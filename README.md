@@ -350,82 +350,215 @@ This section summarizes the rules as they should be implemented in the engine. T
 
 ## Card Data Reference
 
-All card data lives in `src/engine/cards.js`. The schemas are:
+All card data lives in `src/engine/cards.js`, which is the source of truth. Cards are exported by category:
 
-### Building / Leader
+- `BUILDINGS` — Starter and purchasable buildings
+- `UPGRADES` — Upgrade cards (pulled from the Unlockable Deck, not the Building Row)
+- `LEADERS` — Starter and discoverable leaders
+- `CHALLENGES` — standard Exploration Challenge cards
+- `PROGRESSION_CHALLENGES` — Age-transition challenges (Secure ServoCo Factory, Secure Nova9 Tower, Activate Neptune Mainframe)
+- `EVENTS` — Events affecting all players when drawn
+- `INTRIGUE_CARDS` — all Intrigue cards
+- `NARRATIVE_CHAINS` — parent objects, each containing its `beats[]`
+
+Convenience aggregates and helpers are also exported: `ALL_EXPLORATION_CARDS`, `ALL_PURCHASABLE_BUILDINGS`, `STARTER_BUILDINGS`, `STARTER_LEADERS`, `DISCOVERABLE_LEADERS`, and `expandByQty(cards)` (flattens each card into `qty` copies with a unique `uid`).
+
+### The `ability` field (shared convention)
+
+Every card carries `ability: AbilityObject | null`. When non-null, it is a structured object the engine dispatches on — it is **not** a plain string. Every ability object includes a `description` field (human-readable UI text); the other fields are machine-readable and drive resolution.
+
+Ability objects share these conventional keys where applicable:
+
+- `type: string` — how the engine dispatches the effect. Seen in Age 1 data: `"passive"`, `"passive_scaling"`, `"passive_enhancement"`, `"passive_immunity"`, `"activated"`, `"reactive"`, `"free_action"`, `"repeatable"`, `"leader_enhanced"`, `"on_resolve"`, `"all_players"`, `"persistent_event"`, `"self"`, `"targeted"`, `"targeted_with_self_benefit"`, `"multi_targeted"`, `"force_attacker_choice"`, `"narrative_beat"`, `"narrative_beat_branching"`.
+- `trigger?: string` — when the effect fires (e.g. `"collect_resources"`, `"spend_action"`, `"spend_scrap"`, `"free"`, `"once_per_turn"`, `"raid_declared_against_owner"`, `"raid_declared_against_self"`, `"owner_initiating_raid"`, `"owner_demolishes_building"`, `"opponent_resolves_challenge"`, `"opponent_activates_trading_post"`, `"opponent_draws_exploration_card"`, `"resolving_challenge"`, `"trading_post_activated"`).
+- `effect: string` — the specific effect id the resolver implements (e.g. `"bonus_defense"`, `"gain_actions"`, `"draw_intrigue"`, `"disable_building"`, `"reduce_atk_requirement"`, `"recover_atk"`, `"gain_scrap_per_building"`, `"intercept_trade_scrap"`, ...).
+- `description: string` — human-readable card text.
+
+Shape beyond those keys is effect-specific: e.g. `scrapCost`, `actionCost`, `defBonus`, `atkRecovery`, `bonusPerBuilding`, `scalesOn`, `maxBonus`, `reduction`, `minimum`, `maxPerTurn`, `disabledBy`, `optional`, `exemptIf`, `effects[]`, `rewards[]`, `options[]`. Some abilities compose multiple effects via an `effects[]` array; branching narrative beats expose an `options[]` array of labeled outcomes. Consult `cards.js` for the exact keys each effect expects — engine resolvers must read those keys verbatim.
+
+### Building
 
 ```js
 {
-  id: string,           // unique snake_case identifier
+  id: string,              // unique snake_case identifier
   name: string,
-  type: string,         // "Starter" | "Building" | "Upgrade" | "Leader (Starter)" | "Leader"
-  scrapCost: number,    // Scrap spent to purchase
-  atkCost: number,      // Attack score required (not spent — checked against score)
-  passiveScrap: number, // Scrap generated per turn
-  passiveAtk: number,   // Attack score contributed per turn
-  passDef: number,      // Defense score contributed per turn
-  passActions: number,  // Additional actions per turn
-  vp: number,           // Victory Points when in settlement
-  ability: string|null, // Text description of special ability
-  upgradable: string,   // Name of upgrade, "Yes", or "No"
-  requires: string,     // For upgrades: name of parent building required
-  qty: number,          // Number of copies in the deck
+  type: "Starter" | "Building",
+  age: number,             // 1, 2, or 3 — the Age this card belongs to
+  scrapCost: number,       // Scrap spent to purchase
+  atkCost: number,         // Attack score required (checked, not spent)
+  passiveScrap: number,    // Scrap generated per turn
+  passiveAtk: number,      // Attack score contributed
+  passDef: number,         // Defense score contributed
+  passActions: number,     // Additional Actions per turn
+  vp: number,              // VP while in settlement
+  ability: AbilityObject | null,
+  upgradable: boolean,     // whether this building can be replaced by an Upgrade
+  upgradeId: string | null,// id of the associated upgrade card, when assigned
+  flavor: string,          // in-world flavor text (UI only; no mechanical effect)
+  qty: number,             // number of copies in the deck
 }
 ```
 
-### Exploration Card
+### Upgrade
+
+Exported as `UPGRADES`. Upgrades are purchased from the Unlockable Deck and replace their parent building in the same settlement slot — no additional slot is consumed.
 
 ```js
 {
   id: string,
   name: string,
-  type: string,         // "Challenge" | "Challenge (Progression)" | "Event" | "Discovery"
-  scrapCost: number,    // Scrap spent to resolve (consumed)
-  reqAtk: number,       // Attack score required (checked, not spent)
-  reqDef: number,       // Defense score required (checked, not spent)
-  scrapReward: number,
-  atkReward: number,    // Permanent Attack bonus gained on resolution
-  defReward: number,    // Permanent Defense bonus gained on resolution
-  actionReward: number, // Actions gained on resolution
+  type: "Upgrade",
+  age: number,
+  requires: string,        // id of the parent Building that must be in settlement
+  scrapCost: number,
+  atkCost: number,
+  passiveScrap: number,
+  passiveAtk: number,
+  passDef: number,
+  passActions: number,
   vp: number,
-  surprise: boolean,    // If true — no boosting allowed in response
-  ability: string|null, // Full text of special effect
+  ability: AbilityObject | null,
+  flavor: string,
+  qty: number,
+}
+```
+
+### Leader
+
+```js
+{
+  id: string,
+  name: string,
+  type: "Leader (Starter)" | "Leader",
+  age: number,
+  scrapCost: number,       // cost to acquire a discoverable leader
+  atkCost: number,         // Attack requirement to acquire
+  passiveScrap: number,
+  passiveAtk: number,
+  passDef: number,
+  passActions: number,
+  vp: number,
+  ability: AbilityObject | null,
+  flavor: string,
+  qty: number,
+}
+```
+
+### Challenge
+
+Exported as `CHALLENGES`.
+
+```js
+{
+  id: string,
+  name: string,
+  type: "Challenge",
+  age: number,
+  surprise: boolean,       // if true, no boosting allowed in response
+  scrapCost: number,       // Scrap spent to resolve
+  reqAtk: number,          // required Attack score (checked, not spent)
+  reqDef: number,          // required Defense score (checked, not spent)
+  scrapReward: number,
+  atkReward: number,       // permanent Attack bonus on resolve
+  defReward: number,       // permanent Defense bonus on resolve
+  actionReward: number,    // Actions granted on resolve
+  vp: number,
+  ability: AbilityObject | null,
+  flavor: string,
+  qty: number,
+}
+```
+
+### Progression Challenge
+
+Exported as `PROGRESSION_CHALLENGES`. Same shape as Challenge plus a `progressionTrack` identifier for the Age-transition track this challenge satisfies.
+
+```js
+{
+  // ...all Challenge fields...
+  type: "Challenge (Progression)",
+  progressionTrack: string,  // "servotech" | "nova9" | "neptune" | ...
+}
+```
+
+### Event
+
+Exported as `EVENTS`. Events affect all players when drawn; all mechanics live inside `ability` (no per-field rewards).
+
+```js
+{
+  id: string,
+  name: string,
+  type: "Event",
+  age: number,
+  surprise: boolean,
+  scrapCost: number,       // pay-to-resolve for events that require it
+  reqAtk: number,          // resolution requirement for persistent events
+  reqDef: number,
+  vp: number,
+  ability: AbilityObject,  // always present
+  flavor: string,
   qty: number,
 }
 ```
 
 ### Intrigue Card
 
+Exported as `INTRIGUE_CARDS`.
+
 ```js
 {
   id: string,
   name: string,
-  immediate: boolean,   // If true, can be played outside active turn
+  type: "Intrigue",
+  age: number,
+  immediate: boolean,      // if true, playable outside the owner's turn
+  trigger?: string,        // present on Immediate cards — the reactive trigger id
   vp: number,
-  ability: string,      // Full text of effect
+  ability: AbilityObject,
+  flavor: string,
   qty: number,
 }
 ```
 
-### Narrative Chain Beat
+### Narrative Chain
+
+Exported as `NARRATIVE_CHAINS`. Each chain is a parent object; its `beats[]` holds the individual beat cards. `chainId` and `chainName` live on the parent, not on each beat.
 
 ```js
 {
-  chainId: string,
-  chainName: string,
-  beat: number,         // 1-indexed beat number within chain
+  id: string,              // the chainId
+  name: string,            // the chainName
+  finalReward: string,     // human-readable summary of the ultimate payoff
+  beats: Beat[],
+}
+```
+
+Each beat:
+
+```js
+{
+  beat: number,            // 1-indexed beat number within the chain
   name: string,
+  inStartingDeck: boolean, // true for Beat 1 cards seeded into the Exploration
+                           //   deck; later beats are drawn procedurally when the
+                           //   prior beat resolves
   scrapCost: number,
   reqAtk: number,
   reqDef: number,
-  ability: string,      // What the player does
-  reward: string,       // What they receive
-  branches: boolean,    // If true, this beat has multiple outcome paths
-  branchOptions: [      // Only present if branches: true
-    { label: string, requirements: {...}, reward: string }
-  ]
+  vp: number,
+  surprise: boolean,
+  branches?: true,         // only present on branching beats
+  ability: AbilityObject,  // same structured shape as other cards.
+                           //   Rewards live inside ability.rewards (linear beats)
+                           //   or ability.options[].rewards (branching beats).
+                           //   Effect "draw_next_beat" advances to ability.nextBeat;
+                           //   effect "chain_complete" concludes the chain.
+  flavor: string,
 }
 ```
+
+When beats are flattened into `ALL_EXPLORATION_CARDS`, convenience fields (`chainId`, `chainName`, a synthesized `id` of `${chainId}_beat_${beat}`, and `type: "Challenge (Narrative)"`) are attached at flattening time — see the flattening logic at the bottom of `cards.js`.
 
 ---
 
