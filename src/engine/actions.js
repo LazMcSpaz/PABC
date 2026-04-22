@@ -2,7 +2,8 @@
 // state. Never mutate inputs. Real rule enforcement fills in over time; for
 // now these do the minimum to keep state transitions visible and legal.
 
-import { calcActions, calcDefense, calcPassiveScrap, calcVP } from "./calculations.js";
+import { calcActions, calcAttack, calcDefense, calcPassiveScrap, calcVP } from "./calculations.js";
+import { CARD_RESOLVERS } from "./resolution.js";
 
 const WIN_VP = 30;
 
@@ -84,8 +85,54 @@ export function explore(state, playerId) {
 }
 
 export function resolveCard(state, playerId, cardUid) {
-  // Full per-card resolution lives in engine/resolution.js CARD_RESOLVERS.
-  // For now, just mark it resolved and remove from play.
+  const entry = state.explorationInPlay.find((e) => e.card.uid === cardUid);
+  if (!entry) return state;
+  const card = entry.card;
+  const player = state.players.find((p) => p.id === playerId);
+  if (!player) return state;
+
+  const custom = CARD_RESOLVERS[card.id];
+  if (typeof custom === "function") {
+    const after = custom(state, playerId, card);
+    return {
+      ...after,
+      explorationInPlay: after.explorationInPlay.filter((e) => e.card.uid !== cardUid),
+    };
+  }
+
+  // Generic Challenge resolver: pay scrap, check requirements, grant rewards.
+  if (card.type === "Challenge" || card.type === "Challenge (Progression)") {
+    if (player.scrap < (card.scrapCost ?? 0)) return state;
+    if (calcAttack(player) < (card.reqAtk ?? 0)) return state;
+    if (calcDefense(player) < (card.reqDef ?? 0)) return state;
+
+    let next = updatePlayer(state, playerId, (p) => ({
+      ...p,
+      scrap: p.scrap - (card.scrapCost ?? 0) + (card.scrapReward ?? 0),
+      bonusAtk: (p.bonusAtk ?? 0) + (card.atkReward ?? 0),
+      bonusDef: (p.bonusDef ?? 0) + (card.defReward ?? 0),
+      actionsRemaining: p.actionsRemaining + (card.actionReward ?? 0),
+      earnedVP: (p.earnedVP ?? 0) + (card.vp ?? 0),
+    }));
+
+    if (card.type === "Challenge (Progression)" && card.progressionTrack) {
+      next = {
+        ...next,
+        progressionResolved: [
+          ...new Set([...(next.progressionResolved ?? []), card.progressionTrack]),
+        ],
+      };
+    }
+
+    next = {
+      ...next,
+      explorationInPlay: next.explorationInPlay.filter((e) => e.card.uid !== cardUid),
+    };
+    return log(next, { type: "resolve", playerId, cardId: card.id });
+  }
+
+  // Non-Challenge types (Event, Challenge (Narrative)) — remove from play
+  // and leave per-card automation to a later pass.
   return {
     ...state,
     explorationInPlay: state.explorationInPlay.filter((e) => e.card.uid !== cardUid),
@@ -98,7 +145,7 @@ export function raid(state, attackerId, targetId /* raidType */) {
   if (!attacker || !defender || attacker.actionsRemaining < 1) return state;
   if (attacker.raidedThisRound?.includes(targetId)) return state;
 
-  const attack = attacker.boosts.atk; // real calcAttack used in UI
+  const attack = calcAttack(attacker);
   const defense = calcDefense(defender);
   const success = attack > defense; // defender wins ties per README
 

@@ -1,4 +1,12 @@
-import { BUILDINGS, EXPLORATION, INTRIGUE, LEADERS } from "./cards.js";
+import {
+  ALL_EXPLORATION_CARDS,
+  ALL_PURCHASABLE_BUILDINGS,
+  INTRIGUE_CARDS,
+  STARTER_BUILDINGS,
+  STARTER_LEADERS,
+  expandByQty,
+} from "./cards.js";
+import { calcActions, calcPassiveScrap } from "./calculations.js";
 
 export function makePlayer({ id, name, kind = "human", personalityId = null, color = "#888" }) {
   return {
@@ -12,19 +20,13 @@ export function makePlayer({ id, name, kind = "human", personalityId = null, col
     leader: null,
     intrigueHand: [],
     boosts: { atk: 0, def: 0 },
+    bonusAtk: 0,
+    bonusDef: 0,
     actionsRemaining: 0,
     disabledBuildingUids: [],
     raidedThisRound: [],
+    earnedVP: 0,
   };
-}
-
-function expandByQty(cards) {
-  const out = [];
-  for (const card of cards) {
-    const qty = card.qty ?? 1;
-    for (let i = 0; i < qty; i++) out.push({ ...card, uid: `${card.id}_${i}` });
-  }
-  return out;
 }
 
 export function shuffle(arr, rng = Math.random) {
@@ -36,28 +38,52 @@ export function shuffle(arr, rng = Math.random) {
   return copy;
 }
 
-export function buildDecks() {
+function seedStarters(player, starterPool, starterLeaders) {
+  const depot = starterPool.find((c) => c.id === "salvage_depot");
+  const barracks = starterPool.find((c) => c.id === "makeshift_barracks");
+  const admin = starterLeaders.find((l) => l.id === "administrator");
+  const settlement = [];
+  if (depot) settlement.push({ ...depot, uid: `${depot.id}_p${player.id}` });
+  if (barracks) settlement.push({ ...barracks, uid: `${barracks.id}_p${player.id}` });
   return {
-    buildingDeck: shuffle(expandByQty(BUILDINGS)),
-    explorationDeck: shuffle(expandByQty(EXPLORATION)),
-    intrigueDeck: shuffle(expandByQty(INTRIGUE)),
-    leaderPool: expandByQty(LEADERS),
+    ...player,
+    settlement,
+    leader: admin ? { ...admin, uid: `${admin.id}_p${player.id}` } : null,
   };
 }
 
 export function makeInitialState({ players }) {
-  const decks = buildDecks();
-  return {
+  const buildingDeck = shuffle(expandByQty(ALL_PURCHASABLE_BUILDINGS));
+  const explorationDeck = shuffle(expandByQty(ALL_EXPLORATION_CARDS));
+  const intrigueDeck = shuffle(expandByQty(INTRIGUE_CARDS));
+
+  const starterPool = expandByQty(STARTER_BUILDINGS);
+  const seated = players.map((p) => seedStarters(p, starterPool, STARTER_LEADERS));
+
+  const buildingRow = buildingDeck.splice(0, 5);
+
+  const state = {
     round: 1,
     age: 1,
-    activePlayerId: players[0]?.id ?? 0,
-    players,
-    ...decks,
-    buildingRow: decks.buildingDeck.splice(0, 5),
+    activePlayerId: seated[0]?.id ?? 0,
+    players: seated,
+    buildingDeck,
+    explorationDeck,
+    intrigueDeck,
+    buildingRow,
     explorationInPlay: [],
     progressionResolved: [],
     narrativeState: {},
     log: [],
     winnerId: null,
   };
+
+  // Start-of-turn bookkeeping for the opening player: collect passive scrap
+  // and get their base action count.
+  state.players = state.players.map((p) =>
+    p.id === state.activePlayerId
+      ? { ...p, actionsRemaining: calcActions(p), scrap: p.scrap + calcPassiveScrap(p) }
+      : p,
+  );
+  return state;
 }

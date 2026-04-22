@@ -26,7 +26,7 @@ export function calcAttack(player) {
   const base =
     activeBuildings(player).reduce((sum, b) => sum + (b.passiveAtk ?? 0), 0) +
     leaderContribution(player, "passiveAtk");
-  return base + (player.boosts?.atk ?? 0);
+  return base + (player.bonusAtk ?? 0) + (player.boosts?.atk ?? 0);
 }
 
 export function calcDefense(player) {
@@ -34,7 +34,7 @@ export function calcDefense(player) {
     BASE_DEFENSE +
     activeBuildings(player).reduce((sum, b) => sum + (b.passDef ?? 0), 0) +
     leaderContribution(player, "passDef");
-  return base + (player.boosts?.def ?? 0);
+  return base + (player.bonusDef ?? 0) + (player.boosts?.def ?? 0);
 }
 
 export function calcActions(player) {
