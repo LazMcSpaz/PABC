@@ -6,6 +6,7 @@ import ExploreView from "./ExploreView.jsx";
 import IntrigueView from "./IntrigueView.jsx";
 import RaidView from "./RaidView.jsx";
 import NarrativeView from "./NarrativeView.jsx";
+import NotificationFeed from "./NotificationFeed.jsx";
 import FeedbackPanel from "./FeedbackPanel.jsx";
 import CardModal from "./CardModal.jsx";
 
@@ -81,6 +82,7 @@ export default function GameBoard({ state, engine }) {
             onRaid={(targetId, raidType) => engine.raid(state.activePlayerId, targetId, raidType)}
           />
           <NarrativeView state={state} />
+          <NotificationFeed state={state} />
           <AILog state={state} />
           <FeedbackPanel state={state} />
         </fieldset>

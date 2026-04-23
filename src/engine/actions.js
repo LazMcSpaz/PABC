@@ -4,6 +4,7 @@
 
 import { calcActions, calcAttack, calcDefense, calcPassiveScrap, calcVP } from "./calculations.js";
 import { applyEvent, clearRoundEndFlags, resolvePersistentEvent } from "./events.js";
+import { NotifKind, impact, notify } from "./notifications.js";
 import { CARD_RESOLVERS } from "./resolution.js";
 
 const WIN_VP = 30;
@@ -149,7 +150,32 @@ export function resolveCard(state, playerId, cardUid) {
       ...next,
       explorationInPlay: next.explorationInPlay.filter((e) => e.card.uid !== cardUid),
     };
-    return log(next, { type: "resolve", playerId, cardId: card.id });
+    next = log(next, { type: "resolve", playerId, cardId: card.id });
+
+    const rewardBits = [];
+    if (card.scrapReward) rewardBits.push(`+${card.scrapReward}🔩`);
+    if (card.atkReward) rewardBits.push(`+${card.atkReward}⚔`);
+    if (card.defReward) rewardBits.push(`+${card.defReward}🛡`);
+    if (card.actionReward) rewardBits.push(`+${card.actionReward}⚡`);
+    if (card.vp) rewardBits.push(`+${card.vp}★`);
+    if (card.scrapCost) rewardBits.unshift(`−${card.scrapCost}🔩`);
+    next = notify(next, {
+      kind: NotifKind.CHALLENGE,
+      title: `${card.name} resolved`,
+      message: card.ability?.description ?? "",
+      impacts: [
+        impact(playerId, rewardBits.join(" · "), {
+          scrap: (card.scrapReward ?? 0) - (card.scrapCost ?? 0),
+          atk: card.atkReward,
+          def: card.defReward,
+          actions: card.actionReward,
+          vp: card.vp,
+        }),
+      ],
+      sourceCardId: card.id,
+      sourcePlayerId: playerId,
+    });
+    return next;
   }
 
   // Persistent Events (Minefield) — pay the action / meet the requirement
@@ -183,13 +209,31 @@ export function raid(state, attackerId, targetId /* raidType */) {
     raidedThisRound: [...(p.raidedThisRound ?? []), targetId],
   }));
 
-  if (success) {
-    const stolen = Math.floor(defender.scrap / 2);
+  const stolen = success ? Math.floor(defender.scrap / 2) : 0;
+  if (success && stolen > 0) {
     next = updatePlayer(next, attackerId, (p) => ({ ...p, scrap: p.scrap + stolen }));
     next = updatePlayer(next, targetId, (p) => ({ ...p, scrap: p.scrap - stolen }));
-    // Declared outcome (destroy/steal/disable) — deferred to raid outcome executor.
   }
-  return log(next, { type: "raid", attackerId, targetId, success });
+  next = log(next, { type: "raid", attackerId, targetId, success });
+
+  const attackerName = attacker.name;
+  const defenderName = defender.name;
+  next = notify(next, {
+    kind: NotifKind.RAID,
+    title: success ? `Raid succeeded: ${attackerName} → ${defenderName}` : `Raid failed: ${attackerName} → ${defenderName}`,
+    message: success
+      ? `⚔${attack} vs 🛡${defense}. Defender wins ties.${stolen > 0 ? ` Attacker stole ${stolen} Scrap.` : ""} Declared outcome (destroy / steal / disable) not yet wired.`
+      : `⚔${attack} vs 🛡${defense}. No reward (defender wins ties).`,
+    impacts: success
+      ? [
+          impact(attackerId, `+${stolen}🔩`, { scrap: stolen }),
+          impact(targetId, `−${stolen}🔩`, { scrap: -stolen }),
+        ]
+      : [impact(attackerId, "attack repelled")],
+    sourcePlayerId: attackerId,
+    severity: success ? "alert" : "info",
+  });
+  return next;
 }
 
 export function endTurn(state) {
@@ -257,7 +301,16 @@ export function endTurn(state) {
   next = { ...next, activePlayerId: nextPlayer.id };
 
   const winner = next.players.find((p) => calcVP(p) >= WIN_VP);
-  if (winner) next = { ...next, winnerId: winner.id };
+  if (winner) {
+    next = { ...next, winnerId: winner.id };
+    next = notify(next, {
+      kind: NotifKind.INFO,
+      title: `${winner.name} wins!`,
+      message: `Reached ${calcVP(winner)} VP.`,
+      sourcePlayerId: winner.id,
+      severity: "alert",
+    });
+  }
 
   return next;
 }

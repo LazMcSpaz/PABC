@@ -4,27 +4,24 @@
 //   - persist: true if the Event stays in explorationInPlay awaiting
 //     resolution (e.g. Minefield blocks exploration until resolved)
 //
-// See README "Event Card Automation" for the pattern. Resolvers for
-// persistent Events live in engine/actions.js resolveCard().
+// Every effect calls notify() with a per-player impacts array so the UI
+// can show the player exactly what happened and why.
 //
 // Not automated in this pass (require bespoke UI flows):
 //   drifter_intelligence (peek top 2 + reorder)
 //   marauder_territory_war (free draw per player)
 //   drifter_market (optional intrigue purchase per player)
 //   corporate_relic (turn-order auction)
-// These will pass through the default "just remove" path below.
+// These pass through the default "persist and leave for manual" path.
 
 import { calcAttack, calcDefense } from "./calculations.js";
+import { NotifKind, impact, notify } from "./notifications.js";
 
 function updatePlayer(state, playerId, updater) {
   return {
     ...state,
     players: state.players.map((p) => (p.id === playerId ? updater(p) : p)),
   };
-}
-
-function updateAllPlayers(state, updater) {
-  return { ...state, players: state.players.map(updater) };
 }
 
 function hasBuilding(player, buildingId) {
@@ -39,90 +36,230 @@ function logEntry(state, entry) {
   return { ...state, log: [...(state.log ?? []), { round: state.round, ...entry }] };
 }
 
+// Apply a per-player transformation across all players, collecting an impacts
+// array describing what happened to each. Pure.
+function applyPerPlayer(state, fn) {
+  const impacts = [];
+  const newPlayers = state.players.map((p) => {
+    const res = fn(p);
+    if (res.impact) impacts.push(res.impact);
+    return res.player ?? p;
+  });
+  return { state: { ...state, players: newPlayers }, impacts };
+}
+
 export const EVENT_EFFECTS = {
   harvest: (state) => {
-    const next = updateAllPlayers(state, (p) => ({ ...p, scrap: p.scrap + 6 }));
-    return { state: logEntry(next, { type: "event", cardId: "harvest", note: "+6 Scrap all" }), persist: false };
+    const r = applyPerPlayer(state, (p) => ({
+      player: { ...p, scrap: p.scrap + 6 },
+      impact: impact(p.id, `+6 Scrap`, { scrap: 6 }),
+    }));
+    let next = logEntry(r.state, { type: "event", cardId: "harvest" });
+    next = notify(next, {
+      kind: NotifKind.EVENT,
+      title: "Harvest",
+      message: "All players gain +6 Scrap.",
+      impacts: r.impacts,
+      sourceCardId: "harvest",
+      severity: "info",
+    });
+    return { state: next, persist: false };
   },
 
   scrap_rush: (state) => {
-    const next = updateAllPlayers(state, (p) => {
+    const r = applyPerPlayer(state, (p) => {
       const bonus = hasBuilding(p, "scavengers_hut") ? 2 : 0;
-      return { ...p, scrap: p.scrap + 4 + bonus };
+      const total = 4 + bonus;
+      return {
+        player: { ...p, scrap: p.scrap + total },
+        impact: impact(
+          p.id,
+          bonus > 0 ? `+${total} Scrap (Scavenger's Hut bonus)` : `+${total} Scrap`,
+          { scrap: total },
+        ),
+      };
     });
-    return { state: logEntry(next, { type: "event", cardId: "scrap_rush" }), persist: false };
+    let next = logEntry(r.state, { type: "event", cardId: "scrap_rush" });
+    next = notify(next, {
+      kind: NotifKind.EVENT,
+      title: "Scrap Rush",
+      message: "All players gain +4 Scrap; Scavenger's Hut owners gain +6.",
+      impacts: r.impacts,
+      sourceCardId: "scrap_rush",
+    });
+    return { state: next, persist: false };
   },
 
   marauder_ambush: (state) => {
-    const next = updateAllPlayers(state, (p) => {
-      if (calcAttack(p) >= 3) return p;
-      return { ...p, scrap: Math.max(0, p.scrap - 5) };
+    const r = applyPerPlayer(state, (p) => {
+      if (calcAttack(p) >= 3) {
+        return { player: p, impact: impact(p.id, "ATK ≥ 3 — unaffected") };
+      }
+      const loss = Math.min(p.scrap, 5);
+      return {
+        player: { ...p, scrap: p.scrap - loss },
+        impact: impact(p.id, `−${loss} Scrap (failed ATK check)`, { scrap: -loss }),
+      };
     });
-    return { state: logEntry(next, { type: "event", cardId: "marauder_ambush" }), persist: false };
+    let next = logEntry(r.state, { type: "event", cardId: "marauder_ambush" });
+    next = notify(next, {
+      kind: NotifKind.EVENT,
+      title: "Marauder Ambush",
+      message: "Players below 3 ⚔ lose 5 Scrap (min 0). Surprise — no boosting.",
+      impacts: r.impacts,
+      sourceCardId: "marauder_ambush",
+      severity: "warning",
+    });
+    return { state: next, persist: false };
   },
 
   mountain_cult_extortion: (state) => {
-    const next = updateAllPlayers(state, (p) => {
-      if (p.scrap >= 3) return { ...p, scrap: p.scrap - 3 };
-      return { ...p, bonusAtk: (p.bonusAtk ?? 0) - 5 };
+    const r = applyPerPlayer(state, (p) => {
+      if (p.scrap >= 3) {
+        return {
+          player: { ...p, scrap: p.scrap - 3 },
+          impact: impact(p.id, "paid 3 Scrap", { scrap: -3 }),
+        };
+      }
+      return {
+        player: { ...p, bonusAtk: (p.bonusAtk ?? 0) - 5 },
+        impact: impact(p.id, "could not pay — lost 5 permanent ⚔", { atk: -5 }),
+      };
     });
-    return { state: logEntry(next, { type: "event", cardId: "mountain_cult_extortion" }), persist: false };
+    let next = logEntry(r.state, { type: "event", cardId: "mountain_cult_extortion" });
+    next = notify(next, {
+      kind: NotifKind.EVENT,
+      title: "Mountain Cult Extortion",
+      message: "Each player pays 3 Scrap or loses 5 permanent Attack.",
+      impacts: r.impacts,
+      sourceCardId: "mountain_cult_extortion",
+      severity: "warning",
+    });
+    return { state: next, persist: false };
   },
 
   disease_scare: (state) => {
-    const next = updateAllPlayers(state, (p) => {
-      if (hasLeader(p, "doc_brawlins") || hasBuilding(p, "medic_tent")) return p;
+    const r = applyPerPlayer(state, (p) => {
+      if (hasLeader(p, "doc_brawlins") || hasBuilding(p, "medic_tent")) {
+        return { player: p, impact: impact(p.id, "immune (Doc Brawlins / Medic Tent)") };
+      }
       return {
-        ...p,
-        temporaryDebuffs: [
-          ...(p.temporaryDebuffs ?? []),
-          { stat: "atk", amount: -2, expiresOn: "owner_turn_start" },
-        ],
+        player: {
+          ...p,
+          temporaryDebuffs: [
+            ...(p.temporaryDebuffs ?? []),
+            { stat: "atk", amount: -2, expiresOn: "owner_turn_start" },
+          ],
+        },
+        impact: impact(p.id, "−2 ⚔ until next turn", { atk: -2 }),
       };
     });
-    return { state: logEntry(next, { type: "event", cardId: "disease_scare" }), persist: false };
+    let next = logEntry(r.state, { type: "event", cardId: "disease_scare" });
+    next = notify(next, {
+      kind: NotifKind.EVENT,
+      title: "Disease Scare",
+      message: "−2 Attack until your next turn. Doc Brawlins / Medic Tent owners exempt.",
+      impacts: r.impacts,
+      sourceCardId: "disease_scare",
+      severity: "warning",
+    });
+    return { state: next, persist: false };
   },
 
   ash_storm: (state) => {
-    const next = updateAllPlayers(state, (p) => {
-      if (hasBuilding(p, "greenhouse")) return p;
-      return { ...p, skipExploreNextTurn: true };
+    const r = applyPerPlayer(state, (p) => {
+      if (hasBuilding(p, "greenhouse")) {
+        return { player: p, impact: impact(p.id, "immune (Greenhouse)") };
+      }
+      return {
+        player: { ...p, skipExploreNextTurn: true },
+        impact: impact(p.id, "skipping exploration next turn"),
+      };
     });
-    return { state: logEntry(next, { type: "event", cardId: "ash_storm" }), persist: false };
+    let next = logEntry(r.state, { type: "event", cardId: "ash_storm" });
+    next = notify(next, {
+      kind: NotifKind.EVENT,
+      title: "Ash Storm",
+      message: "All players skip their Exploration Action next turn. Greenhouse owners exempt.",
+      impacts: r.impacts,
+      sourceCardId: "ash_storm",
+      severity: "warning",
+    });
+    return { state: next, persist: false };
   },
 
   mountain_cult_sermon: (state) => {
-    const next = updateAllPlayers(state, (p) => {
-      if (p.flags?.completedMountainCult) return p;
-      return { ...p, loseActionsNextTurn: (p.loseActionsNextTurn ?? 0) + 1 };
+    const r = applyPerPlayer(state, (p) => {
+      if (p.flags?.completedMountainCult) {
+        return { player: p, impact: impact(p.id, "immune (Mountain Cult completion)") };
+      }
+      return {
+        player: { ...p, loseActionsNextTurn: (p.loseActionsNextTurn ?? 0) + 1 },
+        impact: impact(p.id, "−1 Action next turn", { actions: -1 }),
+      };
     });
-    return { state: logEntry(next, { type: "event", cardId: "mountain_cult_sermon" }), persist: false };
+    let next = logEntry(r.state, { type: "event", cardId: "mountain_cult_sermon" });
+    next = notify(next, {
+      kind: NotifKind.EVENT,
+      title: "Mountain Cult Sermon",
+      message: "−1 Action on your next turn.",
+      impacts: r.impacts,
+      sourceCardId: "mountain_cult_sermon",
+      severity: "warning",
+    });
+    return { state: next, persist: false };
   },
 
   nova9_broadcast: (state, drawerId) => {
-    const next = updateAllPlayers(state, (p) => ({
-      ...p,
-      bonusActionsNextTurn: (p.bonusActionsNextTurn ?? 0) + (p.id === drawerId ? 2 : 1),
-    }));
-    return { state: logEntry(next, { type: "event", cardId: "nova9_broadcast", drawerId }), persist: false };
+    const r = applyPerPlayer(state, (p) => {
+      const amount = p.id === drawerId ? 2 : 1;
+      return {
+        player: { ...p, bonusActionsNextTurn: (p.bonusActionsNextTurn ?? 0) + amount },
+        impact: impact(p.id, `+${amount} Action${amount > 1 ? "s" : ""} next turn`, { actions: amount }),
+      };
+    });
+    let next = logEntry(r.state, { type: "event", cardId: "nova9_broadcast", drawerId });
+    next = notify(next, {
+      kind: NotifKind.EVENT,
+      title: "Nova9 Broadcast",
+      message: "All players +1 Action next turn; drawing player +2.",
+      impacts: r.impacts,
+      sourceCardId: "nova9_broadcast",
+      sourcePlayerId: drawerId,
+    });
+    return { state: next, persist: false };
   },
 
   solar_flare: (state) => {
     const targetIds = new Set(["antenna_array", "drone_lab", "signal_jammers"]);
-    const next = updateAllPlayers(state, (p) => {
+    const r = applyPerPlayer(state, (p) => {
       const toDisable = p.settlement.filter((b) => targetIds.has(b.id)).map((b) => b.uid);
-      if (toDisable.length === 0) return p;
+      if (toDisable.length === 0) {
+        return { player: p, impact: impact(p.id, "no affected buildings") };
+      }
       return {
-        ...p,
-        disabledBuildingUids: [
-          ...new Set([...(p.disabledBuildingUids ?? []), ...toDisable]),
-        ],
-        buildingsDisabledUntilOwnerTurnStart: [
-          ...new Set([...(p.buildingsDisabledUntilOwnerTurnStart ?? []), ...toDisable]),
-        ],
+        player: {
+          ...p,
+          disabledBuildingUids: [
+            ...new Set([...(p.disabledBuildingUids ?? []), ...toDisable]),
+          ],
+          buildingsDisabledUntilOwnerTurnStart: [
+            ...new Set([...(p.buildingsDisabledUntilOwnerTurnStart ?? []), ...toDisable]),
+          ],
+        },
+        impact: impact(p.id, `disabled ${toDisable.length} building(s) until next turn`),
       };
     });
-    return { state: logEntry(next, { type: "event", cardId: "solar_flare" }), persist: false };
+    let next = logEntry(r.state, { type: "event", cardId: "solar_flare" });
+    next = notify(next, {
+      kind: NotifKind.EVENT,
+      title: "Solar Flare",
+      message: "Antenna Array, Drone Lab, and Signal Jammers disabled until each owner's next turn.",
+      impacts: r.impacts,
+      sourceCardId: "solar_flare",
+      severity: "warning",
+    });
+    return { state: next, persist: false };
   },
 
   vanguard_remnant_patrol: (state) => {
@@ -130,41 +267,70 @@ export const EVENT_EFFECTS = {
       ...state,
       globalFlags: { ...state.globalFlags, raidsBlocked: true },
     };
-    next = updateAllPlayers(next, (p) => {
-      if (hasLeader(p, "lt_tusk")) return { ...p, scrap: p.scrap + 2 };
-      return p;
+    const r = applyPerPlayer(next, (p) => {
+      if (hasLeader(p, "lt_tusk")) {
+        return {
+          player: { ...p, scrap: p.scrap + 2 },
+          impact: impact(p.id, "+2 Scrap (Lt. Tusk)", { scrap: 2 }),
+        };
+      }
+      return { player: p, impact: impact(p.id, "no raids this round") };
     });
-    return { state: logEntry(next, { type: "event", cardId: "vanguard_remnant_patrol" }), persist: false };
+    next = logEntry(r.state, { type: "event", cardId: "vanguard_remnant_patrol" });
+    next = notify(next, {
+      kind: NotifKind.EVENT,
+      title: "Vanguard Remnant Patrol",
+      message: "Raids are blocked for the rest of this round. Lt. Tusk owners +2 Scrap.",
+      impacts: r.impacts,
+      sourceCardId: "vanguard_remnant_patrol",
+      severity: "warning",
+    });
+    return { state: next, persist: false };
   },
 
   minefield: (state) => {
-    const next = {
-      ...state,
-      globalFlags: { ...state.globalFlags, explorationBlocked: true },
-    };
-    return { state: logEntry(next, { type: "event", cardId: "minefield", note: "exploration blocked" }), persist: true };
+    let next = { ...state, globalFlags: { ...state.globalFlags, explorationBlocked: true } };
+    next = logEntry(next, { type: "event", cardId: "minefield", note: "exploration blocked" });
+    next = notify(next, {
+      kind: NotifKind.EVENT,
+      title: "Minefield",
+      message:
+        "Exploration is blocked until any player resolves this card (needs 4 ⚔). Surprise — no boosting.",
+      sourceCardId: "minefield",
+      severity: "alert",
+    });
+    return { state: next, persist: true };
   },
 };
 
 export function applyEvent(state, card, drawerId) {
   const fn = EVENT_EFFECTS[card.id];
   if (!fn) {
-    // No automation for this Event — leave it in play so a human can apply
-    // it manually through the feedback panel / physical-rules override.
-    return { state, persist: true };
+    // No automation — leave the card in play for manual resolution.
+    return {
+      state: notify(state, {
+        kind: NotifKind.EVENT,
+        title: card.name,
+        message: `${card.name} drawn — manual resolution required (not yet automated).`,
+        sourceCardId: card.id,
+        severity: "info",
+      }),
+      persist: true,
+    };
   }
   return fn(state, drawerId);
 }
 
-// Clears globalFlags.raidsBlocked when a round ends. Called from endTurn.
 export function clearRoundEndFlags(state) {
   if (!state.globalFlags?.raidsBlocked) return state;
-  return { ...state, globalFlags: { ...state.globalFlags, raidsBlocked: false } };
+  const next = notify(state, {
+    kind: NotifKind.FLAG,
+    title: "Raids unblocked",
+    message: "Vanguard Remnant Patrol has expired — raids allowed again.",
+  });
+  return { ...next, globalFlags: { ...next.globalFlags, raidsBlocked: false } };
 }
 
-// Resolves a persistent Event in play (e.g. Minefield) when a player meets
-// its requirement by spending an action. Returns new state with the event
-// removed and any globalFlags cleared, or the state unchanged on failure.
 export function resolvePersistentEvent(state, playerId, card) {
   const player = state.players.find((p) => p.id === playerId);
   if (!player) return state;
@@ -173,12 +339,19 @@ export function resolvePersistentEvent(state, playerId, card) {
   if (calcDefense(player) < (card.reqDef ?? 0)) return state;
   if (player.scrap < (card.scrapCost ?? 0)) return state;
 
-  let next = updatePlayer(state, playerId, (p) => ({
-    ...p,
-    actionsRemaining: p.actionsRemaining - 1,
-    scrap: p.scrap - (card.scrapCost ?? 0),
-    earnedVP: (p.earnedVP ?? 0) + (card.vp ?? 0),
-  }));
+  let next = {
+    ...state,
+    players: state.players.map((p) =>
+      p.id === playerId
+        ? {
+            ...p,
+            actionsRemaining: p.actionsRemaining - 1,
+            scrap: p.scrap - (card.scrapCost ?? 0),
+            earnedVP: (p.earnedVP ?? 0) + (card.vp ?? 0),
+          }
+        : p,
+    ),
+  };
 
   if (card.id === "minefield") {
     next = { ...next, globalFlags: { ...next.globalFlags, explorationBlocked: false } };
@@ -187,5 +360,23 @@ export function resolvePersistentEvent(state, playerId, card) {
     ...next,
     explorationInPlay: next.explorationInPlay.filter((e) => e.card.uid !== card.uid),
   };
-  return logEntry(next, { type: "resolve_event", playerId, cardId: card.id });
+  next = logEntry(next, { type: "resolve_event", playerId, cardId: card.id });
+  next = notify(next, {
+    kind: NotifKind.EVENT,
+    title: `${card.name} resolved`,
+    message:
+      card.id === "minefield"
+        ? "Exploration unblocked."
+        : `${card.name} cleared.`,
+    impacts: [
+      impact(
+        playerId,
+        `+${card.vp ?? 0} VP${card.scrapCost ? ` · −${card.scrapCost} Scrap` : ""}`,
+        { vp: card.vp, scrap: -(card.scrapCost ?? 0) },
+      ),
+    ],
+    sourceCardId: card.id,
+    sourcePlayerId: playerId,
+  });
+  return next;
 }

@@ -84,6 +84,8 @@ export function makeInitialState({ players }) {
     globalFlags: { explorationBlocked: false, raidsBlocked: false },
     log: [],
     aiLog: [],
+    notifications: [],
+    notificationCounter: 0,
     winnerId: null,
   };
 
