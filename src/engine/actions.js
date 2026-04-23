@@ -2,7 +2,14 @@
 // state. Never mutate inputs. Real rule enforcement fills in over time; for
 // now these do the minimum to keep state transitions visible and legal.
 
-import { calcActions, calcAttack, calcDefense, calcPassiveScrap, calcVP } from "./calculations.js";
+import {
+  calcActions,
+  calcAttack,
+  calcDefense,
+  calcDefenseForRaid,
+  calcPassiveScrap,
+  calcVP,
+} from "./calculations.js";
 import { applyEvent, clearRoundEndFlags, resolvePersistentEvent } from "./events.js";
 import {
   fireChallengeResolveReactive,
@@ -295,7 +302,9 @@ export function raid(state, attackerId, targetId /* raidType */) {
   // Re-read attacker in case state changed (e.g. Emergency Protocols charged 3 Scrap).
   const attackerNow = next.players.find((p) => p.id === attackerId);
   const attack = calcAttack(attackerNow);
-  const defense = calcDefense(effectiveDefender);
+  const baseDef = calcDefense(effectiveDefender);
+  const defense = calcDefenseForRaid(effectiveDefender);
+  const lookoutFired = defense > baseDef;
   const success = attack > defense; // defender wins ties per README
 
   const stolen = success ? Math.floor(effectiveDefender.scrap / 2) : 0;
@@ -311,9 +320,10 @@ export function raid(state, attackerId, targetId /* raidType */) {
     title: success
       ? `Raid succeeded: ${attacker.name} → ${defenderName}`
       : `Raid failed: ${attacker.name} → ${defenderName}`,
-    message: success
+    message: (success
       ? `⚔${attack} vs 🛡${defense}. Defender wins ties.${stolen > 0 ? ` Attacker stole ${stolen} Scrap.` : ""} Declared outcome (destroy / steal / disable) not yet wired.`
-      : `⚔${attack} vs 🛡${defense}. No reward (defender wins ties).`,
+      : `⚔${attack} vs 🛡${defense}. No reward (defender wins ties).`) +
+      (lookoutFired ? " Lookout Tower added +2 🛡." : ""),
     impacts: success
       ? [
           impact(attackerId, `+${stolen}🔩`, { scrap: stolen }),
@@ -362,6 +372,7 @@ export function endTurn(state) {
       skipExploreThisTurn: !!p.skipExploreNextTurn,
       skipExploreNextTurn: false,
       flags,
+      abilityUsedThisTurn: {},
     };
     const baseActions = calcActions(revived);
     const actionsAfterSchedule = Math.max(

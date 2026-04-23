@@ -7,6 +7,7 @@
 // README; before any public deployment, move behind a server proxy.
 
 import Anthropic from "@anthropic-ai/sdk";
+import { abilityMeta, activateAbility, canActivate } from "./abilities.js";
 import * as actions from "./actions.js";
 import { calcActions, calcAttack, calcDefense, calcPassiveScrap, calcVP } from "./calculations.js";
 import { INTRIGUE_EFFECTS, playIntrigue } from "./intrigue.js";
@@ -50,6 +51,7 @@ function summarizeBuilding(b) {
     passActions: b.passActions,
     vp: b.vp,
     ability: b.ability?.description ?? null,
+    activated: abilityMeta(b.id) != null,
   };
 }
 
@@ -180,6 +182,7 @@ export async function getAIDecision(state, playerId, personality) {
     "  { type: \"raid\", targetId: <opponent id>, raidType: \"Destroy Building\"|\"Steal Intrigue\"|\"Disable Leader\" }  // blocked if globalFlags.raidsBlocked",
     "  { type: \"boost\", stat: \"atk\"|\"def\" }",
     "  { type: \"play_intrigue\", cardName: <name>, targetId?: <id> }",
+    "  { type: \"activate\", buildingId: <id in me.settlement where activated=true>, partnerId?: <opponent id for Trading Post> }",
     "  { type: \"end_turn\" }",
     "Each non-end_turn action consumes resources you must have. The engine will silently no-op invalid actions.",
     "Plan up to 4 actions in priority order. End with end_turn if you intentionally pass remaining actions.",
@@ -232,6 +235,24 @@ export function executeAIAction(state, playerId, action) {
       return actions.raid(state, playerId, action.targetId, action.raidType);
     case "boost":
       return actions.boost(state, playerId, action.stat, 1);
+    case "activate": {
+      const me = state.players.find((p) => p.id === playerId);
+      if (!me) return state;
+      const building = me.settlement.find(
+        (b) => b.id === action.buildingId || b.uid === action.buildingUid,
+      );
+      if (!building) return state;
+      const meta = abilityMeta(building.id);
+      if (!meta) return state;
+      const check = canActivate(state, playerId, building);
+      if (!check.ok) return state;
+      const opts = {};
+      if (meta.requires === "partner") {
+        const opponents = state.players.filter((p) => p.id !== playerId);
+        opts.partnerId = action.partnerId ?? opponents[0]?.id;
+      }
+      return activateAbility(state, playerId, building.uid, opts);
+    }
     case "play_intrigue": {
       const me = state.players.find((p) => p.id === playerId);
       if (!me) return state;

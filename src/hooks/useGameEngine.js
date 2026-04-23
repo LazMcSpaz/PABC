@@ -9,6 +9,7 @@ import {
   getAIDecision,
   recordAIDecision,
 } from "../engine/ai.js";
+import { activateAbility } from "../engine/abilities.js";
 import { makeInitialState, makePlayer } from "../engine/gameState.js";
 import { playIntrigue } from "../engine/intrigue.js";
 
@@ -55,6 +56,8 @@ export function useGameEngine() {
         setState((s) => actions.raid(s, attackerId, targetId, raidType)),
       playIntrigue: (playerId, cardUid, opts) =>
         setState((s) => playIntrigue(s, playerId, cardUid, opts)),
+      activateAbility: (playerId, buildingUid, opts) =>
+        setState((s) => activateAbility(s, playerId, buildingUid, opts)),
       endTurn: () => setState((s) => actions.endTurn(s)),
     }),
     [],
