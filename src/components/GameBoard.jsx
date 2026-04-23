@@ -1,6 +1,7 @@
 import { useState } from "react";
 import AbilitiesView from "./AbilitiesView.jsx";
 import AILog from "./AILog.jsx";
+import UpgradesView from "./UpgradesView.jsx";
 import PlayerPanel from "./PlayerPanel.jsx";
 import BuildingRow from "./BuildingRow.jsx";
 import ExploreView from "./ExploreView.jsx";
@@ -74,6 +75,12 @@ export default function GameBoard({ state, engine }) {
             state={state}
             activePlayer={active}
             onActivate={(uid, opts) => engine.activateAbility(state.activePlayerId, uid, opts)}
+          />
+          <UpgradesView
+            state={state}
+            activePlayer={active}
+            onInspect={setInspectedCard}
+            onUpgrade={(uid) => engine.upgrade(state.activePlayerId, uid)}
           />
           <ExploreView
             state={state}

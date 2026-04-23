@@ -4,6 +4,7 @@ import {
   INTRIGUE_CARDS,
   STARTER_BUILDINGS,
   STARTER_LEADERS,
+  UPGRADES,
   expandByQty,
 } from "./cards.js";
 import { calcActions, calcPassiveScrap } from "./calculations.js";
@@ -71,6 +72,13 @@ export function makeInitialState({ players }) {
 
   const buildingRow = buildingDeck.splice(0, 5);
 
+  // Unlockable Deck — upgrades are available from game start to any player
+  // who owns the parent building and can pay the cost. Unique-building and
+  // leader rewards from progression challenges and narrative chains are
+  // added to this pool as they unlock (scope = "any" for progression,
+  // scope = playerId for narrative-specific rewards).
+  const unlockableDeck = expandByQty(UPGRADES).map((c) => ({ ...c, scope: "any" }));
+
   const state = {
     round: 1,
     age: 1,
@@ -80,6 +88,8 @@ export function makeInitialState({ players }) {
     explorationDeck,
     intrigueDeck,
     buildingRow,
+    unlockableDeck,
+    unlocksPending: [], // ids unlocked but whose card data isn't defined yet
     explorationInPlay: [],
     progressionResolved: [],
     narrativeState: {},

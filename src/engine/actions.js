@@ -18,6 +18,7 @@ import {
 } from "./intrigue.js";
 import { NotifKind, impact, notify } from "./notifications.js";
 import { CARD_RESOLVERS } from "./resolution.js";
+import { unlockUnlockable } from "./upgrades.js";
 
 const WIN_VP = 30;
 
@@ -224,6 +225,39 @@ export function resolveCard(state, playerId, cardUid) {
           ...new Set([...(next.progressionResolved ?? []), card.progressionTrack]),
         ],
       };
+    }
+
+    // Run the challenge's on-resolve ability effects. These are the
+    // unlock_unlockable / draw_intrigue / add_to_hand_as_token effects
+    // that progression challenges (and some regular challenges) carry on
+    // top of their standard rewards.
+    const abilityEffects = card.ability?.effects ?? [];
+    for (const eff of abilityEffects) {
+      if (eff.effect === "unlock_unlockable" && eff.unlockableId) {
+        next = unlockUnlockable(next, eff.unlockableId, playerId);
+      } else if (eff.effect === "draw_intrigue") {
+        const count = eff.intrigueDraw ?? 1;
+        const deck = [...next.intrigueDeck];
+        const drawn = [];
+        for (let i = 0; i < count && deck.length > 0; i++) drawn.push(deck.shift());
+        if (drawn.length > 0) {
+          next = { ...next, intrigueDeck: deck };
+          next = updatePlayer(next, playerId, (p) => ({
+            ...p,
+            intrigueHand: [...p.intrigueHand, ...drawn].slice(-3),
+          }));
+          next = notify(next, {
+            kind: NotifKind.CHALLENGE,
+            title: `${card.name} granted Intrigue`,
+            message: `Drew ${drawn.length} Intrigue card${drawn.length > 1 ? "s" : ""}.`,
+            impacts: [impact(playerId, `+${drawn.length} Intrigue card${drawn.length > 1 ? "s" : ""}`)],
+            sourceCardId: card.id,
+            sourcePlayerId: playerId,
+          });
+        }
+      }
+      // add_to_hand_as_token is tracked implicitly via progressionResolved
+      // — no per-card token artifact yet.
     }
 
     next = {

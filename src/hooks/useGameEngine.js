@@ -12,6 +12,7 @@ import {
 import { activateAbility } from "../engine/abilities.js";
 import { makeInitialState, makePlayer } from "../engine/gameState.js";
 import { playIntrigue } from "../engine/intrigue.js";
+import { upgradeBuilding } from "../engine/upgrades.js";
 
 const ACTION_DELAY_MS = 700;
 const PRE_TURN_DELAY_MS = 400;
@@ -58,6 +59,8 @@ export function useGameEngine() {
         setState((s) => playIntrigue(s, playerId, cardUid, opts)),
       activateAbility: (playerId, buildingUid, opts) =>
         setState((s) => activateAbility(s, playerId, buildingUid, opts)),
+      upgrade: (playerId, upgradeUid) =>
+        setState((s) => upgradeBuilding(s, playerId, upgradeUid)),
       endTurn: () => setState((s) => actions.endTurn(s)),
     }),
     [],

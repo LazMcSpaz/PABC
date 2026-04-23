@@ -11,6 +11,7 @@ import { abilityMeta, activateAbility, canActivate } from "./abilities.js";
 import * as actions from "./actions.js";
 import { calcActions, calcAttack, calcDefense, calcPassiveScrap, calcVP } from "./calculations.js";
 import { INTRIGUE_EFFECTS, playIntrigue } from "./intrigue.js";
+import { canUpgrade, getAvailableUpgradesFor, upgradeBuilding } from "./upgrades.js";
 
 const MODEL_ID = "claude-sonnet-4-20250514";
 
@@ -156,6 +157,20 @@ export function serializeForAI(state, playerId) {
         myAtk >= (e.card.reqAtk ?? 0) &&
         calcDefense(me) >= (e.card.reqDef ?? 0),
     })),
+    availableUpgrades: getAvailableUpgradesFor(state, playerId).map((u) => {
+      const check = canUpgrade(state, playerId, u);
+      return {
+        uid: u.uid,
+        id: u.id,
+        name: u.name,
+        requires: u.requires,
+        scrapCost: u.scrapCost,
+        atkCost: u.atkCost,
+        vp: u.vp,
+        ability: u.ability?.description ?? null,
+        canAfford: check.ok,
+      };
+    }),
     globalFlags: state.globalFlags,
     recentLog: (state.log ?? []).slice(-10),
   };
@@ -183,6 +198,7 @@ export async function getAIDecision(state, playerId, personality) {
     "  { type: \"boost\", stat: \"atk\"|\"def\" }",
     "  { type: \"play_intrigue\", cardName: <name>, targetId?: <id> }",
     "  { type: \"activate\", buildingId: <id in me.settlement where activated=true>, partnerId?: <opponent id for Trading Post> }",
+    "  { type: \"upgrade\", upgradeId: <id from availableUpgrades where canAfford=true> }",
     "  { type: \"end_turn\" }",
     "Each non-end_turn action consumes resources you must have. The engine will silently no-op invalid actions.",
     "Plan up to 4 actions in priority order. End with end_turn if you intentionally pass remaining actions.",
@@ -245,6 +261,11 @@ export function executeAIAction(state, playerId, action) {
     }
     case "boost":
       return actions.boost(state, playerId, action.stat, 1);
+    case "upgrade": {
+      const upgrade = (state.unlockableDeck ?? []).find((u) => u.id === action.upgradeId);
+      if (!upgrade) return state;
+      return upgradeBuilding(state, playerId, upgrade.uid);
+    }
     case "activate": {
       const me = state.players.find((p) => p.id === playerId);
       if (!me) return state;
