@@ -275,7 +275,119 @@ export function resolveCard(state, playerId, cardUid) {
   };
 }
 
-export function raid(state, attackerId, targetId /* raidType */) {
+export const RAID_TYPES = Object.freeze({
+  DESTROY: "Destroy Building",
+  STEAL: "Steal Intrigue",
+  DISABLE: "Disable Leader",
+});
+
+// Execute the attacker's declared outcome on the chosen defender.
+// Returns { state, impacts, summary } — impacts and summary feed the notification.
+function executeRaidOutcome(state, attackerId, defenderId, raidType, extras) {
+  const attacker = state.players.find((p) => p.id === attackerId);
+  const defender = state.players.find((p) => p.id === defenderId);
+
+  if (raidType === RAID_TYPES.DESTROY) {
+    const uid = extras?.buildingUid;
+    const building = defender.settlement.find((b) => b.uid === uid);
+    if (!building) {
+      return {
+        state,
+        impacts: [],
+        summary: "no building targeted — outcome skipped",
+      };
+    }
+    const next = {
+      ...state,
+      players: state.players.map((p) =>
+        p.id === defenderId
+          ? {
+              ...p,
+              settlement: p.settlement.filter((b) => b.uid !== uid),
+              disabledBuildingUids: (p.disabledBuildingUids ?? []).filter((x) => x !== uid),
+              buildingsDisabledUntilOwnerTurnStart: (
+                p.buildingsDisabledUntilOwnerTurnStart ?? []
+              ).filter((x) => x !== uid),
+            }
+          : p,
+      ),
+    };
+    return {
+      state: next,
+      impacts: [
+        impact(defenderId, `lost ${building.name}`),
+        impact(attackerId, `destroyed ${building.name}`),
+      ],
+      summary: `destroyed ${building.name}`,
+    };
+  }
+
+  if (raidType === RAID_TYPES.STEAL) {
+    if ((defender.intrigueHand ?? []).length === 0) {
+      return {
+        state,
+        impacts: [impact(defenderId, "no Intrigue to steal")],
+        summary: "defender had no Intrigue",
+      };
+    }
+    const idx = Math.floor(Math.random() * defender.intrigueHand.length);
+    const stolenCard = defender.intrigueHand[idx];
+    const next = {
+      ...state,
+      players: state.players.map((p) => {
+        if (p.id === defenderId) {
+          return {
+            ...p,
+            intrigueHand: p.intrigueHand.filter((c) => c.uid !== stolenCard.uid),
+          };
+        }
+        if (p.id === attackerId) {
+          return { ...p, intrigueHand: [...p.intrigueHand, stolenCard].slice(-3) };
+        }
+        return p;
+      }),
+    };
+    return {
+      state: next,
+      impacts: [
+        impact(attackerId, "stole an Intrigue card"),
+        impact(defenderId, "lost a random Intrigue card"),
+      ],
+      summary: `stole an Intrigue card`,
+    };
+  }
+
+  if (raidType === RAID_TYPES.DISABLE) {
+    if (!defender.leader) {
+      return {
+        state,
+        impacts: [impact(defenderId, "no leader to disable")],
+        summary: "defender had no leader",
+      };
+    }
+    const next = {
+      ...state,
+      players: state.players.map((p) =>
+        p.id === defenderId
+          ? {
+              ...p,
+              leader: { ...p.leader, disabled: true },
+              leaderDisabledUntilOwnerTurnStart: true,
+            }
+          : p,
+      ),
+    };
+    return {
+      state: next,
+      impacts: [impact(defenderId, `${defender.leader.name} disabled until next turn`)],
+      summary: `disabled ${defender.leader.name}`,
+    };
+  }
+
+  return { state, impacts: [], summary: "unknown raid type — no outcome" };
+}
+
+export function raid(state, attackerId, targetId, raidType = RAID_TYPES.DESTROY, extras = {}) {
   if (state.globalFlags?.raidsBlocked) return state;
   const attacker = state.players.find((p) => p.id === attackerId);
   const defender = state.players.find((p) => p.id === targetId);
@@ -312,22 +424,43 @@ export function raid(state, attackerId, targetId /* raidType */) {
     next = updatePlayer(next, attackerId, (p) => ({ ...p, scrap: p.scrap + stolen }));
     next = updatePlayer(next, effectiveDefenderId, (p) => ({ ...p, scrap: p.scrap - stolen }));
   }
-  next = log(next, { type: "raid", attackerId, targetId: effectiveDefenderId, success });
+
+  let outcomeImpacts = [];
+  let outcomeSummary = "";
+  if (success) {
+    const result = executeRaidOutcome(next, attackerId, effectiveDefenderId, raidType, extras);
+    next = result.state;
+    outcomeImpacts = result.impacts;
+    outcomeSummary = result.summary;
+  }
+
+  next = log(next, {
+    type: "raid",
+    attackerId,
+    targetId: effectiveDefenderId,
+    raidType,
+    success,
+  });
 
   const defenderName = effectiveDefender.name;
   next = notify(next, {
     kind: NotifKind.RAID,
     title: success
-      ? `Raid succeeded: ${attacker.name} → ${defenderName}`
+      ? `Raid succeeded: ${attacker.name} → ${defenderName} (${raidType})`
       : `Raid failed: ${attacker.name} → ${defenderName}`,
     message: (success
-      ? `⚔${attack} vs 🛡${defense}. Defender wins ties.${stolen > 0 ? ` Attacker stole ${stolen} Scrap.` : ""} Declared outcome (destroy / steal / disable) not yet wired.`
+      ? `⚔${attack} vs 🛡${defense}. Defender wins ties.${stolen > 0 ? ` Attacker stole ${stolen} Scrap.` : ""}${outcomeSummary ? ` Outcome: ${outcomeSummary}.` : ""}`
       : `⚔${attack} vs 🛡${defense}. No reward (defender wins ties).`) +
       (lookoutFired ? " Lookout Tower added +2 🛡." : ""),
     impacts: success
       ? [
-          impact(attackerId, `+${stolen}🔩`, { scrap: stolen }),
-          impact(effectiveDefenderId, `−${stolen}🔩`, { scrap: -stolen }),
+          ...(stolen > 0
+            ? [
+                impact(attackerId, `+${stolen}🔩`, { scrap: stolen }),
+                impact(effectiveDefenderId, `−${stolen}🔩`, { scrap: -stolen }),
+              ]
+            : []),
+          ...outcomeImpacts,
         ]
       : [impact(attackerId, "attack repelled")],
     sourcePlayerId: attackerId,
@@ -363,6 +496,7 @@ export function endTurn(state) {
     );
     const flags = { ...(p.flags ?? {}) };
     delete flags.divertScrapNextTurnTo;
+    const leaderRecovered = !!p.leaderDisabledUntilOwnerTurnStart;
     const revived = {
       ...p,
       boosts: { atk: 0, def: 0 },
@@ -373,6 +507,8 @@ export function endTurn(state) {
       skipExploreNextTurn: false,
       flags,
       abilityUsedThisTurn: {},
+      leader: leaderRecovered && p.leader ? { ...p.leader, disabled: false } : p.leader,
+      leaderDisabledUntilOwnerTurnStart: false,
     };
     const baseActions = calcActions(revived);
     const actionsAfterSchedule = Math.max(
@@ -394,6 +530,21 @@ export function endTurn(state) {
       loseActionsNextTurn: 0,
     };
   });
+
+  // Surface leader recovery (disabled by a previous raid) so the owner sees
+  // why their leader is contributing again this turn.
+  const leaderWasDisabled = state.players.find(
+    (p) => p.id === nextPlayer.id,
+  )?.leaderDisabledUntilOwnerTurnStart;
+  if (leaderWasDisabled && nextPlayer.leader) {
+    next = notify(next, {
+      kind: NotifKind.FLAG,
+      title: `${nextPlayer.leader.name} recovered`,
+      message: `${nextPlayer.name}'s leader is no longer disabled.`,
+      impacts: [impact(nextPlayer.id, "leader active again")],
+      sourcePlayerId: nextPlayer.id,
+    });
+  }
 
   // If Diverted Resources fired, credit the watcher player and emit a
   // notification. Also strip the _divertedScrap bookkeeping field.

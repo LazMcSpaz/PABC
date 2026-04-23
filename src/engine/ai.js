@@ -179,7 +179,7 @@ export async function getAIDecision(state, playerId, personality) {
     "  { type: \"build\", buildingId: <id from buildingRow> }",
     "  { type: \"explore\" }  // blocked if globalFlags.explorationBlocked",
     "  { type: \"resolve\", cardId: <id from explorationInPlay where canResolve=true> }",
-    "  { type: \"raid\", targetId: <opponent id>, raidType: \"Destroy Building\"|\"Steal Intrigue\"|\"Disable Leader\" }  // blocked if globalFlags.raidsBlocked",
+    "  { type: \"raid\", targetId: <opponent id>, raidType: \"Destroy Building\"|\"Steal Intrigue\"|\"Disable Leader\", buildingId?: <target building id in opponent.settlement, required if raidType=\"Destroy Building\"> }  // blocked if globalFlags.raidsBlocked",
     "  { type: \"boost\", stat: \"atk\"|\"def\" }",
     "  { type: \"play_intrigue\", cardName: <name>, targetId?: <id> }",
     "  { type: \"activate\", buildingId: <id in me.settlement where activated=true>, partnerId?: <opponent id for Trading Post> }",
@@ -231,8 +231,18 @@ export function executeAIAction(state, playerId, action) {
       const entry = state.explorationInPlay.find((e) => e.card.id === action.cardId);
       return entry ? actions.resolveCard(state, playerId, entry.card.uid) : state;
     }
-    case "raid":
-      return actions.raid(state, playerId, action.targetId, action.raidType);
+    case "raid": {
+      const extras = {};
+      if (action.raidType === "Destroy Building") {
+        const target = state.players.find((p) => p.id === action.targetId);
+        const building =
+          target?.settlement.find((b) => b.id === action.buildingId) ??
+          target?.settlement.find((b) => b.uid === action.buildingUid) ??
+          target?.settlement[0];
+        if (building) extras.buildingUid = building.uid;
+      }
+      return actions.raid(state, playerId, action.targetId, action.raidType, extras);
+    }
     case "boost":
       return actions.boost(state, playerId, action.stat, 1);
     case "activate": {

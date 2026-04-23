@@ -52,8 +52,8 @@ export function useGameEngine() {
         setState((s) => actions.boost(s, playerId, stat, amount)),
       explore: (playerId) => setState((s) => actions.explore(s, playerId)),
       resolveCard: (playerId, uid) => setState((s) => actions.resolveCard(s, playerId, uid)),
-      raid: (attackerId, targetId, raidType) =>
-        setState((s) => actions.raid(s, attackerId, targetId, raidType)),
+      raid: (attackerId, targetId, raidType, extras) =>
+        setState((s) => actions.raid(s, attackerId, targetId, raidType, extras)),
       playIntrigue: (playerId, cardUid, opts) =>
         setState((s) => playIntrigue(s, playerId, cardUid, opts)),
       activateAbility: (playerId, buildingUid, opts) =>

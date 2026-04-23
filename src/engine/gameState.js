@@ -32,6 +32,7 @@ export function makePlayer({ id, name, kind = "human", personalityId = null, col
     skipExploreThisTurn: false,
     flags: {},
     abilityUsedThisTurn: {},
+    leaderDisabledUntilOwnerTurnStart: false,
     raidedThisRound: [],
     earnedVP: 0,
   };

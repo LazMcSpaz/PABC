@@ -90,7 +90,9 @@ export default function GameBoard({ state, engine }) {
           />
           <RaidView
             state={state}
-            onRaid={(targetId, raidType) => engine.raid(state.activePlayerId, targetId, raidType)}
+            onRaid={(targetId, raidType, extras) =>
+              engine.raid(state.activePlayerId, targetId, raidType, extras)
+            }
           />
           <NarrativeView state={state} />
           <NotificationFeed state={state} />
