@@ -4,6 +4,11 @@
 
 import { calcActions, calcAttack, calcDefense, calcPassiveScrap, calcVP } from "./calculations.js";
 import { applyEvent, clearRoundEndFlags, resolvePersistentEvent } from "./events.js";
+import {
+  fireChallengeResolveReactive,
+  fireExploreDrawReactive,
+  fireRaidReactive,
+} from "./intrigue.js";
 import { NotifKind, impact, notify } from "./notifications.js";
 import { CARD_RESOLVERS } from "./resolution.js";
 
@@ -99,13 +104,23 @@ export function explore(state, playerId) {
   let next = {
     ...state,
     explorationDeck: deck,
-    explorationInPlay: [...state.explorationInPlay, { card: drawn, drawnBy: playerId }],
   };
   next = updatePlayer(next, playerId, (p) => ({
     ...p,
     actionsRemaining: p.actionsRemaining - 1,
   }));
   next = log(next, { type: "explore", playerId, cardId: drawn.id });
+
+  // Reactive: opponents may hold Trapped Road to force-discard the drawn card
+  // (Events are immune — they always resolve).
+  const reactive = fireExploreDrawReactive(next, playerId, drawn);
+  next = reactive.state;
+  if (reactive.cancelDraw) return next;
+
+  next = {
+    ...next,
+    explorationInPlay: [...next.explorationInPlay, { card: drawn, drawnBy: playerId }],
+  };
 
   // Events self-apply on draw (README: "Not optional. The drawing player
   // resolves them immediately."). applyEvent returns whether the card
@@ -140,20 +155,60 @@ export function resolveCard(state, playerId, cardUid) {
     };
   }
 
-  // Generic Challenge resolver: pay scrap, check requirements, grant rewards.
+  // Generic Challenge resolver: pay scrap, check requirements, then apply
+  // rewards — which may be fully stolen by Vulture or half-skimmed by
+  // Salvage Rights if an opponent holds one.
   if (card.type === "Challenge" || card.type === "Challenge (Progression)") {
     if (player.scrap < (card.scrapCost ?? 0)) return state;
     if (calcAttack(player) < (card.reqAtk ?? 0)) return state;
     if (calcDefense(player) < (card.reqDef ?? 0)) return state;
 
-    let next = updatePlayer(state, playerId, (p) => ({
-      ...p,
-      scrap: p.scrap - (card.scrapCost ?? 0) + (card.scrapReward ?? 0),
-      bonusAtk: (p.bonusAtk ?? 0) + (card.atkReward ?? 0),
-      bonusDef: (p.bonusDef ?? 0) + (card.defReward ?? 0),
-      actionsRemaining: p.actionsRemaining + (card.actionReward ?? 0),
-      earnedVP: (p.earnedVP ?? 0) + (card.vp ?? 0),
-    }));
+    // Resolver always pays the cost up-front.
+    let next = updatePlayer(state, playerId, (p) => ({ ...p, scrap: p.scrap - (card.scrapCost ?? 0) }));
+
+    // Reactive: Vulture / Salvage Rights.
+    const reactive = fireChallengeResolveReactive(next, playerId, card);
+    next = reactive.state;
+
+    const beneficiaryId = reactive.stolenByHolderId ?? playerId;
+    const scrapReward = card.scrapReward ?? 0;
+    const scrapHalvedAmount = reactive.halvedAmount ?? 0;
+
+    if (reactive.stolenByHolderId != null) {
+      // Full steal — holder gets everything.
+      next = updatePlayer(next, beneficiaryId, (p) => ({
+        ...p,
+        scrap: p.scrap + scrapReward,
+        bonusAtk: (p.bonusAtk ?? 0) + (card.atkReward ?? 0),
+        bonusDef: (p.bonusDef ?? 0) + (card.defReward ?? 0),
+        actionsRemaining: p.actionsRemaining + (card.actionReward ?? 0),
+        earnedVP: (p.earnedVP ?? 0) + (card.vp ?? 0),
+      }));
+    } else if (reactive.halvedToHolderId != null) {
+      // Half scrap skimmed; resolver keeps the other half and all non-scrap rewards.
+      next = updatePlayer(next, reactive.halvedToHolderId, (p) => ({
+        ...p,
+        scrap: p.scrap + scrapHalvedAmount,
+      }));
+      next = updatePlayer(next, playerId, (p) => ({
+        ...p,
+        scrap: p.scrap + (scrapReward - scrapHalvedAmount),
+        bonusAtk: (p.bonusAtk ?? 0) + (card.atkReward ?? 0),
+        bonusDef: (p.bonusDef ?? 0) + (card.defReward ?? 0),
+        actionsRemaining: p.actionsRemaining + (card.actionReward ?? 0),
+        earnedVP: (p.earnedVP ?? 0) + (card.vp ?? 0),
+      }));
+    } else {
+      // Uncontested — resolver gets everything.
+      next = updatePlayer(next, playerId, (p) => ({
+        ...p,
+        scrap: p.scrap + scrapReward,
+        bonusAtk: (p.bonusAtk ?? 0) + (card.atkReward ?? 0),
+        bonusDef: (p.bonusDef ?? 0) + (card.defReward ?? 0),
+        actionsRemaining: p.actionsRemaining + (card.actionReward ?? 0),
+        earnedVP: (p.earnedVP ?? 0) + (card.vp ?? 0),
+      }));
+    }
 
     if (card.type === "Challenge (Progression)" && card.progressionTrack) {
       next = {
@@ -180,7 +235,10 @@ export function resolveCard(state, playerId, cardUid) {
     next = notify(next, {
       kind: NotifKind.CHALLENGE,
       title: `${card.name} resolved`,
-      message: card.ability?.description ?? "",
+      message:
+        (card.ability?.description ?? "") +
+        (reactive.stolenByHolderId != null ? " (rewards stolen by Vulture)" : "") +
+        (reactive.halvedToHolderId != null ? " (half scrap claimed by Salvage Rights)" : ""),
       impacts: [
         impact(playerId, rewardBits.join(" · "), {
           scrap: (card.scrapReward ?? 0) - (card.scrapCost ?? 0),
@@ -217,35 +275,49 @@ export function raid(state, attackerId, targetId /* raidType */) {
   if (!attacker || !defender || attacker.actionsRemaining < 1) return state;
   if (attacker.raidedThisRound?.includes(targetId)) return state;
 
-  const attack = calcAttack(attacker);
-  const defense = calcDefense(defender);
-  const success = attack > defense; // defender wins ties per README
-
+  // Action + raid-cap are consumed up-front so Immediate reactive cards can't
+  // be replayed for free if they cancel the raid.
   let next = updatePlayer(state, attackerId, (p) => ({
     ...p,
     actionsRemaining: p.actionsRemaining - 1,
     raidedThisRound: [...(p.raidedThisRound ?? []), targetId],
   }));
 
-  const stolen = success ? Math.floor(defender.scrap / 2) : 0;
+  // Immediate reactive cards: decoy_caravan can redirect the raid;
+  // emergency_protocols can force the attacker to pay 3 Scrap or abandon.
+  const reactive = fireRaidReactive(next, attackerId, targetId);
+  next = reactive.state;
+  if (reactive.cancel) {
+    return log(next, { type: "raid", attackerId, targetId, cancelled: true });
+  }
+  const effectiveDefenderId = reactive.redirectTo ?? targetId;
+  const effectiveDefender = next.players.find((p) => p.id === effectiveDefenderId);
+  // Re-read attacker in case state changed (e.g. Emergency Protocols charged 3 Scrap).
+  const attackerNow = next.players.find((p) => p.id === attackerId);
+  const attack = calcAttack(attackerNow);
+  const defense = calcDefense(effectiveDefender);
+  const success = attack > defense; // defender wins ties per README
+
+  const stolen = success ? Math.floor(effectiveDefender.scrap / 2) : 0;
   if (success && stolen > 0) {
     next = updatePlayer(next, attackerId, (p) => ({ ...p, scrap: p.scrap + stolen }));
-    next = updatePlayer(next, targetId, (p) => ({ ...p, scrap: p.scrap - stolen }));
+    next = updatePlayer(next, effectiveDefenderId, (p) => ({ ...p, scrap: p.scrap - stolen }));
   }
-  next = log(next, { type: "raid", attackerId, targetId, success });
+  next = log(next, { type: "raid", attackerId, targetId: effectiveDefenderId, success });
 
-  const attackerName = attacker.name;
-  const defenderName = defender.name;
+  const defenderName = effectiveDefender.name;
   next = notify(next, {
     kind: NotifKind.RAID,
-    title: success ? `Raid succeeded: ${attackerName} → ${defenderName}` : `Raid failed: ${attackerName} → ${defenderName}`,
+    title: success
+      ? `Raid succeeded: ${attacker.name} → ${defenderName}`
+      : `Raid failed: ${attacker.name} → ${defenderName}`,
     message: success
       ? `⚔${attack} vs 🛡${defense}. Defender wins ties.${stolen > 0 ? ` Attacker stole ${stolen} Scrap.` : ""} Declared outcome (destroy / steal / disable) not yet wired.`
       : `⚔${attack} vs 🛡${defense}. No reward (defender wins ties).`,
     impacts: success
       ? [
           impact(attackerId, `+${stolen}🔩`, { scrap: stolen }),
-          impact(targetId, `−${stolen}🔩`, { scrap: -stolen }),
+          impact(effectiveDefenderId, `−${stolen}🔩`, { scrap: -stolen }),
         ]
       : [impact(attackerId, "attack repelled")],
     sourcePlayerId: attackerId,

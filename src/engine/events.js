@@ -15,6 +15,7 @@
 // These pass through the default "persist and leave for manual" path.
 
 import { calcAttack, calcDefense } from "./calculations.js";
+import { fireEventImmunity } from "./intrigue.js";
 import { NotifKind, impact, notify } from "./notifications.js";
 
 function updatePlayer(state, playerId, updater) {
@@ -37,10 +38,15 @@ function logEntry(state, entry) {
 }
 
 // Apply a per-player transformation across all players, collecting an impacts
-// array describing what happened to each. Pure.
-function applyPerPlayer(state, fn) {
+// array describing what happened to each. Players whose id is in `immune` are
+// skipped and credited with a neutral "immune (Borrowed Time)" impact. Pure.
+function applyPerPlayer(state, fn, immune) {
   const impacts = [];
   const newPlayers = state.players.map((p) => {
+    if (immune?.has(p.id)) {
+      impacts.push(impact(p.id, "immune (Borrowed Time)"));
+      return p;
+    }
     const res = fn(p);
     if (res.impact) impacts.push(res.impact);
     return res.player ?? p;
@@ -49,11 +55,11 @@ function applyPerPlayer(state, fn) {
 }
 
 export const EVENT_EFFECTS = {
-  harvest: (state) => {
+  harvest: (state, _drawerId, ctx = {}) => {
     const r = applyPerPlayer(state, (p) => ({
       player: { ...p, scrap: p.scrap + 6 },
       impact: impact(p.id, `+6 Scrap`, { scrap: 6 }),
-    }));
+    }), ctx.immuneIds);
     let next = logEntry(r.state, { type: "event", cardId: "harvest" });
     next = notify(next, {
       kind: NotifKind.EVENT,
@@ -66,7 +72,7 @@ export const EVENT_EFFECTS = {
     return { state: next, persist: false };
   },
 
-  scrap_rush: (state) => {
+  scrap_rush: (state, _drawerId, ctx = {}) => {
     const r = applyPerPlayer(state, (p) => {
       const bonus = hasBuilding(p, "scavengers_hut") ? 2 : 0;
       const total = 4 + bonus;
@@ -78,7 +84,7 @@ export const EVENT_EFFECTS = {
           { scrap: total },
         ),
       };
-    });
+    }, ctx.immuneIds);
     let next = logEntry(r.state, { type: "event", cardId: "scrap_rush" });
     next = notify(next, {
       kind: NotifKind.EVENT,
@@ -90,7 +96,7 @@ export const EVENT_EFFECTS = {
     return { state: next, persist: false };
   },
 
-  marauder_ambush: (state) => {
+  marauder_ambush: (state, _drawerId, ctx = {}) => {
     const r = applyPerPlayer(state, (p) => {
       if (calcAttack(p) >= 3) {
         return { player: p, impact: impact(p.id, "ATK ≥ 3 — unaffected") };
@@ -100,7 +106,7 @@ export const EVENT_EFFECTS = {
         player: { ...p, scrap: p.scrap - loss },
         impact: impact(p.id, `−${loss} Scrap (failed ATK check)`, { scrap: -loss }),
       };
-    });
+    }, ctx.immuneIds);
     let next = logEntry(r.state, { type: "event", cardId: "marauder_ambush" });
     next = notify(next, {
       kind: NotifKind.EVENT,
@@ -113,7 +119,7 @@ export const EVENT_EFFECTS = {
     return { state: next, persist: false };
   },
 
-  mountain_cult_extortion: (state) => {
+  mountain_cult_extortion: (state, _drawerId, ctx = {}) => {
     const r = applyPerPlayer(state, (p) => {
       if (p.scrap >= 3) {
         return {
@@ -125,7 +131,7 @@ export const EVENT_EFFECTS = {
         player: { ...p, bonusAtk: (p.bonusAtk ?? 0) - 5 },
         impact: impact(p.id, "could not pay — lost 5 permanent ⚔", { atk: -5 }),
       };
-    });
+    }, ctx.immuneIds);
     let next = logEntry(r.state, { type: "event", cardId: "mountain_cult_extortion" });
     next = notify(next, {
       kind: NotifKind.EVENT,
@@ -138,7 +144,7 @@ export const EVENT_EFFECTS = {
     return { state: next, persist: false };
   },
 
-  disease_scare: (state) => {
+  disease_scare: (state, _drawerId, ctx = {}) => {
     const r = applyPerPlayer(state, (p) => {
       if (hasLeader(p, "doc_brawlins") || hasBuilding(p, "medic_tent")) {
         return { player: p, impact: impact(p.id, "immune (Doc Brawlins / Medic Tent)") };
@@ -153,7 +159,7 @@ export const EVENT_EFFECTS = {
         },
         impact: impact(p.id, "−2 ⚔ until next turn", { atk: -2 }),
       };
-    });
+    }, ctx.immuneIds);
     let next = logEntry(r.state, { type: "event", cardId: "disease_scare" });
     next = notify(next, {
       kind: NotifKind.EVENT,
@@ -166,7 +172,7 @@ export const EVENT_EFFECTS = {
     return { state: next, persist: false };
   },
 
-  ash_storm: (state) => {
+  ash_storm: (state, _drawerId, ctx = {}) => {
     const r = applyPerPlayer(state, (p) => {
       if (hasBuilding(p, "greenhouse")) {
         return { player: p, impact: impact(p.id, "immune (Greenhouse)") };
@@ -175,7 +181,7 @@ export const EVENT_EFFECTS = {
         player: { ...p, skipExploreNextTurn: true },
         impact: impact(p.id, "skipping exploration next turn"),
       };
-    });
+    }, ctx.immuneIds);
     let next = logEntry(r.state, { type: "event", cardId: "ash_storm" });
     next = notify(next, {
       kind: NotifKind.EVENT,
@@ -188,7 +194,7 @@ export const EVENT_EFFECTS = {
     return { state: next, persist: false };
   },
 
-  mountain_cult_sermon: (state) => {
+  mountain_cult_sermon: (state, _drawerId, ctx = {}) => {
     const r = applyPerPlayer(state, (p) => {
       if (p.flags?.completedMountainCult) {
         return { player: p, impact: impact(p.id, "immune (Mountain Cult completion)") };
@@ -197,7 +203,7 @@ export const EVENT_EFFECTS = {
         player: { ...p, loseActionsNextTurn: (p.loseActionsNextTurn ?? 0) + 1 },
         impact: impact(p.id, "−1 Action next turn", { actions: -1 }),
       };
-    });
+    }, ctx.immuneIds);
     let next = logEntry(r.state, { type: "event", cardId: "mountain_cult_sermon" });
     next = notify(next, {
       kind: NotifKind.EVENT,
@@ -210,14 +216,14 @@ export const EVENT_EFFECTS = {
     return { state: next, persist: false };
   },
 
-  nova9_broadcast: (state, drawerId) => {
+  nova9_broadcast: (state, drawerId, ctx = {}) => {
     const r = applyPerPlayer(state, (p) => {
       const amount = p.id === drawerId ? 2 : 1;
       return {
         player: { ...p, bonusActionsNextTurn: (p.bonusActionsNextTurn ?? 0) + amount },
         impact: impact(p.id, `+${amount} Action${amount > 1 ? "s" : ""} next turn`, { actions: amount }),
       };
-    });
+    }, ctx.immuneIds);
     let next = logEntry(r.state, { type: "event", cardId: "nova9_broadcast", drawerId });
     next = notify(next, {
       kind: NotifKind.EVENT,
@@ -230,7 +236,7 @@ export const EVENT_EFFECTS = {
     return { state: next, persist: false };
   },
 
-  solar_flare: (state) => {
+  solar_flare: (state, _drawerId, ctx = {}) => {
     const targetIds = new Set(["antenna_array", "drone_lab", "signal_jammers"]);
     const r = applyPerPlayer(state, (p) => {
       const toDisable = p.settlement.filter((b) => targetIds.has(b.id)).map((b) => b.uid);
@@ -249,7 +255,7 @@ export const EVENT_EFFECTS = {
         },
         impact: impact(p.id, `disabled ${toDisable.length} building(s) until next turn`),
       };
-    });
+    }, ctx.immuneIds);
     let next = logEntry(r.state, { type: "event", cardId: "solar_flare" });
     next = notify(next, {
       kind: NotifKind.EVENT,
@@ -262,7 +268,7 @@ export const EVENT_EFFECTS = {
     return { state: next, persist: false };
   },
 
-  vanguard_remnant_patrol: (state) => {
+  vanguard_remnant_patrol: (state, _drawerId, ctx = {}) => {
     let next = {
       ...state,
       globalFlags: { ...state.globalFlags, raidsBlocked: true },
@@ -275,7 +281,7 @@ export const EVENT_EFFECTS = {
         };
       }
       return { player: p, impact: impact(p.id, "no raids this round") };
-    });
+    }, ctx.immuneIds);
     next = logEntry(r.state, { type: "event", cardId: "vanguard_remnant_patrol" });
     next = notify(next, {
       kind: NotifKind.EVENT,
@@ -304,11 +310,16 @@ export const EVENT_EFFECTS = {
 };
 
 export function applyEvent(state, card, drawerId) {
+  // Immediate reactive: any player holding Borrowed Time can consume it to
+  // grant themselves immunity to this Event. Fire that first so per-player
+  // effects can skip the immune set.
+  const { state: afterImmunity, immuneIds } = fireEventImmunity(state, card);
+
   const fn = EVENT_EFFECTS[card.id];
   if (!fn) {
     // No automation — leave the card in play for manual resolution.
     return {
-      state: notify(state, {
+      state: notify(afterImmunity, {
         kind: NotifKind.EVENT,
         title: card.name,
         message: `${card.name} drawn — manual resolution required (not yet automated).`,
@@ -318,7 +329,7 @@ export function applyEvent(state, card, drawerId) {
       persist: true,
     };
   }
-  return fn(state, drawerId);
+  return fn(afterImmunity, drawerId, { immuneIds });
 }
 
 export function clearRoundEndFlags(state) {
