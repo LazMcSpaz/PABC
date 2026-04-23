@@ -7,6 +7,8 @@
 // README; before any public deployment, move behind a server proxy.
 
 import Anthropic from "@anthropic-ai/sdk";
+import * as actions from "./actions.js";
+import { calcActions, calcAttack, calcDefense, calcPassiveScrap, calcVP } from "./calculations.js";
 
 const MODEL_ID = "claude-sonnet-4-20250514";
 
@@ -31,10 +33,121 @@ export const AI_PERSONALITIES = [
   },
 ];
 
-const NOOP_PLAN = {
+export const NOOP_PLAN = {
   reasoning: "No API key configured — skipping turn.",
   actions: [{ type: "end_turn" }],
 };
+
+function summarizeBuilding(b) {
+  return {
+    uid: b.uid,
+    id: b.id,
+    name: b.name,
+    passiveScrap: b.passiveScrap,
+    passiveAtk: b.passiveAtk,
+    passDef: b.passDef,
+    passActions: b.passActions,
+    vp: b.vp,
+    ability: b.ability?.description ?? null,
+  };
+}
+
+function summarizePlayer(p, opts = {}) {
+  const out = {
+    id: p.id,
+    name: p.name,
+    kind: p.kind,
+    scrap: p.scrap,
+    derived: {
+      vp: calcVP(p),
+      atk: calcAttack(p),
+      def: calcDefense(p),
+      passiveScrap: calcPassiveScrap(p),
+      actions: calcActions(p),
+    },
+    settlement: p.settlement.map(summarizeBuilding),
+    leader: p.leader
+      ? { id: p.leader.id, name: p.leader.name, ability: p.leader.ability?.description ?? null }
+      : null,
+  };
+  if (opts.includeHand) {
+    out.intrigueHand = p.intrigueHand.map((c) => ({
+      uid: c.uid,
+      id: c.id,
+      name: c.name,
+      immediate: c.immediate,
+      ability: c.ability?.description ?? null,
+    }));
+    out.actionsRemaining = p.actionsRemaining;
+    out.boosts = p.boosts;
+  }
+  return out;
+}
+
+export function serializeForAI(state, playerId) {
+  const me = state.players.find((p) => p.id === playerId);
+  if (!me) return null;
+  const myAtk = calcAttack(me);
+
+  const buildingRow = state.buildingRow.map((c) => ({
+    ...summarizeBuilding(c),
+    type: c.type,
+    scrapCost: c.scrapCost,
+    atkCost: c.atkCost,
+    canAfford: me.scrap >= (c.scrapCost ?? 0) && myAtk >= (c.atkCost ?? 0),
+  }));
+
+  const opponents = state.players
+    .filter((p) => p.id !== playerId)
+    .map((p) => {
+      const theirDef = calcDefense(p);
+      return {
+        ...summarizePlayer(p),
+        theirDef,
+        raidWouldSucceed: myAtk > theirDef,
+      };
+    });
+
+  const top = state.explorationDeck[0] ?? null;
+  const topExploration = top
+    ? {
+        id: top.id,
+        name: top.name,
+        type: top.type,
+        scrapCost: top.scrapCost,
+        reqAtk: top.reqAtk,
+        reqDef: top.reqDef,
+        scrapReward: top.scrapReward,
+        atkReward: top.atkReward,
+        defReward: top.defReward,
+        actionReward: top.actionReward,
+        vp: top.vp,
+        surprise: top.surprise,
+        ability: top.ability?.description ?? null,
+        canResolve:
+          me.scrap >= (top.scrapCost ?? 0) &&
+          myAtk >= (top.reqAtk ?? 0) &&
+          calcDefense(me) >= (top.reqDef ?? 0),
+      }
+    : null;
+
+  return {
+    round: state.round,
+    age: state.age,
+    progressionResolved: state.progressionResolved,
+    me: summarizePlayer(me, { includeHand: true }),
+    opponents,
+    buildingRow,
+    topExploration,
+    explorationInPlay: state.explorationInPlay.map((e) => ({
+      uid: e.card.uid,
+      id: e.card.id,
+      name: e.card.name,
+      drawnBy: e.drawnBy,
+    })),
+    recentLog: (state.log ?? []).slice(-10),
+  };
+}
 
 function getClient() {
   const apiKey = import.meta?.env?.VITE_ANTHROPIC_API_KEY;
@@ -42,16 +155,26 @@ function getClient() {
   return new Anthropic({ apiKey, dangerouslyAllowBrowser: true });
 }
 
-export async function getAIDecision(serializedState, personality) {
+export async function getAIDecision(state, playerId, personality) {
   const client = getClient();
   if (!client) return NOOP_PLAN;
+  const serialized = serializeForAI(state, playerId);
+  if (!serialized) return NOOP_PLAN;
 
   const userMessage = [
-    "Return a JSON object with keys `reasoning` (string) and `actions` (array).",
-    "Valid action types: build {buildingId}, explore, raid {targetId, raidType}, boost {stat: 'atk'|'def'}, play_intrigue {cardName, targetId?}, end_turn.",
-    "Here is the current game state:",
+    "Return ONE JSON object with keys `reasoning` (string, 1-2 sentences) and `actions` (array).",
+    "Action types you may use:",
+    "  { type: \"build\", buildingId: <id from buildingRow> }",
+    "  { type: \"explore\" }",
+    "  { type: \"raid\", targetId: <opponent id>, raidType: \"Destroy Building\"|\"Steal Intrigue\"|\"Disable Leader\" }",
+    "  { type: \"boost\", stat: \"atk\"|\"def\" }",
+    "  { type: \"play_intrigue\", cardName: <name>, targetId?: <id> }",
+    "  { type: \"end_turn\" }",
+    "Each non-end_turn action consumes resources you must have. The engine will silently no-op invalid actions.",
+    "Plan up to 4 actions in priority order. End with end_turn if you intentionally pass remaining actions.",
+    "Game state:",
     "```json",
-    JSON.stringify(serializedState, null, 2),
+    JSON.stringify(serialized, null, 2),
     "```",
   ].join("\n");
 
@@ -67,10 +190,50 @@ export async function getAIDecision(serializedState, personality) {
       .map((b) => b.text)
       .join("");
     const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) return NOOP_PLAN;
-    return JSON.parse(jsonMatch[0]);
+    if (!jsonMatch) return { ...NOOP_PLAN, reasoning: "Model returned no JSON; passing." };
+    const parsed = JSON.parse(jsonMatch[0]);
+    if (!Array.isArray(parsed.actions)) parsed.actions = [{ type: "end_turn" }];
+    return parsed;
   } catch (err) {
     console.error("getAIDecision failed", err);
-    return NOOP_PLAN;
+    return { ...NOOP_PLAN, reasoning: `AI call failed: ${err.message ?? "unknown error"}` };
   }
+}
+
+// Maps a single action from the AI plan onto an engine call. Pure function:
+// returns new state. Invalid actions return state unchanged (engine actions
+// already no-op when preconditions aren't met).
+export function executeAIAction(state, playerId, action) {
+  if (!state || state.winnerId != null) return state;
+  if (!action || typeof action !== "object") return state;
+  switch (action.type) {
+    case "build": {
+      const card = state.buildingRow.find((c) => c.id === action.buildingId);
+      return card ? actions.build(state, playerId, card.uid) : state;
+    }
+    case "explore":
+      return actions.explore(state, playerId);
+    case "raid":
+      return actions.raid(state, playerId, action.targetId, action.raidType);
+    case "boost":
+      return actions.boost(state, playerId, action.stat, 1);
+    case "play_intrigue":
+      // INTRIGUE_EFFECTS not yet wired — record intent only.
+      return state;
+    case "end_turn":
+    default:
+      return state;
+  }
+}
+
+// Records the full AI decision (reasoning + planned actions) into state.aiLog.
+export function recordAIDecision(state, playerId, plan) {
+  const entry = {
+    round: state.round,
+    playerId,
+    reasoning: plan.reasoning ?? "",
+    actions: plan.actions ?? [],
+    timestamp: Date.now(),
+  };
+  return { ...state, aiLog: [...(state.aiLog ?? []), entry] };
 }

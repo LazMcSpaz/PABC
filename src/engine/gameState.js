@@ -75,6 +75,7 @@ export function makeInitialState({ players }) {
     progressionResolved: [],
     narrativeState: {},
     log: [],
+    aiLog: [],
     winnerId: null,
   };
 

@@ -165,6 +165,7 @@ export function raid(state, attackerId, targetId /* raidType */) {
 }
 
 export function endTurn(state) {
+  if (state.winnerId != null) return state;
   const idx = state.players.findIndex((p) => p.id === state.activePlayerId);
   const nextIdx = (idx + 1) % state.players.length;
   const nextPlayer = state.players[nextIdx];
