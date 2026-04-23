@@ -27,6 +27,24 @@ export default function PlayerPanel({ player, active, onBoost }) {
           </span>
         ) : null}
       </div>
+      {(player.temporaryDebuffs ?? []).length > 0 ||
+      player.skipExploreThisTurn ||
+      player.skipExploreNextTurn ||
+      player.bonusActionsNextTurn ||
+      player.loseActionsNextTurn ? (
+        <div style={{ fontSize: 11, color: "#e88", marginTop: 4 }}>
+          {player.temporaryDebuffs?.map((d, i) => (
+            <span key={i}>
+              {d.stat.toUpperCase()} {d.amount > 0 ? "+" : ""}
+              {d.amount} (until turn start){" "}
+            </span>
+          ))}
+          {player.skipExploreThisTurn ? "skip explore · " : ""}
+          {player.skipExploreNextTurn ? "skip explore next · " : ""}
+          {player.bonusActionsNextTurn ? `+${player.bonusActionsNextTurn}⚡ next · ` : ""}
+          {player.loseActionsNextTurn ? `-${player.loseActionsNextTurn}⚡ next` : ""}
+        </div>
+      ) : null}
       {active && onBoost ? (
         <div style={{ display: "flex", gap: 4, marginTop: 6 }}>
           <button onClick={() => onBoost("atk")} disabled={player.scrap < 2}>

@@ -15,6 +15,12 @@ function leaderContribution(player, field) {
   return player.leader[field] ?? 0;
 }
 
+function debuffSum(player, stat) {
+  return (player.temporaryDebuffs ?? [])
+    .filter((d) => d.stat === stat)
+    .reduce((sum, d) => sum + (d.amount ?? 0), 0);
+}
+
 export function calcPassiveScrap(player) {
   return (
     activeBuildings(player).reduce((sum, b) => sum + (b.passiveScrap ?? 0), 0) +
@@ -26,7 +32,10 @@ export function calcAttack(player) {
   const base =
     activeBuildings(player).reduce((sum, b) => sum + (b.passiveAtk ?? 0), 0) +
     leaderContribution(player, "passiveAtk");
-  return base + (player.bonusAtk ?? 0) + (player.boosts?.atk ?? 0);
+  return Math.max(
+    0,
+    base + (player.bonusAtk ?? 0) + (player.boosts?.atk ?? 0) + debuffSum(player, "atk"),
+  );
 }
 
 export function calcDefense(player) {
@@ -34,7 +43,10 @@ export function calcDefense(player) {
     BASE_DEFENSE +
     activeBuildings(player).reduce((sum, b) => sum + (b.passDef ?? 0), 0) +
     leaderContribution(player, "passDef");
-  return base + (player.bonusDef ?? 0) + (player.boosts?.def ?? 0);
+  return Math.max(
+    0,
+    base + (player.bonusDef ?? 0) + (player.boosts?.def ?? 0) + debuffSum(player, "def"),
+  );
 }
 
 export function calcActions(player) {

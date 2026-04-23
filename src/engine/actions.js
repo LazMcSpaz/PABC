@@ -3,6 +3,7 @@
 // now these do the minimum to keep state transitions visible and legal.
 
 import { calcActions, calcAttack, calcDefense, calcPassiveScrap, calcVP } from "./calculations.js";
+import { applyEvent, clearRoundEndFlags, resolvePersistentEvent } from "./events.js";
 import { CARD_RESOLVERS } from "./resolution.js";
 
 const WIN_VP = 30;
@@ -69,19 +70,39 @@ export function boost(state, playerId, stat, amount = 1) {
 export function explore(state, playerId) {
   const player = state.players.find((p) => p.id === playerId);
   if (!player || player.actionsRemaining < 1) return state;
+  if (player.skipExploreThisTurn) return state;
+  if (state.globalFlags?.explorationBlocked) return state;
+
   const deck = [...state.explorationDeck];
   const drawn = deck.shift();
   if (!drawn) return state;
-  const next = {
+
+  let next = {
     ...state,
     explorationDeck: deck,
     explorationInPlay: [...state.explorationInPlay, { card: drawn, drawnBy: playerId }],
   };
-  const afterAction = updatePlayer(next, playerId, (p) => ({
+  next = updatePlayer(next, playerId, (p) => ({
     ...p,
     actionsRemaining: p.actionsRemaining - 1,
   }));
-  return log(afterAction, { type: "explore", playerId, cardId: drawn.id });
+  next = log(next, { type: "explore", playerId, cardId: drawn.id });
+
+  // Events self-apply on draw (README: "Not optional. The drawing player
+  // resolves them immediately."). applyEvent returns whether the card
+  // should persist in play (e.g. Minefield blocks exploration).
+  if (drawn.type === "Event") {
+    const { state: afterEvent, persist } = applyEvent(next, drawn, playerId);
+    next = afterEvent;
+    if (!persist) {
+      next = {
+        ...next,
+        explorationInPlay: next.explorationInPlay.filter((e) => e.card.uid !== drawn.uid),
+      };
+    }
+  }
+
+  return next;
 }
 
 export function resolveCard(state, playerId, cardUid) {
@@ -131,8 +152,14 @@ export function resolveCard(state, playerId, cardUid) {
     return log(next, { type: "resolve", playerId, cardId: card.id });
   }
 
-  // Non-Challenge types (Event, Challenge (Narrative)) — remove from play
-  // and leave per-card automation to a later pass.
+  // Persistent Events (Minefield) — pay the action / meet the requirement
+  // and clear the associated global flag.
+  if (card.type === "Event") {
+    return resolvePersistentEvent(state, playerId, card);
+  }
+
+  // Challenge (Narrative) and other types — remove from play and leave
+  // per-card automation to a later pass.
   return {
     ...state,
     explorationInPlay: state.explorationInPlay.filter((e) => e.card.uid !== cardUid),
@@ -140,6 +167,7 @@ export function resolveCard(state, playerId, cardUid) {
 }
 
 export function raid(state, attackerId, targetId /* raidType */) {
+  if (state.globalFlags?.raidsBlocked) return state;
   const attacker = state.players.find((p) => p.id === attackerId);
   const defender = state.players.find((p) => p.id === targetId);
   if (!attacker || !defender || attacker.actionsRemaining < 1) return state;
@@ -170,21 +198,59 @@ export function endTurn(state) {
   const nextIdx = (idx + 1) % state.players.length;
   const nextPlayer = state.players[nextIdx];
 
-  // Collect passive scrap, recalc actions, clear stale boosts for the incoming player.
-  let next = updatePlayer(state, nextPlayer.id, (p) => ({
+  // Turn-start bookkeeping for the incoming player:
+  //   - re-enable buildings disabled "until owner's next turn"
+  //   - expire temporary debuffs tagged for owner-turn-start
+  //   - clear per-turn boosts
+  //   - promote skipExploreNextTurn → skipExploreThisTurn
+  //   - apply bonus/lose actions scheduled from previous events
+  //   - collect passive scrap (after re-enabling so disabled buildings count)
+  // Turn-end bookkeeping for the outgoing player:
+  //   - clear skipExploreThisTurn (their skipped turn is over)
+  let next = updatePlayer(state, state.activePlayerId, (p) => ({
     ...p,
-    boosts: { atk: 0, def: 0 },
-    scrap: p.scrap + calcPassiveScrap(p),
-    actionsRemaining: calcActions(p),
+    skipExploreThisTurn: false,
   }));
+  next = updatePlayer(next, nextPlayer.id, (p) => {
+    const toReenable = new Set(p.buildingsDisabledUntilOwnerTurnStart ?? []);
+    const stillDisabled = (p.disabledBuildingUids ?? []).filter((uid) => !toReenable.has(uid));
+    const freshDebuffs = (p.temporaryDebuffs ?? []).filter(
+      (d) => d.expiresOn !== "owner_turn_start",
+    );
+    const revived = {
+      ...p,
+      boosts: { atk: 0, def: 0 },
+      disabledBuildingUids: stillDisabled,
+      buildingsDisabledUntilOwnerTurnStart: [],
+      temporaryDebuffs: freshDebuffs,
+      skipExploreThisTurn: !!p.skipExploreNextTurn,
+      skipExploreNextTurn: false,
+    };
+    const baseActions = calcActions(revived);
+    const actionsAfterSchedule = Math.max(
+      0,
+      baseActions +
+        (p.bonusActionsNextTurn ?? 0) -
+        (p.loseActionsNextTurn ?? 0),
+    );
+    return {
+      ...revived,
+      scrap: revived.scrap + calcPassiveScrap(revived),
+      actionsRemaining: actionsAfterSchedule,
+      bonusActionsNextTurn: 0,
+      loseActionsNextTurn: 0,
+    };
+  });
 
-  // New round starts when we wrap to player 0: clear raidedThisRound, refresh row.
+  // New round starts when we wrap to player 0: clear raidedThisRound,
+  // round-end flags (e.g. raidsBlocked), and refresh the Building Row.
   if (nextIdx === 0) {
     next = {
       ...next,
       round: next.round + 1,
       players: next.players.map((p) => ({ ...p, raidedThisRound: [] })),
     };
+    next = clearRoundEndFlags(next);
     next = refreshBuildingRow(next, 0);
   }
 

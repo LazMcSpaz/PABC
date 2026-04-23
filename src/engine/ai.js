@@ -143,8 +143,17 @@ export function serializeForAI(state, playerId) {
       uid: e.card.uid,
       id: e.card.id,
       name: e.card.name,
+      type: e.card.type,
       drawnBy: e.drawnBy,
+      scrapCost: e.card.scrapCost,
+      reqAtk: e.card.reqAtk,
+      reqDef: e.card.reqDef,
+      canResolve:
+        me.scrap >= (e.card.scrapCost ?? 0) &&
+        myAtk >= (e.card.reqAtk ?? 0) &&
+        calcDefense(me) >= (e.card.reqDef ?? 0),
     })),
+    globalFlags: state.globalFlags,
     recentLog: (state.log ?? []).slice(-10),
   };
 }
@@ -165,8 +174,9 @@ export async function getAIDecision(state, playerId, personality) {
     "Return ONE JSON object with keys `reasoning` (string, 1-2 sentences) and `actions` (array).",
     "Action types you may use:",
     "  { type: \"build\", buildingId: <id from buildingRow> }",
-    "  { type: \"explore\" }",
-    "  { type: \"raid\", targetId: <opponent id>, raidType: \"Destroy Building\"|\"Steal Intrigue\"|\"Disable Leader\" }",
+    "  { type: \"explore\" }  // blocked if globalFlags.explorationBlocked",
+    "  { type: \"resolve\", cardId: <id from explorationInPlay where canResolve=true> }",
+    "  { type: \"raid\", targetId: <opponent id>, raidType: \"Destroy Building\"|\"Steal Intrigue\"|\"Disable Leader\" }  // blocked if globalFlags.raidsBlocked",
     "  { type: \"boost\", stat: \"atk\"|\"def\" }",
     "  { type: \"play_intrigue\", cardName: <name>, targetId?: <id> }",
     "  { type: \"end_turn\" }",
@@ -213,6 +223,10 @@ export function executeAIAction(state, playerId, action) {
     }
     case "explore":
       return actions.explore(state, playerId);
+    case "resolve": {
+      const entry = state.explorationInPlay.find((e) => e.card.id === action.cardId);
+      return entry ? actions.resolveCard(state, playerId, entry.card.uid) : state;
+    }
     case "raid":
       return actions.raid(state, playerId, action.targetId, action.raidType);
     case "boost":
