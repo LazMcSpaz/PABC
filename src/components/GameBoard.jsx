@@ -76,7 +76,12 @@ export default function GameBoard({ state, engine }) {
             onResolve={(uid) => engine.resolveCard(state.activePlayerId, uid)}
             onInspect={setInspectedCard}
           />
-          <IntrigueView state={state} activePlayer={active} onInspect={setInspectedCard} />
+          <IntrigueView
+            state={state}
+            activePlayer={active}
+            onInspect={setInspectedCard}
+            onPlay={(cardUid, opts) => engine.playIntrigue(state.activePlayerId, cardUid, opts)}
+          />
           <RaidView
             state={state}
             onRaid={(targetId, raidType) => engine.raid(state.activePlayerId, targetId, raidType)}

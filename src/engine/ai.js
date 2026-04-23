@@ -9,6 +9,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import * as actions from "./actions.js";
 import { calcActions, calcAttack, calcDefense, calcPassiveScrap, calcVP } from "./calculations.js";
+import { INTRIGUE_EFFECTS, playIntrigue } from "./intrigue.js";
 
 const MODEL_ID = "claude-sonnet-4-20250514";
 
@@ -231,9 +232,32 @@ export function executeAIAction(state, playerId, action) {
       return actions.raid(state, playerId, action.targetId, action.raidType);
     case "boost":
       return actions.boost(state, playerId, action.stat, 1);
-    case "play_intrigue":
-      // INTRIGUE_EFFECTS not yet wired — record intent only.
-      return state;
+    case "play_intrigue": {
+      const me = state.players.find((p) => p.id === playerId);
+      if (!me) return state;
+      const card = me.intrigueHand.find(
+        (c) =>
+          (action.cardName && c.name.toLowerCase() === action.cardName.toLowerCase()) ||
+          (action.cardId && c.id === action.cardId),
+      );
+      if (!card) return state;
+      const entry = INTRIGUE_EFFECTS[card.id];
+      if (!entry || entry.immediate) return state;
+      const opts = {};
+      const opponents = state.players.filter((p) => p.id !== playerId);
+      if (entry.requires === "target") {
+        opts.targetId = action.targetId ?? opponents[0]?.id;
+      } else if (entry.requires === "twoTargets") {
+        const ids = Array.isArray(action.targetIds) ? action.targetIds : opponents.slice(0, 2).map((p) => p.id);
+        opts.targetIds = ids;
+      } else if (entry.requires === "buildingTarget") {
+        const target = state.players.find((p) => p.id === action.targetId) ?? opponents[0];
+        opts.targetId = target?.id;
+        const bu = target?.settlement?.[0]?.uid;
+        opts.buildingUid = action.buildingUid ?? bu;
+      }
+      return playIntrigue(state, playerId, card.uid, opts);
+    }
     case "end_turn":
     default:
       return state;

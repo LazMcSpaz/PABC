@@ -34,18 +34,36 @@ export function build(state, playerId, buildingUid) {
   const card = state.buildingRow[rowIndex];
   const player = state.players.find((p) => p.id === playerId);
   if (!player) return state;
-  if (player.scrap < (card.scrapCost ?? 0)) return state;
+  const surcharge = player.flags?.nextBuildingScrapSurcharge ?? 0;
+  const totalCost = (card.scrapCost ?? 0) + surcharge;
+  if (player.scrap < totalCost) return state;
   if (player.actionsRemaining < 1) return state;
   if (player.settlement.length >= 5) return state;
 
-  let next = updatePlayer(state, playerId, (p) => ({
-    ...p,
-    scrap: p.scrap - (card.scrapCost ?? 0),
-    actionsRemaining: p.actionsRemaining - 1,
-    settlement: [...p.settlement, card],
-  }));
+  let next = updatePlayer(state, playerId, (p) => {
+    const flags = { ...(p.flags ?? {}) };
+    delete flags.nextBuildingScrapSurcharge;
+    return {
+      ...p,
+      scrap: p.scrap - totalCost,
+      actionsRemaining: p.actionsRemaining - 1,
+      settlement: [...p.settlement, card],
+      flags,
+    };
+  });
   next = refreshBuildingRow(next, rowIndex);
-  return log(next, { type: "build", playerId, cardId: card.id });
+  next = log(next, { type: "build", playerId, cardId: card.id });
+  if (surcharge > 0) {
+    next = notify(next, {
+      kind: NotifKind.INTRIGUE,
+      title: `Data Spike surcharge applied`,
+      message: `${player.name} paid +${surcharge} Scrap on this build.`,
+      impacts: [impact(playerId, `paid +${surcharge} surcharge`, { scrap: -surcharge })],
+      sourcePlayerId: playerId,
+      severity: "warning",
+    });
+  }
+  return next;
 }
 
 export function demolish(state, playerId, buildingUid) {
@@ -261,6 +279,8 @@ export function endTurn(state) {
     const freshDebuffs = (p.temporaryDebuffs ?? []).filter(
       (d) => d.expiresOn !== "owner_turn_start",
     );
+    const flags = { ...(p.flags ?? {}) };
+    delete flags.divertScrapNextTurnTo;
     const revived = {
       ...p,
       boosts: { atk: 0, def: 0 },
@@ -269,6 +289,7 @@ export function endTurn(state) {
       temporaryDebuffs: freshDebuffs,
       skipExploreThisTurn: !!p.skipExploreNextTurn,
       skipExploreNextTurn: false,
+      flags,
     };
     const baseActions = calcActions(revived);
     const actionsAfterSchedule = Math.max(
@@ -277,14 +298,44 @@ export function endTurn(state) {
         (p.bonusActionsNextTurn ?? 0) -
         (p.loseActionsNextTurn ?? 0),
     );
+    const passiveScrap = calcPassiveScrap(revived);
+    // If Diverted Resources is in effect, their passive scrap goes to the
+    // thief; revived.scrap stays unchanged.
+    const divertTo = p.flags?.divertScrapNextTurnTo;
     return {
       ...revived,
-      scrap: revived.scrap + calcPassiveScrap(revived),
+      scrap: revived.scrap + (divertTo != null ? 0 : passiveScrap),
+      _divertedScrap: divertTo != null ? { to: divertTo, amount: passiveScrap } : null,
       actionsRemaining: actionsAfterSchedule,
       bonusActionsNextTurn: 0,
       loseActionsNextTurn: 0,
     };
   });
+
+  // If Diverted Resources fired, credit the watcher player and emit a
+  // notification. Also strip the _divertedScrap bookkeeping field.
+  const divert = next.players.find((p) => p._divertedScrap != null)?._divertedScrap;
+  if (divert && divert.amount > 0) {
+    next = updatePlayer(next, divert.to, (p) => ({ ...p, scrap: p.scrap + divert.amount }));
+    next = notify(next, {
+      kind: NotifKind.INTRIGUE,
+      title: "Diverted Resources fired",
+      message: `${nextPlayer.name}'s passive Scrap was redirected this turn.`,
+      impacts: [
+        impact(nextPlayer.id, `lost ${divert.amount} passive Scrap`, { scrap: -divert.amount }),
+        impact(divert.to, `+${divert.amount} Scrap`, { scrap: divert.amount }),
+      ],
+      severity: "alert",
+    });
+  }
+  next = {
+    ...next,
+    players: next.players.map((p) => {
+      if (p._divertedScrap == null) return p;
+      const { _divertedScrap: _, ...clean } = p;
+      return clean;
+    }),
+  };
 
   // New round starts when we wrap to player 0: clear raidedThisRound,
   // round-end flags (e.g. raidsBlocked), and refresh the Building Row.

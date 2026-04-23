@@ -59,13 +59,22 @@ function seedStarters(player, starterPool, starterLeaders) {
   };
 }
 
+const STARTER_INTRIGUE_PER_PLAYER = 2;
+
 export function makeInitialState({ players }) {
   const buildingDeck = shuffle(expandByQty(ALL_PURCHASABLE_BUILDINGS));
   const explorationDeck = shuffle(expandByQty(ALL_EXPLORATION_CARDS));
   const intrigueDeck = shuffle(expandByQty(INTRIGUE_CARDS));
 
   const starterPool = expandByQty(STARTER_BUILDINGS);
-  const seated = players.map((p) => seedStarters(p, starterPool, STARTER_LEADERS));
+  // Prototype affordance: deal each player a small starter Intrigue hand so
+  // the system is exercisable before Antenna Array's activated ability is
+  // wired. Remove once proper Intrigue draws exist on Buildings / rewards.
+  const seated = players.map((p) => {
+    const withStarters = seedStarters(p, starterPool, STARTER_LEADERS);
+    const hand = intrigueDeck.splice(0, STARTER_INTRIGUE_PER_PLAYER);
+    return { ...withStarters, intrigueHand: hand };
+  });
 
   const buildingRow = buildingDeck.splice(0, 5);
 

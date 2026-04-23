@@ -10,6 +10,7 @@ import {
   recordAIDecision,
 } from "../engine/ai.js";
 import { makeInitialState, makePlayer } from "../engine/gameState.js";
+import { playIntrigue } from "../engine/intrigue.js";
 
 const ACTION_DELAY_MS = 700;
 const PRE_TURN_DELAY_MS = 400;
@@ -52,6 +53,8 @@ export function useGameEngine() {
       resolveCard: (playerId, uid) => setState((s) => actions.resolveCard(s, playerId, uid)),
       raid: (attackerId, targetId, raidType) =>
         setState((s) => actions.raid(s, attackerId, targetId, raidType)),
+      playIntrigue: (playerId, cardUid, opts) =>
+        setState((s) => playIntrigue(s, playerId, cardUid, opts)),
       endTurn: () => setState((s) => actions.endTurn(s)),
     }),
     [],
