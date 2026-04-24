@@ -7,6 +7,19 @@
 // README; before any public deployment, move behind a server proxy.
 
 import Anthropic from "@anthropic-ai/sdk";
+import { abilityMeta, activateAbility, canActivate } from "./abilities.js";
+import * as actions from "./actions.js";
+import { calcActions, calcAttack, calcDefense, calcPassiveScrap, calcVP } from "./calculations.js";
+import { INTRIGUE_EFFECTS, playIntrigue } from "./intrigue.js";
+import { swapLeader } from "./narrative.js";
+import {
+  canBuildUnique,
+  canUpgrade,
+  getAvailableUniqueBuildingsFor,
+  getAvailableUpgradesFor,
+  purchaseUniqueBuilding,
+  upgradeBuilding,
+} from "./upgrades.js";
 
 const MODEL_ID = "claude-sonnet-4-20250514";
 
@@ -31,10 +44,172 @@ export const AI_PERSONALITIES = [
   },
 ];
 
-const NOOP_PLAN = {
+export const NOOP_PLAN = {
   reasoning: "No API key configured — skipping turn.",
   actions: [{ type: "end_turn" }],
 };
+
+function summarizeBuilding(b) {
+  return {
+    uid: b.uid,
+    id: b.id,
+    name: b.name,
+    passiveScrap: b.passiveScrap,
+    passiveAtk: b.passiveAtk,
+    passDef: b.passDef,
+    passActions: b.passActions,
+    vp: b.vp,
+    ability: b.ability?.description ?? null,
+    activated: abilityMeta(b.id) != null,
+  };
+}
+
+function summarizePlayer(p, opts = {}) {
+  const out = {
+    id: p.id,
+    name: p.name,
+    kind: p.kind,
+    scrap: p.scrap,
+    derived: {
+      vp: calcVP(p),
+      atk: calcAttack(p),
+      def: calcDefense(p),
+      passiveScrap: calcPassiveScrap(p),
+      actions: calcActions(p),
+    },
+    settlement: p.settlement.map(summarizeBuilding),
+    leader: p.leader
+      ? { id: p.leader.id, name: p.leader.name, ability: p.leader.ability?.description ?? null }
+      : null,
+  };
+  if (opts.includeHand) {
+    out.intrigueHand = p.intrigueHand.map((c) => ({
+      uid: c.uid,
+      id: c.id,
+      name: c.name,
+      immediate: c.immediate,
+      ability: c.ability?.description ?? null,
+    }));
+    out.actionsRemaining = p.actionsRemaining;
+    out.boosts = p.boosts;
+  }
+  return out;
+}
+
+export function serializeForAI(state, playerId) {
+  const me = state.players.find((p) => p.id === playerId);
+  if (!me) return null;
+  const myAtk = calcAttack(me);
+
+  const buildingRow = state.buildingRow.map((c) => ({
+    ...summarizeBuilding(c),
+    type: c.type,
+    scrapCost: c.scrapCost,
+    atkCost: c.atkCost,
+    canAfford: me.scrap >= (c.scrapCost ?? 0) && myAtk >= (c.atkCost ?? 0),
+  }));
+
+  const opponents = state.players
+    .filter((p) => p.id !== playerId)
+    .map((p) => {
+      const theirDef = calcDefense(p);
+      return {
+        ...summarizePlayer(p),
+        theirDef,
+        raidWouldSucceed: myAtk > theirDef,
+      };
+    });
+
+  const top = state.explorationDeck[0] ?? null;
+  const topExploration = top
+    ? {
+        id: top.id,
+        name: top.name,
+        type: top.type,
+        scrapCost: top.scrapCost,
+        reqAtk: top.reqAtk,
+        reqDef: top.reqDef,
+        scrapReward: top.scrapReward,
+        atkReward: top.atkReward,
+        defReward: top.defReward,
+        actionReward: top.actionReward,
+        vp: top.vp,
+        surprise: top.surprise,
+        ability: top.ability?.description ?? null,
+        canResolve:
+          me.scrap >= (top.scrapCost ?? 0) &&
+          myAtk >= (top.reqAtk ?? 0) &&
+          calcDefense(me) >= (top.reqDef ?? 0),
+      }
+    : null;
+
+  return {
+    round: state.round,
+    age: state.age,
+    progressionResolved: state.progressionResolved,
+    me: summarizePlayer(me, { includeHand: true }),
+    opponents,
+    buildingRow,
+    topExploration,
+    explorationInPlay: state.explorationInPlay.map((e) => ({
+      uid: e.card.uid,
+      id: e.card.id,
+      name: e.card.name,
+      type: e.card.type,
+      drawnBy: e.drawnBy,
+      scrapCost: e.card.scrapCost,
+      reqAtk: e.card.reqAtk,
+      reqDef: e.card.reqDef,
+      canResolve:
+        me.scrap >= (e.card.scrapCost ?? 0) &&
+        myAtk >= (e.card.reqAtk ?? 0) &&
+        calcDefense(me) >= (e.card.reqDef ?? 0),
+    })),
+    availableUpgrades: getAvailableUpgradesFor(state, playerId).map((u) => {
+      const check = canUpgrade(state, playerId, u);
+      return {
+        uid: u.uid,
+        id: u.id,
+        name: u.name,
+        requires: u.requires,
+        scrapCost: u.scrapCost,
+        atkCost: u.atkCost,
+        vp: u.vp,
+        ability: u.ability?.description ?? null,
+        canAfford: check.ok,
+      };
+    }),
+    availableUniqueBuildings: getAvailableUniqueBuildingsFor(state, playerId).map((u) => {
+      const check = canBuildUnique(state, playerId, u);
+      return {
+        uid: u.uid,
+        id: u.id,
+        name: u.name,
+        scrapCost: u.scrapCost,
+        atkCost: u.atkCost,
+        passiveScrap: u.passiveScrap,
+        passiveAtk: u.passiveAtk,
+        passDef: u.passDef,
+        vp: u.vp,
+        ability: u.ability?.description ?? null,
+        canAfford: check.ok,
+      };
+    }),
+    availableLeaders: (me.availableLeaders ?? []).map((l) => ({
+      id: l.id,
+      name: l.name,
+      passiveScrap: l.passiveScrap,
+      passiveAtk: l.passiveAtk,
+      passDef: l.passDef,
+      passActions: l.passActions,
+      vp: l.vp,
+      ability: l.ability?.description ?? null,
+    })),
+    activeBeats: (state.narrativeState?.[playerId] ?? null) && Object.entries(state.narrativeState[playerId]).map(([cid, b]) => ({ chainId: cid, beat: b })),
+    globalFlags: state.globalFlags,
+    recentLog: (state.log ?? []).slice(-10),
+  };
+}
 
 function getClient() {
   const apiKey = import.meta?.env?.VITE_ANTHROPIC_API_KEY;
@@ -42,16 +217,31 @@ function getClient() {
   return new Anthropic({ apiKey, dangerouslyAllowBrowser: true });
 }
 
-export async function getAIDecision(serializedState, personality) {
+export async function getAIDecision(state, playerId, personality) {
   const client = getClient();
   if (!client) return NOOP_PLAN;
+  const serialized = serializeForAI(state, playerId);
+  if (!serialized) return NOOP_PLAN;
 
   const userMessage = [
-    "Return a JSON object with keys `reasoning` (string) and `actions` (array).",
-    "Valid action types: build {buildingId}, explore, raid {targetId, raidType}, boost {stat: 'atk'|'def'}, play_intrigue {cardName, targetId?}, end_turn.",
-    "Here is the current game state:",
+    "Return ONE JSON object with keys `reasoning` (string, 1-2 sentences) and `actions` (array).",
+    "Action types you may use:",
+    "  { type: \"build\", buildingId: <id from buildingRow> }",
+    "  { type: \"explore\" }  // blocked if globalFlags.explorationBlocked",
+    "  { type: \"resolve\", cardId: <id from explorationInPlay where canResolve=true> }",
+    "  { type: \"raid\", targetId: <opponent id>, raidType: \"Destroy Building\"|\"Steal Intrigue\"|\"Disable Leader\", buildingId?: <target building id in opponent.settlement, required if raidType=\"Destroy Building\"> }  // blocked if globalFlags.raidsBlocked",
+    "  { type: \"boost\", stat: \"atk\"|\"def\" }",
+    "  { type: \"play_intrigue\", cardName: <name>, targetId?: <id> }",
+    "  { type: \"activate\", buildingId: <id in me.settlement where activated=true>, partnerId?: <opponent id for Trading Post> }",
+    "  { type: \"upgrade\", upgradeId: <id from availableUpgrades where canAfford=true> }",
+    "  { type: \"build_unique\", buildingId: <id from availableUniqueBuildings where canAfford=true> }",
+    "  { type: \"swap_leader\", leaderId: <id from availableLeaders> }",
+    "  { type: \"end_turn\" }",
+    "Each non-end_turn action consumes resources you must have. The engine will silently no-op invalid actions.",
+    "Plan up to 4 actions in priority order. End with end_turn if you intentionally pass remaining actions.",
+    "Game state:",
     "```json",
-    JSON.stringify(serializedState, null, 2),
+    JSON.stringify(serialized, null, 2),
     "```",
   ].join("\n");
 
@@ -67,10 +257,120 @@ export async function getAIDecision(serializedState, personality) {
       .map((b) => b.text)
       .join("");
     const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) return NOOP_PLAN;
-    return JSON.parse(jsonMatch[0]);
+    if (!jsonMatch) return { ...NOOP_PLAN, reasoning: "Model returned no JSON; passing." };
+    const parsed = JSON.parse(jsonMatch[0]);
+    if (!Array.isArray(parsed.actions)) parsed.actions = [{ type: "end_turn" }];
+    return parsed;
   } catch (err) {
     console.error("getAIDecision failed", err);
-    return NOOP_PLAN;
+    return { ...NOOP_PLAN, reasoning: `AI call failed: ${err.message ?? "unknown error"}` };
   }
+}
+
+// Maps a single action from the AI plan onto an engine call. Pure function:
+// returns new state. Invalid actions return state unchanged (engine actions
+// already no-op when preconditions aren't met).
+export function executeAIAction(state, playerId, action) {
+  if (!state || state.winnerId != null) return state;
+  if (!action || typeof action !== "object") return state;
+  switch (action.type) {
+    case "build": {
+      const card = state.buildingRow.find((c) => c.id === action.buildingId);
+      return card ? actions.build(state, playerId, card.uid) : state;
+    }
+    case "explore":
+      return actions.explore(state, playerId);
+    case "resolve": {
+      const entry = state.explorationInPlay.find((e) => e.card.id === action.cardId);
+      return entry ? actions.resolveCard(state, playerId, entry.card.uid) : state;
+    }
+    case "raid": {
+      const extras = {};
+      if (action.raidType === "Destroy Building") {
+        const target = state.players.find((p) => p.id === action.targetId);
+        const building =
+          target?.settlement.find((b) => b.id === action.buildingId) ??
+          target?.settlement.find((b) => b.uid === action.buildingUid) ??
+          target?.settlement[0];
+        if (building) extras.buildingUid = building.uid;
+      }
+      return actions.raid(state, playerId, action.targetId, action.raidType, extras);
+    }
+    case "boost":
+      return actions.boost(state, playerId, action.stat, 1);
+    case "upgrade": {
+      const upgrade = (state.unlockableDeck ?? []).find((u) => u.id === action.upgradeId);
+      if (!upgrade) return state;
+      return upgradeBuilding(state, playerId, upgrade.uid);
+    }
+    case "build_unique": {
+      const card = (state.unlockableDeck ?? []).find(
+        (u) => u.id === action.buildingId && (u.scope === "any" || u.scope === playerId),
+      );
+      if (!card) return state;
+      return purchaseUniqueBuilding(state, playerId, card.uid);
+    }
+    case "swap_leader": {
+      return swapLeader(state, playerId, action.leaderId);
+    }
+    case "activate": {
+      const me = state.players.find((p) => p.id === playerId);
+      if (!me) return state;
+      const building = me.settlement.find(
+        (b) => b.id === action.buildingId || b.uid === action.buildingUid,
+      );
+      if (!building) return state;
+      const meta = abilityMeta(building.id);
+      if (!meta) return state;
+      const check = canActivate(state, playerId, building);
+      if (!check.ok) return state;
+      const opts = {};
+      if (meta.requires === "partner") {
+        const opponents = state.players.filter((p) => p.id !== playerId);
+        opts.partnerId = action.partnerId ?? opponents[0]?.id;
+      }
+      return activateAbility(state, playerId, building.uid, opts);
+    }
+    case "play_intrigue": {
+      const me = state.players.find((p) => p.id === playerId);
+      if (!me) return state;
+      const card = me.intrigueHand.find(
+        (c) =>
+          (action.cardName && c.name.toLowerCase() === action.cardName.toLowerCase()) ||
+          (action.cardId && c.id === action.cardId),
+      );
+      if (!card) return state;
+      const entry = INTRIGUE_EFFECTS[card.id];
+      if (!entry || entry.immediate) return state;
+      const opts = {};
+      const opponents = state.players.filter((p) => p.id !== playerId);
+      if (entry.requires === "target") {
+        opts.targetId = action.targetId ?? opponents[0]?.id;
+      } else if (entry.requires === "twoTargets") {
+        const ids = Array.isArray(action.targetIds) ? action.targetIds : opponents.slice(0, 2).map((p) => p.id);
+        opts.targetIds = ids;
+      } else if (entry.requires === "buildingTarget") {
+        const target = state.players.find((p) => p.id === action.targetId) ?? opponents[0];
+        opts.targetId = target?.id;
+        const bu = target?.settlement?.[0]?.uid;
+        opts.buildingUid = action.buildingUid ?? bu;
+      }
+      return playIntrigue(state, playerId, card.uid, opts);
+    }
+    case "end_turn":
+    default:
+      return state;
+  }
+}
+
+// Records the full AI decision (reasoning + planned actions) into state.aiLog.
+export function recordAIDecision(state, playerId, plan) {
+  const entry = {
+    round: state.round,
+    playerId,
+    reasoning: plan.reasoning ?? "",
+    actions: plan.actions ?? [],
+    timestamp: Date.now(),
+  };
+  return { ...state, aiLog: [...(state.aiLog ?? []), entry] };
 }

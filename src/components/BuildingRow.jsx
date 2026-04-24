@@ -1,22 +1,35 @@
-export default function BuildingRow({ row, onBuild }) {
+import Card from "./Card.jsx";
+
+export default function BuildingRow({ row, activePlayer, onBuild, onInspect }) {
+  const canAfford = (c) =>
+    activePlayer.scrap >= (c.scrapCost ?? 0) &&
+    activePlayer.actionsRemaining >= 1 &&
+    activePlayer.settlement.length < 5;
+
   return (
     <section>
       <h3 style={{ margin: "0 0 0.5rem" }}>Building Row</h3>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-        {row.length === 0 && (
-          <div style={{ opacity: 0.5 }}>
-            No buildings available — populate src/engine/cards.js BUILDINGS.
-          </div>
-        )}
         {row.map((card) => (
-          <button
+          <Card
             key={card.uid}
-            onClick={() => onBuild(card.uid)}
-            style={{ padding: "0.5rem", minWidth: 120 }}
-          >
-            <div style={{ fontWeight: 600 }}>{card.name}</div>
-            <div style={{ fontSize: 12, opacity: 0.8 }}>Cost: {card.scrapCost ?? 0}</div>
-          </button>
+            card={card}
+            onClick={() => onInspect(card)}
+            disabled={false}
+            action={
+              <div style={{ display: "flex", gap: 4 }}>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onBuild(card.uid);
+                  }}
+                  disabled={!canAfford(card)}
+                >
+                  Build ({card.scrapCost ?? 0}🔩)
+                </button>
+              </div>
+            }
+          />
         ))}
       </div>
     </section>
