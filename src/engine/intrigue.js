@@ -559,6 +559,7 @@ export const INTRIGUE_EFFECTS = {
 // notification. Returns state unchanged if invalid.
 export function playIntrigue(state, playerId, cardUid, opts = {}) {
   if (state.winnerId != null) return state;
+  if (state.pendingPrompt) return state;
   const player = state.players.find((p) => p.id === playerId);
   if (!player) return state;
   if (player.actionsRemaining < 1) return state;

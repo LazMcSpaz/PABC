@@ -1,12 +1,13 @@
 import SetupScreen from "./components/SetupScreen.jsx";
 import GameBoard from "./components/GameBoard.jsx";
 import NotificationToasts from "./components/NotificationToasts.jsx";
+import PromptModal from "./components/PromptModal.jsx";
 import WinScreen from "./components/WinScreen.jsx";
 import { useGameEngine } from "./hooks/useGameEngine.js";
 
 export default function App() {
   const engine = useGameEngine();
-  const { state, startGame, reset } = engine;
+  const { state, startGame, reset, resolvePrompt } = engine;
 
   if (!state) return <SetupScreen onStart={startGame} />;
   if (state.winnerId != null) {
@@ -21,6 +22,7 @@ export default function App() {
   return (
     <>
       <GameBoard state={state} engine={engine} />
+      <PromptModal state={state} onResolve={resolvePrompt} />
       <NotificationToasts state={state} />
     </>
   );

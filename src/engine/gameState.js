@@ -98,6 +98,7 @@ export function makeInitialState({ players }) {
     aiLog: [],
     notifications: [],
     notificationCounter: 0,
+    pendingPrompt: null,
     winnerId: null,
   };
 

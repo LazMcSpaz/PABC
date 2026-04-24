@@ -12,10 +12,12 @@ import {
 import { activateAbility } from "../engine/abilities.js";
 import { makeInitialState, makePlayer } from "../engine/gameState.js";
 import { playIntrigue } from "../engine/intrigue.js";
+import { aiAutoResolve, resolvePrompt } from "../engine/prompts.js";
 import { upgradeBuilding } from "../engine/upgrades.js";
 
 const ACTION_DELAY_MS = 700;
 const PRE_TURN_DELAY_MS = 400;
+const PROMPT_POLL_MS = 150;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -61,6 +63,7 @@ export function useGameEngine() {
         setState((s) => activateAbility(s, playerId, buildingUid, opts)),
       upgrade: (playerId, upgradeUid) =>
         setState((s) => upgradeBuilding(s, playerId, upgradeUid)),
+      resolvePrompt: (choice) => setState((s) => resolvePrompt(s, choice)),
       endTurn: () => setState((s) => actions.endTurn(s)),
     }),
     [],
@@ -72,9 +75,29 @@ export function useGameEngine() {
     setState(null);
   }, []);
 
+  // Settle all outstanding prompts owned by AI players, then pause if a
+  // human still has a prompt to answer. Returns when the prompt pool is
+  // clear from the AI driver's perspective (meaning: either empty, or
+  // the next action can proceed because the human has responded).
+  const settlePrompts = async () => {
+    while (true) {
+      const prompt = stateRef.current?.pendingPrompt;
+      if (!prompt) return;
+      const promptOwner = stateRef.current.players.find((p) => p.id === prompt.playerId);
+      if (promptOwner?.kind === "ai") {
+        setState((s) => aiAutoResolve(s));
+        await sleep(ACTION_DELAY_MS / 2);
+        continue;
+      }
+      // Human prompt — block here until they resolve.
+      await sleep(PROMPT_POLL_MS);
+    }
+  };
+
   // AI turn driver. Fires whenever the active player becomes an AI; serializes
   // the current state, asks the model for a plan, executes each action with a
-  // short delay, then ends the turn. Re-fires for back-to-back AI turns.
+  // short delay (and pauses on prompts, handing control to humans when
+  // needed), then ends the turn.
   useEffect(() => {
     if (!state || state.winnerId != null) return;
     const active = state.players.find((p) => p.id === state.activePlayerId);
@@ -93,10 +116,12 @@ export function useGameEngine() {
         await sleep(PRE_TURN_DELAY_MS);
 
         for (const action of plan.actions ?? []) {
+          await settlePrompts();
           if (stateRef.current?.winnerId != null) break;
           if (action.type === "end_turn") break;
           setState((s) => executeAIAction(s, active.id, action));
           await sleep(ACTION_DELAY_MS);
+          await settlePrompts();
         }
 
         if (stateRef.current?.winnerId == null) {
@@ -111,6 +136,18 @@ export function useGameEngine() {
       }
     })();
   }, [state?.activePlayerId, state?.winnerId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Auto-resolve prompts for AI players even outside the AI-turn driver
+  // (e.g. when a human's action generates a prompt targeting an AI —
+  // reactive defender on a human's raid).
+  useEffect(() => {
+    const prompt = state?.pendingPrompt;
+    if (!prompt) return;
+    const owner = state.players.find((p) => p.id === prompt.playerId);
+    if (owner?.kind !== "ai") return;
+    const t = setTimeout(() => setState((s) => aiAutoResolve(s)), 250);
+    return () => clearTimeout(t);
+  }, [state?.pendingPrompt?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return { state, aiThinking, startGame, reset, ...wrapped };
 }

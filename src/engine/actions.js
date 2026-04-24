@@ -17,6 +17,7 @@ import {
   fireRaidReactive,
 } from "./intrigue.js";
 import { NotifKind, impact, notify } from "./notifications.js";
+import { pauseWithPrompt, registerAIHeuristic, registerResumer } from "./prompts.js";
 import { CARD_RESOLVERS } from "./resolution.js";
 import { unlockUnlockable } from "./upgrades.js";
 
@@ -42,6 +43,7 @@ function refreshBuildingRow(state, removedIndex) {
 }
 
 export function build(state, playerId, buildingUid) {
+  if (state.pendingPrompt) return state;
   const rowIndex = state.buildingRow.findIndex((c) => c.uid === buildingUid);
   if (rowIndex < 0) return state;
   const card = state.buildingRow[rowIndex];
@@ -87,6 +89,7 @@ export function demolish(state, playerId, buildingUid) {
 }
 
 export function boost(state, playerId, stat, amount = 1) {
+  if (state.pendingPrompt) return state;
   if (stat !== "atk" && stat !== "def") return state;
   const cost = 2 * amount;
   return updatePlayer(state, playerId, (p) => {
@@ -100,6 +103,7 @@ export function boost(state, playerId, stat, amount = 1) {
 }
 
 export function explore(state, playerId) {
+  if (state.pendingPrompt) return state;
   const player = state.players.find((p) => p.id === playerId);
   if (!player || player.actionsRemaining < 1) return state;
   if (player.skipExploreThisTurn) return state;
@@ -147,7 +151,13 @@ export function explore(state, playerId) {
   return next;
 }
 
-export function resolveCard(state, playerId, cardUid) {
+function hasActiveBuilding(player, buildingId) {
+  const disabled = new Set(player.disabledBuildingUids ?? []);
+  return (player.settlement ?? []).some((b) => b.id === buildingId && !disabled.has(b.uid));
+}
+
+export function resolveCard(state, playerId, cardUid, decisions = {}) {
+  if (state.pendingPrompt) return state;
   const entry = state.explorationInPlay.find((e) => e.card.uid === cardUid);
   if (!entry) return state;
   const card = entry.card;
@@ -167,12 +177,53 @@ export function resolveCard(state, playerId, cardUid) {
   // rewards — which may be fully stolen by Vulture or half-skimmed by
   // Salvage Rights if an opponent holds one.
   if (card.type === "Challenge" || card.type === "Challenge (Progression)") {
-    if (player.scrap < (card.scrapCost ?? 0)) return state;
-    if (calcAttack(player) < (card.reqAtk ?? 0)) return state;
+    const usingArtillery = decisions.lightArtillery === "spend";
+    const extraScrapCost = usingArtillery ? 1 : 0;
+    const effectiveReqAtk = Math.max(0, (card.reqAtk ?? 0) - (usingArtillery ? 2 : 0));
+
+    // Light Artillery opportunity: if the player owns an active Light
+    // Artillery, has 1+ Scrap, and the 2-point requirement reduction
+    // would flip the check from fail to pass, pause and ask.
+    if (
+      decisions.lightArtillery === undefined &&
+      (card.reqAtk ?? 0) > 0 &&
+      hasActiveBuilding(player, "light_artillery") &&
+      player.scrap >= 1 + (card.scrapCost ?? 0) &&
+      calcAttack(player) < (card.reqAtk ?? 0) &&
+      calcAttack(player) >= Math.max(0, (card.reqAtk ?? 0) - 2)
+    ) {
+      return pauseWithPrompt(state, {
+        kind: "light_artillery_choice",
+        playerId,
+        message: `${card.name} needs ⚔${card.reqAtk} (you have ⚔${calcAttack(player)}). Spend 1 Scrap to reduce the requirement by 2?`,
+        options: [
+          { value: "spend", label: "Spend 1 Scrap (−2 ⚔ requirement)" },
+          { value: "skip", label: "Skip" },
+        ],
+        context: { playerId, cardUid, decisions },
+      });
+    }
+
+    if (player.scrap < (card.scrapCost ?? 0) + extraScrapCost) return state;
+    if (calcAttack(player) < effectiveReqAtk) return state;
     if (calcDefense(player) < (card.reqDef ?? 0)) return state;
 
-    // Resolver always pays the cost up-front.
-    let next = updatePlayer(state, playerId, (p) => ({ ...p, scrap: p.scrap - (card.scrapCost ?? 0) }));
+    // Resolver always pays the cost up-front (plus the Light Artillery
+    // surcharge, if committed).
+    let next = updatePlayer(state, playerId, (p) => ({
+      ...p,
+      scrap: p.scrap - (card.scrapCost ?? 0) - extraScrapCost,
+    }));
+    if (usingArtillery) {
+      next = notify(next, {
+        kind: NotifKind.BUILD,
+        title: `${player.name} fired Light Artillery`,
+        message: `Spent 1 Scrap to reduce ${card.name}'s ⚔ requirement by 2.`,
+        impacts: [impact(playerId, "−1 Scrap", { scrap: -1 })],
+        sourceCardId: "light_artillery",
+        sourcePlayerId: playerId,
+      });
+    }
 
     // Reactive: Vulture / Salvage Rights.
     const reactive = fireChallengeResolveReactive(next, playerId, card);
@@ -309,6 +360,18 @@ export function resolveCard(state, playerId, cardUid) {
   };
 }
 
+registerResumer("light_artillery_choice", (state, choice, ctx) => {
+  return resolveCard(state, ctx.playerId, ctx.cardUid, {
+    ...(ctx.decisions ?? {}),
+    lightArtillery: choice,
+  });
+});
+
+// AI heuristic: if the only option is "spend" (otherwise we wouldn't
+// have been prompted), always spend. The prompt is only emitted when it
+// flips the outcome, so spending is strictly better.
+registerAIHeuristic("light_artillery_choice", () => "spend");
+
 export const RAID_TYPES = Object.freeze({
   DESTROY: "Destroy Building",
   STEAL: "Steal Intrigue",
@@ -422,6 +485,7 @@ function executeRaidOutcome(state, attackerId, defenderId, raidType, extras) {
 }
 
 export function raid(state, attackerId, targetId, raidType = RAID_TYPES.DESTROY, extras = {}) {
+  if (state.pendingPrompt) return state;
   if (state.globalFlags?.raidsBlocked) return state;
   const attacker = state.players.find((p) => p.id === attackerId);
   const defender = state.players.find((p) => p.id === targetId);
@@ -444,25 +508,112 @@ export function raid(state, attackerId, targetId, raidType = RAID_TYPES.DESTROY,
     return log(next, { type: "raid", attackerId, targetId, cancelled: true });
   }
   const effectiveDefenderId = reactive.redirectTo ?? targetId;
-  const effectiveDefender = next.players.find((p) => p.id === effectiveDefenderId);
-  // Re-read attacker in case state changed (e.g. Emergency Protocols charged 3 Scrap).
-  const attackerNow = next.players.find((p) => p.id === attackerId);
-  const attack = calcAttack(attackerNow);
-  const baseDef = calcDefense(effectiveDefender);
-  const defense = calcDefenseForRaid(effectiveDefender);
-  const lookoutFired = defense > baseDef;
-  const success = attack > defense; // defender wins ties per README
 
-  const stolen = success ? Math.floor(effectiveDefender.scrap / 2) : 0;
+  return continueRaid(next, {
+    attackerId,
+    defenderId: effectiveDefenderId,
+    raidType,
+    extras,
+    decisions: {},
+  });
+}
+
+// Phased continuation of a raid: handles opt-in Signal Jammers (attacker)
+// and Perimeter Traps (defender) by pausing with prompts, then finalizes
+// the resolution once both decisions are in hand.
+function continueRaid(state, ctx) {
+  const { attackerId, defenderId } = ctx;
+  const attacker = state.players.find((p) => p.id === attackerId);
+  const defender = state.players.find((p) => p.id === defenderId);
+
+  // Phase: Signal Jammers (attacker opt-in).
+  if (ctx.decisions.jammer === undefined) {
+    if (hasActiveBuilding(attacker, "signal_jammers") && attacker.scrap >= 2) {
+      return pauseWithPrompt(state, {
+        kind: "signal_jammers_choice",
+        playerId: attackerId,
+        message: `Spend 2 Scrap on Signal Jammers to reduce ${defender.name}'s 🛡 by 2 for this raid?`,
+        options: [
+          { value: "spend", label: "Spend 2 Scrap (−2 🛡 target)" },
+          { value: "skip", label: "Skip" },
+        ],
+        context: ctx,
+      });
+    }
+    ctx = { ...ctx, decisions: { ...ctx.decisions, jammer: "skip" } };
+  }
+  if (ctx.decisions.jammer === "spend") {
+    state = updatePlayer(state, attackerId, (p) => ({ ...p, scrap: p.scrap - 2 }));
+    state = notify(state, {
+      kind: NotifKind.INTRIGUE,
+      title: `${attacker.name} fired Signal Jammers`,
+      message: `Spent 2 Scrap — ${defender.name}'s Defense is reduced by 2 this raid.`,
+      impacts: [impact(attackerId, "−2 Scrap", { scrap: -2 })],
+      sourceCardId: "signal_jammers",
+      sourcePlayerId: attackerId,
+      severity: "warning",
+    });
+  }
+
+  // Phase: Perimeter Traps (defender opt-in).
+  if (ctx.decisions.traps === undefined) {
+    const defNow = state.players.find((p) => p.id === defenderId);
+    if (hasActiveBuilding(defNow, "perimeter_traps") && defNow.scrap >= 2) {
+      const atkCurrent = calcAttack(attacker);
+      return pauseWithPrompt(state, {
+        kind: "perimeter_traps_choice",
+        playerId: defenderId,
+        message: `${attacker.name} is raiding you (⚔${atkCurrent}). Spend 2 Scrap on Perimeter Traps for +2 🛡?`,
+        options: [
+          { value: "spend", label: "Spend 2 Scrap (+2 🛡)" },
+          { value: "skip", label: "Skip" },
+        ],
+        context: ctx,
+      });
+    }
+    ctx = { ...ctx, decisions: { ...ctx.decisions, traps: "skip" } };
+  }
+  if (ctx.decisions.traps === "spend") {
+    state = updatePlayer(state, defenderId, (p) => ({ ...p, scrap: p.scrap - 2 }));
+    state = notify(state, {
+      kind: NotifKind.INTRIGUE,
+      title: `${defender.name} fired Perimeter Traps`,
+      message: `Spent 2 Scrap — +2 🛡 against ${attacker.name}'s raid.`,
+      impacts: [impact(defenderId, "−2 Scrap", { scrap: -2 })],
+      sourceCardId: "perimeter_traps",
+      sourcePlayerId: defenderId,
+      severity: "warning",
+    });
+  }
+
+  return finalizeRaid(state, ctx);
+}
+
+function finalizeRaid(state, ctx) {
+  const { attackerId, defenderId, raidType, extras, decisions } = ctx;
+  const attacker = state.players.find((p) => p.id === attackerId);
+  const defender = state.players.find((p) => p.id === defenderId);
+
+  const attack = calcAttack(attacker);
+  const baseDef = calcDefense(defender);
+  const defenseForRaid = calcDefenseForRaid(defender);
+  const jammerPenalty = decisions.jammer === "spend" ? 2 : 0;
+  const trapsBonus = decisions.traps === "spend" ? 2 : 0;
+  const defense = Math.max(0, defenseForRaid - jammerPenalty + trapsBonus);
+  const lookoutFired = defenseForRaid > baseDef;
+  const success = attack > defense;
+
+  let next = state;
+  const stolen = success ? Math.floor(defender.scrap / 2) : 0;
   if (success && stolen > 0) {
     next = updatePlayer(next, attackerId, (p) => ({ ...p, scrap: p.scrap + stolen }));
-    next = updatePlayer(next, effectiveDefenderId, (p) => ({ ...p, scrap: p.scrap - stolen }));
+    next = updatePlayer(next, defenderId, (p) => ({ ...p, scrap: p.scrap - stolen }));
   }
 
   let outcomeImpacts = [];
   let outcomeSummary = "";
   if (success) {
-    const result = executeRaidOutcome(next, attackerId, effectiveDefenderId, raidType, extras);
+    const result = executeRaidOutcome(next, attackerId, defenderId, raidType, extras);
     next = result.state;
     outcomeImpacts = result.impacts;
     outcomeSummary = result.summary;
@@ -471,27 +622,31 @@ export function raid(state, attackerId, targetId, raidType = RAID_TYPES.DESTROY,
   next = log(next, {
     type: "raid",
     attackerId,
-    targetId: effectiveDefenderId,
+    targetId: defenderId,
     raidType,
     success,
   });
 
-  const defenderName = effectiveDefender.name;
+  const defAdjustBits = [];
+  if (lookoutFired) defAdjustBits.push("+2 Lookout");
+  if (jammerPenalty) defAdjustBits.push("−2 Jammers");
+  if (trapsBonus) defAdjustBits.push("+2 Traps");
+
   next = notify(next, {
     kind: NotifKind.RAID,
     title: success
-      ? `Raid succeeded: ${attacker.name} → ${defenderName} (${raidType})`
-      : `Raid failed: ${attacker.name} → ${defenderName}`,
+      ? `Raid succeeded: ${attacker.name} → ${defender.name} (${raidType})`
+      : `Raid failed: ${attacker.name} → ${defender.name}`,
     message: (success
       ? `⚔${attack} vs 🛡${defense}. Defender wins ties.${stolen > 0 ? ` Attacker stole ${stolen} Scrap.` : ""}${outcomeSummary ? ` Outcome: ${outcomeSummary}.` : ""}`
       : `⚔${attack} vs 🛡${defense}. No reward (defender wins ties).`) +
-      (lookoutFired ? " Lookout Tower added +2 🛡." : ""),
+      (defAdjustBits.length ? ` Defense: ${defAdjustBits.join(", ")}.` : ""),
     impacts: success
       ? [
           ...(stolen > 0
             ? [
                 impact(attackerId, `+${stolen}🔩`, { scrap: stolen }),
-                impact(effectiveDefenderId, `−${stolen}🔩`, { scrap: -stolen }),
+                impact(defenderId, `−${stolen}🔩`, { scrap: -stolen }),
               ]
             : []),
           ...outcomeImpacts,
@@ -503,8 +658,39 @@ export function raid(state, attackerId, targetId, raidType = RAID_TYPES.DESTROY,
   return next;
 }
 
+registerResumer("signal_jammers_choice", (state, choice, ctx) => {
+  return continueRaid(state, { ...ctx, decisions: { ...(ctx.decisions ?? {}), jammer: choice } });
+});
+registerResumer("perimeter_traps_choice", (state, choice, ctx) => {
+  return continueRaid(state, { ...ctx, decisions: { ...(ctx.decisions ?? {}), traps: choice } });
+});
+
+// AI heuristics. Signal Jammers: spend if the 2-point reduction would
+// flip an otherwise-failing raid into a success. Perimeter Traps: spend
+// if the 2-point boost would flip an otherwise-winning raid into a fail.
+registerAIHeuristic("signal_jammers_choice", (state, prompt) => {
+  const { attackerId, defenderId } = prompt.context;
+  const attacker = state.players.find((p) => p.id === attackerId);
+  const defender = state.players.find((p) => p.id === defenderId);
+  if (!attacker || !defender) return "skip";
+  const atk = calcAttack(attacker);
+  const def = calcDefenseForRaid(defender);
+  return atk > def - 2 && atk <= def ? "spend" : "skip";
+});
+registerAIHeuristic("perimeter_traps_choice", (state, prompt) => {
+  const { attackerId, defenderId, decisions } = prompt.context;
+  const attacker = state.players.find((p) => p.id === attackerId);
+  const defender = state.players.find((p) => p.id === defenderId);
+  if (!attacker || !defender) return "skip";
+  const atk = calcAttack(attacker);
+  const jammerPenalty = decisions?.jammer === "spend" ? 2 : 0;
+  const def = Math.max(0, calcDefenseForRaid(defender) - jammerPenalty);
+  return atk > def && atk <= def + 2 ? "spend" : "skip";
+});
+
 export function endTurn(state) {
   if (state.winnerId != null) return state;
+  if (state.pendingPrompt) return state;
   const idx = state.players.findIndex((p) => p.id === state.activePlayerId);
   const nextIdx = (idx + 1) % state.players.length;
   const nextPlayer = state.players[nextIdx];

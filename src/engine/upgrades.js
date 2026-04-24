@@ -58,6 +58,7 @@ export function getAvailableUpgradesFor(state, playerId) {
 
 export function upgradeBuilding(state, playerId, upgradeUid) {
   if (state.winnerId != null) return state;
+  if (state.pendingPrompt) return state;
   const upgrade = (state.unlockableDeck ?? []).find((u) => u.uid === upgradeUid);
   if (!upgrade) return state;
   const check = canUpgrade(state, playerId, upgrade);

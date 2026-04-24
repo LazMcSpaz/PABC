@@ -15,6 +15,7 @@
 //   perimeter_traps / signal_jammers (opt-in raid reactives — prompt UI)
 
 import { NotifKind, impact, notify } from "./notifications.js";
+import { pauseWithPrompt, registerAIHeuristic, registerResumer } from "./prompts.js";
 
 function updatePlayer(state, playerId, updater) {
   return {
@@ -81,6 +82,64 @@ function vehicleGarage(state, playerId, building) {
     sourcePlayerId: playerId,
   });
 }
+
+function droneLab(state, playerId, building) {
+  const top = state.explorationDeck[0] ?? null;
+  const player = state.players.find((p) => p.id === playerId);
+  // Mark the ability as used even if there's no card to peek, so the
+  // player doesn't try again this turn.
+  let next = updatePlayer(state, playerId, (p) => markUsed(p, building.uid));
+  next = logEntry(next, { type: "ability", buildingId: building.id, playerId });
+
+  if (!top) {
+    return notify(next, {
+      kind: NotifKind.BUILD,
+      title: `${player.name} used Drone Lab`,
+      message: "Exploration deck is empty — nothing to peek.",
+      sourceCardId: "drone_lab",
+      sourcePlayerId: playerId,
+    });
+  }
+
+  next = notify(next, {
+    kind: NotifKind.BUILD,
+    title: `${player.name} used Drone Lab`,
+    message: `Peeked top of Exploration deck: ${top.name} (${top.type}).`,
+    sourceCardId: "drone_lab",
+    sourcePlayerId: playerId,
+  });
+
+  return pauseWithPrompt(next, {
+    kind: "drone_lab_choice",
+    playerId,
+    message: `Top card is ${top.name} (${top.type}). Discard it, or leave it on top?`,
+    options: [
+      { value: "discard", label: "Discard" },
+      { value: "keep", label: "Keep on top" },
+    ],
+    context: { playerId, cardId: top.id, cardName: top.name, cardType: top.type },
+  });
+}
+
+registerResumer("drone_lab_choice", (state, choice, ctx) => {
+  if (choice !== "discard") return state;
+  const deck = [...state.explorationDeck];
+  const top = deck.shift();
+  if (!top || top.id !== ctx.cardId) return state; // deck changed — bail
+  const next = { ...state, explorationDeck: deck };
+  return notify(next, {
+    kind: NotifKind.BUILD,
+    title: `Drone Lab discarded ${ctx.cardName}`,
+    message: `${ctx.cardType} removed from the top of the Exploration deck.`,
+    sourcePlayerId: ctx.playerId,
+  });
+});
+
+registerAIHeuristic("drone_lab_choice", (state, prompt) => {
+  // AI heuristic: discard if it's an Event or Surprise — otherwise keep.
+  const type = prompt.context.cardType;
+  return type === "Event" ? "discard" : "keep";
+});
 
 function tradingPost(state, playerId, building, opts) {
   const partnerId = opts?.partnerId;
@@ -150,6 +209,13 @@ const HANDLERS = {
     requires: "partner",
     apply: tradingPost,
   },
+  drone_lab: {
+    actionCost: 0,
+    scrapCost: 0,
+    oncePerTurn: true,
+    requires: null,
+    apply: droneLab,
+  },
 };
 
 export const ACTIVATABLE_BUILDING_IDS = Object.keys(HANDLERS);
@@ -177,6 +243,7 @@ export function canActivate(state, playerId, building) {
 
 export function activateAbility(state, playerId, buildingUid, opts = {}) {
   if (state.winnerId != null) return state;
+  if (state.pendingPrompt) return state;
   const player = state.players.find((p) => p.id === playerId);
   if (!player) return state;
   const building = player.settlement.find((b) => b.uid === buildingUid);
