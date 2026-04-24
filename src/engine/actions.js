@@ -51,7 +51,11 @@ export function build(state, playerId, buildingUid) {
   const player = state.players.find((p) => p.id === playerId);
   if (!player) return state;
   const surcharge = player.flags?.nextBuildingScrapSurcharge ?? 0;
-  const totalCost = (card.scrapCost ?? 0) + surcharge;
+  // ServoCo Assembly: −1 Scrap on every building purchase (floors at 0,
+  // applied before the Data Spike surcharge).
+  const servotechDiscount = hasActiveBuilding(player, "servotech_assembly") ? 1 : 0;
+  const discountedCost = Math.max(0, (card.scrapCost ?? 0) - servotechDiscount);
+  const totalCost = discountedCost + surcharge;
   if (player.scrap < totalCost) return state;
   if (player.actionsRemaining < 1) return state;
   if (player.settlement.length >= 5) return state;
@@ -69,6 +73,15 @@ export function build(state, playerId, buildingUid) {
   });
   next = refreshBuildingRow(next, rowIndex);
   next = log(next, { type: "build", playerId, cardId: card.id });
+  if (servotechDiscount > 0 && (card.scrapCost ?? 0) > 0) {
+    next = notify(next, {
+      kind: NotifKind.BUILD,
+      title: "ServoCo Assembly discount",
+      message: `${player.name} paid ${discountedCost}🔩 for ${card.name} (−${servotechDiscount} ServoCo).`,
+      impacts: [impact(playerId, `−${servotechDiscount} Scrap saved`, { scrap: servotechDiscount })],
+      sourcePlayerId: playerId,
+    });
+  }
   if (surcharge > 0) {
     next = notify(next, {
       kind: NotifKind.INTRIGUE,
@@ -397,6 +410,14 @@ function executeRaidOutcome(state, attackerId, defenderId, raidType, extras) {
         state,
         impacts: [],
         summary: "no building targeted — outcome skipped",
+      };
+    }
+    // Vanguard Outpost is immune to Destroy Building raids.
+    if (building.id === "vanguard_outpost") {
+      return {
+        state,
+        impacts: [impact(defenderId, `${building.name} is immune — destroy outcome blocked`)],
+        summary: `${building.name} is immune to Destroy`,
       };
     }
     const next = {
@@ -743,6 +764,22 @@ export function endTurn(state) {
         (p.loseActionsNextTurn ?? 0),
     );
     const passiveScrap = calcPassiveScrap(revived);
+    // Medic Tent (+1) / Improved Meds (+2) recover permanent Attack
+    // losses each turn, clamped so bonusAtk never exceeds 0 (can't
+    // grant more than the player's natural score).
+    let atkRecovery = 0;
+    const disabledSet = new Set(revived.disabledBuildingUids ?? []);
+    for (const b of revived.settlement) {
+      if (disabledSet.has(b.uid)) continue;
+      if (b.ability?.effect === "recover_atk") {
+        atkRecovery += b.ability.atkRecovery ?? 0;
+      }
+    }
+    const currentBonusAtk = revived.bonusAtk ?? 0;
+    const recoveredBonusAtk =
+      atkRecovery > 0 && currentBonusAtk < 0
+        ? Math.min(0, currentBonusAtk + atkRecovery)
+        : currentBonusAtk;
     // If Diverted Resources is in effect, their passive scrap goes to the
     // thief; revived.scrap stays unchanged.
     const divertTo = p.flags?.divertScrapNextTurnTo;
@@ -753,8 +790,32 @@ export function endTurn(state) {
       actionsRemaining: actionsAfterSchedule,
       bonusActionsNextTurn: 0,
       loseActionsNextTurn: 0,
+      bonusAtk: recoveredBonusAtk,
+      _atkRecovered: recoveredBonusAtk - currentBonusAtk,
     };
   });
+
+  // Notify the incoming player when Medic Tent / Improved Meds fired.
+  const recovered = next.players.find(
+    (p) => p.id === nextPlayer.id && (p._atkRecovered ?? 0) > 0,
+  );
+  if (recovered) {
+    next = notify(next, {
+      kind: NotifKind.BUILD,
+      title: `Medic recovery for ${nextPlayer.name}`,
+      message: `Recovered ${recovered._atkRecovered} ⚔ from Medic Tent / Improved Meds.`,
+      impacts: [impact(nextPlayer.id, `+${recovered._atkRecovered} ⚔`, { atk: recovered._atkRecovered })],
+      sourcePlayerId: nextPlayer.id,
+    });
+  }
+  next = {
+    ...next,
+    players: next.players.map((p) => {
+      if (!("_atkRecovered" in p)) return p;
+      const { _atkRecovered: _, ...clean } = p;
+      return clean;
+    }),
+  };
 
   // Surface leader recovery (disabled by a previous raid) so the owner sees
   // why their leader is contributing again this turn.
@@ -797,13 +858,38 @@ export function endTurn(state) {
   };
 
   // New round starts when we wrap to player 0: clear raidedThisRound,
-  // round-end flags (e.g. raidsBlocked), and refresh the Building Row.
+  // round-end flags (e.g. raidsBlocked), apply round_start permanent
+  // bonuses (e.g. Brawlins' Circuit atk recovery), refresh the row.
   if (nextIdx === 0) {
+    const roundRecoveryDeltas = new Map();
     next = {
       ...next,
       round: next.round + 1,
-      players: next.players.map((p) => ({ ...p, raidedThisRound: [] })),
+      players: next.players.map((p) => {
+        const recover = (p.permanentBonuses ?? []).reduce((sum, b) => {
+          const m = b.mechanic;
+          if (m?.trigger === "round_start" && m?.effect === "recover_atk") {
+            return sum + (m.amount ?? 0);
+          }
+          return sum;
+        }, 0);
+        const current = p.bonusAtk ?? 0;
+        const recovered =
+          recover > 0 && current < 0 ? Math.min(0, current + recover) : current;
+        if (recovered !== current) roundRecoveryDeltas.set(p.id, recovered - current);
+        return { ...p, raidedThisRound: [], bonusAtk: recovered };
+      }),
     };
+    for (const [pid, delta] of roundRecoveryDeltas) {
+      const pname = next.players.find((p) => p.id === pid)?.name ?? `p${pid}`;
+      next = notify(next, {
+        kind: NotifKind.FLAG,
+        title: `Brawlins' Circuit — ${pname}`,
+        message: `Round-start recovery: +${delta} ⚔ (capped at 0).`,
+        impacts: [impact(pid, `+${delta} ⚔`, { atk: delta })],
+        sourcePlayerId: pid,
+      });
+    }
     next = clearRoundEndFlags(next);
     next = refreshBuildingRow(next, 0);
   }

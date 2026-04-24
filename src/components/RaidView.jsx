@@ -19,12 +19,13 @@ function RaidLauncherModal({ attacker, target, onConfirm, onCancel }) {
   const wouldWin = myAtk > effectiveDef;
 
   const needsBuilding = raidType === RAID_TYPES.DESTROY;
-  const hasAnyBuilding = target.settlement.length > 0;
+  const destroyableBuildings = target.settlement.filter((b) => b.id !== "vanguard_outpost");
+  const hasAnyDestroyable = destroyableBuildings.length > 0;
   const hasLeader = !!target.leader;
   const intrigueCount = target.intrigueHand?.length ?? 0;
 
   const raidTypeDisabled = (t) => {
-    if (t === RAID_TYPES.DESTROY) return !hasAnyBuilding;
+    if (t === RAID_TYPES.DESTROY) return !hasAnyDestroyable;
     if (t === RAID_TYPES.DISABLE) return !hasLeader;
     return false;
   };
@@ -112,7 +113,7 @@ function RaidLauncherModal({ attacker, target, onConfirm, onCancel }) {
           <div style={{ marginBottom: "0.5rem" }}>
             <div style={{ fontSize: 12, opacity: 0.7 }}>Which building?</div>
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 4 }}>
-              {target.settlement.map((b) => (
+              {destroyableBuildings.map((b) => (
                 <button
                   key={b.uid}
                   onClick={() => setBuildingUid(b.uid)}
@@ -129,6 +130,11 @@ function RaidLauncherModal({ attacker, target, onConfirm, onCancel }) {
                 </button>
               ))}
             </div>
+            {target.settlement.some((b) => b.id === "vanguard_outpost") ? (
+              <div style={{ fontSize: 11, opacity: 0.6, marginTop: 4 }}>
+                Vanguard Outpost is immune to Destroy.
+              </div>
+            ) : null}
           </div>
         ) : null}
 

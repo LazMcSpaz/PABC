@@ -33,19 +33,45 @@ function scalingBonus(player, triggerBuildingId, field) {
   return Math.min(4, matching);
 }
 
+// Lt. Tusk's passive mirrors Training Grounds — +1 Attack per attack-
+// producing building — but is uncapped, and does NOT stack with
+// Training Grounds. If both are present, calcAttack applies the higher
+// of the two.
+function tuskBonus(player) {
+  if (player.leader?.id !== "lt_tusk" || player.leader?.disabled) return 0;
+  return activeBuildings(player).filter((b) => (b.passiveAtk ?? 0) > 0).length;
+}
+
+// Sum any permanent bonus whose mechanic wires into a given calc field.
+// Used for narrative rewards like Soluxian "gain +3 Scrap per turn".
+function permanentBonusSum(player, effect) {
+  return (player.permanentBonuses ?? []).reduce((sum, b) => {
+    const m = b.mechanic;
+    if (m?.effect === effect) return sum + (m.amount ?? 0);
+    return sum;
+  }, 0);
+}
+
 export function calcPassiveScrap(player) {
   return (
     activeBuildings(player).reduce((sum, b) => sum + (b.passiveScrap ?? 0), 0) +
     leaderContribution(player, "passiveScrap") +
-    scalingBonus(player, "scrap_yard", "passiveScrap")
+    scalingBonus(player, "scrap_yard", "passiveScrap") +
+    permanentBonusSum(player, "bonus_scrap")
   );
 }
 
 export function calcAttack(player) {
+  // Tusk's passive and Training Grounds' passive both scale on attack-
+  // producing buildings; they do not stack — use the higher.
+  const scalingAtk = Math.max(
+    scalingBonus(player, "training_grounds", "passiveAtk"),
+    tuskBonus(player),
+  );
   const base =
     activeBuildings(player).reduce((sum, b) => sum + (b.passiveAtk ?? 0), 0) +
     leaderContribution(player, "passiveAtk") +
-    scalingBonus(player, "training_grounds", "passiveAtk");
+    scalingAtk;
   return Math.max(
     0,
     base + (player.bonusAtk ?? 0) + (player.boosts?.atk ?? 0) + debuffSum(player, "atk"),
