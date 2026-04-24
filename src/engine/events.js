@@ -15,6 +15,7 @@
 // These pass through the default "persist and leave for manual" path.
 
 import { calcAttack, calcDefense } from "./calculations.js";
+import { pausePeekReorder } from "./deckPeek.js";
 import { fireEventImmunity } from "./intrigue.js";
 import { NotifKind, impact, notify } from "./notifications.js";
 
@@ -292,6 +293,25 @@ export const EVENT_EFFECTS = {
       severity: "warning",
     });
     return { state: next, persist: false };
+  },
+
+  drifter_intelligence: (state, drawerId) => {
+    let next = logEntry(state, { type: "event", cardId: "drifter_intelligence" });
+    next = notify(next, {
+      kind: NotifKind.EVENT,
+      title: "Drifter Intelligence",
+      message: "Top 2 Exploration cards revealed — return them in any order.",
+      sourceCardId: "drifter_intelligence",
+      sourcePlayerId: drawerId,
+    });
+    const after = pausePeekReorder(next, {
+      playerId: drawerId,
+      deckType: "exploration",
+      peekCount: 2,
+      mayDiscard: false,
+      message: "Drifter Intelligence: reorder the top 2 Exploration cards.",
+    });
+    return { state: after, persist: false };
   },
 
   minefield: (state) => {

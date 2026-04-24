@@ -11,6 +11,8 @@ export default function PromptModal({ state, onResolve }) {
 
   // Hide for AI prompts — the hook auto-resolves those.
   if (!prompt || owner?.kind !== "human") return null;
+  // Peek-and-reorder has its own modal with a bespoke interaction.
+  if (prompt.kind === "peek_reorder_choice") return null;
 
   return (
     <div

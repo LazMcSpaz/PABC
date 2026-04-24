@@ -1,6 +1,7 @@
 import SetupScreen from "./components/SetupScreen.jsx";
 import GameBoard from "./components/GameBoard.jsx";
 import NotificationToasts from "./components/NotificationToasts.jsx";
+import PeekReorderModal from "./components/PeekReorderModal.jsx";
 import PromptModal from "./components/PromptModal.jsx";
 import WinScreen from "./components/WinScreen.jsx";
 import { useGameEngine } from "./hooks/useGameEngine.js";
@@ -23,6 +24,7 @@ export default function App() {
     <>
       <GameBoard state={state} engine={engine} />
       <PromptModal state={state} onResolve={resolvePrompt} />
+      <PeekReorderModal state={state} onResolve={resolvePrompt} />
       <NotificationToasts state={state} />
     </>
   );

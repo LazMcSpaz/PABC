@@ -19,6 +19,7 @@
 
 import { NARRATIVE_CHAINS } from "./cards.js";
 import { NARRATIVE_LEADERS, REWARD_CARD_MAP } from "./cards_age1_rewards.js";
+import { pausePeekReorder } from "./deckPeek.js";
 import { NotifKind, impact, notify } from "./notifications.js";
 import { pauseWithPrompt, registerAIHeuristic, registerResumer } from "./prompts.js";
 
@@ -375,6 +376,16 @@ export function resolveNarrativeBeat(state, playerId, card, decisions = {}) {
     for (const eff of ability.effects) {
       if (eff.effect === "draw_next_beat") {
         next = spawnBeat(next, playerId, chain.id, eff.nextBeat);
+      } else if (eff.effect === "peek_and_reorder") {
+        // Pauses execution — assumed to be the terminal effect. If we
+        // ever need effects after a peek, pass them through followUp.
+        next = pausePeekReorder(next, {
+          playerId,
+          deckType: eff.deckType ?? "exploration",
+          peekCount: eff.peekCount ?? 3,
+          mayDiscard: !!eff.mayDiscard,
+          message: `${chain.name} — ${beat.name}: peek and reorder the top ${eff.peekCount ?? 3} ${eff.deckType ?? "exploration"} cards.`,
+        });
       } else {
         next = applyReward(next, playerId, eff);
       }

@@ -14,6 +14,7 @@
 // detect them, but they aren't playable via playIntrigue().
 
 import { calcAttack } from "./calculations.js";
+import { pausePeekReorder } from "./deckPeek.js";
 import { NotifKind, impact, notify } from "./notifications.js";
 
 function updatePlayer(state, playerId, updater) {
@@ -326,6 +327,26 @@ function sabotage(state, playerId, card, opts) {
   });
 }
 
+function whisperNetwork(state, playerId, card) {
+  const me = state.players.find((p) => p.id === playerId);
+  let next = logEntry(state, { type: "intrigue", cardId: card.id, playerId });
+  next = notify(next, {
+    kind: NotifKind.INTRIGUE,
+    title: `${me.name} played Whisper Network`,
+    message: card.ability.description,
+    sourceCardId: card.id,
+    sourcePlayerId: playerId,
+  });
+  return pausePeekReorder(next, {
+    playerId,
+    deckType: "exploration",
+    peekCount: 4,
+    mayDiscard: false,
+    message: "Whisper Network: reorder the top 4 Exploration cards, then draw 1 Intrigue.",
+    followUp: { type: "draw_intrigue", count: 1, playerId },
+  });
+}
+
 function falseFlag(state, playerId, card, opts) {
   const me = state.players.find((p) => p.id === playerId);
   const targetIds = opts.targetIds ?? [];
@@ -552,6 +573,7 @@ export const INTRIGUE_EFFECTS = {
   requisition: { requires: "target", apply: requisition },
   sabotage: { requires: "buildingTarget", apply: sabotage },
   false_flag: { requires: "twoTargets", apply: falseFlag },
+  whisper_network: { requires: null, apply: whisperNetwork },
 };
 
 // Plays an active (non-immediate) intrigue card from the player's hand.
