@@ -1,7 +1,7 @@
 import { calcActions, calcAttack, calcDefense, calcPassiveScrap, calcVP } from "../engine/calculations.js";
 import SettlementView from "./SettlementView.jsx";
 
-export default function PlayerPanel({ player, active, onBoost }) {
+export default function PlayerPanel({ player, active, onBoost, onSwapLeader }) {
   const style = {
     padding: "0.75rem",
     borderRadius: 6,
@@ -53,6 +53,28 @@ export default function PlayerPanel({ player, active, onBoost }) {
           <button onClick={() => onBoost("def")} disabled={player.scrap < 2}>
             Boost 🛡 (2🔩)
           </button>
+        </div>
+      ) : null}
+      {active && onSwapLeader && (player.availableLeaders ?? []).length > 0 ? (
+        <div style={{ marginTop: 6 }}>
+          <div style={{ fontSize: 11, opacity: 0.7 }}>Available leaders (swap is free):</div>
+          <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 2 }}>
+            {player.availableLeaders.map((l) => (
+              <button
+                key={l.id}
+                onClick={() => onSwapLeader(l.id)}
+                style={{ fontSize: 11, padding: "2px 6px" }}
+                title={l.ability?.description ?? ""}
+              >
+                Swap to {l.name}
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
+      {(player.permanentBonuses ?? []).length > 0 ? (
+        <div style={{ fontSize: 11, opacity: 0.7, marginTop: 4 }}>
+          Bonuses: {player.permanentBonuses.map((b) => b.description).join(" · ")}
         </div>
       ) : null}
       <SettlementView settlement={player.settlement} leader={player.leader} />

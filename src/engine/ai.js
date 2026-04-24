@@ -11,7 +11,15 @@ import { abilityMeta, activateAbility, canActivate } from "./abilities.js";
 import * as actions from "./actions.js";
 import { calcActions, calcAttack, calcDefense, calcPassiveScrap, calcVP } from "./calculations.js";
 import { INTRIGUE_EFFECTS, playIntrigue } from "./intrigue.js";
-import { canUpgrade, getAvailableUpgradesFor, upgradeBuilding } from "./upgrades.js";
+import { swapLeader } from "./narrative.js";
+import {
+  canBuildUnique,
+  canUpgrade,
+  getAvailableUniqueBuildingsFor,
+  getAvailableUpgradesFor,
+  purchaseUniqueBuilding,
+  upgradeBuilding,
+} from "./upgrades.js";
 
 const MODEL_ID = "claude-sonnet-4-20250514";
 
@@ -171,6 +179,33 @@ export function serializeForAI(state, playerId) {
         canAfford: check.ok,
       };
     }),
+    availableUniqueBuildings: getAvailableUniqueBuildingsFor(state, playerId).map((u) => {
+      const check = canBuildUnique(state, playerId, u);
+      return {
+        uid: u.uid,
+        id: u.id,
+        name: u.name,
+        scrapCost: u.scrapCost,
+        atkCost: u.atkCost,
+        passiveScrap: u.passiveScrap,
+        passiveAtk: u.passiveAtk,
+        passDef: u.passDef,
+        vp: u.vp,
+        ability: u.ability?.description ?? null,
+        canAfford: check.ok,
+      };
+    }),
+    availableLeaders: (me.availableLeaders ?? []).map((l) => ({
+      id: l.id,
+      name: l.name,
+      passiveScrap: l.passiveScrap,
+      passiveAtk: l.passiveAtk,
+      passDef: l.passDef,
+      passActions: l.passActions,
+      vp: l.vp,
+      ability: l.ability?.description ?? null,
+    })),
+    activeBeats: (state.narrativeState?.[playerId] ?? null) && Object.entries(state.narrativeState[playerId]).map(([cid, b]) => ({ chainId: cid, beat: b })),
     globalFlags: state.globalFlags,
     recentLog: (state.log ?? []).slice(-10),
   };
@@ -199,6 +234,8 @@ export async function getAIDecision(state, playerId, personality) {
     "  { type: \"play_intrigue\", cardName: <name>, targetId?: <id> }",
     "  { type: \"activate\", buildingId: <id in me.settlement where activated=true>, partnerId?: <opponent id for Trading Post> }",
     "  { type: \"upgrade\", upgradeId: <id from availableUpgrades where canAfford=true> }",
+    "  { type: \"build_unique\", buildingId: <id from availableUniqueBuildings where canAfford=true> }",
+    "  { type: \"swap_leader\", leaderId: <id from availableLeaders> }",
     "  { type: \"end_turn\" }",
     "Each non-end_turn action consumes resources you must have. The engine will silently no-op invalid actions.",
     "Plan up to 4 actions in priority order. End with end_turn if you intentionally pass remaining actions.",
@@ -265,6 +302,16 @@ export function executeAIAction(state, playerId, action) {
       const upgrade = (state.unlockableDeck ?? []).find((u) => u.id === action.upgradeId);
       if (!upgrade) return state;
       return upgradeBuilding(state, playerId, upgrade.uid);
+    }
+    case "build_unique": {
+      const card = (state.unlockableDeck ?? []).find(
+        (u) => u.id === action.buildingId && (u.scope === "any" || u.scope === playerId),
+      );
+      if (!card) return state;
+      return purchaseUniqueBuilding(state, playerId, card.uid);
+    }
+    case "swap_leader": {
+      return swapLeader(state, playerId, action.leaderId);
     }
     case "activate": {
       const me = state.players.find((p) => p.id === playerId);

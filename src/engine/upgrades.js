@@ -13,6 +13,7 @@
 // module treats any entry with a `requires` field as a purchasable
 // Upgrade and leaves the others for chunk 4's narrative reward flow.
 
+import { REWARD_CARD_MAP } from "./cards_age1_rewards.js";
 import { calcAttack } from "./calculations.js";
 import { NotifKind, impact, notify } from "./notifications.js";
 
@@ -54,6 +55,64 @@ export function getAvailableUpgradesFor(state, playerId) {
   return (state.unlockableDeck ?? []).filter(
     (u) => u.requires && scopeAllows(u, playerId),
   );
+}
+
+// Unique buildings: unlockables that are full buildings (no parent
+// required) scoped to a single player. Either purchased with Scrap +
+// Action (like regular buildings) or granted free for 0 Scrap (reward
+// drops). They join the player's settlement alongside the 5-slot cap —
+// unique buildings don't count against the cap per the reward-card
+// file's "Do not consume a building slot unless noted" guideline.
+export function getAvailableUniqueBuildingsFor(state, playerId) {
+  return (state.unlockableDeck ?? []).filter(
+    (u) =>
+      !u.requires &&
+      (u.type === "Unique Building" || u.unique === true) &&
+      scopeAllows(u, playerId),
+  );
+}
+
+export function canBuildUnique(state, playerId, card) {
+  const player = state.players.find((p) => p.id === playerId);
+  if (!player) return { ok: false, reason: "no-player" };
+  if (state.activePlayerId !== playerId) return { ok: false, reason: "not-your-turn" };
+  if (player.actionsRemaining < 1) return { ok: false, reason: "actions" };
+  if (player.scrap < (card.scrapCost ?? 0)) return { ok: false, reason: "scrap" };
+  if (calcAttack(player) < (card.atkCost ?? 0)) return { ok: false, reason: "attack" };
+  if (!scopeAllows(card, playerId)) return { ok: false, reason: "out-of-scope" };
+  return { ok: true };
+}
+
+export function purchaseUniqueBuilding(state, playerId, uid) {
+  if (state.winnerId != null) return state;
+  if (state.pendingPrompt) return state;
+  const card = (state.unlockableDeck ?? []).find((u) => u.uid === uid);
+  if (!card) return state;
+  const check = canBuildUnique(state, playerId, card);
+  if (!check.ok) return state;
+
+  let next = updatePlayer(state, playerId, (p) => ({
+    ...p,
+    scrap: p.scrap - (card.scrapCost ?? 0),
+    actionsRemaining: p.actionsRemaining - 1,
+    settlement: [...p.settlement, { ...card }],
+  }));
+  next = { ...next, unlockableDeck: next.unlockableDeck.filter((u) => u.uid !== uid) };
+  next = logEntry(next, { type: "build_unique", playerId, cardId: card.id });
+  const player = next.players.find((p) => p.id === playerId);
+  return notify(next, {
+    kind: NotifKind.BUILD,
+    title: `${player.name} built ${card.name}`,
+    message: card.ability?.description ?? "",
+    impacts: [
+      impact(playerId, `−${card.scrapCost ?? 0} Scrap · +${card.vp ?? 0}★`, {
+        scrap: -(card.scrapCost ?? 0),
+        vp: card.vp,
+      }),
+    ],
+    sourceCardId: card.id,
+    sourcePlayerId: playerId,
+  });
 }
 
 export function upgradeBuilding(state, playerId, upgradeUid) {
@@ -118,14 +177,32 @@ export function upgradeBuilding(state, playerId, upgradeUid) {
   });
 }
 
-// Called from progression-challenge `unlock_unlockable` effect. If the
-// referenced card id already lives in an extended UPGRADES / unique-
-// buildings registry, this would add a copy to the deck. For now (Age 2
-// content doesn't yet exist in cards.js) we record the intent on
-// state.unlocksPending and emit a notification so the player knows the
-// unlock fired. Chunk 4 / Age 2 work will resolve pending entries into
-// real cards.
+// Called from progression-challenge `unlock_unlockable` effect. Looks up
+// the referenced card in REWARD_CARD_MAP; if found, adds a playerId-
+// scoped copy to the Unlockable Deck. If the card id isn't defined yet
+// (e.g. Age 2 content not landed), records the intent on
+// state.unlocksPending and notifies the unlocker.
 export function unlockUnlockable(state, unlockableId, unlockerId, label) {
+  const card = REWARD_CARD_MAP[unlockableId];
+  if (card) {
+    const copy = {
+      ...card,
+      scope: unlockerId,
+      uid: `${card.id}_p${unlockerId}`,
+    };
+    const alreadyInDeck = (state.unlockableDeck ?? []).some((u) => u.uid === copy.uid);
+    const next = alreadyInDeck
+      ? state
+      : { ...state, unlockableDeck: [...(state.unlockableDeck ?? []), copy] };
+    return notify(next, {
+      kind: NotifKind.FLAG,
+      title: `Unlocked: ${label ?? card.name}`,
+      message: `${card.name} is now purchasable from the Unlockable Deck.`,
+      sourcePlayerId: unlockerId,
+      severity: "info",
+    });
+  }
+  // Unknown id — most likely Age 2 content — record as pending.
   const next = {
     ...state,
     unlocksPending: [...new Set([...(state.unlocksPending ?? []), unlockableId])],
@@ -135,7 +212,7 @@ export function unlockUnlockable(state, unlockableId, unlockerId, label) {
     title: `Unlock available: ${label ?? unlockableId}`,
     message:
       `${unlockableId} is unlocked, but its card data isn't implemented yet. ` +
-      "It will become purchasable once Age 2 content lands.",
+      "It will become purchasable once its card ships.",
     sourcePlayerId: unlockerId,
     severity: "info",
   });

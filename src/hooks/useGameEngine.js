@@ -12,8 +12,9 @@ import {
 import { activateAbility } from "../engine/abilities.js";
 import { makeInitialState, makePlayer } from "../engine/gameState.js";
 import { playIntrigue } from "../engine/intrigue.js";
+import { swapLeader } from "../engine/narrative.js";
 import { aiAutoResolve, resolvePrompt } from "../engine/prompts.js";
-import { upgradeBuilding } from "../engine/upgrades.js";
+import { purchaseUniqueBuilding, upgradeBuilding } from "../engine/upgrades.js";
 
 const ACTION_DELAY_MS = 700;
 const PRE_TURN_DELAY_MS = 400;
@@ -63,6 +64,10 @@ export function useGameEngine() {
         setState((s) => activateAbility(s, playerId, buildingUid, opts)),
       upgrade: (playerId, upgradeUid) =>
         setState((s) => upgradeBuilding(s, playerId, upgradeUid)),
+      purchaseUnique: (playerId, uid) =>
+        setState((s) => purchaseUniqueBuilding(s, playerId, uid)),
+      swapLeader: (playerId, leaderId) =>
+        setState((s) => swapLeader(s, playerId, leaderId)),
       resolvePrompt: (choice) => setState((s) => resolvePrompt(s, choice)),
       endTurn: () => setState((s) => actions.endTurn(s)),
     }),

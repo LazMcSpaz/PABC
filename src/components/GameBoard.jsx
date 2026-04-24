@@ -50,6 +50,11 @@ export default function GameBoard({ state, engine }) {
                   ? (stat) => engine.boost(p.id, stat)
                   : null
               }
+              onSwapLeader={
+                p.id === state.activePlayerId && !lockUI
+                  ? (leaderId) => engine.swapLeader(p.id, leaderId)
+                  : null
+              }
             />
           ))}
         </div>
@@ -81,6 +86,7 @@ export default function GameBoard({ state, engine }) {
             activePlayer={active}
             onInspect={setInspectedCard}
             onUpgrade={(uid) => engine.upgrade(state.activePlayerId, uid)}
+            onPurchaseUnique={(uid) => engine.purchaseUnique(state.activePlayerId, uid)}
           />
           <ExploreView
             state={state}

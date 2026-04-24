@@ -16,6 +16,7 @@ import {
   fireExploreDrawReactive,
   fireRaidReactive,
 } from "./intrigue.js";
+import { resolveNarrativeBeat } from "./narrative.js";
 import { NotifKind, impact, notify } from "./notifications.js";
 import { pauseWithPrompt, registerAIHeuristic, registerResumer } from "./prompts.js";
 import { CARD_RESOLVERS } from "./resolution.js";
@@ -352,8 +353,12 @@ export function resolveCard(state, playerId, cardUid, decisions = {}) {
     return resolvePersistentEvent(state, playerId, card);
   }
 
-  // Challenge (Narrative) and other types — remove from play and leave
-  // per-card automation to a later pass.
+  // Narrative beats — chain progression, branching, rewards.
+  if (card.type === "Challenge (Narrative)") {
+    return resolveNarrativeBeat(state, playerId, card);
+  }
+
+  // Anything unrecognized — remove from play.
   return {
     ...state,
     explorationInPlay: state.explorationInPlay.filter((e) => e.card.uid !== cardUid),
