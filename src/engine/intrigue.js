@@ -91,7 +91,7 @@ function forcedMarch(state, playerId, card) {
     actionsRemaining: p.actionsRemaining + 2,
     temporaryDebuffs: [
       ...(p.temporaryDebuffs ?? []),
-      { stat: "atk", amount: -2, expiresOn: "owner_turn_start" },
+      { stat: "atk", amount: -2, expiresOn: "owner_turn_end" },
     ],
   }));
   next = logEntry(next, { type: "intrigue", cardId: card.id, playerId });
@@ -164,7 +164,7 @@ function infectedHardware(state, playerId, card, opts) {
     ...p,
     temporaryDebuffs: [
       ...(p.temporaryDebuffs ?? []),
-      { stat: "def", amount: -4, expiresOn: "owner_turn_start" },
+      { stat: "def", amount: -4, expiresOn: "owner_turn_end" },
     ],
   }));
   next = logEntry(next, { type: "intrigue", cardId: card.id, playerId, targetId });
@@ -187,8 +187,8 @@ function blackout(state, playerId, card, opts) {
   let next = updatePlayer(state, targetId, (p) => ({
     ...p,
     disabledBuildingUids: [...new Set([...(p.disabledBuildingUids ?? []), ...uids])],
-    buildingsDisabledUntilOwnerTurnStart: [
-      ...new Set([...(p.buildingsDisabledUntilOwnerTurnStart ?? []), ...uids]),
+    buildingsDisabledUntilOwnerTurnEnd: [
+      ...new Set([...(p.buildingsDisabledUntilOwnerTurnEnd ?? []), ...uids]),
     ],
   }));
   next = logEntry(next, { type: "intrigue", cardId: card.id, playerId, targetId });
@@ -311,8 +311,8 @@ function sabotage(state, playerId, card, opts) {
   let next = updatePlayer(state, targetId, (p) => ({
     ...p,
     disabledBuildingUids: [...new Set([...(p.disabledBuildingUids ?? []), buildingUid])],
-    buildingsDisabledUntilOwnerTurnStart: [
-      ...new Set([...(p.buildingsDisabledUntilOwnerTurnStart ?? []), buildingUid]),
+    buildingsDisabledUntilOwnerTurnEnd: [
+      ...new Set([...(p.buildingsDisabledUntilOwnerTurnEnd ?? []), buildingUid]),
     ],
   }));
   next = logEntry(next, { type: "intrigue", cardId: card.id, playerId, targetId, buildingId: building.id });

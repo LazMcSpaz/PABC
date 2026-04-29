@@ -437,8 +437,8 @@ function executeRaidOutcome(state, attackerId, defenderId, raidType, extras) {
               ...p,
               settlement: p.settlement.filter((b) => b.uid !== uid),
               disabledBuildingUids: (p.disabledBuildingUids ?? []).filter((x) => x !== uid),
-              buildingsDisabledUntilOwnerTurnStart: (
-                p.buildingsDisabledUntilOwnerTurnStart ?? []
+              buildingsDisabledUntilOwnerTurnEnd: (
+                p.buildingsDisabledUntilOwnerTurnEnd ?? []
               ).filter((x) => x !== uid),
             }
           : p,
@@ -504,7 +504,7 @@ function executeRaidOutcome(state, attackerId, defenderId, raidType, extras) {
           ? {
               ...p,
               leader: { ...p.leader, disabled: true },
-              leaderDisabledUntilOwnerTurnStart: true,
+              leaderDisabledUntilOwnerTurnEnd: true,
             }
           : p,
       ),
@@ -731,41 +731,55 @@ export function endTurn(state) {
   const nextIdx = (idx + 1) % state.players.length;
   const nextPlayer = state.players[nextIdx];
 
-  // Turn-start bookkeeping for the incoming player:
-  //   - re-enable buildings disabled "until owner's next turn"
-  //   - expire temporary debuffs tagged for owner-turn-start
-  //   - clear per-turn boosts
+  // Turn-end bookkeeping for the OUTGOING player:
+  //   - clear skipExploreThisTurn (their skipped turn is over)
+  //   - re-enable buildings disabled "until owner turn end" — these
+  //     were disabled by an opponent and are meant to cost the owner
+  //     one full turn, recovering as that turn ends
+  //   - same for the leader (raid Disable Leader outcome) and any
+  //     temporaryDebuffs tagged "owner_turn_end"
+  //   - capture leaderRecovered for the post-update notification
+  let outgoingLeaderRecovered = false;
+  const outgoingPlayer = state.players.find((p) => p.id === state.activePlayerId);
+  let next = updatePlayer(state, state.activePlayerId, (p) => {
+    const toReenable = new Set(p.buildingsDisabledUntilOwnerTurnEnd ?? []);
+    const stillDisabled = (p.disabledBuildingUids ?? []).filter(
+      (uid) => !toReenable.has(uid),
+    );
+    const freshDebuffs = (p.temporaryDebuffs ?? []).filter(
+      (d) => d.expiresOn !== "owner_turn_end",
+    );
+    const leaderRecovered = !!p.leaderDisabledUntilOwnerTurnEnd;
+    if (leaderRecovered && p.leader) outgoingLeaderRecovered = true;
+    return {
+      ...p,
+      skipExploreThisTurn: false,
+      disabledBuildingUids: stillDisabled,
+      buildingsDisabledUntilOwnerTurnEnd: [],
+      temporaryDebuffs: freshDebuffs,
+      leader:
+        leaderRecovered && p.leader ? { ...p.leader, disabled: false } : p.leader,
+      leaderDisabledUntilOwnerTurnEnd: false,
+    };
+  });
+
+  // Turn-start bookkeeping for the INCOMING player:
+  //   - clear per-turn boosts, ability-used and built-this-turn pools
   //   - promote skipExploreNextTurn → skipExploreThisTurn
   //   - apply bonus/lose actions scheduled from previous events
-  //   - collect passive scrap (after re-enabling so disabled buildings count)
-  // Turn-end bookkeeping for the outgoing player:
-  //   - clear skipExploreThisTurn (their skipped turn is over)
-  let next = updatePlayer(state, state.activePlayerId, (p) => ({
-    ...p,
-    skipExploreThisTurn: false,
-  }));
+  //   - collect passive scrap (no disable-recovery here — that fires on
+  //     the disabled player's previous turn-end, above)
   next = updatePlayer(next, nextPlayer.id, (p) => {
-    const toReenable = new Set(p.buildingsDisabledUntilOwnerTurnStart ?? []);
-    const stillDisabled = (p.disabledBuildingUids ?? []).filter((uid) => !toReenable.has(uid));
-    const freshDebuffs = (p.temporaryDebuffs ?? []).filter(
-      (d) => d.expiresOn !== "owner_turn_start",
-    );
     const flags = { ...(p.flags ?? {}) };
     delete flags.divertScrapNextTurnTo;
-    const leaderRecovered = !!p.leaderDisabledUntilOwnerTurnStart;
     const revived = {
       ...p,
       boosts: { atk: 0, def: 0 },
-      disabledBuildingUids: stillDisabled,
-      buildingsDisabledUntilOwnerTurnStart: [],
-      temporaryDebuffs: freshDebuffs,
       skipExploreThisTurn: !!p.skipExploreNextTurn,
       skipExploreNextTurn: false,
       flags,
       abilityUsedThisTurn: {},
       builtThisTurnUids: [],
-      leader: leaderRecovered && p.leader ? { ...p.leader, disabled: false } : p.leader,
-      leaderDisabledUntilOwnerTurnStart: false,
     };
     const baseActions = calcActions(revived);
     const actionsAfterSchedule = Math.max(
@@ -828,18 +842,16 @@ export function endTurn(state) {
     }),
   };
 
-  // Surface leader recovery (disabled by a previous raid) so the owner sees
-  // why their leader is contributing again this turn.
-  const leaderWasDisabled = state.players.find(
-    (p) => p.id === nextPlayer.id,
-  )?.leaderDisabledUntilOwnerTurnStart;
-  if (leaderWasDisabled && nextPlayer.leader) {
+  // Surface leader recovery on the outgoing player — their leader was
+  // disabled for the full duration of the turn that just ended and is
+  // active again starting next time around.
+  if (outgoingLeaderRecovered && outgoingPlayer?.leader) {
     next = notify(next, {
       kind: NotifKind.FLAG,
-      title: `${nextPlayer.leader.name} recovered`,
-      message: `${nextPlayer.name}'s leader is no longer disabled.`,
-      impacts: [impact(nextPlayer.id, "leader active again")],
-      sourcePlayerId: nextPlayer.id,
+      title: `${outgoingPlayer.leader.name} recovered`,
+      message: `${outgoingPlayer.name}'s leader is no longer disabled.`,
+      impacts: [impact(outgoingPlayer.id, "leader active next turn")],
+      sourcePlayerId: outgoingPlayer.id,
     });
   }
 

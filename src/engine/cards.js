@@ -1993,7 +1993,7 @@ export const EVENTS = [
       allPlayerEffect: {
         effect: "disable_buildings_by_id",
         buildingIds: ["antenna_array", "drone_lab", "signal_jammers"],
-        recoverOn: "owner_turn_start",
+        recoverOn: "owner_turn_end",
       },
       description: "Antenna Array, Drone Lab, and Signal Jammers disabled until each player's next turn.",
     },
@@ -2192,13 +2192,13 @@ export const EVENTS = [
       // Exception: players who have Doc Brawlins as their leader OR own a Medic Tent
       // are unaffected.
       // IMPLEMENTATION NOTE: for affected players, add a temporary debuff:
-      // { stat: "atk", amount: -2, expiresOn: "owner_turn_start" }
+      // { stat: "atk", amount: -2, expiresOn: "owner_turn_end" }
       type: "all_players",
       perPlayer: {
         effect: "temporary_stat_debuff",
         stat: "atk",
         amount: -2,
-        expiresOn: "owner_turn_start",
+        expiresOn: "owner_turn_end",
         exemptIf: [
           { hasLeader: "doc_brawlins" },
           { hasBuilding: "medic_tent" },
@@ -2236,7 +2236,7 @@ export const INTRIGUE_CARDS = [
       target: "opponent_building",
       effect: "disable_building",
       recoveryCost: { action: 1, scrap: 2 },
-      recoveryOn: "owner_turn_start",
+      recoveryOn: "owner_turn_end",
       description: "Requires 2 Attack. Disable a building of your choice in another player's settlement.",
     },
     flavor: "Most systems these days are fragile, and that's great for us. — Agent Peck",

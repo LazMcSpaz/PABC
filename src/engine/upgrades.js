@@ -133,7 +133,7 @@ export function upgradeBuilding(state, playerId, upgradeUid) {
     const newSlot = { ...upgrade };
     const settlement = p.settlement.map((b) => (b.uid === parent.uid ? newSlot : b));
     const disabled = (p.disabledBuildingUids ?? []).filter((x) => x !== parent.uid);
-    const disabledPool = (p.buildingsDisabledUntilOwnerTurnStart ?? []).filter(
+    const disabledPool = (p.buildingsDisabledUntilOwnerTurnEnd ?? []).filter(
       (x) => x !== parent.uid,
     );
     const abilityUsed = { ...(p.abilityUsedThisTurn ?? {}) };
@@ -145,7 +145,7 @@ export function upgradeBuilding(state, playerId, upgradeUid) {
       actionsRemaining: p.actionsRemaining - 1,
       settlement,
       disabledBuildingUids: disabled,
-      buildingsDisabledUntilOwnerTurnStart: disabledPool,
+      buildingsDisabledUntilOwnerTurnEnd: disabledPool,
       abilityUsedThisTurn: abilityUsed,
       builtThisTurnUids: [...builtThisTurn, upgrade.uid],
     };
