@@ -46,7 +46,7 @@ export default function GameBoard({ state, engine }) {
           {lockUI ? <span style={{ marginLeft: 8 }}>🤖 thinking…</span> : null}
         </span>
       </header>
-      <div style={{ display: "grid", gridTemplateColumns: "minmax(260px, 1fr) 3fr", gap: "1rem" }}>
+      <div className="app-board-grid">
         <div style={{ display: "grid", gap: "0.75rem", alignContent: "start" }}>
           {state.players.map((p) => (
             <PlayerPanel
