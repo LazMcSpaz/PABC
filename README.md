@@ -34,7 +34,7 @@ This project has two phases with a single codebase:
 A fully playable browser-based implementation of the game used to playtest all card effects, balance the economy, and refine rules before anything is locked in. The prototype supports human vs. AI play (powered by the Claude API) and includes a feedback logging system for capturing balance notes and design observations during live sessions.
 
 **Phase 2: Production Mobile App**
-The prototype is intentionally built so that it can evolve into a released mobile app on iOS and Android via [Capacitor](https://capacitorjs.com/). No rewrite required — the game engine is framework-agnostic and the UI is standard React. When Phase 2 begins, Capacitor is added and the project is compiled into a native shell.
+The prototype is intentionally built so that it can evolve into a released mobile app on iOS and Android via [Capacitor](https://capacitorjs.com/). No rewrite required — the game engine is framework-agnostic and the UI is standard React. When Phase 2 begins, Capacitor is added and the project is compiled into a native shell. The Claude-API-powered AI opponents are a **playtesting tool only** and will be replaced with offline scripted/heuristic AI before any production release — the shipped app never calls an external API at runtime.
 
 ---
 
@@ -180,7 +180,7 @@ React re-renders components with new state
 |---|---|---|
 | UI Framework | React (Vite) | Fast iteration, massive ecosystem, directly wrappable by Capacitor |
 | Game Engine | Vanilla JS | No framework dependency — portable to any future target |
-| AI Opponents | Anthropic Claude API (`claude-sonnet-4-20250514`) | Provides genuine strategic reasoning vs. scripted behavior |
+| AI Opponents (Phase 1 only) | Anthropic Claude API (`claude-sonnet-4-20250514`) | Provides genuine strategic reasoning during playtesting. **Replaced before Phase 2 ships** — the production app uses an offline scripted/heuristic AI so the game never depends on a live API. |
 | Native Wrapping | Capacitor (when ready) | Wraps existing React app for iOS/Android with no rewrite |
 | State Management | React useState + custom hook | Sufficient for this complexity; no Redux needed |
 | Persistence | localStorage (feedback log) + JSON export | Simple, works in browser and Capacitor |
@@ -235,6 +235,24 @@ Opens at `http://localhost:5173`. Designed for mobile viewport — use browser D
 ```bash
 npm run build
 ```
+
+The build emits to `dist/` and uses `base: "/PABC/"` so it serves correctly from `https://lazmcspaz.github.io/PABC/` (GitHub Pages). For a different host, override with `npx vite build --base=/`.
+
+### Hosted Playtest Build (GitHub Pages)
+
+For sharing the prototype with playtesters without asking them to clone and `npm install`:
+
+1. **One-time setup in GitHub:**
+   - Repo Settings → Pages → Source: **GitHub Actions**.
+   - Repo Settings → Secrets and variables → Actions → New repository secret:
+     - Name: `VITE_ANTHROPIC_API_KEY`
+     - Value: your Anthropic API key.
+2. **Deploy:**
+   - Push to `main` → auto-deploys via `.github/workflows/pages.yml`.
+   - Or, to deploy a feature branch ad-hoc: Actions tab → "Deploy to GitHub Pages" → Run workflow → pick the branch.
+3. **Playtest URL:** `https://lazmcspaz.github.io/PABC/`
+
+> **Heads up on the API key:** the workflow injects `VITE_ANTHROPIC_API_KEY` at build time, so it ends up in the JS bundle and is extractable by anyone who loads the page. Acceptable for private playtesting *if* you set a hard monthly spend cap in the Anthropic console. Before any public/production release, the AI calls move off the client entirely (see Phase 2 note above).
 
 ### Adding Capacitor (when ready for native)
 
@@ -696,6 +714,7 @@ Good feedback entries are specific. Examples of useful notes:
 - [ ] App Store assets prepared (icon, screenshots, description)
 
 ### Milestone 5: Release
+- [ ] **Replace Claude-API AI with offline scripted/heuristic AI** (release blocker — shipped app must not depend on a live API)
 - [ ] Apple App Store submission
 - [ ] Google Play submission
 - [ ] Multiplayer via network (optional — could ship without)
