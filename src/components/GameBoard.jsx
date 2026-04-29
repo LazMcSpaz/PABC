@@ -38,7 +38,15 @@ export default function GameBoard({ state, engine }) {
 
   return (
     <div style={shellStyle}>
-      <header style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+      <header
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "baseline",
+          flexWrap: "wrap",
+          gap: "0.5rem",
+        }}
+      >
         <strong>Ashland Conquest</strong>
         <span style={{ fontSize: 13, opacity: 0.75 }}>
           Round {state.round} · Age {state.age} · Active:{" "}

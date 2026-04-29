@@ -77,3 +77,12 @@ body {
 body {
   overflow-x: hidden;
 }
+
+/* Long card / ability text — break aggressively so a single long word
+ * (a card name, a URL-like flavor string) can't push a fixed-width
+ * card or modal off the right edge of the screen. */
+.app-board-grid,
+.modal-shell {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
