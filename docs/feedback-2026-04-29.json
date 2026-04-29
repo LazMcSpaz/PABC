@@ -1,0 +1,77 @@
+[
+  {
+    "id": "0657697c-91e3-4908-9320-0505e0cdf58b",
+    "timestamp": "2026-04-24T14:55:55.519Z",
+    "round": 1,
+    "gameState": {
+      "playerVPs": [
+        0,
+        0,
+        0
+      ],
+      "age": 1,
+      "progressionResolved": []
+    },
+    "note": "The unlockable deck taking up a majority of the display is not ideal. Which leader and buildings are currently in my settlement should be very clear from the beginning, and possibly the most important view. Upgrades should only really appear if you have the prerequisite building, and they should appear on the building card to show they are linked."
+  },
+  {
+    "id": "36533100-bf75-4b16-b4be-39e56361eff4",
+    "timestamp": "2026-04-29T12:04:24.409Z",
+    "round": 1,
+    "gameState": {
+      "playerVPs": [
+        0,
+        0,
+        0
+      ],
+      "age": 1,
+      "progressionResolved": []
+    },
+    "note": "Immediate issue is that we introduced a defense score but didn't introduce ways to increase it other than spending scrap during a raid. We need to go back and adjust cards to add attack, defense, or both depending on their context."
+  },
+  {
+    "id": "9306f3a8-d65c-4c80-a657-12dc8560d9fc",
+    "timestamp": "2026-04-29T12:06:58.187Z",
+    "round": 1,
+    "gameState": {
+      "playerVPs": [
+        0,
+        0,
+        0
+      ],
+      "age": 1,
+      "progressionResolved": []
+    },
+    "note": "As far as the UI goes, having a clearer setup of what one can do on their turn. Maybe a few options (build, explore, raid, play intrigue) and you'd see the building row once you click build. I can navigate the menu now because I know how the game works, but a newbie would struggle to understand what is going on or what they can do."
+  },
+  {
+    "id": "e545760b-4402-442c-a8f8-c87956b3cf4e",
+    "timestamp": "2026-04-29T12:08:34.736Z",
+    "round": 1,
+    "gameState": {
+      "playerVPs": [
+        0,
+        0,
+        0
+      ],
+      "age": 1,
+      "progressionResolved": []
+    },
+    "note": "The first player can immediately raid someone else on their first turn, this is very unfair. We need to gate raiding right out of the gate. Maybe defense starts at 3 or something."
+  },
+  {
+    "id": "400fc210-2776-4f4a-a258-d5c5c1942bbe",
+    "timestamp": "2026-04-29T12:10:10.491Z",
+    "round": 1,
+    "gameState": {
+      "playerVPs": [
+        0,
+        0,
+        0
+      ],
+      "age": 1,
+      "progressionResolved": []
+    },
+    "note": "Resources need to be added at the beginning of a turn. Buying a building and immediately getting it's resource effect is not right."
+  }
+]
