@@ -17,12 +17,11 @@ function modalShell(onClose, children) {
     >
       <div
         onClick={(e) => e.stopPropagation()}
+        className="modal-shell"
         style={{
           background: "#222",
           padding: "1rem",
           borderRadius: 6,
-          minWidth: 320,
-          maxWidth: 480,
           color: "#f5f5f5",
         }}
       >

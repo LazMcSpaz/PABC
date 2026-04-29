@@ -47,12 +47,11 @@ function RaidLauncherModal({ attacker, target, onConfirm, onCancel }) {
     >
       <div
         onClick={(e) => e.stopPropagation()}
+        className="modal-shell"
         style={{
           background: "#222",
           padding: "1rem",
           borderRadius: 6,
-          minWidth: 340,
-          maxWidth: 480,
           color: "#f5f5f5",
         }}
       >

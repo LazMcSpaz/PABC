@@ -21,11 +21,11 @@ function PartnerModal({ building, state, activePlayer, onConfirm, onCancel }) {
     >
       <div
         onClick={(e) => e.stopPropagation()}
+        className="modal-shell modal-shell--narrow"
         style={{
           background: "#222",
           padding: "1rem",
           borderRadius: 6,
-          minWidth: 300,
           color: "#f5f5f5",
         }}
       >

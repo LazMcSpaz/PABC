@@ -39,11 +39,21 @@ body {
 
 /* Shared modal container: width adapts down to phone widths and the
  * inner content scrolls if it would overflow vertically. Components
- * still set their own background / padding via inline styles. */
+ * still set their own background / padding via inline styles. The
+ * .modal-shell--narrow / --wide variants override the cap for modals
+ * that genuinely want different desktop widths. */
 .modal-shell {
-  width: min(420px, 95vw);
+  width: min(460px, 95vw);
   max-height: 90vh;
   overflow-y: auto;
+}
+
+.modal-shell--narrow {
+  width: min(360px, 95vw);
+}
+
+.modal-shell--wide {
+  width: min(540px, 95vw);
 }
 
 /* Phone touch targets — most inline buttons are 11–13px font with
