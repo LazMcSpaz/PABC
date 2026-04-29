@@ -64,6 +64,8 @@ function reasonText(reason) {
       return "disabled";
     case "used-this-turn":
       return "used this turn";
+    case "built-this-turn":
+      return "just built — wait until next turn";
     case "actions":
       return "needs action";
     case "scrap":

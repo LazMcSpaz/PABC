@@ -73,6 +73,10 @@ export function build(state, playerId, buildingUid) {
       scrap: p.scrap - totalCost,
       actionsRemaining: p.actionsRemaining - 1,
       settlement: [...p.settlement, card],
+      // Summoning sickness: activated abilities on a freshly-built building
+      // are gated until the owner's next turn. Cleared in endTurn() when this
+      // player's turn comes back around.
+      builtThisTurnUids: [...(p.builtThisTurnUids ?? []), card.uid],
       flags,
     };
   });
@@ -759,6 +763,7 @@ export function endTurn(state) {
       skipExploreNextTurn: false,
       flags,
       abilityUsedThisTurn: {},
+      builtThisTurnUids: [],
       leader: leaderRecovered && p.leader ? { ...p.leader, disabled: false } : p.leader,
       leaderDisabledUntilOwnerTurnStart: false,
     };
