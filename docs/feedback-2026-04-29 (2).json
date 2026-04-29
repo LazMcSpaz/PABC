@@ -1,0 +1,92 @@
+[
+  {
+    "id": "5f90c5cf-165d-4b1c-af92-945bb0a3c0b9",
+    "timestamp": "2026-04-29T17:32:51.388Z",
+    "round": 2,
+    "gameState": {
+      "playerVPs": [
+        0,
+        0,
+        0
+      ],
+      "age": 1,
+      "progressionResolved": []
+    },
+    "note": "Looks like enemy buildings are not updated on their card when purchased."
+  },
+  {
+    "id": "105aceb8-250d-4d25-8853-059823814657",
+    "timestamp": "2026-04-29T17:36:28.015Z",
+    "round": 3,
+    "gameState": {
+      "playerVPs": [
+        4,
+        0,
+        0
+      ],
+      "age": 1,
+      "progressionResolved": []
+    },
+    "note": "Looks like the Scrap Yard should be producing +2 scrap per turn, but that's not being added to my total on turn start. Ideally, this card offers +1 scrap on it's own, then +1 scrap per scrap producing building (which includes the Scrap Yard itself)"
+  },
+  {
+    "id": "c984f2af-3824-42ec-a6bf-32dc1793a80b",
+    "timestamp": "2026-04-29T17:39:55.783Z",
+    "round": 3,
+    "gameState": {
+      "playerVPs": [
+        11,
+        0,
+        0
+      ],
+      "age": 1,
+      "progressionResolved": []
+    },
+    "note": "Looks like Rebuild Vanguard Armory did not add it to my settlement (could be because it was full already). Also, the tooltip was hard to understand. Let's rework exploration to make it very clear what the cost is and what the reward is."
+  },
+  {
+    "id": "b151293b-8f99-4bf6-88f0-7f4410e66bdb",
+    "timestamp": "2026-04-29T17:40:54.075Z",
+    "round": 3,
+    "gameState": {
+      "playerVPs": [
+        13,
+        0,
+        0
+      ],
+      "age": 1,
+      "progressionResolved": []
+    },
+    "note": "Scavenge Ruins exploration card did not prompt me to pay up to 3 times the cost for up to 3 times the reward"
+  },
+  {
+    "id": "bebf3c94-1ed3-4262-b796-c52a1f1160f3",
+    "timestamp": "2026-04-29T17:43:03.103Z",
+    "round": 4,
+    "gameState": {
+      "playerVPs": [
+        13,
+        0,
+        0
+      ],
+      "age": 1,
+      "progressionResolved": []
+    },
+    "note": "Not sure, but it looks like, after a raid, the leader who was disabled is re-enabled automatically at the START of the enemy turn. It should be at the end."
+  },
+  {
+    "id": "682bbd35-ebb2-4d28-945f-cabeac9f421a",
+    "timestamp": "2026-04-29T17:46:02.001Z",
+    "round": 4,
+    "gameState": {
+      "playerVPs": [
+        18,
+        0,
+        0
+      ],
+      "age": 1,
+      "progressionResolved": []
+    },
+    "note": "Let's create a way to export the game log so that we can refine balancing by seeing the whole picture. That means that logs need to be a bit more robust in order to actually know what's happening. Maybe a snapshot of every player's settlement, resources, VP, and what happened on their turn. I can already see the raiding snowball after a few turns"
+  }
+]
