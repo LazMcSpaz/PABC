@@ -47,6 +47,33 @@ export default function FeedbackPanel({ state }) {
     URL.revokeObjectURL(url);
   };
 
+  const exportGameLog = () => {
+    const payload = {
+      exportedAt: new Date().toISOString(),
+      round: state?.round ?? 0,
+      age: state?.age ?? 1,
+      players: (state?.players ?? []).map((p) => ({
+        id: p.id,
+        name: p.name,
+        kind: p.kind,
+        personalityId: p.personalityId ?? null,
+      })),
+      progressionResolved: state?.progressionResolved ?? [],
+      log: state?.log ?? [],
+      aiLog: state?.aiLog ?? [],
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+    a.href = url;
+    a.download = `gamelog-${stamp}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const logCount = state?.log?.length ?? 0;
+
   return (
     <section>
       <h3 style={{ margin: "0 0 0.5rem" }}>Feedback ({entries.length})</h3>
@@ -57,10 +84,13 @@ export default function FeedbackPanel({ state }) {
         style={{ width: "100%" }}
         placeholder="Balance note, surprising moment, observed issue..."
       />
-      <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
+      <div style={{ display: "flex", gap: 6, marginTop: 4, flexWrap: "wrap" }}>
         <button onClick={save}>Save note</button>
         <button onClick={exportJson} disabled={entries.length === 0}>
-          Export JSON
+          Export Notes
+        </button>
+        <button onClick={exportGameLog} disabled={logCount === 0}>
+          Export Game Log ({logCount})
         </button>
       </div>
     </section>

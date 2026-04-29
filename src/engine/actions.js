@@ -40,6 +40,30 @@ function log(state, entry) {
   return { ...state, log: [...state.log, { round: state.round, ...entry }] };
 }
 
+// Snapshot for the per-turn log entry. Captures derived scores and
+// id-only references — id strings are stable across runs and play well
+// with diff/spreadsheet tooling for balance analysis.
+function snapshotPlayers(state) {
+  return state.players.map((p) => ({
+    id: p.id,
+    name: p.name,
+    scrap: p.scrap,
+    vp: calcVP(p),
+    atk: calcAttack(p),
+    def: calcDefense(p),
+    actions: p.actionsRemaining,
+    settlement: p.settlement.map((b) => b.id),
+    leader: p.leader?.id ?? null,
+    leaderDisabled: !!p.leader?.disabled,
+    disabledBuildings: [...(p.disabledBuildingUids ?? [])],
+    intrigueHand: p.intrigueHand.map((c) => c.id),
+    bonusAtk: p.bonusAtk ?? 0,
+    bonusDef: p.bonusDef ?? 0,
+    boosts: { ...p.boosts },
+    earnedVP: p.earnedVP ?? 0,
+  }));
+}
+
 function refreshBuildingRow(state, removedIndex) {
   const nextRow = [...state.buildingRow];
   if (removedIndex != null) nextRow.splice(removedIndex, 1);
@@ -988,6 +1012,18 @@ export function endTurn(state) {
     next = clearRoundEndFlags(next);
     next = refreshBuildingRow(next, 0);
   }
+
+  // Append a per-turn snapshot for offline balance analysis. Captures the
+  // full game state at the moment the active player's turn ended (after
+  // disable-recovery and the next player's resource collection have
+  // applied), keyed by the OUTGOING player and round. Sized to be useful
+  // without bloating the log — building/leader/intrigue refs are id-only.
+  const turnEndedFor = state.activePlayerId;
+  next = log(next, {
+    type: "turn_end",
+    playerId: turnEndedFor,
+    snapshot: snapshotPlayers(next),
+  });
 
   next = { ...next, activePlayerId: nextPlayer.id };
 
