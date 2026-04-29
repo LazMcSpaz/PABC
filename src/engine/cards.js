@@ -78,7 +78,7 @@ export const BUILDINGS = [
     atkCost: 0,
     passiveScrap: 0,
     passiveAtk: 1,
-    passDef: 0,
+    passDef: 1,
     passActions: 0,
     vp: 2,
     ability: null,
@@ -179,7 +179,7 @@ export const BUILDINGS = [
     atkCost: 0,
     passiveScrap: 0,
     passiveAtk: 0,
-    passDef: 0,
+    passDef: 1,
     passActions: 1,
     vp: 3,
     ability: {
@@ -420,7 +420,7 @@ export const BUILDINGS = [
     atkCost: 1,
     passiveScrap: 0,
     passiveAtk: 0,
-    passDef: 0,
+    passDef: 1,
     passActions: 0,
     vp: 3,
     ability: {
@@ -759,8 +759,8 @@ export const LEADERS = [
     scrapCost: 2,
     atkCost: 2,
     passiveScrap: 0,
-    passiveAtk: 1,
-    passDef: 0,
+    passiveAtk: 0,
+    passDef: 2,
     passActions: 0,
     vp: 3,
     ability: {

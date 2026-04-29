@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { calcAttack, calcDefense } from "../engine/calculations.js";
-import { RAID_TYPES } from "../engine/actions.js";
+import { RAID_TYPES, RAID_UNLOCK_ROUND } from "../engine/actions.js";
 
 const RAID_TYPE_LIST = [RAID_TYPES.DESTROY, RAID_TYPES.STEAL, RAID_TYPES.DISABLE];
 
@@ -175,10 +175,16 @@ export default function RaidView({ state, onRaid }) {
 
   const [selectedTarget, setSelectedTarget] = useState(null);
   const raidsBlocked = state.globalFlags?.raidsBlocked;
+  const raidsLocked = state.round < RAID_UNLOCK_ROUND;
 
   return (
     <section>
       <h3 style={{ margin: "0 0 0.5rem" }}>Raid (⚔ {myAtk})</h3>
+      {raidsLocked ? (
+        <div style={{ fontSize: 11, color: "#e88", marginBottom: 4 }}>
+          🔒 Raids unlock on Round {RAID_UNLOCK_ROUND}
+        </div>
+      ) : null}
       {raidsBlocked ? (
         <div style={{ fontSize: 11, color: "#e88", marginBottom: 4 }}>
           🛑 Raids blocked this round (Vanguard Remnant Patrol)
@@ -192,13 +198,15 @@ export default function RaidView({ state, onRaid }) {
             <button
               key={t.id}
               onClick={() => setSelectedTarget(t)}
-              disabled={active.actionsRemaining < 1 || alreadyRaided || raidsBlocked}
+              disabled={active.actionsRemaining < 1 || alreadyRaided || raidsBlocked || raidsLocked}
               title={
-                alreadyRaided
-                  ? "Already raided this round"
-                  : raidsBlocked
-                    ? "Raids blocked this round"
-                    : ""
+                raidsLocked
+                  ? `Raids unlock on Round ${RAID_UNLOCK_ROUND}`
+                  : alreadyRaided
+                    ? "Already raided this round"
+                    : raidsBlocked
+                      ? "Raids blocked this round"
+                      : ""
               }
             >
               Raid {t.name} (🛡{theirDef})

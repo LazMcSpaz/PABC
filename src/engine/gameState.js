@@ -39,6 +39,7 @@ export function makePlayer({ id, name, kind = "human", personalityId = null, col
     leaderDisabledUntilOwnerTurnStart: false,
     raidedThisRound: [],
     earnedVP: 0,
+    builtThisTurnUids: [],
   };
 }
 

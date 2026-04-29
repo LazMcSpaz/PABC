@@ -9,6 +9,8 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { abilityMeta, activateAbility, canActivate } from "./abilities.js";
 import * as actions from "./actions.js";
+
+const { RAID_UNLOCK_ROUND } = actions;
 import { calcActions, calcAttack, calcDefense, calcPassiveScrap, calcVP } from "./calculations.js";
 import { INTRIGUE_EFFECTS, playIntrigue } from "./intrigue.js";
 import { swapLeader } from "./narrative.js";
@@ -146,6 +148,8 @@ export function serializeForAI(state, playerId) {
   return {
     round: state.round,
     age: state.age,
+    raidsLocked: state.round < RAID_UNLOCK_ROUND,
+    raidUnlockRound: RAID_UNLOCK_ROUND,
     progressionResolved: state.progressionResolved,
     me: summarizePlayer(me, { includeHand: true }),
     opponents,
@@ -229,7 +233,7 @@ export async function getAIDecision(state, playerId, personality) {
     "  { type: \"build\", buildingId: <id from buildingRow> }",
     "  { type: \"explore\" }  // blocked if globalFlags.explorationBlocked",
     "  { type: \"resolve\", cardId: <id from explorationInPlay where canResolve=true> }",
-    "  { type: \"raid\", targetId: <opponent id>, raidType: \"Destroy Building\"|\"Steal Intrigue\"|\"Disable Leader\", buildingId?: <target building id in opponent.settlement, required if raidType=\"Destroy Building\"> }  // blocked if globalFlags.raidsBlocked",
+    "  { type: \"raid\", targetId: <opponent id>, raidType: \"Destroy Building\"|\"Steal Intrigue\"|\"Disable Leader\", buildingId?: <target building id in opponent.settlement, required if raidType=\"Destroy Building\"> }  // blocked if globalFlags.raidsBlocked or raidsLocked (round < raidUnlockRound)",
     "  { type: \"boost\", stat: \"atk\"|\"def\" }",
     "  { type: \"play_intrigue\", cardName: <name>, targetId?: <id> }",
     "  { type: \"activate\", buildingId: <id in me.settlement where activated=true>, partnerId?: <opponent id for Trading Post> }",

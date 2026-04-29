@@ -234,6 +234,8 @@ export function canActivate(state, playerId, building) {
     return { ok: false, reason: "disabled" };
   if (!player.settlement.some((b) => b.uid === building.uid))
     return { ok: false, reason: "not-owned" };
+  if ((player.builtThisTurnUids ?? []).includes(building.uid))
+    return { ok: false, reason: "built-this-turn" };
   if (handler.oncePerTurn && player.abilityUsedThisTurn?.[building.uid])
     return { ok: false, reason: "used-this-turn" };
   if (player.actionsRemaining < handler.actionCost) return { ok: false, reason: "actions" };

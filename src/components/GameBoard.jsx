@@ -1,16 +1,17 @@
-import { useState } from "react";
-import AbilitiesView from "./AbilitiesView.jsx";
+import { useEffect, useState } from "react";
 import AILog from "./AILog.jsx";
-import UpgradesView from "./UpgradesView.jsx";
-import PlayerPanel from "./PlayerPanel.jsx";
+import ActionModePicker from "./ActionModePicker.jsx";
 import BuildingRow from "./BuildingRow.jsx";
+import CardModal from "./CardModal.jsx";
 import ExploreView from "./ExploreView.jsx";
+import FeedbackPanel from "./FeedbackPanel.jsx";
 import IntrigueView from "./IntrigueView.jsx";
-import RaidView from "./RaidView.jsx";
+import MySettlementPanel from "./MySettlementPanel.jsx";
 import NarrativeView from "./NarrativeView.jsx";
 import NotificationFeed from "./NotificationFeed.jsx";
-import FeedbackPanel from "./FeedbackPanel.jsx";
-import CardModal from "./CardModal.jsx";
+import PlayerPanel from "./PlayerPanel.jsx";
+import RaidView from "./RaidView.jsx";
+import UpgradesView from "./UpgradesView.jsx";
 
 const shellStyle = {
   minHeight: "100vh",
@@ -24,9 +25,16 @@ const shellStyle = {
 
 export default function GameBoard({ state, engine }) {
   const [inspectedCard, setInspectedCard] = useState(null);
+  const [actionMode, setActionMode] = useState(null);
   const active = state.players.find((p) => p.id === state.activePlayerId);
   const aiThinking = engine.aiThinking;
   const lockUI = active?.kind === "ai" || aiThinking;
+
+  // Reset to no-mode when the active player changes — every turn starts on
+  // the welcome state so the player has to pick an action consciously.
+  useEffect(() => {
+    setActionMode(null);
+  }, [state.activePlayerId]);
 
   return (
     <div style={shellStyle}>
@@ -70,42 +78,59 @@ export default function GameBoard({ state, engine }) {
             opacity: lockUI ? 0.6 : 1,
           }}
         >
-          <BuildingRow
-            row={state.buildingRow}
-            activePlayer={active}
-            onBuild={(uid) => engine.build(state.activePlayerId, uid)}
-            onInspect={setInspectedCard}
-          />
-          <AbilitiesView
+          <MySettlementPanel
             state={state}
             activePlayer={active}
+            onInspect={setInspectedCard}
             onActivate={(uid, opts) => engine.activateAbility(state.activePlayerId, uid, opts)}
+            onUpgrade={(uid) => engine.upgrade(state.activePlayerId, uid)}
           />
+          <ActionModePicker
+            state={state}
+            activePlayer={active}
+            mode={actionMode}
+            onModeChange={setActionMode}
+          />
+          {actionMode === "build" ? (
+            <BuildingRow
+              row={state.buildingRow}
+              activePlayer={active}
+              onBuild={(uid) => engine.build(state.activePlayerId, uid)}
+              onInspect={setInspectedCard}
+            />
+          ) : null}
+          {actionMode === "explore" ? (
+            <ExploreView
+              state={state}
+              activePlayer={active}
+              onExplore={() => engine.explore(state.activePlayerId)}
+              onResolve={(uid) => engine.resolveCard(state.activePlayerId, uid)}
+              onInspect={setInspectedCard}
+            />
+          ) : null}
+          {actionMode === "raid" ? (
+            <RaidView
+              state={state}
+              onRaid={(targetId, raidType, extras) =>
+                engine.raid(state.activePlayerId, targetId, raidType, extras)
+              }
+            />
+          ) : null}
+          {actionMode === "intrigue" ? (
+            <IntrigueView
+              state={state}
+              activePlayer={active}
+              onInspect={setInspectedCard}
+              onPlay={(cardUid, opts) =>
+                engine.playIntrigue(state.activePlayerId, cardUid, opts)
+              }
+            />
+          ) : null}
           <UpgradesView
             state={state}
             activePlayer={active}
             onInspect={setInspectedCard}
-            onUpgrade={(uid) => engine.upgrade(state.activePlayerId, uid)}
             onPurchaseUnique={(uid) => engine.purchaseUnique(state.activePlayerId, uid)}
-          />
-          <ExploreView
-            state={state}
-            activePlayer={active}
-            onExplore={() => engine.explore(state.activePlayerId)}
-            onResolve={(uid) => engine.resolveCard(state.activePlayerId, uid)}
-            onInspect={setInspectedCard}
-          />
-          <IntrigueView
-            state={state}
-            activePlayer={active}
-            onInspect={setInspectedCard}
-            onPlay={(cardUid, opts) => engine.playIntrigue(state.activePlayerId, cardUid, opts)}
-          />
-          <RaidView
-            state={state}
-            onRaid={(targetId, raidType, extras) =>
-              engine.raid(state.activePlayerId, targetId, raidType, extras)
-            }
           />
           <NarrativeView state={state} />
           <NotificationFeed state={state} />

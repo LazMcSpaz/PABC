@@ -96,6 +96,7 @@ export function purchaseUniqueBuilding(state, playerId, uid) {
     scrap: p.scrap - (card.scrapCost ?? 0),
     actionsRemaining: p.actionsRemaining - 1,
     settlement: [...p.settlement, { ...card }],
+    builtThisTurnUids: [...(p.builtThisTurnUids ?? []), card.uid],
   }));
   next = { ...next, unlockableDeck: next.unlockableDeck.filter((u) => u.uid !== uid) };
   next = logEntry(next, { type: "build_unique", playerId, cardId: card.id });
@@ -137,6 +138,7 @@ export function upgradeBuilding(state, playerId, upgradeUid) {
     );
     const abilityUsed = { ...(p.abilityUsedThisTurn ?? {}) };
     delete abilityUsed[parent.uid];
+    const builtThisTurn = (p.builtThisTurnUids ?? []).filter((x) => x !== parent.uid);
     return {
       ...p,
       scrap: p.scrap - (upgrade.scrapCost ?? 0),
@@ -145,6 +147,7 @@ export function upgradeBuilding(state, playerId, upgradeUid) {
       disabledBuildingUids: disabled,
       buildingsDisabledUntilOwnerTurnStart: disabledPool,
       abilityUsedThisTurn: abilityUsed,
+      builtThisTurnUids: [...builtThisTurn, upgrade.uid],
     };
   });
 
