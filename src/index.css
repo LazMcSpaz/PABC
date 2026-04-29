@@ -1,0 +1,88 @@
+/* Mobile-first base styles. Pairs with the inline-style components —
+ * use this file for things media queries handle better than JS:
+ * responsive layout, touch targets, modal sizing. */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  min-height: 100%;
+  background: #1a1a1a;
+}
+
+body {
+  -webkit-text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* GameBoard's two-column layout collapses to a single column on phones,
+ * so PlayerPanels stack on top of the action area instead of competing
+ * for narrow screen width. */
+.app-board-grid {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) 3fr;
+  gap: 1rem;
+}
+
+@media (max-width: 720px) {
+  .app-board-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Shared modal container: width adapts down to phone widths and the
+ * inner content scrolls if it would overflow vertically. Components
+ * still set their own background / padding via inline styles. The
+ * .modal-shell--narrow / --wide variants override the cap for modals
+ * that genuinely want different desktop widths. */
+.modal-shell {
+  width: min(460px, 95vw);
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+.modal-shell--narrow {
+  width: min(360px, 95vw);
+}
+
+.modal-shell--wide {
+  width: min(540px, 95vw);
+}
+
+/* Phone touch targets — most inline buttons are 11–13px font with
+ * 2–4px padding, well under iOS's 44pt guideline. Bump the floor on
+ * narrow viewports without disturbing desktop density. */
+@media (max-width: 720px) {
+  button {
+    min-height: 36px;
+    padding: 6px 10px;
+  }
+  /* Inputs that share button-like sizing (e.g., select dropdowns). */
+  select,
+  input[type="text"],
+  input[type="number"] {
+    min-height: 36px;
+  }
+}
+
+/* Hide horizontal page-level overflow caused by absolutely-positioned
+ * notification toasts during slide-in animation. */
+body {
+  overflow-x: hidden;
+}
+
+/* Long card / ability text — break aggressively so a single long word
+ * (a card name, a URL-like flavor string) can't push a fixed-width
+ * card or modal off the right edge of the screen. */
+.app-board-grid,
+.modal-shell {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}

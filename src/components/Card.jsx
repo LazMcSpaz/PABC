@@ -44,16 +44,34 @@ export default function Card({ card, onClick, disabled, action }) {
         {card.age ? ` · Age ${card.age}` : ""}
       </div>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", fontSize: 12 }}>{stats}</div>
-      {(card.reqAtk || card.reqDef || card.scrapReward || card.atkReward || card.defReward) ? (
-        <div style={{ fontSize: 11, opacity: 0.75 }}>
-          {card.reqAtk ? `req ⚔${card.reqAtk} ` : ""}
-          {card.reqDef ? `req 🛡${card.reqDef} ` : ""}
-          {card.scrapReward ? `+🔩${card.scrapReward} ` : ""}
-          {card.atkReward ? `+⚔${card.atkReward} ` : ""}
-          {card.defReward ? `+🛡${card.defReward} ` : ""}
-          {card.actionReward ? `+⚡${card.actionReward} ` : ""}
-        </div>
-      ) : null}
+      {(() => {
+        const costBits = [];
+        if (card.scrapCost) costBits.push(`${card.scrapCost}🔩`);
+        if (card.reqAtk) costBits.push(`req ⚔${card.reqAtk}`);
+        if (card.reqDef) costBits.push(`req 🛡${card.reqDef}`);
+        if (card.atkCost && !card.reqAtk) costBits.push(`req ⚔${card.atkCost}`);
+        const rewardBits = [];
+        if (card.scrapReward) rewardBits.push(`+${card.scrapReward}🔩`);
+        if (card.atkReward) rewardBits.push(`+${card.atkReward}⚔`);
+        if (card.defReward) rewardBits.push(`+${card.defReward}🛡`);
+        if (card.actionReward) rewardBits.push(`+${card.actionReward}⚡`);
+        if (rewardBits.length === 0 && card.vp) rewardBits.push(`+${card.vp}★`);
+        if (costBits.length === 0 && rewardBits.length === 0) return null;
+        return (
+          <div style={{ fontSize: 11, opacity: 0.85, lineHeight: 1.4 }}>
+            {costBits.length > 0 ? (
+              <div>
+                <strong style={{ opacity: 0.9 }}>Cost:</strong> {costBits.join(" · ")}
+              </div>
+            ) : null}
+            {rewardBits.length > 0 ? (
+              <div>
+                <strong style={{ opacity: 0.9 }}>Reward:</strong> {rewardBits.join(" · ")}
+              </div>
+            ) : null}
+          </div>
+        );
+      })()}
       {card.ability?.description ? (
         <div style={{ fontSize: 11, opacity: 0.85, fontStyle: "italic" }}>
           {card.ability.description}

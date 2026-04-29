@@ -38,7 +38,15 @@ export default function GameBoard({ state, engine }) {
 
   return (
     <div style={shellStyle}>
-      <header style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+      <header
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "baseline",
+          flexWrap: "wrap",
+          gap: "0.5rem",
+        }}
+      >
         <strong>Ashland Conquest</strong>
         <span style={{ fontSize: 13, opacity: 0.75 }}>
           Round {state.round} · Age {state.age} · Active:{" "}
@@ -46,7 +54,7 @@ export default function GameBoard({ state, engine }) {
           {lockUI ? <span style={{ marginLeft: 8 }}>🤖 thinking…</span> : null}
         </span>
       </header>
-      <div style={{ display: "grid", gridTemplateColumns: "minmax(260px, 1fr) 3fr", gap: "1rem" }}>
+      <div className="app-board-grid">
         <div style={{ display: "grid", gap: "0.75rem", alignContent: "start" }}>
           {state.players.map((p) => (
             <PlayerPanel

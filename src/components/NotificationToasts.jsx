@@ -106,7 +106,7 @@ export default function NotificationToasts({ state }) {
         display: "flex",
         flexDirection: "column",
         gap: 8,
-        maxWidth: 340,
+        maxWidth: "min(340px, calc(100vw - 24px))",
         pointerEvents: "none",
       }}
     >

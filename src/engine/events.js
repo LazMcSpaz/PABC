@@ -155,7 +155,7 @@ export const EVENT_EFFECTS = {
           ...p,
           temporaryDebuffs: [
             ...(p.temporaryDebuffs ?? []),
-            { stat: "atk", amount: -2, expiresOn: "owner_turn_start" },
+            { stat: "atk", amount: -2, expiresOn: "owner_turn_end" },
           ],
         },
         impact: impact(p.id, "−2 ⚔ until next turn", { atk: -2 }),
@@ -250,8 +250,8 @@ export const EVENT_EFFECTS = {
           disabledBuildingUids: [
             ...new Set([...(p.disabledBuildingUids ?? []), ...toDisable]),
           ],
-          buildingsDisabledUntilOwnerTurnStart: [
-            ...new Set([...(p.buildingsDisabledUntilOwnerTurnStart ?? []), ...toDisable]),
+          buildingsDisabledUntilOwnerTurnEnd: [
+            ...new Set([...(p.buildingsDisabledUntilOwnerTurnEnd ?? []), ...toDisable]),
           ],
         },
         impact: impact(p.id, `disabled ${toDisable.length} building(s) until next turn`),

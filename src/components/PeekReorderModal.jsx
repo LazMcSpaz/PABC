@@ -55,12 +55,11 @@ export default function PeekReorderModal({ state, onResolve }) {
       }}
     >
       <div
+        className="modal-shell modal-shell--wide"
         style={{
           background: "#222",
           padding: "1rem",
           borderRadius: 6,
-          minWidth: 360,
-          maxWidth: 540,
           color: "#f5f5f5",
           border: `1px solid ${owner?.color ?? "#666"}`,
           boxShadow: "0 8px 24px rgba(0,0,0,0.6)",

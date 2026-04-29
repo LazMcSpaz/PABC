@@ -24,6 +24,21 @@ function updatePlayer(state, playerId, updater) {
   };
 }
 
+// Buildings whose `ability.discardIfDisabled` is true (Rebuild Vanguard
+// Armory) are removed from settlement entirely instead of toggling
+// disabled state. Splits a uid list against a settlement and returns
+// { toDisable, toDiscard }.
+function splitDisableTargets(player, uids) {
+  const toDisable = [];
+  const toDiscard = [];
+  for (const uid of uids) {
+    const b = (player.settlement ?? []).find((x) => x.uid === uid);
+    if (b?.ability?.discardIfDisabled) toDiscard.push(uid);
+    else if (b) toDisable.push(uid);
+  }
+  return { toDisable, toDiscard };
+}
+
 function countBuildingsWith(player, field) {
   return (player.settlement ?? []).filter((b) => (b[field] ?? 0) > 0).length;
 }
@@ -91,7 +106,7 @@ function forcedMarch(state, playerId, card) {
     actionsRemaining: p.actionsRemaining + 2,
     temporaryDebuffs: [
       ...(p.temporaryDebuffs ?? []),
-      { stat: "atk", amount: -2, expiresOn: "owner_turn_start" },
+      { stat: "atk", amount: -2, expiresOn: "owner_turn_end" },
     ],
   }));
   next = logEntry(next, { type: "intrigue", cardId: card.id, playerId });
@@ -164,7 +179,7 @@ function infectedHardware(state, playerId, card, opts) {
     ...p,
     temporaryDebuffs: [
       ...(p.temporaryDebuffs ?? []),
-      { stat: "def", amount: -4, expiresOn: "owner_turn_start" },
+      { stat: "def", amount: -4, expiresOn: "owner_turn_end" },
     ],
   }));
   next = logEntry(next, { type: "intrigue", cardId: card.id, playerId, targetId });
@@ -183,20 +198,28 @@ function blackout(state, playerId, card, opts) {
   const targetId = opts.targetId;
   const me = state.players.find((p) => p.id === playerId);
   const target = state.players.find((p) => p.id === targetId);
-  const uids = target.settlement.map((b) => b.uid);
+  const allUids = target.settlement.map((b) => b.uid);
+  const { toDisable, toDiscard } = splitDisableTargets(target, allUids);
   let next = updatePlayer(state, targetId, (p) => ({
     ...p,
-    disabledBuildingUids: [...new Set([...(p.disabledBuildingUids ?? []), ...uids])],
-    buildingsDisabledUntilOwnerTurnStart: [
-      ...new Set([...(p.buildingsDisabledUntilOwnerTurnStart ?? []), ...uids]),
+    settlement: (p.settlement ?? []).filter((b) => !toDiscard.includes(b.uid)),
+    disabledBuildingUids: [
+      ...new Set([...(p.disabledBuildingUids ?? []), ...toDisable]),
+    ],
+    buildingsDisabledUntilOwnerTurnEnd: [
+      ...new Set([...(p.buildingsDisabledUntilOwnerTurnEnd ?? []), ...toDisable]),
     ],
   }));
   next = logEntry(next, { type: "intrigue", cardId: card.id, playerId, targetId });
+  const summary = [
+    toDisable.length ? `${toDisable.length} building(s) disabled until their next turn` : null,
+    toDiscard.length ? `${toDiscard.length} building(s) discarded (no recovery)` : null,
+  ].filter(Boolean).join(" · ");
   return notify(next, {
     kind: NotifKind.INTRIGUE,
     title: `${me.name} played Blackout → ${target.name}`,
     message: card.ability.description,
-    impacts: [impact(targetId, `${uids.length} building(s) disabled until their next turn`)],
+    impacts: [impact(targetId, summary || "no effect")],
     sourceCardId: card.id,
     sourcePlayerId: playerId,
     severity: "alert",
@@ -308,19 +331,39 @@ function sabotage(state, playerId, card, opts) {
   const target = state.players.find((p) => p.id === targetId);
   const building = target.settlement.find((b) => b.uid === buildingUid);
   if (!building) return state;
-  let next = updatePlayer(state, targetId, (p) => ({
-    ...p,
-    disabledBuildingUids: [...new Set([...(p.disabledBuildingUids ?? []), buildingUid])],
-    buildingsDisabledUntilOwnerTurnStart: [
-      ...new Set([...(p.buildingsDisabledUntilOwnerTurnStart ?? []), buildingUid]),
-    ],
-  }));
+  const discardInstead = !!building.ability?.discardIfDisabled;
+  let next = updatePlayer(state, targetId, (p) =>
+    discardInstead
+      ? {
+          ...p,
+          settlement: (p.settlement ?? []).filter((b) => b.uid !== buildingUid),
+        }
+      : {
+          ...p,
+          disabledBuildingUids: [
+            ...new Set([...(p.disabledBuildingUids ?? []), buildingUid]),
+          ],
+          buildingsDisabledUntilOwnerTurnEnd: [
+            ...new Set([
+              ...(p.buildingsDisabledUntilOwnerTurnEnd ?? []),
+              buildingUid,
+            ]),
+          ],
+        },
+  );
   next = logEntry(next, { type: "intrigue", cardId: card.id, playerId, targetId, buildingId: building.id });
   return notify(next, {
     kind: NotifKind.INTRIGUE,
     title: `${me.name} played Sabotage → ${target.name}'s ${building.name}`,
     message: card.ability.description,
-    impacts: [impact(targetId, `${building.name} disabled until next turn`)],
+    impacts: [
+      impact(
+        targetId,
+        discardInstead
+          ? `${building.name} discarded (no recovery)`
+          : `${building.name} disabled until next turn`,
+      ),
+    ],
     sourceCardId: card.id,
     sourcePlayerId: playerId,
     severity: "alert",
@@ -475,7 +518,7 @@ export function fireRaidReactive(state, attackerId, defenderId) {
 
 // Opponent successfully resolved a Challenge. vulture steals ALL rewards;
 // salvage_rights claims half the Scrap reward.
-export function fireChallengeResolveReactive(state, resolverId, card) {
+export function fireChallengeResolveReactive(state, resolverId, card, repeats = 1) {
   const match = findHolder(state, ["vulture", "salvage_rights"], resolverId);
   if (!match) return { state };
   const { holderId, card: intrigue } = match;
@@ -497,7 +540,9 @@ export function fireChallengeResolveReactive(state, resolverId, card) {
   }
 
   // salvage_rights: holder claims half scrap reward; resolver still gets the other half + VP.
-  const half = Math.floor((card.scrapReward ?? 0) / 2);
+  // Multi-resolved challenges scale the half by `repeats` so the holder's
+  // share follows the actual reward yield.
+  const half = Math.floor(((card.scrapReward ?? 0) * repeats) / 2);
   let next = consumeCard(state, holderId, intrigue.uid);
   next = notify(next, {
     kind: NotifKind.INTRIGUE,

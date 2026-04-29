@@ -450,7 +450,7 @@ export function swapLeader(state, playerId, leaderId) {
       ...p.availableLeaders.filter((l) => l.id !== leaderId),
       ...(currentLeader ? [{ ...currentLeader, disabled: false }] : []),
     ],
-    leaderDisabledUntilOwnerTurnStart: false,
+    leaderDisabledUntilOwnerTurnEnd: false,
   }));
   return notify(next, {
     kind: NotifKind.INFO,

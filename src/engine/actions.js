@@ -40,6 +40,30 @@ function log(state, entry) {
   return { ...state, log: [...state.log, { round: state.round, ...entry }] };
 }
 
+// Snapshot for the per-turn log entry. Captures derived scores and
+// id-only references — id strings are stable across runs and play well
+// with diff/spreadsheet tooling for balance analysis.
+function snapshotPlayers(state) {
+  return state.players.map((p) => ({
+    id: p.id,
+    name: p.name,
+    scrap: p.scrap,
+    vp: calcVP(p),
+    atk: calcAttack(p),
+    def: calcDefense(p),
+    actions: p.actionsRemaining,
+    settlement: p.settlement.map((b) => b.id),
+    leader: p.leader?.id ?? null,
+    leaderDisabled: !!p.leader?.disabled,
+    disabledBuildings: [...(p.disabledBuildingUids ?? [])],
+    intrigueHand: p.intrigueHand.map((c) => c.id),
+    bonusAtk: p.bonusAtk ?? 0,
+    bonusDef: p.bonusDef ?? 0,
+    boosts: { ...p.boosts },
+    earnedVP: p.earnedVP ?? 0,
+  }));
+}
+
 function refreshBuildingRow(state, removedIndex) {
   const nextRow = [...state.buildingRow];
   if (removedIndex != null) nextRow.splice(removedIndex, 1);
@@ -231,11 +255,40 @@ export function resolveCard(state, playerId, cardUid, decisions = {}) {
     if (calcAttack(player) < effectiveReqAtk) return state;
     if (calcDefense(player) < (card.reqDef ?? 0)) return state;
 
+    // Repeatable challenges: the player may pay the cost N times in a
+    // single resolution (capped by ability.maxRepeat and affordability)
+    // for proportionally bigger rewards. Pause once for the count if
+    // we haven't been told yet and the card actually allows it.
+    if (
+      card.ability?.type === "repeatable" &&
+      decisions.repeats === undefined
+    ) {
+      const maxRepeat = card.ability.maxRepeat ?? 1;
+      const perScrap = (card.scrapCost ?? 0) + extraScrapCost;
+      const maxAffordable =
+        perScrap === 0 ? maxRepeat : Math.floor(player.scrap / perScrap);
+      const limit = Math.max(1, Math.min(maxRepeat, maxAffordable));
+      if (limit > 1) {
+        return pauseWithPrompt(state, {
+          kind: "repeatable_choice",
+          playerId,
+          message: `${card.name} — pay cost up to ${limit}× for proportional rewards. How many times?`,
+          options: Array.from({ length: limit }, (_, i) => ({
+            value: i + 1,
+            label: `${i + 1}× (cost ${perScrap * (i + 1)}🔩)`,
+          })),
+          context: { playerId, cardUid, decisions },
+        });
+      }
+    }
+    const repeats = Math.max(1, decisions.repeats ?? 1);
+
     // Resolver always pays the cost up-front (plus the Light Artillery
-    // surcharge, if committed).
+    // surcharge, if committed). Multiply by `repeats` for repeatable
+    // challenges that the player chose to multi-resolve.
     let next = updatePlayer(state, playerId, (p) => ({
       ...p,
-      scrap: p.scrap - (card.scrapCost ?? 0) - extraScrapCost,
+      scrap: p.scrap - ((card.scrapCost ?? 0) + extraScrapCost) * repeats,
     }));
     if (usingArtillery) {
       next = notify(next, {
@@ -248,12 +301,17 @@ export function resolveCard(state, playerId, cardUid, decisions = {}) {
       });
     }
 
-    // Reactive: Vulture / Salvage Rights.
-    const reactive = fireChallengeResolveReactive(next, playerId, card);
+    // Reactive: Vulture / Salvage Rights. Pass `repeats` so Salvage
+    // Rights claims half of the actual (multiplied) Scrap reward.
+    const reactive = fireChallengeResolveReactive(next, playerId, card, repeats);
     next = reactive.state;
 
     const beneficiaryId = reactive.stolenByHolderId ?? playerId;
-    const scrapReward = card.scrapReward ?? 0;
+    const scrapReward = (card.scrapReward ?? 0) * repeats;
+    const atkReward = (card.atkReward ?? 0) * repeats;
+    const defReward = (card.defReward ?? 0) * repeats;
+    const actionReward = (card.actionReward ?? 0) * repeats;
+    const vpReward = (card.vp ?? 0) * repeats;
     const scrapHalvedAmount = reactive.halvedAmount ?? 0;
 
     if (reactive.stolenByHolderId != null) {
@@ -261,10 +319,10 @@ export function resolveCard(state, playerId, cardUid, decisions = {}) {
       next = updatePlayer(next, beneficiaryId, (p) => ({
         ...p,
         scrap: p.scrap + scrapReward,
-        bonusAtk: (p.bonusAtk ?? 0) + (card.atkReward ?? 0),
-        bonusDef: (p.bonusDef ?? 0) + (card.defReward ?? 0),
-        actionsRemaining: p.actionsRemaining + (card.actionReward ?? 0),
-        earnedVP: (p.earnedVP ?? 0) + (card.vp ?? 0),
+        bonusAtk: (p.bonusAtk ?? 0) + atkReward,
+        bonusDef: (p.bonusDef ?? 0) + defReward,
+        actionsRemaining: p.actionsRemaining + actionReward,
+        earnedVP: (p.earnedVP ?? 0) + vpReward,
       }));
     } else if (reactive.halvedToHolderId != null) {
       // Half scrap skimmed; resolver keeps the other half and all non-scrap rewards.
@@ -275,20 +333,20 @@ export function resolveCard(state, playerId, cardUid, decisions = {}) {
       next = updatePlayer(next, playerId, (p) => ({
         ...p,
         scrap: p.scrap + (scrapReward - scrapHalvedAmount),
-        bonusAtk: (p.bonusAtk ?? 0) + (card.atkReward ?? 0),
-        bonusDef: (p.bonusDef ?? 0) + (card.defReward ?? 0),
-        actionsRemaining: p.actionsRemaining + (card.actionReward ?? 0),
-        earnedVP: (p.earnedVP ?? 0) + (card.vp ?? 0),
+        bonusAtk: (p.bonusAtk ?? 0) + atkReward,
+        bonusDef: (p.bonusDef ?? 0) + defReward,
+        actionsRemaining: p.actionsRemaining + actionReward,
+        earnedVP: (p.earnedVP ?? 0) + vpReward,
       }));
     } else {
       // Uncontested — resolver gets everything.
       next = updatePlayer(next, playerId, (p) => ({
         ...p,
         scrap: p.scrap + scrapReward,
-        bonusAtk: (p.bonusAtk ?? 0) + (card.atkReward ?? 0),
-        bonusDef: (p.bonusDef ?? 0) + (card.defReward ?? 0),
-        actionsRemaining: p.actionsRemaining + (card.actionReward ?? 0),
-        earnedVP: (p.earnedVP ?? 0) + (card.vp ?? 0),
+        bonusAtk: (p.bonusAtk ?? 0) + atkReward,
+        bonusDef: (p.bonusDef ?? 0) + defReward,
+        actionsRemaining: p.actionsRemaining + actionReward,
+        earnedVP: (p.earnedVP ?? 0) + vpReward,
       }));
     }
 
@@ -334,19 +392,41 @@ export function resolveCard(state, playerId, cardUid, decisions = {}) {
       // — no per-card token artifact yet.
     }
 
+    // Top-level on_resolve add_to_settlement (Rebuild Vanguard Armory):
+    // copy the resolved card into the resolver's settlement. Cards with
+    // noSlotRequired bypass the 5-slot cap; cards with discardIfDisabled
+    // are removed from settlement entirely on a future disable instead
+    // of toggling disabled state (handled in intrigue.js).
+    if (
+      card.ability?.type === "on_resolve" &&
+      card.ability?.effect === "add_to_settlement"
+    ) {
+      const noSlot = !!card.ability.noSlotRequired;
+      next = updatePlayer(next, playerId, (p) => {
+        if (!noSlot && p.settlement.length >= 5) return p;
+        const settlementEntry = {
+          ...card,
+          uid: `${card.id}_resolved_p${playerId}_${Date.now()}`,
+        };
+        return { ...p, settlement: [...p.settlement, settlementEntry] };
+      });
+    }
+
     next = {
       ...next,
       explorationInPlay: next.explorationInPlay.filter((e) => e.card.uid !== cardUid),
     };
-    next = log(next, { type: "resolve", playerId, cardId: card.id });
+    next = log(next, { type: "resolve", playerId, cardId: card.id, repeats });
 
     const rewardBits = [];
-    if (card.scrapReward) rewardBits.push(`+${card.scrapReward}🔩`);
-    if (card.atkReward) rewardBits.push(`+${card.atkReward}⚔`);
-    if (card.defReward) rewardBits.push(`+${card.defReward}🛡`);
-    if (card.actionReward) rewardBits.push(`+${card.actionReward}⚡`);
-    if (card.vp) rewardBits.push(`+${card.vp}★`);
-    if (card.scrapCost) rewardBits.unshift(`−${card.scrapCost}🔩`);
+    const eff = (n) => n * repeats;
+    if (card.scrapReward) rewardBits.push(`+${eff(card.scrapReward)}🔩`);
+    if (card.atkReward) rewardBits.push(`+${eff(card.atkReward)}⚔`);
+    if (card.defReward) rewardBits.push(`+${eff(card.defReward)}🛡`);
+    if (card.actionReward) rewardBits.push(`+${eff(card.actionReward)}⚡`);
+    if (card.vp) rewardBits.push(`+${eff(card.vp)}★`);
+    if (card.scrapCost) rewardBits.unshift(`−${eff(card.scrapCost)}🔩`);
+    if (repeats > 1) rewardBits.unshift(`${repeats}×`);
     next = notify(next, {
       kind: NotifKind.CHALLENGE,
       title: `${card.name} resolved`,
@@ -399,6 +479,22 @@ registerResumer("light_artillery_choice", (state, choice, ctx) => {
 // flips the outcome, so spending is strictly better.
 registerAIHeuristic("light_artillery_choice", () => "spend");
 
+registerResumer("repeatable_choice", (state, choice, ctx) => {
+  return resolveCard(state, ctx.playerId, ctx.cardUid, {
+    ...(ctx.decisions ?? {}),
+    repeats: Number(choice) || 1,
+  });
+});
+
+// Greedy is optimal for repeatable challenges: pay cost N times for N×
+// rewards and never lose anything by paying more (the resolver already
+// gates on affordability).
+registerAIHeuristic("repeatable_choice", (_state, prompt) => {
+  const opts = prompt.options ?? [];
+  if (opts.length === 0) return 1;
+  return opts[opts.length - 1].value;
+});
+
 export const RAID_TYPES = Object.freeze({
   DESTROY: "Destroy Building",
   STEAL: "Steal Intrigue",
@@ -437,8 +533,8 @@ function executeRaidOutcome(state, attackerId, defenderId, raidType, extras) {
               ...p,
               settlement: p.settlement.filter((b) => b.uid !== uid),
               disabledBuildingUids: (p.disabledBuildingUids ?? []).filter((x) => x !== uid),
-              buildingsDisabledUntilOwnerTurnStart: (
-                p.buildingsDisabledUntilOwnerTurnStart ?? []
+              buildingsDisabledUntilOwnerTurnEnd: (
+                p.buildingsDisabledUntilOwnerTurnEnd ?? []
               ).filter((x) => x !== uid),
             }
           : p,
@@ -504,7 +600,7 @@ function executeRaidOutcome(state, attackerId, defenderId, raidType, extras) {
           ? {
               ...p,
               leader: { ...p.leader, disabled: true },
-              leaderDisabledUntilOwnerTurnStart: true,
+              leaderDisabledUntilOwnerTurnEnd: true,
             }
           : p,
       ),
@@ -731,41 +827,55 @@ export function endTurn(state) {
   const nextIdx = (idx + 1) % state.players.length;
   const nextPlayer = state.players[nextIdx];
 
-  // Turn-start bookkeeping for the incoming player:
-  //   - re-enable buildings disabled "until owner's next turn"
-  //   - expire temporary debuffs tagged for owner-turn-start
-  //   - clear per-turn boosts
+  // Turn-end bookkeeping for the OUTGOING player:
+  //   - clear skipExploreThisTurn (their skipped turn is over)
+  //   - re-enable buildings disabled "until owner turn end" — these
+  //     were disabled by an opponent and are meant to cost the owner
+  //     one full turn, recovering as that turn ends
+  //   - same for the leader (raid Disable Leader outcome) and any
+  //     temporaryDebuffs tagged "owner_turn_end"
+  //   - capture leaderRecovered for the post-update notification
+  let outgoingLeaderRecovered = false;
+  const outgoingPlayer = state.players.find((p) => p.id === state.activePlayerId);
+  let next = updatePlayer(state, state.activePlayerId, (p) => {
+    const toReenable = new Set(p.buildingsDisabledUntilOwnerTurnEnd ?? []);
+    const stillDisabled = (p.disabledBuildingUids ?? []).filter(
+      (uid) => !toReenable.has(uid),
+    );
+    const freshDebuffs = (p.temporaryDebuffs ?? []).filter(
+      (d) => d.expiresOn !== "owner_turn_end",
+    );
+    const leaderRecovered = !!p.leaderDisabledUntilOwnerTurnEnd;
+    if (leaderRecovered && p.leader) outgoingLeaderRecovered = true;
+    return {
+      ...p,
+      skipExploreThisTurn: false,
+      disabledBuildingUids: stillDisabled,
+      buildingsDisabledUntilOwnerTurnEnd: [],
+      temporaryDebuffs: freshDebuffs,
+      leader:
+        leaderRecovered && p.leader ? { ...p.leader, disabled: false } : p.leader,
+      leaderDisabledUntilOwnerTurnEnd: false,
+    };
+  });
+
+  // Turn-start bookkeeping for the INCOMING player:
+  //   - clear per-turn boosts, ability-used and built-this-turn pools
   //   - promote skipExploreNextTurn → skipExploreThisTurn
   //   - apply bonus/lose actions scheduled from previous events
-  //   - collect passive scrap (after re-enabling so disabled buildings count)
-  // Turn-end bookkeeping for the outgoing player:
-  //   - clear skipExploreThisTurn (their skipped turn is over)
-  let next = updatePlayer(state, state.activePlayerId, (p) => ({
-    ...p,
-    skipExploreThisTurn: false,
-  }));
+  //   - collect passive scrap (no disable-recovery here — that fires on
+  //     the disabled player's previous turn-end, above)
   next = updatePlayer(next, nextPlayer.id, (p) => {
-    const toReenable = new Set(p.buildingsDisabledUntilOwnerTurnStart ?? []);
-    const stillDisabled = (p.disabledBuildingUids ?? []).filter((uid) => !toReenable.has(uid));
-    const freshDebuffs = (p.temporaryDebuffs ?? []).filter(
-      (d) => d.expiresOn !== "owner_turn_start",
-    );
     const flags = { ...(p.flags ?? {}) };
     delete flags.divertScrapNextTurnTo;
-    const leaderRecovered = !!p.leaderDisabledUntilOwnerTurnStart;
     const revived = {
       ...p,
       boosts: { atk: 0, def: 0 },
-      disabledBuildingUids: stillDisabled,
-      buildingsDisabledUntilOwnerTurnStart: [],
-      temporaryDebuffs: freshDebuffs,
       skipExploreThisTurn: !!p.skipExploreNextTurn,
       skipExploreNextTurn: false,
       flags,
       abilityUsedThisTurn: {},
       builtThisTurnUids: [],
-      leader: leaderRecovered && p.leader ? { ...p.leader, disabled: false } : p.leader,
-      leaderDisabledUntilOwnerTurnStart: false,
     };
     const baseActions = calcActions(revived);
     const actionsAfterSchedule = Math.max(
@@ -828,18 +938,16 @@ export function endTurn(state) {
     }),
   };
 
-  // Surface leader recovery (disabled by a previous raid) so the owner sees
-  // why their leader is contributing again this turn.
-  const leaderWasDisabled = state.players.find(
-    (p) => p.id === nextPlayer.id,
-  )?.leaderDisabledUntilOwnerTurnStart;
-  if (leaderWasDisabled && nextPlayer.leader) {
+  // Surface leader recovery on the outgoing player — their leader was
+  // disabled for the full duration of the turn that just ended and is
+  // active again starting next time around.
+  if (outgoingLeaderRecovered && outgoingPlayer?.leader) {
     next = notify(next, {
       kind: NotifKind.FLAG,
-      title: `${nextPlayer.leader.name} recovered`,
-      message: `${nextPlayer.name}'s leader is no longer disabled.`,
-      impacts: [impact(nextPlayer.id, "leader active again")],
-      sourcePlayerId: nextPlayer.id,
+      title: `${outgoingPlayer.leader.name} recovered`,
+      message: `${outgoingPlayer.name}'s leader is no longer disabled.`,
+      impacts: [impact(outgoingPlayer.id, "leader active next turn")],
+      sourcePlayerId: outgoingPlayer.id,
     });
   }
 
@@ -904,6 +1012,18 @@ export function endTurn(state) {
     next = clearRoundEndFlags(next);
     next = refreshBuildingRow(next, 0);
   }
+
+  // Append a per-turn snapshot for offline balance analysis. Captures the
+  // full game state at the moment the active player's turn ended (after
+  // disable-recovery and the next player's resource collection have
+  // applied), keyed by the OUTGOING player and round. Sized to be useful
+  // without bloating the log — building/leader/intrigue refs are id-only.
+  const turnEndedFor = state.activePlayerId;
+  next = log(next, {
+    type: "turn_end",
+    playerId: turnEndedFor,
+    snapshot: snapshotPlayers(next),
+  });
 
   next = { ...next, activePlayerId: nextPlayer.id };
 

@@ -22,15 +22,16 @@ function debuffSum(player, stat) {
 }
 
 // Passive_scaling abilities fire during resource collection and grant
-// +1 per matching building, capped at +4. Scrap Yard scales on Scrap-
-// producing buildings (passiveScrap > 0); Training Grounds on Attack-
-// producing (passiveAtk > 0). Multiple copies of the triggering building
-// do not stack — the cap is on the total bonus, not per copy.
+// +1 per matching building. Scrap Yard scales on Scrap-producing
+// buildings (passiveScrap > 0) and now contributes its own +1 base, so
+// it counts itself in the scaling tally. Training Grounds scales on
+// Attack-producing (passiveAtk > 0). No hard cap — the 5-slot
+// settlement limit (plus the rare unique building) is the natural
+// ceiling. Multiple copies of the triggering building do not stack.
 function scalingBonus(player, triggerBuildingId, field) {
   const active = activeBuildings(player);
   if (!active.some((b) => b.id === triggerBuildingId)) return 0;
-  const matching = active.filter((b) => (b[field] ?? 0) > 0).length;
-  return Math.min(4, matching);
+  return active.filter((b) => (b[field] ?? 0) > 0).length;
 }
 
 // Lt. Tusk's passive mirrors Training Grounds — +1 Attack per attack-

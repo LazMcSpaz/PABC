@@ -114,23 +114,23 @@ export const BUILDINGS = [
     age: 1,
     scrapCost: 2,
     atkCost: 0,
-    passiveScrap: 0,
+    passiveScrap: 1,
     passiveAtk: 0,
     passDef: 0,
     passActions: 0,
     vp: 4,
     ability: {
-      // Triggered: passive, evaluated during resource collection each turn.
-      // Grants +1 Scrap per Scrap-producing building in the player's settlement.
-      // A Scrap-producing building is any building where passiveScrap > 0.
-      // Hard cap: +4 maximum bonus Scrap from this effect.
+      // Passive scaling, evaluated during resource collection each turn.
+      // Scrap Yard contributes +1 base Scrap (passiveScrap above) and an
+      // additional +1 per Scrap-producing building in the player's
+      // settlement — including itself. No hard cap (the 5-slot
+      // settlement limit is the natural ceiling).
       type: "passive_scaling",
       trigger: "collect_resources",
       scalesOn: "passiveScrap",
       bonusPerBuilding: 1,
       bonusStat: "scrap",
-      maxBonus: 4,
-      description: "Each turn, gain +1 Scrap per Scrap-producing building in your settlement. Max +4.",
+      description: "+1 Scrap base, plus +1 Scrap per Scrap-producing building in your settlement (Scrap Yard counts itself).",
     },
     upgradable: false,
     upgradeId: null,
@@ -266,16 +266,16 @@ export const BUILDINGS = [
     vp: 4,
     ability: {
       // Passive: mirrors Scrap Yard but for Attack.
-      // Grants +1 Attack per Attack-producing building in the player's settlement.
-      // An Attack-producing building is any building where passiveAtk > 0.
-      // Hard cap: +4 maximum bonus Attack from this effect.
+      // Grants +1 Attack per Attack-producing building in the player's
+      // settlement. An Attack-producing building is any building where
+      // passiveAtk > 0. No hard cap (the 5-slot settlement limit is the
+      // natural ceiling).
       type: "passive_scaling",
       trigger: "collect_resources",
       scalesOn: "passiveAtk",
       bonusPerBuilding: 1,
       bonusStat: "atk",
-      maxBonus: 4,
-      description: "Each turn, gain +1 Attack per Attack-producing building in your settlement. Max +4.",
+      description: "Each turn, gain +1 Attack per Attack-producing building in your settlement.",
     },
     upgradable: false,
     upgradeId: null,
@@ -1993,7 +1993,7 @@ export const EVENTS = [
       allPlayerEffect: {
         effect: "disable_buildings_by_id",
         buildingIds: ["antenna_array", "drone_lab", "signal_jammers"],
-        recoverOn: "owner_turn_start",
+        recoverOn: "owner_turn_end",
       },
       description: "Antenna Array, Drone Lab, and Signal Jammers disabled until each player's next turn.",
     },
@@ -2192,13 +2192,13 @@ export const EVENTS = [
       // Exception: players who have Doc Brawlins as their leader OR own a Medic Tent
       // are unaffected.
       // IMPLEMENTATION NOTE: for affected players, add a temporary debuff:
-      // { stat: "atk", amount: -2, expiresOn: "owner_turn_start" }
+      // { stat: "atk", amount: -2, expiresOn: "owner_turn_end" }
       type: "all_players",
       perPlayer: {
         effect: "temporary_stat_debuff",
         stat: "atk",
         amount: -2,
-        expiresOn: "owner_turn_start",
+        expiresOn: "owner_turn_end",
         exemptIf: [
           { hasLeader: "doc_brawlins" },
           { hasBuilding: "medic_tent" },
@@ -2236,7 +2236,7 @@ export const INTRIGUE_CARDS = [
       target: "opponent_building",
       effect: "disable_building",
       recoveryCost: { action: 1, scrap: 2 },
-      recoveryOn: "owner_turn_start",
+      recoveryOn: "owner_turn_end",
       description: "Requires 2 Attack. Disable a building of your choice in another player's settlement.",
     },
     flavor: "Most systems these days are fragile, and that's great for us. — Agent Peck",

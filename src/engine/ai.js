@@ -273,10 +273,37 @@ export async function getAIDecision(state, playerId, personality) {
 
 // Maps a single action from the AI plan onto an engine call. Pure function:
 // returns new state. Invalid actions return state unchanged (engine actions
-// already no-op when preconditions aren't met).
+// already no-op when preconditions aren't met). The outer wrapper detects
+// silent no-ops and appends a log entry so the failure is visible in the
+// game log export — engine functions return state unchanged when
+// preconditions fail (insufficient actions/scrap, settlement full, etc.)
+// and previously left no trace of the AI's intent.
 export function executeAIAction(state, playerId, action) {
   if (!state || state.winnerId != null) return state;
   if (!action || typeof action !== "object") return state;
+  const next = dispatchAIAction(state, playerId, action);
+  if (next === state && action.type !== "end_turn") {
+    if (typeof console !== "undefined" && console.warn) {
+      console.warn("AI action no-op", { playerId, action });
+    }
+    return {
+      ...state,
+      log: [
+        ...(state.log ?? []),
+        {
+          round: state.round,
+          type: "ai_no_op",
+          playerId,
+          actionType: action.type,
+          details: action,
+        },
+      ],
+    };
+  }
+  return next;
+}
+
+function dispatchAIAction(state, playerId, action) {
   switch (action.type) {
     case "build": {
       const card = state.buildingRow.find((c) => c.id === action.buildingId);
