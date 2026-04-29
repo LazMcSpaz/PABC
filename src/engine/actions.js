@@ -24,6 +24,11 @@ import { unlockUnlockable } from "./upgrades.js";
 
 const WIN_VP = 30;
 
+// Raids are unavailable until this round to avoid first-turn unfairness
+// — players need at least one round to set up a defensive baseline before
+// being raidable. Surfaced in RaidView and the AI prompt.
+export const RAID_UNLOCK_ROUND = 3;
+
 function updatePlayer(state, playerId, updater) {
   return {
     ...state,
@@ -513,6 +518,7 @@ function executeRaidOutcome(state, attackerId, defenderId, raidType, extras) {
 export function raid(state, attackerId, targetId, raidType = RAID_TYPES.DESTROY, extras = {}) {
   if (state.pendingPrompt) return state;
   if (state.globalFlags?.raidsBlocked) return state;
+  if (state.round < RAID_UNLOCK_ROUND) return state;
   const attacker = state.players.find((p) => p.id === attackerId);
   const defender = state.players.find((p) => p.id === targetId);
   if (!attacker || !defender || attacker.actionsRemaining < 1) return state;
