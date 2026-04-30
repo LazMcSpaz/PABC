@@ -1,0 +1,1014 @@
+{
+  "exportedAt": "2026-04-30T00:46:03.663Z",
+  "round": 4,
+  "age": 1,
+  "players": [
+    {
+      "id": 0,
+      "name": "Player",
+      "kind": "human",
+      "personalityId": null
+    },
+    {
+      "id": 1,
+      "name": "The Warlord AI",
+      "kind": "ai",
+      "personalityId": "warlord"
+    },
+    {
+      "id": 2,
+      "name": "The Builder AI",
+      "kind": "ai",
+      "personalityId": "builder"
+    }
+  ],
+  "progressionResolved": [],
+  "log": [
+    {
+      "round": 1,
+      "type": "build",
+      "playerId": 0,
+      "cardId": "militia_bunkhouse"
+    },
+    {
+      "round": 1,
+      "type": "build",
+      "playerId": 0,
+      "cardId": "scavengers_hut"
+    },
+    {
+      "round": 1,
+      "type": "turn_end",
+      "playerId": 0,
+      "snapshot": [
+        {
+          "id": 0,
+          "name": "Player",
+          "scrap": 2,
+          "vp": 7,
+          "atk": 3,
+          "def": 2,
+          "actions": 0,
+          "settlement": [
+            "salvage_depot",
+            "makeshift_barracks",
+            "militia_bunkhouse",
+            "scavengers_hut"
+          ],
+          "leader": "administrator",
+          "leaderDisabled": false,
+          "disabledBuildings": [],
+          "intrigueHand": [],
+          "bonusAtk": 0,
+          "bonusDef": 0,
+          "boosts": {
+            "atk": 0,
+            "def": 0
+          },
+          "earnedVP": 0
+        },
+        {
+          "id": 1,
+          "name": "The Warlord AI",
+          "scrap": 2,
+          "vp": 3,
+          "atk": 2,
+          "def": 1,
+          "actions": 2,
+          "settlement": [
+            "salvage_depot",
+            "makeshift_barracks"
+          ],
+          "leader": "administrator",
+          "leaderDisabled": false,
+          "disabledBuildings": [],
+          "intrigueHand": [],
+          "bonusAtk": 0,
+          "bonusDef": 0,
+          "boosts": {
+            "atk": 0,
+            "def": 0
+          },
+          "earnedVP": 0
+        },
+        {
+          "id": 2,
+          "name": "The Builder AI",
+          "scrap": 0,
+          "vp": 3,
+          "atk": 2,
+          "def": 1,
+          "actions": 0,
+          "settlement": [
+            "salvage_depot",
+            "makeshift_barracks"
+          ],
+          "leader": "administrator",
+          "leaderDisabled": false,
+          "disabledBuildings": [],
+          "intrigueHand": [],
+          "bonusAtk": 0,
+          "bonusDef": 0,
+          "boosts": {
+            "atk": 0,
+            "def": 0
+          },
+          "earnedVP": 0
+        }
+      ]
+    },
+    {
+      "round": 1,
+      "type": "ai_no_op",
+      "playerId": 1,
+      "actionType": "build",
+      "details": {
+        "type": "build",
+        "buildingId": "training_grounds_0"
+      }
+    },
+    {
+      "round": 1,
+      "type": "ai_no_op",
+      "playerId": 1,
+      "actionType": "build",
+      "details": {
+        "type": "build",
+        "buildingId": "militia_bunkhouse_0"
+      }
+    },
+    {
+      "round": 1,
+      "type": "turn_end",
+      "playerId": 1,
+      "snapshot": [
+        {
+          "id": 0,
+          "name": "Player",
+          "scrap": 2,
+          "vp": 7,
+          "atk": 3,
+          "def": 2,
+          "actions": 0,
+          "settlement": [
+            "salvage_depot",
+            "makeshift_barracks",
+            "militia_bunkhouse",
+            "scavengers_hut"
+          ],
+          "leader": "administrator",
+          "leaderDisabled": false,
+          "disabledBuildings": [],
+          "intrigueHand": [],
+          "bonusAtk": 0,
+          "bonusDef": 0,
+          "boosts": {
+            "atk": 0,
+            "def": 0
+          },
+          "earnedVP": 0
+        },
+        {
+          "id": 1,
+          "name": "The Warlord AI",
+          "scrap": 2,
+          "vp": 3,
+          "atk": 2,
+          "def": 1,
+          "actions": 2,
+          "settlement": [
+            "salvage_depot",
+            "makeshift_barracks"
+          ],
+          "leader": "administrator",
+          "leaderDisabled": false,
+          "disabledBuildings": [],
+          "intrigueHand": [],
+          "bonusAtk": 0,
+          "bonusDef": 0,
+          "boosts": {
+            "atk": 0,
+            "def": 0
+          },
+          "earnedVP": 0
+        },
+        {
+          "id": 2,
+          "name": "The Builder AI",
+          "scrap": 2,
+          "vp": 3,
+          "atk": 2,
+          "def": 1,
+          "actions": 2,
+          "settlement": [
+            "salvage_depot",
+            "makeshift_barracks"
+          ],
+          "leader": "administrator",
+          "leaderDisabled": false,
+          "disabledBuildings": [],
+          "intrigueHand": [],
+          "bonusAtk": 0,
+          "bonusDef": 0,
+          "boosts": {
+            "atk": 0,
+            "def": 0
+          },
+          "earnedVP": 0
+        }
+      ]
+    },
+    {
+      "round": 1,
+      "type": "ai_no_op",
+      "playerId": 2,
+      "actionType": "build",
+      "details": {
+        "type": "build",
+        "buildingId": "training_grounds_0"
+      }
+    },
+    {
+      "round": 1,
+      "type": "ai_no_op",
+      "playerId": 2,
+      "actionType": "build",
+      "details": {
+        "type": "build",
+        "buildingId": "militia_bunkhouse_0"
+      }
+    },
+    {
+      "round": 2,
+      "type": "turn_end",
+      "playerId": 2,
+      "snapshot": [
+        {
+          "id": 0,
+          "name": "Player",
+          "scrap": 5,
+          "vp": 7,
+          "atk": 3,
+          "def": 2,
+          "actions": 2,
+          "settlement": [
+            "salvage_depot",
+            "makeshift_barracks",
+            "militia_bunkhouse",
+            "scavengers_hut"
+          ],
+          "leader": "administrator",
+          "leaderDisabled": false,
+          "disabledBuildings": [],
+          "intrigueHand": [],
+          "bonusAtk": 0,
+          "bonusDef": 0,
+          "boosts": {
+            "atk": 0,
+            "def": 0
+          },
+          "earnedVP": 0
+        },
+        {
+          "id": 1,
+          "name": "The Warlord AI",
+          "scrap": 2,
+          "vp": 3,
+          "atk": 2,
+          "def": 1,
+          "actions": 2,
+          "settlement": [
+            "salvage_depot",
+            "makeshift_barracks"
+          ],
+          "leader": "administrator",
+          "leaderDisabled": false,
+          "disabledBuildings": [],
+          "intrigueHand": [],
+          "bonusAtk": 0,
+          "bonusDef": 0,
+          "boosts": {
+            "atk": 0,
+            "def": 0
+          },
+          "earnedVP": 0
+        },
+        {
+          "id": 2,
+          "name": "The Builder AI",
+          "scrap": 2,
+          "vp": 3,
+          "atk": 2,
+          "def": 1,
+          "actions": 2,
+          "settlement": [
+            "salvage_depot",
+            "makeshift_barracks"
+          ],
+          "leader": "administrator",
+          "leaderDisabled": false,
+          "disabledBuildings": [],
+          "intrigueHand": [],
+          "bonusAtk": 0,
+          "bonusDef": 0,
+          "boosts": {
+            "atk": 0,
+            "def": 0
+          },
+          "earnedVP": 0
+        }
+      ]
+    },
+    {
+      "round": 2,
+      "type": "explore",
+      "playerId": 0,
+      "cardId": "form_trade_route"
+    },
+    {
+      "round": 2,
+      "type": "resolve",
+      "playerId": 0,
+      "cardId": "form_trade_route",
+      "repeats": 1
+    },
+    {
+      "round": 2,
+      "type": "build",
+      "playerId": 0,
+      "cardId": "training_grounds"
+    },
+    {
+      "round": 2,
+      "type": "turn_end",
+      "playerId": 0,
+      "snapshot": [
+        {
+          "id": 0,
+          "name": "Player",
+          "scrap": 11,
+          "vp": 16,
+          "atk": 5,
+          "def": 2,
+          "actions": 0,
+          "settlement": [
+            "salvage_depot",
+            "makeshift_barracks",
+            "militia_bunkhouse",
+            "scavengers_hut",
+            "training_grounds"
+          ],
+          "leader": "administrator",
+          "leaderDisabled": false,
+          "disabledBuildings": [],
+          "intrigueHand": [],
+          "bonusAtk": 0,
+          "bonusDef": 0,
+          "boosts": {
+            "atk": 0,
+            "def": 0
+          },
+          "earnedVP": 5
+        },
+        {
+          "id": 1,
+          "name": "The Warlord AI",
+          "scrap": 4,
+          "vp": 3,
+          "atk": 2,
+          "def": 1,
+          "actions": 2,
+          "settlement": [
+            "salvage_depot",
+            "makeshift_barracks"
+          ],
+          "leader": "administrator",
+          "leaderDisabled": false,
+          "disabledBuildings": [],
+          "intrigueHand": [],
+          "bonusAtk": 0,
+          "bonusDef": 0,
+          "boosts": {
+            "atk": 0,
+            "def": 0
+          },
+          "earnedVP": 0
+        },
+        {
+          "id": 2,
+          "name": "The Builder AI",
+          "scrap": 2,
+          "vp": 3,
+          "atk": 2,
+          "def": 1,
+          "actions": 2,
+          "settlement": [
+            "salvage_depot",
+            "makeshift_barracks"
+          ],
+          "leader": "administrator",
+          "leaderDisabled": false,
+          "disabledBuildings": [],
+          "intrigueHand": [],
+          "bonusAtk": 0,
+          "bonusDef": 0,
+          "boosts": {
+            "atk": 0,
+            "def": 0
+          },
+          "earnedVP": 0
+        }
+      ]
+    },
+    {
+      "round": 2,
+      "type": "ai_no_op",
+      "playerId": 1,
+      "actionType": "build",
+      "details": {
+        "type": "build",
+        "buildingId": "militia_bunkhouse_0"
+      }
+    },
+    {
+      "round": 2,
+      "type": "ai_no_op",
+      "playerId": 1,
+      "actionType": "build",
+      "details": {
+        "type": "build",
+        "buildingId": "light_artillery_1"
+      }
+    },
+    {
+      "round": 2,
+      "type": "turn_end",
+      "playerId": 1,
+      "snapshot": [
+        {
+          "id": 0,
+          "name": "Player",
+          "scrap": 11,
+          "vp": 16,
+          "atk": 5,
+          "def": 2,
+          "actions": 0,
+          "settlement": [
+            "salvage_depot",
+            "makeshift_barracks",
+            "militia_bunkhouse",
+            "scavengers_hut",
+            "training_grounds"
+          ],
+          "leader": "administrator",
+          "leaderDisabled": false,
+          "disabledBuildings": [],
+          "intrigueHand": [],
+          "bonusAtk": 0,
+          "bonusDef": 0,
+          "boosts": {
+            "atk": 0,
+            "def": 0
+          },
+          "earnedVP": 5
+        },
+        {
+          "id": 1,
+          "name": "The Warlord AI",
+          "scrap": 4,
+          "vp": 3,
+          "atk": 2,
+          "def": 1,
+          "actions": 2,
+          "settlement": [
+            "salvage_depot",
+            "makeshift_barracks"
+          ],
+          "leader": "administrator",
+          "leaderDisabled": false,
+          "disabledBuildings": [],
+          "intrigueHand": [],
+          "bonusAtk": 0,
+          "bonusDef": 0,
+          "boosts": {
+            "atk": 0,
+            "def": 0
+          },
+          "earnedVP": 0
+        },
+        {
+          "id": 2,
+          "name": "The Builder AI",
+          "scrap": 4,
+          "vp": 3,
+          "atk": 2,
+          "def": 1,
+          "actions": 2,
+          "settlement": [
+            "salvage_depot",
+            "makeshift_barracks"
+          ],
+          "leader": "administrator",
+          "leaderDisabled": false,
+          "disabledBuildings": [],
+          "intrigueHand": [],
+          "bonusAtk": 0,
+          "bonusDef": 0,
+          "boosts": {
+            "atk": 0,
+            "def": 0
+          },
+          "earnedVP": 0
+        }
+      ]
+    },
+    {
+      "round": 2,
+      "type": "ai_no_op",
+      "playerId": 2,
+      "actionType": "build",
+      "details": {
+        "type": "build",
+        "buildingId": "communal_garden_1"
+      }
+    },
+    {
+      "round": 2,
+      "type": "explore",
+      "playerId": 2,
+      "cardId": "mountain_cult_sermon"
+    },
+    {
+      "round": 2,
+      "type": "event",
+      "cardId": "mountain_cult_sermon"
+    },
+    {
+      "round": 3,
+      "type": "turn_end",
+      "playerId": 2,
+      "snapshot": [
+        {
+          "id": 0,
+          "name": "Player",
+          "scrap": 14,
+          "vp": 16,
+          "atk": 5,
+          "def": 2,
+          "actions": 1,
+          "settlement": [
+            "salvage_depot",
+            "makeshift_barracks",
+            "militia_bunkhouse",
+            "scavengers_hut",
+            "training_grounds"
+          ],
+          "leader": "administrator",
+          "leaderDisabled": false,
+          "disabledBuildings": [],
+          "intrigueHand": [],
+          "bonusAtk": 0,
+          "bonusDef": 0,
+          "boosts": {
+            "atk": 0,
+            "def": 0
+          },
+          "earnedVP": 5
+        },
+        {
+          "id": 1,
+          "name": "The Warlord AI",
+          "scrap": 4,
+          "vp": 3,
+          "atk": 2,
+          "def": 1,
+          "actions": 2,
+          "settlement": [
+            "salvage_depot",
+            "makeshift_barracks"
+          ],
+          "leader": "administrator",
+          "leaderDisabled": false,
+          "disabledBuildings": [],
+          "intrigueHand": [],
+          "bonusAtk": 0,
+          "bonusDef": 0,
+          "boosts": {
+            "atk": 0,
+            "def": 0
+          },
+          "earnedVP": 0
+        },
+        {
+          "id": 2,
+          "name": "The Builder AI",
+          "scrap": 4,
+          "vp": 3,
+          "atk": 2,
+          "def": 1,
+          "actions": 1,
+          "settlement": [
+            "salvage_depot",
+            "makeshift_barracks"
+          ],
+          "leader": "administrator",
+          "leaderDisabled": false,
+          "disabledBuildings": [],
+          "intrigueHand": [],
+          "bonusAtk": 0,
+          "bonusDef": 0,
+          "boosts": {
+            "atk": 0,
+            "def": 0
+          },
+          "earnedVP": 0
+        }
+      ]
+    },
+    {
+      "round": 3,
+      "type": "explore",
+      "playerId": 0,
+      "cardId": "raid_marauder_cache"
+    },
+    {
+      "round": 3,
+      "type": "resolve",
+      "playerId": 0,
+      "cardId": "raid_marauder_cache",
+      "repeats": 1
+    },
+    {
+      "round": 3,
+      "type": "turn_end",
+      "playerId": 0,
+      "snapshot": [
+        {
+          "id": 0,
+          "name": "Player",
+          "scrap": 21,
+          "vp": 19,
+          "atk": 5,
+          "def": 2,
+          "actions": 0,
+          "settlement": [
+            "salvage_depot",
+            "makeshift_barracks",
+            "militia_bunkhouse",
+            "scavengers_hut",
+            "training_grounds"
+          ],
+          "leader": "administrator",
+          "leaderDisabled": false,
+          "disabledBuildings": [],
+          "intrigueHand": [],
+          "bonusAtk": 0,
+          "bonusDef": 0,
+          "boosts": {
+            "atk": 0,
+            "def": 0
+          },
+          "earnedVP": 8
+        },
+        {
+          "id": 1,
+          "name": "The Warlord AI",
+          "scrap": 6,
+          "vp": 3,
+          "atk": 2,
+          "def": 1,
+          "actions": 1,
+          "settlement": [
+            "salvage_depot",
+            "makeshift_barracks"
+          ],
+          "leader": "administrator",
+          "leaderDisabled": false,
+          "disabledBuildings": [],
+          "intrigueHand": [],
+          "bonusAtk": 0,
+          "bonusDef": 0,
+          "boosts": {
+            "atk": 0,
+            "def": 0
+          },
+          "earnedVP": 0
+        },
+        {
+          "id": 2,
+          "name": "The Builder AI",
+          "scrap": 4,
+          "vp": 3,
+          "atk": 2,
+          "def": 1,
+          "actions": 1,
+          "settlement": [
+            "salvage_depot",
+            "makeshift_barracks"
+          ],
+          "leader": "administrator",
+          "leaderDisabled": false,
+          "disabledBuildings": [],
+          "intrigueHand": [],
+          "bonusAtk": 0,
+          "bonusDef": 0,
+          "boosts": {
+            "atk": 0,
+            "def": 0
+          },
+          "earnedVP": 0
+        }
+      ]
+    },
+    {
+      "round": 3,
+      "type": "ai_no_op",
+      "playerId": 1,
+      "actionType": "resolve",
+      "details": {
+        "type": "resolve",
+        "cardId": "abandoned_clinic"
+      }
+    },
+    {
+      "round": 3,
+      "type": "ai_no_op",
+      "playerId": 1,
+      "actionType": "build",
+      "details": {
+        "type": "build",
+        "buildingId": "militia_bunkhouse_0"
+      }
+    },
+    {
+      "round": 3,
+      "type": "turn_end",
+      "playerId": 1,
+      "snapshot": [
+        {
+          "id": 0,
+          "name": "Player",
+          "scrap": 21,
+          "vp": 19,
+          "atk": 5,
+          "def": 2,
+          "actions": 0,
+          "settlement": [
+            "salvage_depot",
+            "makeshift_barracks",
+            "militia_bunkhouse",
+            "scavengers_hut",
+            "training_grounds"
+          ],
+          "leader": "administrator",
+          "leaderDisabled": false,
+          "disabledBuildings": [],
+          "intrigueHand": [],
+          "bonusAtk": 0,
+          "bonusDef": 0,
+          "boosts": {
+            "atk": 0,
+            "def": 0
+          },
+          "earnedVP": 8
+        },
+        {
+          "id": 1,
+          "name": "The Warlord AI",
+          "scrap": 6,
+          "vp": 3,
+          "atk": 2,
+          "def": 1,
+          "actions": 1,
+          "settlement": [
+            "salvage_depot",
+            "makeshift_barracks"
+          ],
+          "leader": "administrator",
+          "leaderDisabled": false,
+          "disabledBuildings": [],
+          "intrigueHand": [],
+          "bonusAtk": 0,
+          "bonusDef": 0,
+          "boosts": {
+            "atk": 0,
+            "def": 0
+          },
+          "earnedVP": 0
+        },
+        {
+          "id": 2,
+          "name": "The Builder AI",
+          "scrap": 6,
+          "vp": 3,
+          "atk": 2,
+          "def": 1,
+          "actions": 1,
+          "settlement": [
+            "salvage_depot",
+            "makeshift_barracks"
+          ],
+          "leader": "administrator",
+          "leaderDisabled": false,
+          "disabledBuildings": [],
+          "intrigueHand": [],
+          "bonusAtk": 0,
+          "bonusDef": 0,
+          "boosts": {
+            "atk": 0,
+            "def": 0
+          },
+          "earnedVP": 0
+        }
+      ]
+    },
+    {
+      "round": 3,
+      "type": "ai_no_op",
+      "playerId": 2,
+      "actionType": "resolve",
+      "details": {
+        "type": "resolve",
+        "cardId": "abandoned_clinic"
+      }
+    },
+    {
+      "round": 4,
+      "type": "turn_end",
+      "playerId": 2,
+      "snapshot": [
+        {
+          "id": 0,
+          "name": "Player",
+          "scrap": 24,
+          "vp": 19,
+          "atk": 5,
+          "def": 2,
+          "actions": 2,
+          "settlement": [
+            "salvage_depot",
+            "makeshift_barracks",
+            "militia_bunkhouse",
+            "scavengers_hut",
+            "training_grounds"
+          ],
+          "leader": "administrator",
+          "leaderDisabled": false,
+          "disabledBuildings": [],
+          "intrigueHand": [],
+          "bonusAtk": 0,
+          "bonusDef": 0,
+          "boosts": {
+            "atk": 0,
+            "def": 0
+          },
+          "earnedVP": 8
+        },
+        {
+          "id": 1,
+          "name": "The Warlord AI",
+          "scrap": 6,
+          "vp": 3,
+          "atk": 2,
+          "def": 1,
+          "actions": 1,
+          "settlement": [
+            "salvage_depot",
+            "makeshift_barracks"
+          ],
+          "leader": "administrator",
+          "leaderDisabled": false,
+          "disabledBuildings": [],
+          "intrigueHand": [],
+          "bonusAtk": 0,
+          "bonusDef": 0,
+          "boosts": {
+            "atk": 0,
+            "def": 0
+          },
+          "earnedVP": 0
+        },
+        {
+          "id": 2,
+          "name": "The Builder AI",
+          "scrap": 6,
+          "vp": 3,
+          "atk": 2,
+          "def": 1,
+          "actions": 1,
+          "settlement": [
+            "salvage_depot",
+            "makeshift_barracks"
+          ],
+          "leader": "administrator",
+          "leaderDisabled": false,
+          "disabledBuildings": [],
+          "intrigueHand": [],
+          "bonusAtk": 0,
+          "bonusDef": 0,
+          "boosts": {
+            "atk": 0,
+            "def": 0
+          },
+          "earnedVP": 0
+        }
+      ]
+    }
+  ],
+  "aiLog": [
+    {
+      "round": 1,
+      "playerId": 1,
+      "reasoning": "Training Grounds synergizes perfectly with my attack-focused strategy, giving +1 Attack per attack-producing building each turn. Militia Bunkhouse provides both attack and defense while being affordable.",
+      "actions": [
+        {
+          "type": "build",
+          "buildingId": "training_grounds_0"
+        },
+        {
+          "type": "build",
+          "buildingId": "militia_bunkhouse_0"
+        }
+      ],
+      "timestamp": 1777496188349
+    },
+    {
+      "round": 1,
+      "playerId": 2,
+      "reasoning": "I'll build Training Grounds for 4 VP and future attack scaling, then Militia Bunkhouse for defense and attack generation to establish my economic foundation.",
+      "actions": [
+        {
+          "type": "build",
+          "buildingId": "training_grounds_0"
+        },
+        {
+          "type": "build",
+          "buildingId": "militia_bunkhouse_0"
+        }
+      ],
+      "timestamp": 1777496195002
+    },
+    {
+      "round": 2,
+      "playerId": 1,
+      "reasoning": "Player is far ahead with 16 VP vs my 3 VP, but raids are locked until round 3. I need to build attack-producing buildings to prepare for raiding and catch up.",
+      "actions": [
+        {
+          "type": "build",
+          "buildingId": "militia_bunkhouse_0"
+        },
+        {
+          "type": "build",
+          "buildingId": "light_artillery_1"
+        },
+        {
+          "type": "end_turn"
+        }
+      ],
+      "timestamp": 1777496269960
+    },
+    {
+      "round": 2,
+      "playerId": 2,
+      "reasoning": "With 4 scrap and 2 actions, I should prioritize scrap-producing buildings to fuel my economic engine. The Communal Garden provides +2 scrap and 3 VP, perfect for my Builder strategy.",
+      "actions": [
+        {
+          "type": "build",
+          "buildingId": "communal_garden_1"
+        },
+        {
+          "type": "explore"
+        }
+      ],
+      "timestamp": 1777496275551
+    },
+    {
+      "round": 3,
+      "playerId": 1,
+      "reasoning": "Player is far ahead with 19 VP vs my 3 VP, so I need to be aggressive. I can resolve the exploration for resources then build an attack-producing building to prepare for raids.",
+      "actions": [
+        {
+          "type": "resolve",
+          "cardId": "abandoned_clinic"
+        },
+        {
+          "type": "build",
+          "buildingId": "militia_bunkhouse_0"
+        }
+      ],
+      "timestamp": 1777496507628
+    },
+    {
+      "round": 3,
+      "playerId": 2,
+      "reasoning": "I can resolve the Abandoned Clinic challenge for 3 VP and 5 scrap, which aligns with my economic engine strategy and helps me catch up in VP.",
+      "actions": [
+        {
+          "type": "resolve",
+          "cardId": "abandoned_clinic"
+        }
+      ],
+      "timestamp": 1777496512440
+    }
+  ]
+}
