@@ -52,8 +52,11 @@ export const NOOP_PLAN = {
 };
 
 function summarizeBuilding(b) {
+  // NOTE: `uid` is intentionally omitted. Including both `uid` and `id`
+  // confuses the AI — it picks `uid` (e.g. "training_grounds_0") for
+  // its action plans, then executeAIAction's `id`-based lookup misses
+  // and the action silently no-ops. Stick to `id`.
   return {
-    uid: b.uid,
     id: b.id,
     name: b.name,
     passiveScrap: b.passiveScrap,
@@ -86,7 +89,6 @@ function summarizePlayer(p, opts = {}) {
   };
   if (opts.includeHand) {
     out.intrigueHand = p.intrigueHand.map((c) => ({
-      uid: c.uid,
       id: c.id,
       name: c.name,
       immediate: c.immediate,
@@ -156,7 +158,6 @@ export function serializeForAI(state, playerId) {
     buildingRow,
     topExploration,
     explorationInPlay: state.explorationInPlay.map((e) => ({
-      uid: e.card.uid,
       id: e.card.id,
       name: e.card.name,
       type: e.card.type,
@@ -172,7 +173,6 @@ export function serializeForAI(state, playerId) {
     availableUpgrades: getAvailableUpgradesFor(state, playerId).map((u) => {
       const check = canUpgrade(state, playerId, u);
       return {
-        uid: u.uid,
         id: u.id,
         name: u.name,
         requires: u.requires,
@@ -186,7 +186,6 @@ export function serializeForAI(state, playerId) {
     availableUniqueBuildings: getAvailableUniqueBuildingsFor(state, playerId).map((u) => {
       const check = canBuildUnique(state, playerId, u);
       return {
-        uid: u.uid,
         id: u.id,
         name: u.name,
         scrapCost: u.scrapCost,
@@ -229,6 +228,7 @@ export async function getAIDecision(state, playerId, personality) {
 
   const userMessage = [
     "Return ONE JSON object with keys `reasoning` (string, 1-2 sentences) and `actions` (array).",
+    "ID HANDLING: every card/building/upgrade in the state below has an `id` field (snake_case, e.g. \"training_grounds\", \"abandoned_clinic\"). Always use that exact `id` value when an action asks for buildingId / cardId / upgradeId / leaderId. Do NOT append \"_0\", \"_1\", or any suffix — those are internal copy markers and will cause your action to fail silently.",
     "Action types you may use:",
     "  { type: \"build\", buildingId: <id from buildingRow> }",
     "  { type: \"explore\" }  // blocked if globalFlags.explorationBlocked",
@@ -241,7 +241,7 @@ export async function getAIDecision(state, playerId, personality) {
     "  { type: \"build_unique\", buildingId: <id from availableUniqueBuildings where canAfford=true> }",
     "  { type: \"swap_leader\", leaderId: <id from availableLeaders> }",
     "  { type: \"end_turn\" }",
-    "Each non-end_turn action consumes resources you must have. The engine will silently no-op invalid actions.",
+    "Each non-end_turn action consumes resources you must have. The engine no-ops invalid actions; only resolve cards that appear in explorationInPlay this turn.",
     "Plan up to 4 actions in priority order. End with end_turn if you intentionally pass remaining actions.",
     "Game state:",
     "```json",
@@ -303,16 +303,34 @@ export function executeAIAction(state, playerId, action) {
   return next;
 }
 
+// Match `action.field` against either a card's `id` or its `uid` — the
+// AI sometimes returns the uid even when the prompt asks for the id, and
+// silent no-ops are worse than a permissive lookup.
+function findByIdOrUid(arr, key, getId, getUid) {
+  if (!key) return undefined;
+  return arr.find((x) => getId(x) === key) ?? arr.find((x) => getUid(x) === key);
+}
+
 function dispatchAIAction(state, playerId, action) {
   switch (action.type) {
     case "build": {
-      const card = state.buildingRow.find((c) => c.id === action.buildingId);
+      const card = findByIdOrUid(
+        state.buildingRow,
+        action.buildingId,
+        (c) => c.id,
+        (c) => c.uid,
+      );
       return card ? actions.build(state, playerId, card.uid) : state;
     }
     case "explore":
       return actions.explore(state, playerId);
     case "resolve": {
-      const entry = state.explorationInPlay.find((e) => e.card.id === action.cardId);
+      const entry = findByIdOrUid(
+        state.explorationInPlay,
+        action.cardId,
+        (e) => e.card.id,
+        (e) => e.card.uid,
+      );
       return entry ? actions.resolveCard(state, playerId, entry.card.uid) : state;
     }
     case "raid": {
@@ -330,13 +348,24 @@ function dispatchAIAction(state, playerId, action) {
     case "boost":
       return actions.boost(state, playerId, action.stat, 1);
     case "upgrade": {
-      const upgrade = (state.unlockableDeck ?? []).find((u) => u.id === action.upgradeId);
+      const upgrade = findByIdOrUid(
+        state.unlockableDeck ?? [],
+        action.upgradeId,
+        (u) => u.id,
+        (u) => u.uid,
+      );
       if (!upgrade) return state;
       return upgradeBuilding(state, playerId, upgrade.uid);
     }
     case "build_unique": {
-      const card = (state.unlockableDeck ?? []).find(
-        (u) => u.id === action.buildingId && (u.scope === "any" || u.scope === playerId),
+      const inScope = (state.unlockableDeck ?? []).filter(
+        (u) => u.scope === "any" || u.scope === playerId,
+      );
+      const card = findByIdOrUid(
+        inScope,
+        action.buildingId,
+        (u) => u.id,
+        (u) => u.uid,
       );
       if (!card) return state;
       return purchaseUniqueBuilding(state, playerId, card.uid);
