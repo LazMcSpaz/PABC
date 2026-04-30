@@ -1,0 +1,227 @@
+[
+  {
+    "id": "5f90c5cf-165d-4b1c-af92-945bb0a3c0b9",
+    "timestamp": "2026-04-29T17:32:51.388Z",
+    "round": 2,
+    "gameState": {
+      "playerVPs": [
+        0,
+        0,
+        0
+      ],
+      "age": 1,
+      "progressionResolved": []
+    },
+    "note": "Looks like enemy buildings are not updated on their card when purchased."
+  },
+  {
+    "id": "105aceb8-250d-4d25-8853-059823814657",
+    "timestamp": "2026-04-29T17:36:28.015Z",
+    "round": 3,
+    "gameState": {
+      "playerVPs": [
+        4,
+        0,
+        0
+      ],
+      "age": 1,
+      "progressionResolved": []
+    },
+    "note": "Looks like the Scrap Yard should be producing +2 scrap per turn, but that's not being added to my total on turn start. Ideally, this card offers +1 scrap on it's own, then +1 scrap per scrap producing building (which includes the Scrap Yard itself)"
+  },
+  {
+    "id": "c984f2af-3824-42ec-a6bf-32dc1793a80b",
+    "timestamp": "2026-04-29T17:39:55.783Z",
+    "round": 3,
+    "gameState": {
+      "playerVPs": [
+        11,
+        0,
+        0
+      ],
+      "age": 1,
+      "progressionResolved": []
+    },
+    "note": "Looks like Rebuild Vanguard Armory did not add it to my settlement (could be because it was full already). Also, the tooltip was hard to understand. Let's rework exploration to make it very clear what the cost is and what the reward is."
+  },
+  {
+    "id": "b151293b-8f99-4bf6-88f0-7f4410e66bdb",
+    "timestamp": "2026-04-29T17:40:54.075Z",
+    "round": 3,
+    "gameState": {
+      "playerVPs": [
+        13,
+        0,
+        0
+      ],
+      "age": 1,
+      "progressionResolved": []
+    },
+    "note": "Scavenge Ruins exploration card did not prompt me to pay up to 3 times the cost for up to 3 times the reward"
+  },
+  {
+    "id": "bebf3c94-1ed3-4262-b796-c52a1f1160f3",
+    "timestamp": "2026-04-29T17:43:03.103Z",
+    "round": 4,
+    "gameState": {
+      "playerVPs": [
+        13,
+        0,
+        0
+      ],
+      "age": 1,
+      "progressionResolved": []
+    },
+    "note": "Not sure, but it looks like, after a raid, the leader who was disabled is re-enabled automatically at the START of the enemy turn. It should be at the end."
+  },
+  {
+    "id": "682bbd35-ebb2-4d28-945f-cabeac9f421a",
+    "timestamp": "2026-04-29T17:46:02.001Z",
+    "round": 4,
+    "gameState": {
+      "playerVPs": [
+        18,
+        0,
+        0
+      ],
+      "age": 1,
+      "progressionResolved": []
+    },
+    "note": "Let's create a way to export the game log so that we can refine balancing by seeing the whole picture. That means that logs need to be a bit more robust in order to actually know what's happening. Maybe a snapshot of every player's settlement, resources, VP, and what happened on their turn. I can already see the raiding snowball after a few turns"
+  },
+  {
+    "id": "ea635669-5955-4961-b25b-2e7a98e37f51",
+    "timestamp": "2026-04-29T21:00:14.761Z",
+    "round": 3,
+    "gameState": {
+      "playerVPs": [
+        5,
+        0,
+        0
+      ],
+      "age": 1,
+      "progressionResolved": []
+    },
+    "note": "Build row should not be gated when the settlement is full. Instead, we should be able to replace a building if we decide to build something new. Buy > prompt the player which building they would like to remove from their settlement > replace it with the new building"
+  },
+  {
+    "id": "1f032d21-4e75-4fbb-b770-422883f6f12c",
+    "timestamp": "2026-04-29T21:02:57.384Z",
+    "round": 4,
+    "gameState": {
+      "playerVPs": [
+        8,
+        0,
+        0
+      ],
+      "age": 1,
+      "progressionResolved": []
+    },
+    "note": "I'm still not seeing buildings or values update for enemies. Seems like they aren't either since their logic is based on still having only 3 VP"
+  },
+  {
+    "id": "7fa8445b-61c4-4be4-b67f-70f0de5adce9",
+    "timestamp": "2026-04-30T11:10:04.718Z",
+    "round": 5,
+    "gameState": {
+      "playerVPs": [
+        3,
+        3,
+        0
+      ],
+      "age": 1,
+      "progressionResolved": []
+    },
+    "note": "On successful raid, a building should be disabled, not destroyed. Once disabled, it costs an action to repair it."
+  },
+  {
+    "id": "05ca900c-5393-4d5e-b64a-1e80c7b2f87f",
+    "timestamp": "2026-04-30T11:18:05.190Z",
+    "round": 2,
+    "gameState": {
+      "playerVPs": [
+        0,
+        0,
+        0
+      ],
+      "age": 1,
+      "progressionResolved": []
+    },
+    "note": "I saw that the Builder drew an exploration card, had the requirements to complete, but didn't. Let's make sure that the AI can complete exploration cards."
+  },
+  {
+    "id": "53226a01-f00b-4d4c-9957-58553f598140",
+    "timestamp": "2026-04-30T11:20:20.765Z",
+    "round": 3,
+    "gameState": {
+      "playerVPs": [
+        3,
+        0,
+        0
+      ],
+      "age": 1,
+      "progressionResolved": []
+    },
+    "note": "Looks like we need to show players what an upgrade does before they buy it. I don't see any info before I click."
+  },
+  {
+    "id": "12c817c6-de89-4f99-94a1-0d523e2f0b1e",
+    "timestamp": "2026-04-30T11:21:38.504Z",
+    "round": 3,
+    "gameState": {
+      "playerVPs": [
+        3,
+        0,
+        0
+      ],
+      "age": 1,
+      "progressionResolved": []
+    },
+    "note": "I couldn't see my intrigue card because it was a reaction card, for some reason. I should be able to read my cards even if I can't play them immediately. Also, the Vulture card was played without my input. I should choose when it's activated. This should be the case with most cards."
+  },
+  {
+    "id": "5ca20040-9b80-4617-95d7-feefb9b2b651",
+    "timestamp": "2026-04-30T11:22:05.450Z",
+    "round": 3,
+    "gameState": {
+      "playerVPs": [
+        3,
+        0,
+        0
+      ],
+      "age": 1,
+      "progressionResolved": []
+    },
+    "note": "Seems like AI can resolve cards, although I'm still not sure why the builder didn't initially resolve that one."
+  },
+  {
+    "id": "df28f580-24b4-4181-892d-7e1487747fb2",
+    "timestamp": "2026-04-30T11:22:48.963Z",
+    "round": 3,
+    "gameState": {
+      "playerVPs": [
+        3,
+        0,
+        0
+      ],
+      "age": 1,
+      "progressionResolved": []
+    },
+    "note": "I don't think I received the rewards from the Vulture card when they were stolen"
+  },
+  {
+    "id": "05045d5f-2970-4c79-a89f-0845582781e5",
+    "timestamp": "2026-04-30T11:24:03.164Z",
+    "round": 4,
+    "gameState": {
+      "playerVPs": [
+        3,
+        3,
+        0
+      ],
+      "age": 1,
+      "progressionResolved": []
+    },
+    "note": "Also, I don't think upgrades should remove the effects of the previous buildings. They should add on to them."
+  }
+]
