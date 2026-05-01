@@ -15,7 +15,6 @@ import {
 import { resolveNarrativeBeat } from "../narrative.js";
 import { NotifKind, impact, notify } from "../notifications.js";
 import { pauseWithPrompt, registerAIHeuristic, registerResumer } from "../prompts.js";
-import { CARD_RESOLVERS } from "../resolution.js";
 import { logEntry, updatePlayer } from "../stateHelpers.js";
 import { unlockUnlockable } from "../upgrades.js";
 import { hasActiveBuilding } from "./_shared.js";
@@ -76,15 +75,6 @@ export function resolveCard(state, playerId, cardUid, decisions = {}) {
   const card = entry.card;
   const player = state.players.find((p) => p.id === playerId);
   if (!player) return state;
-
-  const custom = CARD_RESOLVERS[card.id];
-  if (typeof custom === "function") {
-    const after = custom(state, playerId, card);
-    return {
-      ...after,
-      explorationInPlay: after.explorationInPlay.filter((e) => e.card.uid !== cardUid),
-    };
-  }
 
   // Generic Challenge resolver: pay scrap, check requirements, then apply
   // rewards — which may be fully stolen by Vulture or half-skimmed by

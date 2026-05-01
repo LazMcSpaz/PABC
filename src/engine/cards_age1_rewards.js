@@ -664,7 +664,7 @@ export const ALL_AGE1_REWARD_CARDS = [
   ...UNIQUE_INTRIGUE,
 ];
 
-// Lookup by id — useful in resolution.js and narrative.js
+// Lookup by id — useful in narrative.js and upgrades.js.
 export const REWARD_CARD_MAP = Object.fromEntries(
   ALL_AGE1_REWARD_CARDS.map(card => [card.id, card])
 );
