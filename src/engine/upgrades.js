@@ -130,7 +130,12 @@ export function upgradeBuilding(state, playerId, upgradeUid) {
   // bookkeeping that referenced the parent's uid so the upgrade comes in
   // clean.
   let next = updatePlayer(state, playerId, (p) => {
-    const newSlot = { ...upgrade };
+    // The upgrade replaces the parent visually (same settlement slot),
+    // but the parent's passive stats are preserved by attaching the
+    // parent card onto the upgrade entry. calculations.js sums stats
+    // across an entry and its attachedParent. Activated abilities still
+    // come from the upgrade only — not merged.
+    const newSlot = { ...upgrade, attachedParent: { ...parent } };
     const settlement = p.settlement.map((b) => (b.uid === parent.uid ? newSlot : b));
     const disabled = (p.disabledBuildingUids ?? []).filter((x) => x !== parent.uid);
     const disabledPool = (p.buildingsDisabledUntilOwnerTurnEnd ?? []).filter(

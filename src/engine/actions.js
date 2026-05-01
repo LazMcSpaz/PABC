@@ -15,6 +15,7 @@ import {
   fireChallengeResolveReactive,
   fireExploreDrawReactive,
   fireRaidReactive,
+  peekChallengeReactiveHolder,
 } from "./intrigue.js";
 import { resolveNarrativeBeat } from "./narrative.js";
 import { NotifKind, impact, notify } from "./notifications.js";
@@ -307,6 +308,30 @@ export function resolveCard(state, playerId, cardUid, decisions = {}) {
     if (calcAttack(player) < effectiveReqAtk) return state;
     if (calcDefense(player) < (card.reqDef ?? 0)) return state;
 
+    // Reactive Intrigue holder approval. If a human opponent is holding
+    // Vulture or Salvage Rights, ask them whether to fire it BEFORE the
+    // resolver pays cost — the reactive used to auto-fire and the
+    // playtester reasonably wanted control over their own card. AI
+    // holders auto-fire (heuristic registered below).
+    if (decisions.reactiveChoice === undefined) {
+      const peek = peekChallengeReactiveHolder(state, playerId);
+      if (peek) {
+        const holder = state.players.find((p) => p.id === peek.holderId);
+        if (holder?.kind === "human") {
+          return pauseWithPrompt(state, {
+            kind: "challenge_reactive_choice",
+            playerId: peek.holderId,
+            message: `${player.name} is resolving ${card.name}. Fire your ${peek.cardName}?`,
+            options: [
+              { value: "fire", label: `Fire ${peek.cardName}` },
+              { value: "skip", label: "Save it" },
+            ],
+            context: { playerId, cardUid, decisions },
+          });
+        }
+      }
+    }
+
     // Repeatable challenges: the player may pay the cost N times in a
     // single resolution (capped by ability.maxRepeat and affordability)
     // for proportionally bigger rewards. Pause once for the count if
@@ -355,7 +380,11 @@ export function resolveCard(state, playerId, cardUid, decisions = {}) {
 
     // Reactive: Vulture / Salvage Rights. Pass `repeats` so Salvage
     // Rights claims half of the actual (multiplied) Scrap reward.
-    const reactive = fireChallengeResolveReactive(next, playerId, card, repeats);
+    // Honor a "skip" decision from the human-holder approval prompt.
+    const reactive =
+      decisions.reactiveChoice === "skip"
+        ? { state: next }
+        : fireChallengeResolveReactive(next, playerId, card, repeats);
     next = reactive.state;
 
     const beneficiaryId = reactive.stolenByHolderId ?? playerId;
@@ -595,6 +624,19 @@ registerAIHeuristic("repeatable_choice", (_state, prompt) => {
 registerResumer("demolish_for_build_choice", (state, choice, ctx) => {
   return build(state, ctx.playerId, ctx.buildingUid, { demolishUid: choice });
 });
+
+registerResumer("challenge_reactive_choice", (state, choice, ctx) => {
+  return resolveCard(state, ctx.playerId, ctx.cardUid, {
+    ...(ctx.decisions ?? {}),
+    reactiveChoice: choice,
+  });
+});
+
+// AI heuristic for reactive prompts: greedy fire is optimal — the
+// holder either steals the rewards (Vulture) or skims half scrap
+// (Salvage Rights), and saving the card has no opportunity cost since
+// it's an Immediate trigger.
+registerAIHeuristic("challenge_reactive_choice", () => "fire");
 
 // AI heuristic: demolish the lowest-VP non-leader building (cheapest
 // loss). Ties broken arbitrarily by the first-found order.
