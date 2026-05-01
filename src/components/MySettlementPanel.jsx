@@ -2,61 +2,40 @@ import { useState } from "react";
 import { abilityMeta, canActivate } from "../engine/abilities.js";
 import { canUpgrade, getAvailableUpgradesFor } from "../engine/upgrades.js";
 import Card from "./Card.jsx";
+import ModalShell from "./ModalShell.jsx";
 
 function PartnerModal({ building, state, activePlayer, onConfirm, onCancel }) {
   const [partnerId, setPartnerId] = useState(null);
   const opponents = state.players.filter((p) => p.id !== activePlayer.id);
   return (
-    <div
-      onClick={onCancel}
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(0,0,0,0.7)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        zIndex: 80,
-      }}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        className="modal-shell modal-shell--narrow"
-        style={{
-          background: "#222",
-          padding: "1rem",
-          borderRadius: 6,
-          color: "#f5f5f5",
-        }}
-      >
-        <h3 style={{ marginTop: 0 }}>{building.name}</h3>
-        <div style={{ fontSize: 13, opacity: 0.85, marginBottom: "0.5rem" }}>
-          Choose a trading partner — they gain +1 Scrap.
-        </div>
-        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-          {opponents.map((p) => (
-            <button
-              key={p.id}
-              onClick={() => setPartnerId(p.id)}
-              style={{
-                padding: "4px 8px",
-                border: partnerId === p.id ? `2px solid ${p.color}` : "1px solid #444",
-                background: "#1f1f1f",
-                color: p.color,
-              }}
-            >
-              {p.name}
-            </button>
-          ))}
-        </div>
-        <div style={{ display: "flex", gap: 6, marginTop: "0.75rem" }}>
-          <button onClick={() => onConfirm({ partnerId })} disabled={partnerId == null}>
-            Use
-          </button>
-          <button onClick={onCancel}>Cancel</button>
-        </div>
+    <ModalShell onClose={onCancel} zIndex={80} variant="narrow">
+      <h3 style={{ marginTop: 0 }}>{building.name}</h3>
+      <div style={{ fontSize: 13, opacity: 0.85, marginBottom: "0.5rem" }}>
+        Choose a trading partner — they gain +1 Scrap.
       </div>
-    </div>
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+        {opponents.map((p) => (
+          <button
+            key={p.id}
+            onClick={() => setPartnerId(p.id)}
+            style={{
+              padding: "4px 8px",
+              border: partnerId === p.id ? `2px solid ${p.color}` : "1px solid #444",
+              background: "#1f1f1f",
+              color: p.color,
+            }}
+          >
+            {p.name}
+          </button>
+        ))}
+      </div>
+      <div style={{ display: "flex", gap: 6, marginTop: "0.75rem" }}>
+        <button onClick={() => onConfirm({ partnerId })} disabled={partnerId == null}>
+          Use
+        </button>
+        <button onClick={onCancel}>Cancel</button>
+      </div>
+    </ModalShell>
   );
 }
 

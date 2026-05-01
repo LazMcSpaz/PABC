@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { calcAttack, calcDefense } from "../engine/calculations.js";
 import { RAID_TYPES, RAID_UNLOCK_ROUND } from "../engine/actions.js";
+import ModalShell from "./ModalShell.jsx";
 
 const RAID_TYPE_LIST = [RAID_TYPES.DESTROY, RAID_TYPES.STEAL, RAID_TYPES.DISABLE];
 
@@ -33,31 +34,10 @@ function RaidLauncherModal({ attacker, target, onConfirm, onCancel }) {
   const canConfirm = !needsBuilding || !!buildingUid;
 
   return (
-    <div
-      onClick={onCancel}
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(0,0,0,0.7)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        zIndex: 80,
-      }}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        className="modal-shell"
-        style={{
-          background: "#222",
-          padding: "1rem",
-          borderRadius: 6,
-          color: "#f5f5f5",
-        }}
-      >
-        <h3 style={{ marginTop: 0 }}>
-          Raid {target.name}
-        </h3>
+    <ModalShell onClose={onCancel} zIndex={80}>
+      <h3 style={{ marginTop: 0 }}>
+        Raid {target.name}
+      </h3>
         <div style={{ fontSize: 13, opacity: 0.85, marginBottom: "0.5rem" }}>
           Your ⚔{myAtk} vs their 🛡{theirDef}
           {lookoutBonus ? ` (+${lookoutBonus} Lookout)` : ""} — defender wins
@@ -162,8 +142,7 @@ function RaidLauncherModal({ attacker, target, onConfirm, onCancel }) {
           </button>
           <button onClick={onCancel}>Cancel</button>
         </div>
-      </div>
-    </div>
+    </ModalShell>
   );
 }
 

@@ -4,6 +4,7 @@
 // the current pendingPrompt belongs to a human player.
 
 import { useEffect } from "react";
+import ModalShell from "./ModalShell.jsx";
 
 export default function PromptModal({ state, onResolve }) {
   const prompt = state?.pendingPrompt;
@@ -15,51 +16,34 @@ export default function PromptModal({ state, onResolve }) {
   if (prompt.kind === "peek_reorder_choice") return null;
 
   return (
-    <div
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(0,0,0,0.72)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        zIndex: 90,
-      }}
+    <ModalShell
+      zIndex={90}
+      variant="wide"
+      overlayAlpha={0.72}
+      ownerColor={owner?.color ?? "#666"}
     >
       <div
-        className="modal-shell modal-shell--wide"
         style={{
-          background: "#222",
-          padding: "1rem",
-          borderRadius: 6,
-          color: "#f5f5f5",
-          border: `1px solid ${owner?.color ?? "#666"}`,
-          boxShadow: "0 8px 24px rgba(0,0,0,0.6)",
+          fontSize: 12,
+          opacity: 0.65,
+          marginBottom: 4,
+          color: owner?.color,
         }}
       >
-        <div
-          style={{
-            fontSize: 12,
-            opacity: 0.65,
-            marginBottom: 4,
-            color: owner?.color,
-          }}
-        >
-          {owner?.name} — Decision required
-        </div>
-        {prompt.message ? (
-          <div style={{ fontSize: 14, marginBottom: "0.75rem" }}>{prompt.message}</div>
-        ) : null}
-        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-          {(prompt.options ?? []).map((opt) => (
-            <OptionButton key={String(opt.value)} opt={opt} onResolve={onResolve} />
-          ))}
-        </div>
-        <div style={{ fontSize: 11, opacity: 0.55, marginTop: "0.75rem" }}>
-          Prompt id: {prompt.kind}
-        </div>
+        {owner?.name} — Decision required
       </div>
-    </div>
+      {prompt.message ? (
+        <div style={{ fontSize: 14, marginBottom: "0.75rem" }}>{prompt.message}</div>
+      ) : null}
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+        {(prompt.options ?? []).map((opt) => (
+          <OptionButton key={String(opt.value)} opt={opt} onResolve={onResolve} />
+        ))}
+      </div>
+      <div style={{ fontSize: 11, opacity: 0.55, marginTop: "0.75rem" }}>
+        Prompt id: {prompt.kind}
+      </div>
+    </ModalShell>
   );
 }
 

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import ModalShell from "./ModalShell.jsx";
 
 // Renders only when the pending prompt is a peek_reorder_choice for a
 // human player. Presents the peeked cards in top-to-bottom order with
@@ -43,28 +44,12 @@ export default function PeekReorderModal({ state, onResolve }) {
     : order;
 
   return (
-    <div
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(0,0,0,0.72)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        zIndex: 95,
-      }}
+    <ModalShell
+      zIndex={95}
+      variant="wide"
+      overlayAlpha={0.72}
+      ownerColor={owner?.color ?? "#666"}
     >
-      <div
-        className="modal-shell modal-shell--wide"
-        style={{
-          background: "#222",
-          padding: "1rem",
-          borderRadius: 6,
-          color: "#f5f5f5",
-          border: `1px solid ${owner?.color ?? "#666"}`,
-          boxShadow: "0 8px 24px rgba(0,0,0,0.6)",
-        }}
-      >
         <div
           style={{
             fontSize: 12,
@@ -150,7 +135,6 @@ export default function PeekReorderModal({ state, onResolve }) {
             Confirm
           </button>
         </div>
-      </div>
-    </div>
+    </ModalShell>
   );
 }

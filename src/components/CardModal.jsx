@@ -1,3 +1,5 @@
+import ModalShell from "./ModalShell.jsx";
+
 export default function CardModal({ card, onClose }) {
   if (!card) return null;
   const rows = [
@@ -18,31 +20,8 @@ export default function CardModal({ card, onClose }) {
   ].filter(([, v]) => v !== undefined && v !== null && v !== 0 && v !== "");
 
   return (
-    <div
-      onClick={onClose}
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(0,0,0,0.7)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        zIndex: 50,
-      }}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        className="modal-shell"
-        style={{
-          background: "#222",
-          padding: "1rem",
-          borderRadius: 6,
-          color: "#f5f5f5",
-          fontSize: 13,
-          lineHeight: 1.5,
-        }}
-      >
-        <h3 style={{ marginTop: 0 }}>{card.name}</h3>
+    <ModalShell onClose={onClose} innerStyle={{ fontSize: 13, lineHeight: 1.5 }}>
+      <h3 style={{ marginTop: 0 }}>{card.name}</h3>
         <table style={{ width: "100%", fontSize: 12 }}>
           <tbody>
             {rows.map(([label, value]) => (
@@ -81,7 +60,6 @@ export default function CardModal({ card, onClose }) {
         <button onClick={onClose} style={{ marginTop: "0.75rem" }}>
           Close
         </button>
-      </div>
-    </div>
+    </ModalShell>
   );
 }

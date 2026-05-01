@@ -1,35 +1,6 @@
 import { useState } from "react";
 import { INTRIGUE_EFFECTS } from "../engine/intrigue.js";
-
-function modalShell(onClose, children) {
-  return (
-    <div
-      onClick={onClose}
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(0,0,0,0.7)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        zIndex: 80,
-      }}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        className="modal-shell"
-        style={{
-          background: "#222",
-          padding: "1rem",
-          borderRadius: 6,
-          color: "#f5f5f5",
-        }}
-      >
-        {children}
-      </div>
-    </div>
-  );
-}
+import ModalShell from "./ModalShell.jsx";
 
 export default function IntriguePlayModal({ card, state, activePlayer, onConfirm, onCancel }) {
   const [targetId, setTargetId] = useState(null);
@@ -39,15 +10,15 @@ export default function IntriguePlayModal({ card, state, activePlayer, onConfirm
   if (!card) return null;
   const entry = INTRIGUE_EFFECTS[card.id];
   if (!entry) {
-    return modalShell(onCancel, (
-      <>
+    return (
+      <ModalShell onClose={onCancel} zIndex={80}>
         <h3>{card.name}</h3>
         <div style={{ opacity: 0.8, marginBottom: "0.5rem" }}>
           No engine handler wired yet. You can still discard it.
         </div>
         <button onClick={onCancel}>Close</button>
-      </>
-    ));
+      </ModalShell>
+    );
   }
 
   const opponents = state.players.filter((p) => p.id !== activePlayer.id);
@@ -80,8 +51,8 @@ export default function IntriguePlayModal({ card, state, activePlayer, onConfirm
 
   const target = opponents.find((p) => p.id === targetId);
 
-  return modalShell(onCancel, (
-    <>
+  return (
+    <ModalShell onClose={onCancel} zIndex={80}>
       <h3 style={{ marginTop: 0 }}>Play {card.name}</h3>
       <div style={{ fontSize: 13, opacity: 0.85, marginBottom: "0.75rem" }}>
         {card.ability?.description}
@@ -179,6 +150,6 @@ export default function IntriguePlayModal({ card, state, activePlayer, onConfirm
         </button>
         <button onClick={onCancel}>Cancel</button>
       </div>
-    </>
-  ));
+    </ModalShell>
+  );
 }
