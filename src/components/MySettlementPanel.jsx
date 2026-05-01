@@ -102,6 +102,7 @@ export default function MySettlementPanel({
   onInspect,
   onActivate,
   onUpgrade,
+  onRepair,
 }) {
   const [partnerPrompt, setPartnerPrompt] = useState(null);
 
@@ -121,6 +122,30 @@ export default function MySettlementPanel({
     const upgrade = !isLeader ? upgradeFor(entry) : null;
 
     const actionButtons = [];
+    if (!isLeader && isDisabled && onRepair) {
+      const canRepair =
+        activePlayer.actionsRemaining >= 1 && activePlayer.scrap >= 2;
+      actionButtons.push(
+        <button
+          key="repair"
+          onClick={(e) => {
+            e.stopPropagation();
+            onRepair(entry.uid);
+          }}
+          disabled={!canRepair}
+          title={
+            canRepair
+              ? "Repair this disabled building (1⚡ + 2🔩)"
+              : activePlayer.actionsRemaining < 1
+                ? "needs 1 Action"
+                : "needs 2 Scrap"
+          }
+          style={{ fontSize: 11, padding: "3px 6px" }}
+        >
+          Repair (1⚡ 2🔩)
+        </button>,
+      );
+    }
     if (meta) {
       const check = canActivate(state, activePlayer.id, entry);
       const cost =
@@ -147,6 +172,22 @@ export default function MySettlementPanel({
     }
     if (upgrade) {
       const check = canUpgrade(state, activePlayer.id, upgrade);
+      const tooltip = upgrade.ability?.description
+        ? `${upgrade.ability.description} — Upgrade for ${upgrade.scrapCost ?? 0}🔩${upgrade.atkCost ? ` (req ⚔${upgrade.atkCost})` : ""}`
+        : `Upgrade to ${upgrade.name} (${upgrade.scrapCost ?? 0}🔩)`;
+      actionButtons.push(
+        <button
+          key="upgrade-info"
+          onClick={(e) => {
+            e.stopPropagation();
+            onInspect(upgrade);
+          }}
+          title={`Inspect ${upgrade.name}`}
+          style={{ fontSize: 11, padding: "3px 6px" }}
+        >
+          ⓘ
+        </button>,
+      );
       actionButtons.push(
         <button
           key="upgrade"
@@ -155,11 +196,7 @@ export default function MySettlementPanel({
             onUpgrade(upgrade.uid);
           }}
           disabled={!check.ok}
-          title={
-            !check.ok
-              ? upgradeReason(check.reason) ?? "unavailable"
-              : `Upgrade to ${upgrade.name} (${upgrade.scrapCost ?? 0}🔩)`
-          }
+          title={!check.ok ? upgradeReason(check.reason) ?? "unavailable" : tooltip}
           style={{ fontSize: 11, padding: "3px 6px" }}
         >
           → {upgrade.name} ({upgrade.scrapCost ?? 0}🔩)

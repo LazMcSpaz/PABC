@@ -10,6 +10,13 @@ function activeBuildings(player) {
   return player.settlement.filter((b) => !disabled.has(b.uid));
 }
 
+// Sum a passive stat across an entry and its attached parent (if any).
+// Upgrades attach the parent card on the same settlement slot so the
+// parent's passive contribution is preserved alongside the upgrade's.
+function statOf(entry, field) {
+  return (entry[field] ?? 0) + (entry.attachedParent?.[field] ?? 0);
+}
+
 function leaderContribution(player, field) {
   if (!player.leader || player.leader.disabled) return 0;
   return player.leader[field] ?? 0;
@@ -21,17 +28,24 @@ function debuffSum(player, stat) {
     .reduce((sum, d) => sum + (d.amount ?? 0), 0);
 }
 
+// True if an entry (or its attached parent) matches a given building id.
+// Used by scalingBonus and tuskBonus so an upgrade slot still triggers
+// the parent's scaling identity (e.g. an upgraded Scrap Yard still acts
+// as a Scrap Yard for the +1-per-Scrap-producer scaling).
+function entryMatchesId(entry, id) {
+  return entry.id === id || entry.attachedParent?.id === id;
+}
+
 // Passive_scaling abilities fire during resource collection and grant
 // +1 per matching building. Scrap Yard scales on Scrap-producing
-// buildings (passiveScrap > 0) and now contributes its own +1 base, so
-// it counts itself in the scaling tally. Training Grounds scales on
-// Attack-producing (passiveAtk > 0). No hard cap — the 5-slot
-// settlement limit (plus the rare unique building) is the natural
-// ceiling. Multiple copies of the triggering building do not stack.
+// buildings (passiveScrap > 0) and contributes its own +1 base. Training
+// Grounds scales on Attack-producing (passiveAtk > 0). No hard cap — the
+// 5-slot settlement limit is the natural ceiling. Counts upgrades as
+// matching either their own stat or their attached parent's stat.
 function scalingBonus(player, triggerBuildingId, field) {
   const active = activeBuildings(player);
-  if (!active.some((b) => b.id === triggerBuildingId)) return 0;
-  return active.filter((b) => (b[field] ?? 0) > 0).length;
+  if (!active.some((b) => entryMatchesId(b, triggerBuildingId))) return 0;
+  return active.filter((b) => statOf(b, field) > 0).length;
 }
 
 // Lt. Tusk's passive mirrors Training Grounds — +1 Attack per attack-
@@ -40,7 +54,7 @@ function scalingBonus(player, triggerBuildingId, field) {
 // of the two.
 function tuskBonus(player) {
   if (player.leader?.id !== "lt_tusk" || player.leader?.disabled) return 0;
-  return activeBuildings(player).filter((b) => (b.passiveAtk ?? 0) > 0).length;
+  return activeBuildings(player).filter((b) => statOf(b, "passiveAtk") > 0).length;
 }
 
 // Sum any permanent bonus whose mechanic wires into a given calc field.
@@ -55,7 +69,7 @@ function permanentBonusSum(player, effect) {
 
 export function calcPassiveScrap(player) {
   return (
-    activeBuildings(player).reduce((sum, b) => sum + (b.passiveScrap ?? 0), 0) +
+    activeBuildings(player).reduce((sum, b) => sum + statOf(b, "passiveScrap"), 0) +
     leaderContribution(player, "passiveScrap") +
     scalingBonus(player, "scrap_yard", "passiveScrap") +
     permanentBonusSum(player, "bonus_scrap")
@@ -70,7 +84,7 @@ export function calcAttack(player) {
     tuskBonus(player),
   );
   const base =
-    activeBuildings(player).reduce((sum, b) => sum + (b.passiveAtk ?? 0), 0) +
+    activeBuildings(player).reduce((sum, b) => sum + statOf(b, "passiveAtk"), 0) +
     leaderContribution(player, "passiveAtk") +
     scalingAtk;
   return Math.max(
@@ -82,7 +96,7 @@ export function calcAttack(player) {
 export function calcDefense(player) {
   const base =
     BASE_DEFENSE +
-    activeBuildings(player).reduce((sum, b) => sum + (b.passDef ?? 0), 0) +
+    activeBuildings(player).reduce((sum, b) => sum + statOf(b, "passDef"), 0) +
     leaderContribution(player, "passDef");
   return Math.max(
     0,
@@ -97,21 +111,25 @@ export function calcDefense(player) {
 // wired through a prompt UI in a later pass.
 export function calcDefenseForRaid(player) {
   const base = calcDefense(player);
-  const lookoutBonus = activeBuildings(player).some((b) => b.id === "lookout_tower") ? 2 : 0;
+  const lookoutBonus = activeBuildings(player).some((b) =>
+    entryMatchesId(b, "lookout_tower"),
+  )
+    ? 2
+    : 0;
   return base + lookoutBonus;
 }
 
 export function calcActions(player) {
   return (
     BASE_ACTIONS +
-    activeBuildings(player).reduce((sum, b) => sum + (b.passActions ?? 0), 0) +
+    activeBuildings(player).reduce((sum, b) => sum + statOf(b, "passActions"), 0) +
     leaderContribution(player, "passActions")
   );
 }
 
 export function calcVP(player) {
   return (
-    activeBuildings(player).reduce((sum, b) => sum + (b.vp ?? 0), 0) +
+    activeBuildings(player).reduce((sum, b) => sum + statOf(b, "vp"), 0) +
     leaderContribution(player, "vp") +
     (player.earnedVP ?? 0)
   );

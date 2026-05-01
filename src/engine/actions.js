@@ -15,6 +15,7 @@ import {
   fireChallengeResolveReactive,
   fireExploreDrawReactive,
   fireRaidReactive,
+  peekChallengeReactiveHolder,
 } from "./intrigue.js";
 import { resolveNarrativeBeat } from "./narrative.js";
 import { NotifKind, impact, notify } from "./notifications.js";
@@ -72,7 +73,7 @@ function refreshBuildingRow(state, removedIndex) {
   return { ...state, buildingRow: nextRow, buildingDeck: deck };
 }
 
-export function build(state, playerId, buildingUid) {
+export function build(state, playerId, buildingUid, decisions = {}) {
   if (state.pendingPrompt) return state;
   const rowIndex = state.buildingRow.findIndex((c) => c.uid === buildingUid);
   if (rowIndex < 0) return state;
@@ -87,9 +88,29 @@ export function build(state, playerId, buildingUid) {
   const totalCost = discountedCost + surcharge;
   if (player.scrap < totalCost) return state;
   if (player.actionsRemaining < 1) return state;
-  if (player.settlement.length >= 5) return state;
 
-  let next = updatePlayer(state, playerId, (p) => {
+  // Settlement full — instead of silently rejecting, ask the player which
+  // existing building to demolish to make room. Resumer ("demolish_for_build_choice")
+  // performs the demolish then re-invokes build() with decisions.demolishUid set.
+  let next = state;
+  if (player.settlement.length >= 5) {
+    if (!decisions.demolishUid) {
+      return pauseWithPrompt(state, {
+        kind: "demolish_for_build_choice",
+        playerId,
+        message: `Settlement is full (5/5). Pick a building to demolish to make room for ${card.name}.`,
+        options: player.settlement.map((b) => ({
+          value: b.uid,
+          label: `${b.name}${b.vp ? ` (★${b.vp})` : ""}`,
+        })),
+        context: { playerId, buildingUid },
+      });
+    }
+    // Apply the demolish before paying for the new building.
+    next = demolish(next, playerId, decisions.demolishUid);
+  }
+
+  next = updatePlayer(next, playerId, (p) => {
     const flags = { ...(p.flags ?? {}) };
     delete flags.nextBuildingScrapSurcharge;
     return {
@@ -133,6 +154,38 @@ export function demolish(state, playerId, buildingUid) {
     ...p,
     settlement: p.settlement.filter((b) => b.uid !== buildingUid),
   }));
+}
+
+// Repair a disabled building on the active player's turn. Standard cost
+// per the rules summary: 1 Action + 2 Scrap. Only clears entries from
+// disabledBuildingUids — does NOT touch buildingsDisabledUntilOwnerTurnEnd
+// (those auto-recover on the owner's turn end already, no manual repair
+// needed).
+export function repair(state, playerId, buildingUid) {
+  if (state.pendingPrompt) return state;
+  if (state.activePlayerId !== playerId) return state;
+  const player = state.players.find((p) => p.id === playerId);
+  if (!player) return state;
+  if (!(player.disabledBuildingUids ?? []).includes(buildingUid)) return state;
+  if (player.actionsRemaining < 1 || player.scrap < 2) return state;
+  const building = (player.settlement ?? []).find((b) => b.uid === buildingUid);
+  if (!building) return state;
+
+  let next = updatePlayer(state, playerId, (p) => ({
+    ...p,
+    actionsRemaining: p.actionsRemaining - 1,
+    scrap: p.scrap - 2,
+    disabledBuildingUids: (p.disabledBuildingUids ?? []).filter((x) => x !== buildingUid),
+  }));
+  next = log(next, { type: "repair", playerId, cardId: building.id });
+  return notify(next, {
+    kind: NotifKind.BUILD,
+    title: `${player.name} repaired ${building.name}`,
+    message: `Spent 1⚡ + 2🔩 to bring ${building.name} back online.`,
+    impacts: [impact(playerId, "−1⚡ · −2🔩 · building active again", { scrap: -2, actions: -1 })],
+    sourceCardId: building.id,
+    sourcePlayerId: playerId,
+  });
 }
 
 export function boost(state, playerId, stat, amount = 1) {
@@ -255,6 +308,30 @@ export function resolveCard(state, playerId, cardUid, decisions = {}) {
     if (calcAttack(player) < effectiveReqAtk) return state;
     if (calcDefense(player) < (card.reqDef ?? 0)) return state;
 
+    // Reactive Intrigue holder approval. If a human opponent is holding
+    // Vulture or Salvage Rights, ask them whether to fire it BEFORE the
+    // resolver pays cost — the reactive used to auto-fire and the
+    // playtester reasonably wanted control over their own card. AI
+    // holders auto-fire (heuristic registered below).
+    if (decisions.reactiveChoice === undefined) {
+      const peek = peekChallengeReactiveHolder(state, playerId);
+      if (peek) {
+        const holder = state.players.find((p) => p.id === peek.holderId);
+        if (holder?.kind === "human") {
+          return pauseWithPrompt(state, {
+            kind: "challenge_reactive_choice",
+            playerId: peek.holderId,
+            message: `${player.name} is resolving ${card.name}. Fire your ${peek.cardName}?`,
+            options: [
+              { value: "fire", label: `Fire ${peek.cardName}` },
+              { value: "skip", label: "Save it" },
+            ],
+            context: { playerId, cardUid, decisions },
+          });
+        }
+      }
+    }
+
     // Repeatable challenges: the player may pay the cost N times in a
     // single resolution (capped by ability.maxRepeat and affordability)
     // for proportionally bigger rewards. Pause once for the count if
@@ -303,7 +380,11 @@ export function resolveCard(state, playerId, cardUid, decisions = {}) {
 
     // Reactive: Vulture / Salvage Rights. Pass `repeats` so Salvage
     // Rights claims half of the actual (multiplied) Scrap reward.
-    const reactive = fireChallengeResolveReactive(next, playerId, card, repeats);
+    // Honor a "skip" decision from the human-holder approval prompt.
+    const reactive =
+      decisions.reactiveChoice === "skip"
+        ? { state: next }
+        : fireChallengeResolveReactive(next, playerId, card, repeats);
     next = reactive.state;
 
     const beneficiaryId = reactive.stolenByHolderId ?? playerId;
@@ -427,6 +508,59 @@ export function resolveCard(state, playerId, cardUid, decisions = {}) {
     if (card.vp) rewardBits.push(`+${eff(card.vp)}★`);
     if (card.scrapCost) rewardBits.unshift(`−${eff(card.scrapCost)}🔩`);
     if (repeats > 1) rewardBits.unshift(`${repeats}×`);
+
+    // Build the impacts list. The resolver always shows their cost; if
+    // Vulture stole the rewards, the holder gets a separate impact line
+    // showing what they received. Salvage Rights' half-skim shows the
+    // holder's half on a third line so the Scrap movement is visible.
+    const resolveImpacts = [];
+    if (reactive.stolenByHolderId != null) {
+      // Resolver only paid the cost.
+      if (card.scrapCost) {
+        resolveImpacts.push(
+          impact(playerId, `−${eff(card.scrapCost)}🔩 (rewards stolen)`, {
+            scrap: -eff(card.scrapCost),
+          }),
+        );
+      }
+      const holderName =
+        next.players.find((p) => p.id === reactive.stolenByHolderId)?.name ?? "Vulture holder";
+      resolveImpacts.push(
+        impact(reactive.stolenByHolderId, `${holderName} stole: ${rewardBits.filter((s) => !s.startsWith("−")).join(" · ") || "—"}`, {
+          scrap: eff(card.scrapReward ?? 0),
+          atk: eff(card.atkReward ?? 0),
+          def: eff(card.defReward ?? 0),
+          actions: eff(card.actionReward ?? 0),
+          vp: eff(card.vp ?? 0),
+        }),
+      );
+    } else if (reactive.halvedToHolderId != null) {
+      const half = reactive.halvedAmount ?? 0;
+      const holderName =
+        next.players.find((p) => p.id === reactive.halvedToHolderId)?.name ?? "Salvage Rights holder";
+      resolveImpacts.push(
+        impact(playerId, rewardBits.join(" · "), {
+          scrap: eff(card.scrapReward ?? 0) - eff(card.scrapCost ?? 0) - half,
+          atk: eff(card.atkReward ?? 0),
+          def: eff(card.defReward ?? 0),
+          actions: eff(card.actionReward ?? 0),
+          vp: eff(card.vp ?? 0),
+        }),
+      );
+      resolveImpacts.push(
+        impact(reactive.halvedToHolderId, `${holderName} skimmed +${half}🔩`, { scrap: half }),
+      );
+    } else {
+      resolveImpacts.push(
+        impact(playerId, rewardBits.join(" · "), {
+          scrap: eff(card.scrapReward ?? 0) - eff(card.scrapCost ?? 0),
+          atk: eff(card.atkReward ?? 0),
+          def: eff(card.defReward ?? 0),
+          actions: eff(card.actionReward ?? 0),
+          vp: eff(card.vp ?? 0),
+        }),
+      );
+    }
     next = notify(next, {
       kind: NotifKind.CHALLENGE,
       title: `${card.name} resolved`,
@@ -434,15 +568,7 @@ export function resolveCard(state, playerId, cardUid, decisions = {}) {
         (card.ability?.description ?? "") +
         (reactive.stolenByHolderId != null ? " (rewards stolen by Vulture)" : "") +
         (reactive.halvedToHolderId != null ? " (half scrap claimed by Salvage Rights)" : ""),
-      impacts: [
-        impact(playerId, rewardBits.join(" · "), {
-          scrap: (card.scrapReward ?? 0) - (card.scrapCost ?? 0),
-          atk: card.atkReward,
-          def: card.defReward,
-          actions: card.actionReward,
-          vp: card.vp,
-        }),
-      ],
+      impacts: resolveImpacts,
       sourceCardId: card.id,
       sourcePlayerId: playerId,
     });
@@ -495,8 +621,41 @@ registerAIHeuristic("repeatable_choice", (_state, prompt) => {
   return opts[opts.length - 1].value;
 });
 
+registerResumer("demolish_for_build_choice", (state, choice, ctx) => {
+  return build(state, ctx.playerId, ctx.buildingUid, { demolishUid: choice });
+});
+
+registerResumer("challenge_reactive_choice", (state, choice, ctx) => {
+  return resolveCard(state, ctx.playerId, ctx.cardUid, {
+    ...(ctx.decisions ?? {}),
+    reactiveChoice: choice,
+  });
+});
+
+// AI heuristic for reactive prompts: greedy fire is optimal — the
+// holder either steals the rewards (Vulture) or skims half scrap
+// (Salvage Rights), and saving the card has no opportunity cost since
+// it's an Immediate trigger.
+registerAIHeuristic("challenge_reactive_choice", () => "fire");
+
+// AI heuristic: demolish the lowest-VP non-leader building (cheapest
+// loss). Ties broken arbitrarily by the first-found order.
+registerAIHeuristic("demolish_for_build_choice", (state, prompt) => {
+  const player = state.players.find((p) => p.id === prompt.playerId);
+  if (!player) return prompt.options?.[0]?.value;
+  const choices = (player.settlement ?? []).slice().sort(
+    (a, b) => (a.vp ?? 0) - (b.vp ?? 0),
+  );
+  return choices[0]?.uid ?? prompt.options?.[0]?.value;
+});
+
 export const RAID_TYPES = Object.freeze({
-  DESTROY: "Destroy Building",
+  // The building outcome was renamed from "Destroy" to "Disable" — a
+  // successful raid now disables the target building (the owner can
+  // pay 1⚡ + 2🔩 on their turn to repair it). The constant key
+  // remains DESTROY for backward compatibility with older callers and
+  // logged entries.
+  DESTROY: "Disable Building",
   STEAL: "Steal Intrigue",
   DISABLE: "Disable Leader",
 });
@@ -517,25 +676,54 @@ function executeRaidOutcome(state, attackerId, defenderId, raidType, extras) {
         summary: "no building targeted — outcome skipped",
       };
     }
-    // Vanguard Outpost is immune to Destroy Building raids.
+    // Vanguard Outpost is immune to the Disable Building raid outcome
+    // (carries forward from when this was a Destroy raid).
     if (building.id === "vanguard_outpost") {
       return {
         state,
-        impacts: [impact(defenderId, `${building.name} is immune — destroy outcome blocked`)],
-        summary: `${building.name} is immune to Destroy`,
+        impacts: [impact(defenderId, `${building.name} is immune — raid outcome blocked`)],
+        summary: `${building.name} is immune to Disable`,
       };
     }
+    // Cards with discardIfDisabled (Vanguard Armory) are removed
+    // entirely instead of getting a recoverable disable.
+    if (building.ability?.discardIfDisabled) {
+      const next = {
+        ...state,
+        players: state.players.map((p) =>
+          p.id === defenderId
+            ? {
+                ...p,
+                settlement: p.settlement.filter((b) => b.uid !== uid),
+                disabledBuildingUids: (p.disabledBuildingUids ?? []).filter((x) => x !== uid),
+                buildingsDisabledUntilOwnerTurnEnd: (
+                  p.buildingsDisabledUntilOwnerTurnEnd ?? []
+                ).filter((x) => x !== uid),
+              }
+            : p,
+        ),
+      };
+      return {
+        state: next,
+        impacts: [
+          impact(defenderId, `lost ${building.name} (no recovery)`),
+          impact(attackerId, `discarded ${building.name}`),
+        ],
+        summary: `discarded ${building.name}`,
+      };
+    }
+    // Default: disable the building. Note we do NOT add to
+    // buildingsDisabledUntilOwnerTurnEnd — raid disables persist until
+    // the owner pays the Repair cost (1⚡ + 2🔩) on their turn.
     const next = {
       ...state,
       players: state.players.map((p) =>
         p.id === defenderId
           ? {
               ...p,
-              settlement: p.settlement.filter((b) => b.uid !== uid),
-              disabledBuildingUids: (p.disabledBuildingUids ?? []).filter((x) => x !== uid),
-              buildingsDisabledUntilOwnerTurnEnd: (
-                p.buildingsDisabledUntilOwnerTurnEnd ?? []
-              ).filter((x) => x !== uid),
+              disabledBuildingUids: [
+                ...new Set([...(p.disabledBuildingUids ?? []), uid]),
+              ],
             }
           : p,
       ),
@@ -543,10 +731,10 @@ function executeRaidOutcome(state, attackerId, defenderId, raidType, extras) {
     return {
       state: next,
       impacts: [
-        impact(defenderId, `lost ${building.name}`),
-        impact(attackerId, `destroyed ${building.name}`),
+        impact(defenderId, `${building.name} disabled (Repair: 1⚡ + 2🔩)`),
+        impact(attackerId, `disabled ${building.name}`),
       ],
-      summary: `destroyed ${building.name}`,
+      summary: `disabled ${building.name}`,
     };
   }
 

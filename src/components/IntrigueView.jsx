@@ -29,7 +29,21 @@ export default function IntrigueView({ state, activePlayer, onInspect, onPlay })
               onClick={() => onInspect(c)}
               action={
                 c.immediate ? (
-                  <span style={{ fontSize: 11, opacity: 0.65 }}>Immediate · fires on trigger</span>
+                  <div style={{ display: "flex", gap: 4, alignItems: "center", flexWrap: "wrap" }}>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onInspect(c);
+                      }}
+                      style={{ fontSize: 11, padding: "2px 6px" }}
+                      title="Read full card text"
+                    >
+                      Read
+                    </button>
+                    <span style={{ fontSize: 11, opacity: 0.65 }}>
+                      Immediate · fires on trigger
+                    </span>
+                  </div>
                 ) : (
                   <button
                     onClick={(e) => {
@@ -47,8 +61,8 @@ export default function IntrigueView({ state, activePlayer, onInspect, onPlay })
         </div>
       )}
       <div style={{ fontSize: 11, opacity: 0.55, marginTop: 4 }}>
-        {Object.keys(INTRIGUE_EFFECTS).length} active Intrigue effects wired ·
-        Immediate / reactive cards are pending an event bus.
+        Tap any card to read full text. Immediate / reactive cards still
+        prompt the holder when they trigger (chunk C).
       </div>
       {playing ? (
         <IntriguePlayModal

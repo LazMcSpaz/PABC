@@ -516,6 +516,20 @@ export function fireRaidReactive(state, attackerId, defenderId) {
   return { state };
 }
 
+// Peek at whether any opponent holds a Vulture or Salvage Rights they
+// could fire if the resolver completes the challenge. Used by
+// resolveCard to surface a holder-approval prompt before the reactive
+// auto-fires. Does not mutate state or consume the card.
+export function peekChallengeReactiveHolder(state, resolverId) {
+  const match = findHolder(state, ["vulture", "salvage_rights"], resolverId);
+  if (!match) return null;
+  return {
+    holderId: match.holderId,
+    cardId: match.card.id,
+    cardName: match.card.name,
+  };
+}
+
 // Opponent successfully resolved a Challenge. vulture steals ALL rewards;
 // salvage_rights claims half the Scrap reward.
 export function fireChallengeResolveReactive(state, resolverId, card, repeats = 1) {
