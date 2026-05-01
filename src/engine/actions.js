@@ -427,6 +427,59 @@ export function resolveCard(state, playerId, cardUid, decisions = {}) {
     if (card.vp) rewardBits.push(`+${eff(card.vp)}★`);
     if (card.scrapCost) rewardBits.unshift(`−${eff(card.scrapCost)}🔩`);
     if (repeats > 1) rewardBits.unshift(`${repeats}×`);
+
+    // Build the impacts list. The resolver always shows their cost; if
+    // Vulture stole the rewards, the holder gets a separate impact line
+    // showing what they received. Salvage Rights' half-skim shows the
+    // holder's half on a third line so the Scrap movement is visible.
+    const resolveImpacts = [];
+    if (reactive.stolenByHolderId != null) {
+      // Resolver only paid the cost.
+      if (card.scrapCost) {
+        resolveImpacts.push(
+          impact(playerId, `−${eff(card.scrapCost)}🔩 (rewards stolen)`, {
+            scrap: -eff(card.scrapCost),
+          }),
+        );
+      }
+      const holderName =
+        next.players.find((p) => p.id === reactive.stolenByHolderId)?.name ?? "Vulture holder";
+      resolveImpacts.push(
+        impact(reactive.stolenByHolderId, `${holderName} stole: ${rewardBits.filter((s) => !s.startsWith("−")).join(" · ") || "—"}`, {
+          scrap: eff(card.scrapReward ?? 0),
+          atk: eff(card.atkReward ?? 0),
+          def: eff(card.defReward ?? 0),
+          actions: eff(card.actionReward ?? 0),
+          vp: eff(card.vp ?? 0),
+        }),
+      );
+    } else if (reactive.halvedToHolderId != null) {
+      const half = reactive.halvedAmount ?? 0;
+      const holderName =
+        next.players.find((p) => p.id === reactive.halvedToHolderId)?.name ?? "Salvage Rights holder";
+      resolveImpacts.push(
+        impact(playerId, rewardBits.join(" · "), {
+          scrap: eff(card.scrapReward ?? 0) - eff(card.scrapCost ?? 0) - half,
+          atk: eff(card.atkReward ?? 0),
+          def: eff(card.defReward ?? 0),
+          actions: eff(card.actionReward ?? 0),
+          vp: eff(card.vp ?? 0),
+        }),
+      );
+      resolveImpacts.push(
+        impact(reactive.halvedToHolderId, `${holderName} skimmed +${half}🔩`, { scrap: half }),
+      );
+    } else {
+      resolveImpacts.push(
+        impact(playerId, rewardBits.join(" · "), {
+          scrap: eff(card.scrapReward ?? 0) - eff(card.scrapCost ?? 0),
+          atk: eff(card.atkReward ?? 0),
+          def: eff(card.defReward ?? 0),
+          actions: eff(card.actionReward ?? 0),
+          vp: eff(card.vp ?? 0),
+        }),
+      );
+    }
     next = notify(next, {
       kind: NotifKind.CHALLENGE,
       title: `${card.name} resolved`,
@@ -434,15 +487,7 @@ export function resolveCard(state, playerId, cardUid, decisions = {}) {
         (card.ability?.description ?? "") +
         (reactive.stolenByHolderId != null ? " (rewards stolen by Vulture)" : "") +
         (reactive.halvedToHolderId != null ? " (half scrap claimed by Salvage Rights)" : ""),
-      impacts: [
-        impact(playerId, rewardBits.join(" · "), {
-          scrap: (card.scrapReward ?? 0) - (card.scrapCost ?? 0),
-          atk: card.atkReward,
-          def: card.defReward,
-          actions: card.actionReward,
-          vp: card.vp,
-        }),
-      ],
+      impacts: resolveImpacts,
       sourceCardId: card.id,
       sourcePlayerId: playerId,
     });

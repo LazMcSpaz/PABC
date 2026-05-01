@@ -242,6 +242,7 @@ export async function getAIDecision(state, playerId, personality) {
     "  { type: \"swap_leader\", leaderId: <id from availableLeaders> }",
     "  { type: \"end_turn\" }",
     "Each non-end_turn action consumes resources you must have. The engine no-ops invalid actions; only resolve cards that appear in explorationInPlay this turn.",
+    "RESOLVE-WHEN-YOU-CAN: if any card in explorationInPlay has canResolve=true (you meet the cost and requirements), include a `resolve` action for it before ending the turn — leaving rewards on the table is never optimal. Resolve cards drawn earlier this turn or by other players in the same pass.",
     "Plan up to 4 actions in priority order. End with end_turn if you intentionally pass remaining actions.",
     "Game state:",
     "```json",
