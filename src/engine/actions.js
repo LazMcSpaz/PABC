@@ -72,7 +72,7 @@ function refreshBuildingRow(state, removedIndex) {
   return { ...state, buildingRow: nextRow, buildingDeck: deck };
 }
 
-export function build(state, playerId, buildingUid) {
+export function build(state, playerId, buildingUid, decisions = {}) {
   if (state.pendingPrompt) return state;
   const rowIndex = state.buildingRow.findIndex((c) => c.uid === buildingUid);
   if (rowIndex < 0) return state;
@@ -87,9 +87,29 @@ export function build(state, playerId, buildingUid) {
   const totalCost = discountedCost + surcharge;
   if (player.scrap < totalCost) return state;
   if (player.actionsRemaining < 1) return state;
-  if (player.settlement.length >= 5) return state;
 
-  let next = updatePlayer(state, playerId, (p) => {
+  // Settlement full — instead of silently rejecting, ask the player which
+  // existing building to demolish to make room. Resumer ("demolish_for_build_choice")
+  // performs the demolish then re-invokes build() with decisions.demolishUid set.
+  let next = state;
+  if (player.settlement.length >= 5) {
+    if (!decisions.demolishUid) {
+      return pauseWithPrompt(state, {
+        kind: "demolish_for_build_choice",
+        playerId,
+        message: `Settlement is full (5/5). Pick a building to demolish to make room for ${card.name}.`,
+        options: player.settlement.map((b) => ({
+          value: b.uid,
+          label: `${b.name}${b.vp ? ` (★${b.vp})` : ""}`,
+        })),
+        context: { playerId, buildingUid },
+      });
+    }
+    // Apply the demolish before paying for the new building.
+    next = demolish(next, playerId, decisions.demolishUid);
+  }
+
+  next = updatePlayer(next, playerId, (p) => {
     const flags = { ...(p.flags ?? {}) };
     delete flags.nextBuildingScrapSurcharge;
     return {
@@ -133,6 +153,38 @@ export function demolish(state, playerId, buildingUid) {
     ...p,
     settlement: p.settlement.filter((b) => b.uid !== buildingUid),
   }));
+}
+
+// Repair a disabled building on the active player's turn. Standard cost
+// per the rules summary: 1 Action + 2 Scrap. Only clears entries from
+// disabledBuildingUids — does NOT touch buildingsDisabledUntilOwnerTurnEnd
+// (those auto-recover on the owner's turn end already, no manual repair
+// needed).
+export function repair(state, playerId, buildingUid) {
+  if (state.pendingPrompt) return state;
+  if (state.activePlayerId !== playerId) return state;
+  const player = state.players.find((p) => p.id === playerId);
+  if (!player) return state;
+  if (!(player.disabledBuildingUids ?? []).includes(buildingUid)) return state;
+  if (player.actionsRemaining < 1 || player.scrap < 2) return state;
+  const building = (player.settlement ?? []).find((b) => b.uid === buildingUid);
+  if (!building) return state;
+
+  let next = updatePlayer(state, playerId, (p) => ({
+    ...p,
+    actionsRemaining: p.actionsRemaining - 1,
+    scrap: p.scrap - 2,
+    disabledBuildingUids: (p.disabledBuildingUids ?? []).filter((x) => x !== buildingUid),
+  }));
+  next = log(next, { type: "repair", playerId, cardId: building.id });
+  return notify(next, {
+    kind: NotifKind.BUILD,
+    title: `${player.name} repaired ${building.name}`,
+    message: `Spent 1⚡ + 2🔩 to bring ${building.name} back online.`,
+    impacts: [impact(playerId, "−1⚡ · −2🔩 · building active again", { scrap: -2, actions: -1 })],
+    sourceCardId: building.id,
+    sourcePlayerId: playerId,
+  });
 }
 
 export function boost(state, playerId, stat, amount = 1) {
@@ -540,8 +592,28 @@ registerAIHeuristic("repeatable_choice", (_state, prompt) => {
   return opts[opts.length - 1].value;
 });
 
+registerResumer("demolish_for_build_choice", (state, choice, ctx) => {
+  return build(state, ctx.playerId, ctx.buildingUid, { demolishUid: choice });
+});
+
+// AI heuristic: demolish the lowest-VP non-leader building (cheapest
+// loss). Ties broken arbitrarily by the first-found order.
+registerAIHeuristic("demolish_for_build_choice", (state, prompt) => {
+  const player = state.players.find((p) => p.id === prompt.playerId);
+  if (!player) return prompt.options?.[0]?.value;
+  const choices = (player.settlement ?? []).slice().sort(
+    (a, b) => (a.vp ?? 0) - (b.vp ?? 0),
+  );
+  return choices[0]?.uid ?? prompt.options?.[0]?.value;
+});
+
 export const RAID_TYPES = Object.freeze({
-  DESTROY: "Destroy Building",
+  // The building outcome was renamed from "Destroy" to "Disable" — a
+  // successful raid now disables the target building (the owner can
+  // pay 1⚡ + 2🔩 on their turn to repair it). The constant key
+  // remains DESTROY for backward compatibility with older callers and
+  // logged entries.
+  DESTROY: "Disable Building",
   STEAL: "Steal Intrigue",
   DISABLE: "Disable Leader",
 });
@@ -562,25 +634,54 @@ function executeRaidOutcome(state, attackerId, defenderId, raidType, extras) {
         summary: "no building targeted — outcome skipped",
       };
     }
-    // Vanguard Outpost is immune to Destroy Building raids.
+    // Vanguard Outpost is immune to the Disable Building raid outcome
+    // (carries forward from when this was a Destroy raid).
     if (building.id === "vanguard_outpost") {
       return {
         state,
-        impacts: [impact(defenderId, `${building.name} is immune — destroy outcome blocked`)],
-        summary: `${building.name} is immune to Destroy`,
+        impacts: [impact(defenderId, `${building.name} is immune — raid outcome blocked`)],
+        summary: `${building.name} is immune to Disable`,
       };
     }
+    // Cards with discardIfDisabled (Vanguard Armory) are removed
+    // entirely instead of getting a recoverable disable.
+    if (building.ability?.discardIfDisabled) {
+      const next = {
+        ...state,
+        players: state.players.map((p) =>
+          p.id === defenderId
+            ? {
+                ...p,
+                settlement: p.settlement.filter((b) => b.uid !== uid),
+                disabledBuildingUids: (p.disabledBuildingUids ?? []).filter((x) => x !== uid),
+                buildingsDisabledUntilOwnerTurnEnd: (
+                  p.buildingsDisabledUntilOwnerTurnEnd ?? []
+                ).filter((x) => x !== uid),
+              }
+            : p,
+        ),
+      };
+      return {
+        state: next,
+        impacts: [
+          impact(defenderId, `lost ${building.name} (no recovery)`),
+          impact(attackerId, `discarded ${building.name}`),
+        ],
+        summary: `discarded ${building.name}`,
+      };
+    }
+    // Default: disable the building. Note we do NOT add to
+    // buildingsDisabledUntilOwnerTurnEnd — raid disables persist until
+    // the owner pays the Repair cost (1⚡ + 2🔩) on their turn.
     const next = {
       ...state,
       players: state.players.map((p) =>
         p.id === defenderId
           ? {
               ...p,
-              settlement: p.settlement.filter((b) => b.uid !== uid),
-              disabledBuildingUids: (p.disabledBuildingUids ?? []).filter((x) => x !== uid),
-              buildingsDisabledUntilOwnerTurnEnd: (
-                p.buildingsDisabledUntilOwnerTurnEnd ?? []
-              ).filter((x) => x !== uid),
+              disabledBuildingUids: [
+                ...new Set([...(p.disabledBuildingUids ?? []), uid]),
+              ],
             }
           : p,
       ),
@@ -588,10 +689,10 @@ function executeRaidOutcome(state, attackerId, defenderId, raidType, extras) {
     return {
       state: next,
       impacts: [
-        impact(defenderId, `lost ${building.name}`),
-        impact(attackerId, `destroyed ${building.name}`),
+        impact(defenderId, `${building.name} disabled (Repair: 1⚡ + 2🔩)`),
+        impact(attackerId, `disabled ${building.name}`),
       ],
-      summary: `destroyed ${building.name}`,
+      summary: `disabled ${building.name}`,
     };
   }
 

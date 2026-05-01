@@ -92,6 +92,7 @@ export default function GameBoard({ state, engine }) {
             onInspect={setInspectedCard}
             onActivate={(uid, opts) => engine.activateAbility(state.activePlayerId, uid, opts)}
             onUpgrade={(uid) => engine.upgrade(state.activePlayerId, uid)}
+            onRepair={(uid) => engine.repair(state.activePlayerId, uid)}
           />
           <ActionModePicker
             state={state}

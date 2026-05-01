@@ -52,6 +52,7 @@ export function useGameEngine() {
     () => ({
       build: (playerId, uid) => setState((s) => actions.build(s, playerId, uid)),
       demolish: (playerId, uid) => setState((s) => actions.demolish(s, playerId, uid)),
+      repair: (playerId, uid) => setState((s) => actions.repair(s, playerId, uid)),
       boost: (playerId, stat, amount) =>
         setState((s) => actions.boost(s, playerId, stat, amount)),
       explore: (playerId) => setState((s) => actions.explore(s, playerId)),
