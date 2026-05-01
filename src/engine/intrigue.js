@@ -16,13 +16,7 @@
 import { calcAttack } from "./calculations.js";
 import { pausePeekReorder } from "./deckPeek.js";
 import { NotifKind, impact, notify } from "./notifications.js";
-
-function updatePlayer(state, playerId, updater) {
-  return {
-    ...state,
-    players: state.players.map((p) => (p.id === playerId ? updater(p) : p)),
-  };
-}
+import { logEntry, updatePlayer } from "./stateHelpers.js";
 
 // Buildings whose `ability.discardIfDisabled` is true (Rebuild Vanguard
 // Armory) are removed from settlement entirely instead of toggling
@@ -45,10 +39,6 @@ function countBuildingsWith(player, field) {
 
 function removeFromHand(player, cardUid) {
   return { ...player, intrigueHand: player.intrigueHand.filter((c) => c.uid !== cardUid) };
-}
-
-function logEntry(state, entry) {
-  return { ...state, log: [...(state.log ?? []), { round: state.round, ...entry }] };
 }
 
 // ─── Active (played on own turn) effects ──────────────────────────────────────

@@ -18,13 +18,7 @@ import { calcAttack, calcDefense } from "./calculations.js";
 import { pausePeekReorder } from "./deckPeek.js";
 import { fireEventImmunity } from "./intrigue.js";
 import { NotifKind, impact, notify } from "./notifications.js";
-
-function updatePlayer(state, playerId, updater) {
-  return {
-    ...state,
-    players: state.players.map((p) => (p.id === playerId ? updater(p) : p)),
-  };
-}
+import { logEntry, updatePlayer } from "./stateHelpers.js";
 
 function hasBuilding(player, buildingId) {
   return player.settlement.some((b) => b.id === buildingId);
@@ -32,10 +26,6 @@ function hasBuilding(player, buildingId) {
 
 function hasLeader(player, leaderId) {
   return player.leader?.id === leaderId;
-}
-
-function logEntry(state, entry) {
-  return { ...state, log: [...(state.log ?? []), { round: state.round, ...entry }] };
 }
 
 // Apply a per-player transformation across all players, collecting an impacts

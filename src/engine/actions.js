@@ -21,6 +21,7 @@ import { resolveNarrativeBeat } from "./narrative.js";
 import { NotifKind, impact, notify } from "./notifications.js";
 import { pauseWithPrompt, registerAIHeuristic, registerResumer } from "./prompts.js";
 import { CARD_RESOLVERS } from "./resolution.js";
+import { logEntry, updatePlayer } from "./stateHelpers.js";
 import { unlockUnlockable } from "./upgrades.js";
 
 const WIN_VP = 30;
@@ -29,17 +30,6 @@ const WIN_VP = 30;
 // — players need at least one round to set up a defensive baseline before
 // being raidable. Surfaced in RaidView and the AI prompt.
 export const RAID_UNLOCK_ROUND = 3;
-
-function updatePlayer(state, playerId, updater) {
-  return {
-    ...state,
-    players: state.players.map((p) => (p.id === playerId ? updater(p) : p)),
-  };
-}
-
-function log(state, entry) {
-  return { ...state, log: [...state.log, { round: state.round, ...entry }] };
-}
 
 // Snapshot for the per-turn log entry. Captures derived scores and
 // id-only references — id strings are stable across runs and play well
@@ -126,7 +116,7 @@ export function build(state, playerId, buildingUid, decisions = {}) {
     };
   });
   next = refreshBuildingRow(next, rowIndex);
-  next = log(next, { type: "build", playerId, cardId: card.id });
+  next = logEntry(next, { type: "build", playerId, cardId: card.id });
   if (servotechDiscount > 0 && (card.scrapCost ?? 0) > 0) {
     next = notify(next, {
       kind: NotifKind.BUILD,
@@ -177,7 +167,7 @@ export function repair(state, playerId, buildingUid) {
     scrap: p.scrap - 2,
     disabledBuildingUids: (p.disabledBuildingUids ?? []).filter((x) => x !== buildingUid),
   }));
-  next = log(next, { type: "repair", playerId, cardId: building.id });
+  next = logEntry(next, { type: "repair", playerId, cardId: building.id });
   return notify(next, {
     kind: NotifKind.BUILD,
     title: `${player.name} repaired ${building.name}`,
@@ -221,7 +211,7 @@ export function explore(state, playerId) {
     ...p,
     actionsRemaining: p.actionsRemaining - 1,
   }));
-  next = log(next, { type: "explore", playerId, cardId: drawn.id });
+  next = logEntry(next, { type: "explore", playerId, cardId: drawn.id });
 
   // Reactive: opponents may hold Trapped Road to force-discard the drawn card
   // (Events are immune — they always resolve).
@@ -497,7 +487,7 @@ export function resolveCard(state, playerId, cardUid, decisions = {}) {
       ...next,
       explorationInPlay: next.explorationInPlay.filter((e) => e.card.uid !== cardUid),
     };
-    next = log(next, { type: "resolve", playerId, cardId: card.id, repeats });
+    next = logEntry(next, { type: "resolve", playerId, cardId: card.id, repeats });
 
     const rewardBits = [];
     const eff = (n) => n * repeats;
@@ -825,7 +815,7 @@ export function raid(state, attackerId, targetId, raidType = RAID_TYPES.DESTROY,
   const reactive = fireRaidReactive(next, attackerId, targetId);
   next = reactive.state;
   if (reactive.cancel) {
-    return log(next, { type: "raid", attackerId, targetId, cancelled: true });
+    return logEntry(next, { type: "raid", attackerId, targetId, cancelled: true });
   }
   const effectiveDefenderId = reactive.redirectTo ?? targetId;
 
@@ -939,7 +929,7 @@ function finalizeRaid(state, ctx) {
     outcomeSummary = result.summary;
   }
 
-  next = log(next, {
+  next = logEntry(next, {
     type: "raid",
     attackerId,
     targetId: defenderId,
@@ -1207,7 +1197,7 @@ export function endTurn(state) {
   // applied), keyed by the OUTGOING player and round. Sized to be useful
   // without bloating the log — building/leader/intrigue refs are id-only.
   const turnEndedFor = state.activePlayerId;
-  next = log(next, {
+  next = logEntry(next, {
     type: "turn_end",
     playerId: turnEndedFor,
     snapshot: snapshotPlayers(next),

@@ -16,17 +16,7 @@
 
 import { NotifKind, impact, notify } from "./notifications.js";
 import { pauseWithPrompt, registerAIHeuristic, registerResumer } from "./prompts.js";
-
-function updatePlayer(state, playerId, updater) {
-  return {
-    ...state,
-    players: state.players.map((p) => (p.id === playerId ? updater(p) : p)),
-  };
-}
-
-function logEntry(state, entry) {
-  return { ...state, log: [...(state.log ?? []), { round: state.round, ...entry }] };
-}
+import { logEntry, updatePlayer } from "./stateHelpers.js";
 
 function markUsed(player, buildingUid) {
   return {

@@ -16,17 +16,7 @@
 import { REWARD_CARD_MAP } from "./cards_age1_rewards.js";
 import { calcAttack } from "./calculations.js";
 import { NotifKind, impact, notify } from "./notifications.js";
-
-function updatePlayer(state, playerId, updater) {
-  return {
-    ...state,
-    players: state.players.map((p) => (p.id === playerId ? updater(p) : p)),
-  };
-}
-
-function logEntry(state, entry) {
-  return { ...state, log: [...(state.log ?? []), { round: state.round, ...entry }] };
-}
+import { logEntry, updatePlayer } from "./stateHelpers.js";
 
 function activeParent(player, requires) {
   const disabled = new Set(player.disabledBuildingUids ?? []);

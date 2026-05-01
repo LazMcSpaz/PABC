@@ -14,13 +14,7 @@
 
 import { NotifKind, impact, notify } from "./notifications.js";
 import { pauseWithPrompt, registerAIHeuristic, registerResumer } from "./prompts.js";
-
-function updatePlayer(state, playerId, updater) {
-  return {
-    ...state,
-    players: state.players.map((p) => (p.id === playerId ? updater(p) : p)),
-  };
-}
+import { updatePlayer } from "./stateHelpers.js";
 
 const DECK_KEY = {
   exploration: "explorationDeck",

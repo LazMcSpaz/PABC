@@ -22,17 +22,7 @@ import { NARRATIVE_LEADERS, REWARD_CARD_MAP } from "./cards_age1_rewards.js";
 import { pausePeekReorder } from "./deckPeek.js";
 import { NotifKind, impact, notify } from "./notifications.js";
 import { pauseWithPrompt, registerAIHeuristic, registerResumer } from "./prompts.js";
-
-function updatePlayer(state, playerId, updater) {
-  return {
-    ...state,
-    players: state.players.map((p) => (p.id === playerId ? updater(p) : p)),
-  };
-}
-
-function logEntry(state, entry) {
-  return { ...state, log: [...(state.log ?? []), { round: state.round, ...entry }] };
-}
+import { logEntry, updatePlayer } from "./stateHelpers.js";
 
 export function getChain(chainId) {
   return NARRATIVE_CHAINS.find((c) => c.id === chainId) ?? null;
