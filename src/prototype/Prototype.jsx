@@ -1,7 +1,7 @@
 // Root of the look-pass prototype. The board is front-and-centre;
-// everything else lives in peripheral bars — a top faction bar, a
-// right-hand inspector drawer, and bottom slide-up tabs.
-import { useRef, useState } from "react";
+// everything else lives in peripheral bars — a top faction bar and a
+// bottom tab dock — with a floating tabbed window for hex inspection.
+import { useState } from "react";
 import "./prototype.css";
 import { mockState } from "./mockState.js";
 import { theme } from "./data.js";
@@ -29,25 +29,13 @@ function Bracket({ corner }) {
 export default function Prototype() {
   const state = mockState;
   const [selectedHexId, setSelectedHexId] = useState(null);
-  const [shownHexId, setShownHexId] = useState(null);
-  const selRef = useRef(null);
   const you = state.players[state.youId];
 
   function selectHex(id) {
-    if (id === selRef.current) {
-      closeInspector();
-      return;
-    }
-    selRef.current = id;
-    setSelectedHexId(id);
-    setShownHexId(id);
+    setSelectedHexId((cur) => (cur === id ? null : id));
   }
-  function closeInspector() {
-    selRef.current = null;
+  function closeWindow() {
     setSelectedHexId(null);
-    setTimeout(() => {
-      if (selRef.current === null) setShownHexId(null);
-    }, 320);
   }
 
   return (
@@ -151,23 +139,10 @@ export default function Prototype() {
         </div>
       </BoardViewport>
 
-      {/* INSPECTOR — right-hand drawer, slides in on selection */}
-      <div
-        style={{
-          position: "fixed",
-          top: TOP_H,
-          bottom: TAB_H,
-          right: 0,
-          width: 372,
-          transform: selectedHexId ? "translateX(0)" : "translateX(100%)",
-          transition: "transform 0.3s ease",
-          zIndex: 30,
-          boxShadow: selectedHexId ? "-12px 0 32px rgba(0,0,0,0.6)" : "none",
-          display: "flex",
-        }}
-      >
-        <Inspector state={state} selectedHexId={shownHexId} onClose={closeInspector} />
-      </div>
+      {/* INSPECTOR — floating tabbed window, opens on hex selection */}
+      {selectedHexId && (
+        <Inspector state={state} selectedHexId={selectedHexId} onClose={closeWindow} />
+      )}
 
       {/* BOTTOM — slide-up tabs for the player's own cards */}
       <BottomDock state={state} tabHeight={TAB_H} />
