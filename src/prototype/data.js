@@ -43,19 +43,19 @@ export const STRATEGIC_VALUE = {
   veryHigh: { key: "veryHigh", label: "Very High", color: "#d2453f", rank: 4 },
 };
 
-// The ten named locations. `garrison` / `chipSlots` / `production` and
-// the flavour `ability` strings are placeholders for the look pass.
+// The ten named locations. `garrison` / `chipSlots` / `production` / `vp`
+// and the flavour `ability` strings are placeholders for the look pass.
 export const LOCATIONS = {
-  korad: { id: "korad", name: "Korad", value: "high", garrison: 6, chipSlots: 3, production: 3, ability: "Forge — once per turn, spend 2 scrap to give a unit here +1 Strength until your next turn." },
-  dambar: { id: "dambar", name: "Dambar", value: "veryHigh", garrison: 9, chipSlots: 4, production: 4, ability: "Deepwater Port — your units may Move between Dambar and any other water-edge location for 1 Action." },
-  kansit: { id: "kansit", name: "Kansit", value: "high", garrison: 6, chipSlots: 3, production: 3, ability: null },
-  theShelf: { id: "theShelf", name: "The Shelf", value: "high", garrison: 7, chipSlots: 3, production: 3, ability: "High Ground — this garrison adds +1 to its contest roll." },
-  omara: { id: "omara", name: "Omara", value: "medium", garrison: 4, chipSlots: 2, production: 2, ability: null },
-  chigan: { id: "chigan", name: "Chigan", value: "veryHigh", garrison: 9, chipSlots: 4, production: 4, ability: "Goldgrass Reserves — gain 1 scrap whenever you flip a section anywhere on the board." },
-  droit: { id: "droit", name: "Droit", value: "high", garrison: 6, chipSlots: 3, production: 3, ability: null },
-  erport: { id: "erport", name: "Erport", value: "medium", garrison: 4, chipSlots: 2, production: 2, ability: "Airfield — once per turn, redeploy a unit you control to any location you fully hold." },
-  concordan: { id: "concordan", name: "Concordan", value: "medium", garrison: 5, chipSlots: 2, production: 2, ability: null },
-  tinTown: { id: "tinTown", name: "Tin Town", value: "medium", garrison: 4, chipSlots: 2, production: 2, ability: null },
+  korad: { id: "korad", name: "Korad", value: "high", vp: 3, garrison: 6, chipSlots: 3, production: 3, ability: "Forge — once per turn, spend 2 scrap to give a unit here +1 Strength until your next turn." },
+  dambar: { id: "dambar", name: "Dambar", value: "veryHigh", vp: 4, garrison: 9, chipSlots: 4, production: 4, ability: "Deepwater Port — your units may Move between Dambar and any other water-edge location for 1 Action." },
+  kansit: { id: "kansit", name: "Kansit", value: "high", vp: 3, garrison: 6, chipSlots: 3, production: 3, ability: null },
+  theShelf: { id: "theShelf", name: "The Shelf", value: "high", vp: 3, garrison: 7, chipSlots: 3, production: 3, ability: "High Ground — this garrison adds +1 to its contest roll." },
+  omara: { id: "omara", name: "Omara", value: "medium", vp: 2, garrison: 4, chipSlots: 2, production: 2, ability: null },
+  chigan: { id: "chigan", name: "Chigan", value: "veryHigh", vp: 4, garrison: 9, chipSlots: 4, production: 4, ability: "Goldgrass Reserves — gain 1 scrap whenever you flip a section anywhere on the board." },
+  droit: { id: "droit", name: "Droit", value: "high", vp: 3, garrison: 6, chipSlots: 3, production: 3, ability: null },
+  erport: { id: "erport", name: "Erport", value: "medium", vp: 2, garrison: 4, chipSlots: 2, production: 2, ability: "Airfield — once per turn, redeploy a unit you control to any location you fully hold." },
+  concordan: { id: "concordan", name: "Concordan", value: "medium", vp: 2, garrison: 5, chipSlots: 2, production: 2, ability: null },
+  tinTown: { id: "tinTown", name: "Tin Town", value: "medium", vp: 2, garrison: 4, chipSlots: 2, production: 2, ability: null },
 };
 
 // Chip family tints — orange = unit upgrade, teal = location upgrade.
