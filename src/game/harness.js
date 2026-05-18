@@ -1,29 +1,20 @@
-// Headless harness — `node src/game/harness.js [seed]` builds a game and
-// prints it, so engine layers can be verified without the UI.
+// Headless harness — `node src/game/harness.js [seed]`. Builds a game,
+// runs the turn loop, and exercises the effect library so each engine
+// layer can be verified without the UI.
 import { createGame } from "./setup.js";
+import { startTurn, endTurn } from "./turn.js";
+import { applyEffect } from "./effects.js";
+import { activePlayerId } from "./targeting.js";
 import { FACTIONS, LOCATIONS } from "./content.js";
 
 const seed = Number(process.argv[2]) || 42;
+const line = (s = "") => console.log(s);
+
 const game = createGame({ seed });
+line(`\n=== Ashland Conquest — engine harness (seed ${seed}) ===`);
 
-console.log(`\n=== Ashland Conquest — engine harness ===`);
-console.log(`seed ${game.seed} · round ${game.round} · phase ${game.phase}\n`);
-
-console.log("PLAYERS");
-for (const p of Object.values(game.players)) {
-  console.log(
-    `  ${FACTIONS[p.factionId].name.padEnd(20)} ` +
-      `scrap ${p.resource}  VP ${p.vp}  tech ${p.tech}  ` +
-      `actions ${p.actions.remaining}/${p.actions.max}  unitCap ${p.unitCap}`,
-  );
-}
-
-console.log("\nUNITS");
-for (const u of Object.values(game.units)) {
-  console.log(`  ${u.name.padEnd(26)} @ ${u.node}  STR ${u.strength}  MOV ${u.movement}`);
-}
-
-console.log("\nBOARD  (loc[CTRL]  ~encounter~  wasteland;  * = unit present)");
+// --- board ---
+line("\nBOARD  (loc[CTRL]  ~encounter~  wasteland;  * = unit)");
 const unitAt = {};
 for (const u of Object.values(game.units)) unitAt[u.node] = true;
 const byRow = {};
@@ -38,34 +29,52 @@ for (const row of Object.keys(byRow).sort((a, b) => a - b)) {
         const loc = game.locations[h.id];
         const ctrl = loc.controller ? loc.controller.slice(0, 3).toUpperCase() : "—";
         label = `${LOCATIONS[loc.locationId].name}[${ctrl}]`;
-      } else if (h.type === "encounter") {
-        label = "~encounter~";
-      } else {
-        label = "wasteland";
-      }
-      if (unitAt[h.id]) label += "*";
-      return label.padEnd(17);
+      } else label = h.type === "encounter" ? "~encounter~" : "wasteland";
+      return (label + (unitAt[h.id] ? "*" : "")).padEnd(17);
     });
-  console.log("  " + " ".repeat((maxW - byRow[row].length) * 9) + cells.join(""));
+  line("  " + " ".repeat((maxW - byRow[row].length) * 9) + cells.join(""));
 }
 
-console.log("\nLOCATIONS");
-for (const loc of Object.values(game.locations)) {
-  const def = LOCATIONS[loc.locationId];
-  console.log(
-    `  ${def.name.padEnd(12)} ${def.strategicValue.padEnd(9)} ` +
-      `garrison ${String(loc.garrison).padStart(2)}  scrap/turn ${loc.production}  ` +
-      `slots ${loc.chips.length}/${loc.chipSlots}  ` +
-      `${loc.controller ? "held by " + loc.controller : "neutral"}`,
+// --- begin play ---
+startTurn(game);
+line(`\nround ${game.round} · phase ${game.phase} · active ${activePlayerId(game)}`);
+
+line("\nAFTER FIRST UPKEEP  (active player collects location production)");
+for (const p of Object.values(game.players)) {
+  line(
+    `  ${FACTIONS[p.factionId].name.padEnd(20)} ` +
+      `scrap ${p.resource}  actions ${p.actions.remaining}/${p.actions.max}`,
   );
 }
 
-console.log("\nMARKET");
-for (const tier of [1, 2, 3]) {
-  const t = game.market.tiers[tier];
-  console.log(
-    `  Tier ${tier}  row: ${t.row.map((u) => game.chips[u].chipId).join(", ")}  ` +
-      `(deck ${t.deck.length})`,
-  );
+// --- effect library demo ---
+const me = activePlayerId(game);
+const myUnit = Object.values(game.units).find((u) => u.owner === me);
+const ctx = { sourcePlayer: me };
+line(`\nEFFECT DEMO  (active: ${me})`);
+line(
+  `  before  scrap ${game.players[me].resource}  ` +
+    `unit STR ${myUnit.strength}  actions ${game.players[me].actions.remaining}`,
+);
+applyEffect(game, { type: "ADJUST_RESOURCE", resource: "Resource", amount: 5, target: "active_player" }, ctx);
+applyEffect(game, { type: "MODIFY_STAT", stat: "Strength", amount: 3, target: myUnit.uid, duration: "this_turn" }, ctx);
+applyEffect(game, { type: "GRANT_ACTIONS", amount: 1, target: "active_player" }, ctx);
+line(
+  `  after   scrap ${game.players[me].resource}  ` +
+    `unit STR ${myUnit.strength}  actions ${game.players[me].actions.remaining}`,
+);
+
+// --- play out round 1 ---
+line("\nPLAY ROUND 1  (each player ends their turn)");
+for (let i = 0; i < game.turnOrder.length; i++) endTurn(game);
+line(`  -> now round ${game.round}, phase ${game.phase}, active ${activePlayerId(game)}`);
+for (const p of Object.values(game.players)) {
+  line(`  ${FACTIONS[p.factionId].name.padEnd(20)} scrap ${p.resource}`);
 }
-console.log("");
+
+// --- event log tail ---
+line("\nEVENT LOG  (last 14)");
+for (const ev of game.log.slice(-14)) {
+  line(`  ${ev.name.padEnd(18)} ${JSON.stringify(ev.payload)}`);
+}
+line("");

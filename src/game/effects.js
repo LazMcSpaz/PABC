@@ -1,0 +1,198 @@
+// The effect library (mechanical-spec §12) — exactly one handler per
+// effect `type`. Handlers mutate the GameState and emit events.
+import { CONFIG } from "./config.js";
+import { emit } from "./events.js";
+import { resolveTargets } from "./targeting.js";
+import { recomputeStats } from "./stats.js";
+
+// Headless default for interactive effects — pick the first option.
+export function autoInteract(request) {
+  return request?.options ? request.options[0] : null;
+}
+
+const POOL_KEY = { Resource: "resource", VP: "vp", Tech: "tech" };
+
+function findEntity(state, id) {
+  return (
+    state.units[id] || state.locations[id] || state.chips[id] || state.players[id] || null
+  );
+}
+
+// Resolve a zone path (e.g. "hand:versari", "marketRow:2") to its array.
+function getZone(state, spec) {
+  if (!spec) return null;
+  const [kind, arg] = String(spec).split(":");
+  switch (kind) {
+    case "encounterDeck": return state.encounterDeck;
+    case "reactiveDeck": return state.reactiveDeck;
+    case "removed": return state.removed;
+    case "hand": return state.players[arg]?.hand;
+    case "discard": return state.discards[arg];
+    case "marketRow": return state.market.tiers[arg]?.row;
+    case "marketDeck": return state.market.tiers[arg]?.deck;
+    case "unitBay": return state.units[arg]?.chips;
+    case "locationSlots": return state.locations[arg]?.chips;
+    default: return null;
+  }
+}
+
+const EFFECTS = {
+  ADJUST_RESOURCE(state, e, ctx) {
+    for (const pid of resolveTargets(state, e.target, ctx)) {
+      const p = state.players[pid];
+      if (!p) continue;
+      const key = POOL_KEY[e.resource] || "resource";
+      p[key] = Math.max(0, p[key] + e.amount);
+      emit(state, e.amount >= 0 ? "resource_gained" : "resource_spent", {
+        player: pid, resource: e.resource, amount: e.amount,
+      });
+      if (e.resource === "Tech") emit(state, "tech_changed", { player: pid, tech: p.tech });
+      if (e.resource === "VP" && p.vp >= CONFIG.vpThreshold && !state.winnerId) {
+        state.winnerId = pid;
+      }
+    }
+  },
+
+  MODIFY_STAT(state, e, ctx) {
+    for (const t of resolveTargets(state, e.target, ctx)) {
+      state.modifiers.push({
+        target: t, stat: e.stat, amount: e.amount,
+        duration: e.duration || "permanent",
+        createdRound: state.round, createdTurn: state.activeIndex,
+      });
+      emit(state, "stat_modified", { target: t, stat: e.stat, amount: e.amount });
+    }
+    recomputeStats(state);
+  },
+
+  GRANT_ACTIONS(state, e, ctx) {
+    for (const pid of resolveTargets(state, e.target, ctx)) {
+      const p = state.players[pid];
+      if (!p) continue;
+      if (e.when === "next_turn") {
+        state.pendingActionGrants.push({ player: pid, amount: e.amount });
+      } else {
+        p.actions.remaining = Math.max(0, p.actions.remaining + e.amount);
+      }
+    }
+  },
+
+  MOVE_CARD(state, e, ctx) {
+    const from = getZone(state, e.from);
+    const to = getZone(state, e.to);
+    if (!from || !to) return;
+    const count = e.count || 1;
+    for (let i = 0; i < count && from.length; i++) {
+      let idx = 0; // "top" / default
+      if (e.selector === "random") idx = ctx.rng ? ctx.rng.int(from.length) : 0;
+      else if (e.selector === "by_id") idx = Math.max(0, from.indexOf(e.id));
+      else if (e.selector === "chosen") {
+        const choice = ctx.interact?.({ kind: "chooseCard", options: [...from] });
+        idx = Math.max(0, from.indexOf(choice));
+      }
+      const [moved] = from.splice(idx, 1);
+      to.push(moved);
+      emit(state, "card_left_zone", { card: moved, zone: e.from });
+      emit(state, "card_entered_zone", { card: moved, zone: e.to });
+    }
+  },
+
+  SET_FLAG(state, e, ctx) {
+    for (const t of resolveTargets(state, e.target, ctx)) {
+      const ent = findEntity(state, t);
+      if (!ent) continue;
+      ent.flags = ent.flags || {};
+      ent.flags[e.flag] = { value: e.value !== false, duration: e.duration || "permanent" };
+    }
+  },
+
+  TRANSFER(state, e, ctx) {
+    if (e.what !== "resource") return; // card transfer arrives in a later layer
+    const from = resolveTargets(state, e.from, ctx)[0];
+    const to = resolveTargets(state, e.to, ctx)[0];
+    const fp = state.players[from];
+    const tp = state.players[to];
+    if (!fp || !tp) return;
+    const key = POOL_KEY[e.resource] || "resource";
+    let amt =
+      e.amount === "all" ? fp[key]
+        : e.amount === "half" ? Math.floor(fp[key] / 2)
+          : e.amount;
+    amt = Math.min(amt, fp[key]);
+    fp[key] -= amt;
+    tp[key] += amt;
+    emit(state, "resource_spent", { player: from, resource: e.resource, amount: -amt });
+    emit(state, "resource_gained", { player: to, resource: e.resource, amount: amt });
+  },
+
+  CONVERT(state, e, ctx) {
+    const pid = resolveTargets(state, e.target, ctx)[0];
+    const p = state.players[pid];
+    if (!p) return;
+    const fromKey = POOL_KEY[e.from];
+    const toKey = POOL_KEY[e.to];
+    const cost = e.rate?.cost ?? 1;
+    const gain = e.rate?.gain ?? 1;
+    let times = Math.floor(p[fromKey] / cost);
+    if (e.max != null) times = Math.min(times, e.max);
+    if (times <= 0) return;
+    p[fromKey] -= times * cost;
+    p[toKey] += times * gain;
+  },
+
+  SPAWN(state, e, ctx) {
+    // v0.1 supports unit spawning via the Recruit action (Layer 3);
+    // location / obstacle spawns arrive with the encounter content.
+  },
+
+  PEEK(state, e, ctx) {
+    // Information-only — surfaced to the UI in a later layer.
+  },
+
+  FORCE_CHOICE(state, e, ctx) {
+    const options = e.options || [];
+    if (!options.length) return;
+    const label = ctx.interact
+      ? ctx.interact({ kind: "forceChoice", options: options.map((o) => o.label) })
+      : options[0].label;
+    const picked = options.find((o) => o.label === label) || options[0];
+    applyEffects(state, picked.effects || [], ctx);
+  },
+
+  SURCHARGE(state, e, ctx) {
+    for (const t of resolveTargets(state, e.target, ctx)) {
+      state.surcharges.push({
+        action: e.action,
+        extraCost: e.extraCost || null,
+        block: !!e.block,
+        window: e.window || "until_your_next_turn",
+        target: t,
+      });
+    }
+  },
+
+  // --- replacement mode — only meaningful inside a reaction window ---
+  REDIRECT(state, e, ctx) {
+    if (!ctx.pending) return;
+    const cur = ctx.pending[e.field];
+    if (e.operation === "set") ctx.pending[e.field] = e.value;
+    else if (e.operation === "scale") ctx.pending[e.field] = cur * e.value;
+    else if (e.operation === "clamp") ctx.pending[e.field] = Math.min(cur, e.value);
+  },
+
+  CANCEL(state, e, ctx) {
+    if (ctx.pending) ctx.pending.cancelled = true;
+  },
+};
+
+export function applyEffect(state, effect, ctx = {}) {
+  const handler = EFFECTS[effect.type];
+  if (!handler) throw new Error(`applyEffect: no handler for "${effect.type}"`);
+  handler(state, effect, ctx);
+}
+
+export function applyEffects(state, effects, ctx = {}) {
+  for (const effect of effects || []) applyEffect(state, effect, ctx);
+}
+
+export { EFFECTS };

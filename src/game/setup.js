@@ -39,6 +39,7 @@ export function createGame({ seed = Date.now() & 0xffffffff, factionIds } = {}) 
       tech: CONFIG.tech.start,
       actions: { remaining: CONFIG.baseActions, max: CONFIG.baseActions },
       unitCap: 1,
+      hand: [],
     };
   }
 
@@ -68,6 +69,7 @@ export function createGame({ seed = Date.now() & 0xffffffff, factionIds } = {}) 
       hexId,
       locationId: locId,
       controller,
+      footholdOwner: controller,
       sections: Array(3).fill(controller || "neutral"),
       foothold: controller ? 0 : null,
       footholdCap: CONFIG.footholdCap,
@@ -88,6 +90,8 @@ export function createGame({ seed = Date.now() & 0xffffffff, factionIds } = {}) 
       owner: fid,
       name: `${FACTIONS[fid].name} unit`, // flavor names arrive with content
       node: layout.factionStart[fid],
+      baseStrength: CONFIG.unit.baseStrength,
+      baseMovement: CONFIG.unit.baseMovement,
       strength: CONFIG.unit.baseStrength,
       movement: CONFIG.unit.baseMovement,
       chips: [],
@@ -129,6 +133,10 @@ export function createGame({ seed = Date.now() & 0xffffffff, factionIds } = {}) 
     encounterDeck: [], // content pending — encounter design batch
     reactiveDeck: [], // content pending
     discards: { encounter: [], reactive: [], market: [] },
+    removed: [],
+    modifiers: [],
+    pendingActionGrants: [],
+    surcharges: [],
     winnerId: null,
     log: [],
   };

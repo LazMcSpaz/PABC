@@ -32,12 +32,12 @@ export const LOCATIONS = {
 // copies are PROVISIONAL until the content batch. `effects` are left for
 // Layer 2 (the effect library); `desc` carries the plain-text effect.
 export const CHIPS = {
-  // --- unit chips ---
-  "new-recruits": { id: "new-recruits", name: "New Recruits", kind: "unit", slots: 1, techLevel: 1, cost: 2, copies: 3, desc: "+1 Strength" },
-  navigator: { id: "navigator", name: "Navigator", kind: "unit", slots: 1, techLevel: 1, cost: 2, copies: 3, desc: "+1 Movement" },
-  "sharpened-blades": { id: "sharpened-blades", name: "Sharpened Blades", kind: "unit", slots: 1, techLevel: 2, cost: 4, copies: 3, desc: "+2 Strength" },
-  cannons: { id: "cannons", name: "Cannons", kind: "unit", slots: 1, techLevel: 3, cost: 6, copies: 2, desc: "+3 Strength" },
-  landship: { id: "landship", name: "Landship", kind: "unit", slots: 2, techLevel: 3, cost: 7, copies: 2, desc: "+2 Movement (rare, 2-slot)" },
+  // --- unit chips --- (strength / movement = structured stat bonuses)
+  "new-recruits": { id: "new-recruits", name: "New Recruits", kind: "unit", slots: 1, techLevel: 1, cost: 2, copies: 3, strength: 1, desc: "+1 Strength" },
+  navigator: { id: "navigator", name: "Navigator", kind: "unit", slots: 1, techLevel: 1, cost: 2, copies: 3, movement: 1, desc: "+1 Movement" },
+  "sharpened-blades": { id: "sharpened-blades", name: "Sharpened Blades", kind: "unit", slots: 1, techLevel: 2, cost: 4, copies: 3, strength: 2, desc: "+2 Strength" },
+  cannons: { id: "cannons", name: "Cannons", kind: "unit", slots: 1, techLevel: 3, cost: 6, copies: 2, strength: 3, desc: "+3 Strength" },
+  landship: { id: "landship", name: "Landship", kind: "unit", slots: 2, techLevel: 3, cost: 7, copies: 2, movement: 2, desc: "+2 Movement (rare, 2-slot)" },
   // --- location chips ---
   recyclers: { id: "recyclers", name: "Recyclers", kind: "location", slots: 1, techLevel: 1, cost: 3, copies: 3, desc: "+1 scrap production" },
   "town-hall": { id: "town-hall", name: "Town Hall", kind: "location", slots: 1, techLevel: 1, cost: 3, copies: 3, desc: "+1 to this location's foothold cap" },
