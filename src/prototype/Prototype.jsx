@@ -7,6 +7,7 @@ import { mockState } from "./mockState.js";
 import { theme } from "./data.js";
 import { Btn } from "./kit.jsx";
 import HexBoard from "./HexBoard.jsx";
+import BoardViewport from "./BoardViewport.jsx";
 import Inspector from "./Inspector.jsx";
 import FactionBar from "./FactionBar.jsx";
 import BottomDock from "./BottomDock.jsx";
@@ -139,18 +140,8 @@ export default function Prototype() {
         </div>
       </header>
 
-      {/* BOARD — the field of battle, kept central */}
-      <div
-        className="pc-board pc-scroll"
-        style={{
-          flex: 1,
-          overflow: "auto",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          paddingBottom: TAB_H + 20,
-        }}
-      >
+      {/* BOARD — the field of battle; drag to pan, wheel to zoom */}
+      <BoardViewport>
         <div style={{ position: "relative", padding: 30 }}>
           <Bracket corner="tl" />
           <Bracket corner="tr" />
@@ -158,7 +149,7 @@ export default function Prototype() {
           <Bracket corner="br" />
           <HexBoard state={state} selectedHexId={selectedHexId} onSelect={selectHex} />
         </div>
-      </div>
+      </BoardViewport>
 
       {/* INSPECTOR — right-hand drawer, slides in on selection */}
       <div
