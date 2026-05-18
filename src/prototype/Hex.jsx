@@ -1,6 +1,6 @@
 // One board tile. Locations show a mini control meter; encounter tiles
 // draw an encounter on arrival; terrain is passable filler.
-import { LOCATIONS, FACTIONS, fullController, ownerColor, theme } from "./data.js";
+import { LOCATIONS, FACTIONS, fullController, ownerColor, garrisonStrength, theme } from "./data.js";
 import ControlMeter from "./ControlMeter.jsx";
 
 const HEX_W = 150;
@@ -21,9 +21,9 @@ function UnitToken({ unit }) {
       title={`${unit.name} — ${faction.name}`}
       style={{
         position: "absolute",
-        left: "50%",
-        bottom: "11%",
-        transform: "translateX(-50%)",
+        top: "50%",
+        right: "7%",
+        transform: "translateY(-50%)",
         width: 30,
         height: 30,
         borderRadius: "50%",
@@ -139,7 +139,7 @@ export default function Hex({ hex, unit, selected, onClick }) {
                   strokeWidth="1.5"
                 />
               </svg>
-              {loc.garrison}
+              {garrisonStrength(hex.locationId, hex.control)}
             </div>
           </>
         )}
