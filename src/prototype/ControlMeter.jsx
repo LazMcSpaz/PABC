@@ -43,12 +43,14 @@ export default function ControlMeter({
           />
         );
       })}
+      {/* crisp outer ring */}
+      <circle cx={cx} cy={cy} r={r - 0.6} fill="none" stroke="rgba(0,0,0,0.6)" strokeWidth="1.2" />
       {/* centre disc — holds the foothold score */}
       <circle
         cx={cx}
         cy={cy}
         r={innerR}
-        fill={theme.panel2}
+        fill={theme.panel}
         stroke={ctrl ? ownerColor(ctrl) : theme.border}
         strokeWidth={ctrl ? 2 : 1}
       />
@@ -58,10 +60,10 @@ export default function ControlMeter({
           y={cy}
           textAnchor="middle"
           dominantBaseline="central"
-          fontSize={size * 0.34}
-          fontWeight="800"
+          fontSize={size * 0.36}
+          fontWeight="700"
           fill={foothold == null ? theme.textFaint : theme.accent}
-          fontFamily="system-ui, sans-serif"
+          fontFamily="'Oswald', sans-serif"
         >
           {footholdText}
         </text>

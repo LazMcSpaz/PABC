@@ -1,6 +1,5 @@
-// The top faction bar — one compact box per faction (name + VP bar,
-// bordered in the faction colour). Hovering a box raises a detail
-// popover so the bar itself stays narrow.
+// The top faction bar — one compact plate per faction (name + VP bar,
+// flagged in the faction colour). Hovering raises a detail popover.
 import { useState } from "react";
 import { FACTIONS, LOCATIONS, fullController, theme } from "./data.js";
 import { Coin } from "./kit.jsx";
@@ -18,9 +17,9 @@ function Popover({ state, pid }) {
   const units = Object.values(state.units).filter((u) => u.owner === pid).length;
 
   const Row = ({ label, children }) => (
-    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11 }}>
+    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11.5 }}>
       <span style={{ color: theme.textDim }}>{label}</span>
-      <span style={{ color: theme.text, fontWeight: 700 }}>{children}</span>
+      <span style={{ color: theme.text, fontWeight: 600 }}>{children}</span>
     </div>
   );
 
@@ -28,26 +27,37 @@ function Popover({ state, pid }) {
     <div
       style={{
         position: "absolute",
-        top: "calc(100% + 7px)",
+        top: "calc(100% + 9px)",
         left: 0,
-        width: 224,
+        width: 228,
         zIndex: 80,
-        background: theme.panel2,
+        background: theme.plate,
         border: `1px solid ${faction.color}`,
-        borderRadius: 8,
+        borderRadius: 7,
         padding: 12,
-        boxShadow: "0 12px 30px rgba(0,0,0,0.6)",
+        boxShadow: theme.shadowDeep,
         display: "flex",
         flexDirection: "column",
         gap: 7,
       }}
     >
-      <div style={{ fontSize: 13, fontWeight: 800, color: faction.color }}>{faction.name}</div>
+      <div
+        style={{
+          fontFamily: theme.fontDisplay,
+          fontSize: 14,
+          fontWeight: 700,
+          letterSpacing: 0.6,
+          color: faction.color,
+          textTransform: "uppercase",
+        }}
+      >
+        {faction.name}
+      </div>
       <div style={{ height: 1, background: theme.border }} />
       <Row label="Victory points">
         {player.vp} / {state.vpGoal}
       </Row>
-      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11.5 }}>
         <span style={{ color: theme.textDim }}>Scrap</span>
         <Coin n={player.scrap} size={13} />
       </div>
@@ -80,11 +90,17 @@ function FactionBox({ state, pid }) {
       <div
         className="pc-int"
         style={{
-          width: 158,
-          padding: "5px 9px",
-          borderRadius: 6,
-          border: `2px solid ${faction.color}`,
-          background: isActive ? `${faction.color}26` : theme.panel2,
+          width: 162,
+          borderRadius: 5,
+          border: `1px solid ${isActive ? faction.color : theme.border}`,
+          borderTop: `3px solid ${faction.color}`,
+          background: isActive
+            ? `linear-gradient(180deg, ${faction.color}2e, ${theme.panel2})`
+            : theme.plate,
+          boxShadow: isActive
+            ? `0 0 12px ${faction.color}66, inset 0 1px 0 rgba(255,255,255,0.05)`
+            : "inset 0 1px 0 rgba(255,255,255,0.04)",
+          padding: "5px 9px 6px",
           display: "flex",
           flexDirection: "column",
           gap: 4,
@@ -92,28 +108,60 @@ function FactionBox({ state, pid }) {
         }}
       >
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <span style={{ fontSize: 11, fontWeight: 800, color: theme.text }}>
+          <span
+            style={{
+              fontFamily: theme.fontDisplay,
+              fontSize: 12,
+              fontWeight: 600,
+              letterSpacing: 0.7,
+              textTransform: "uppercase",
+              color: theme.text,
+            }}
+          >
             {faction.short}
           </span>
-          <span style={{ display: "flex", gap: 4, alignItems: "center" }}>
+          <span style={{ display: "flex", gap: 5, alignItems: "center" }}>
             {isYou && (
-              <span style={{ fontSize: 8, fontWeight: 800, color: theme.accent }}>YOU</span>
-            )}
-            {isActive && (
               <span
                 style={{
-                  width: 7,
-                  height: 7,
-                  borderRadius: "50%",
-                  background: faction.color,
+                  fontFamily: theme.fontDisplay,
+                  fontSize: 8,
+                  fontWeight: 700,
+                  letterSpacing: 0.5,
+                  color: theme.accent,
                 }}
-                title="Active turn"
-              />
+              >
+                YOU
+              </span>
             )}
+            <span
+              style={{
+                fontFamily: theme.fontDisplay,
+                fontSize: 10,
+                fontWeight: 700,
+                color: theme.textDim,
+              }}
+            >
+              {player.vp}
+            </span>
           </span>
         </div>
-        <div style={{ height: 6, borderRadius: 3, background: theme.panel3, overflow: "hidden" }}>
-          <div style={{ width: `${vpPct}%`, height: "100%", background: faction.color }} />
+        <div
+          style={{
+            height: 7,
+            borderRadius: 4,
+            background: "#15110c",
+            border: "1px solid rgba(0,0,0,0.5)",
+            overflow: "hidden",
+          }}
+        >
+          <div
+            style={{
+              width: `${vpPct}%`,
+              height: "100%",
+              background: `linear-gradient(180deg, ${faction.color}, ${faction.color}aa)`,
+            }}
+          />
         </div>
       </div>
       {hover && <Popover state={state} pid={pid} />}
@@ -123,7 +171,7 @@ function FactionBox({ state, pid }) {
 
 export default function FactionBar({ state }) {
   return (
-    <div style={{ display: "flex", gap: 8, justifyContent: "center", flex: 1 }}>
+    <div style={{ display: "flex", gap: 9, justifyContent: "center", flex: 1 }}>
       {Object.keys(state.players).map((pid) => (
         <FactionBox key={pid} state={state} pid={pid} />
       ))}

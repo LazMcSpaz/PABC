@@ -5,13 +5,25 @@ import { useRef, useState } from "react";
 import "./prototype.css";
 import { mockState } from "./mockState.js";
 import { theme } from "./data.js";
+import { Btn } from "./kit.jsx";
 import HexBoard from "./HexBoard.jsx";
 import Inspector from "./Inspector.jsx";
 import FactionBar from "./FactionBar.jsx";
 import BottomDock from "./BottomDock.jsx";
 
-const TOP_H = 52;
+const TOP_H = 56;
 const TAB_H = 44;
+
+function Bracket({ corner }) {
+  const c = theme.accent;
+  const map = {
+    tl: { top: 0, left: 0, borderTop: `2px solid ${c}`, borderLeft: `2px solid ${c}` },
+    tr: { top: 0, right: 0, borderTop: `2px solid ${c}`, borderRight: `2px solid ${c}` },
+    bl: { bottom: 0, left: 0, borderBottom: `2px solid ${c}`, borderLeft: `2px solid ${c}` },
+    br: { bottom: 0, right: 0, borderBottom: `2px solid ${c}`, borderRight: `2px solid ${c}` },
+  };
+  return <div className="pc-bracket" style={map[corner]} />;
+}
 
 export default function Prototype() {
   const state = mockState;
@@ -55,27 +67,36 @@ export default function Prototype() {
           flexShrink: 0,
           display: "flex",
           alignItems: "center",
-          gap: 14,
-          padding: "0 14px",
-          background: theme.panel,
-          borderBottom: `1px solid ${theme.border}`,
+          gap: 16,
+          padding: "0 16px",
+          background: theme.plate,
+          borderBottom: `1px solid #000`,
+          boxShadow: "0 2px 0 rgba(232,169,63,0.18), 0 6px 16px rgba(0,0,0,0.5)",
           position: "relative",
           zIndex: 50,
         }}
       >
-        <div style={{ display: "flex", flexDirection: "column", lineHeight: 1.2, minWidth: 168 }}>
+        <div style={{ display: "flex", flexDirection: "column", lineHeight: 1.15, minWidth: 188 }}>
           <span
             style={{
-              fontSize: 14,
-              fontWeight: 800,
-              letterSpacing: 1.6,
+              fontFamily: theme.fontDisplay,
+              fontSize: 19,
+              fontWeight: 700,
+              letterSpacing: 3,
               textTransform: "uppercase",
-              color: theme.text,
             }}
           >
-            Ashland Conquest
+            <span style={{ color: theme.text }}>Ashland </span>
+            <span style={{ color: theme.accent }}>Conquest</span>
           </span>
-          <span style={{ fontSize: 10, color: theme.textFaint }}>
+          <span
+            style={{
+              fontSize: 9.5,
+              letterSpacing: 1.6,
+              textTransform: "uppercase",
+              color: theme.textFaint,
+            }}
+          >
             Round {state.round} · {state.phase} Phase
           </span>
         </div>
@@ -86,48 +107,41 @@ export default function Prototype() {
           style={{
             display: "flex",
             alignItems: "center",
-            gap: 12,
-            minWidth: 168,
+            gap: 14,
+            minWidth: 188,
             justifyContent: "flex-end",
           }}
         >
-          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", lineHeight: 1.15 }}>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", lineHeight: 1.1 }}>
             <span
               style={{
                 fontSize: 9,
-                letterSpacing: 1,
+                letterSpacing: 1.4,
                 textTransform: "uppercase",
                 color: theme.textFaint,
-                fontWeight: 700,
+                fontWeight: 600,
               }}
             >
               Actions
             </span>
-            <span style={{ fontSize: 14, fontWeight: 800, color: theme.text }}>
+            <span
+              style={{
+                fontFamily: theme.fontDisplay,
+                fontSize: 16,
+                fontWeight: 700,
+                color: theme.text,
+              }}
+            >
               {you.actions.remaining} / {you.actions.max}
             </span>
           </div>
-          <button
-            className="pc-int"
-            style={{
-              padding: "8px 14px",
-              borderRadius: 6,
-              border: `1px solid ${theme.borderLit}`,
-              background: theme.panel3,
-              color: theme.text,
-              fontWeight: 800,
-              fontSize: 12,
-              cursor: "pointer",
-            }}
-          >
-            End Turn
-          </button>
+          <Btn variant="primary">End Turn</Btn>
         </div>
       </header>
 
       {/* BOARD — the field of battle, kept central */}
       <div
-        className="pc-scroll"
+        className="pc-board pc-scroll"
         style={{
           flex: 1,
           overflow: "auto",
@@ -135,10 +149,15 @@ export default function Prototype() {
           alignItems: "center",
           justifyContent: "center",
           paddingBottom: TAB_H + 20,
-          background: theme.bg,
         }}
       >
-        <HexBoard state={state} selectedHexId={selectedHexId} onSelect={selectHex} />
+        <div style={{ position: "relative", padding: 30 }}>
+          <Bracket corner="tl" />
+          <Bracket corner="tr" />
+          <Bracket corner="bl" />
+          <Bracket corner="br" />
+          <HexBoard state={state} selectedHexId={selectedHexId} onSelect={selectHex} />
+        </div>
       </div>
 
       {/* INSPECTOR — right-hand drawer, slides in on selection */}
@@ -152,7 +171,7 @@ export default function Prototype() {
           transform: selectedHexId ? "translateX(0)" : "translateX(100%)",
           transition: "transform 0.3s ease",
           zIndex: 30,
-          boxShadow: selectedHexId ? "-10px 0 28px rgba(0,0,0,0.5)" : "none",
+          boxShadow: selectedHexId ? "-12px 0 32px rgba(0,0,0,0.6)" : "none",
           display: "flex",
         }}
       >

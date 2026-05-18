@@ -98,7 +98,7 @@ export default function Chip({ chipId, width = 84, dim = false }) {
           width,
           height,
           opacity: dim ? 0.5 : 1,
-          background: theme.panel3,
+          background: "linear-gradient(165deg, #36302a, #221d16)",
           border: `2px solid ${accent}`,
           borderRadius: 7,
           padding: small ? 5 : 6,
@@ -106,6 +106,7 @@ export default function Chip({ chipId, width = 84, dim = false }) {
           flexDirection: "column",
           justifyContent: "space-between",
           cursor: "default",
+          boxShadow: `0 3px 7px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.06)`,
         }}
       >
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>

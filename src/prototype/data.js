@@ -5,18 +5,24 @@
 // mockup read well — flagged here so they are not mistaken for final.
 
 export const theme = {
-  bg: "#16181c",
-  panel: "#1e2127",
-  panel2: "#252932",
-  panel3: "#2d323d",
-  border: "#343a44",
-  borderLit: "#4b5360",
-  text: "#e8e6e0",
-  textDim: "#9aa1ad",
-  textFaint: "#6b7280",
-  accent: "#d9a441", // amber — primary highlight
-  accent2: "#c2592f", // rust — danger / decay
-  good: "#6fae5b",
+  bg: "#14110d",
+  panel: "#1e1913",
+  panel2: "#262017",
+  panel3: "#312a1f",
+  border: "#403729",
+  borderLit: "#5b4e3a",
+  text: "#ece3d2",
+  textDim: "#a89d87",
+  textFaint: "#776c5b",
+  accent: "#e8a93f", // amber lamplight
+  accent2: "#c75d30", // rust
+  good: "#86ad52",
+  boardBg:
+    "radial-gradient(ellipse 72% 64% at 50% 38%, #322a1d 0%, #1c1711 52%, #100d09 100%)",
+  plate: "linear-gradient(180deg, #2a2217 0%, #1c1711 100%)",
+  shadow: "0 6px 18px rgba(0,0,0,0.55)",
+  shadowDeep: "0 16px 38px rgba(0,0,0,0.7)",
+  fontDisplay: "'Oswald','Arial Narrow','Roboto Condensed',system-ui,sans-serif",
 };
 
 export const NEUTRAL = "#717171";

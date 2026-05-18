@@ -9,32 +9,16 @@ import {
   unitEffective,
   theme,
 } from "./data.js";
-import { Panel, Label, Divider } from "./kit.jsx";
+import { Panel, Label, Divider, IconBtn } from "./kit.jsx";
 import LocationCard from "./LocationCard.jsx";
 import ControlMeter from "./ControlMeter.jsx";
 import ContestPanel from "./ContestPanel.jsx";
 
 function CloseBtn({ onClose }) {
   return (
-    <button
-      className="pc-int"
-      onClick={onClose}
-      title="Close"
-      style={{
-        width: 24,
-        height: 24,
-        borderRadius: 5,
-        border: `1px solid ${theme.border}`,
-        background: theme.panel2,
-        color: theme.textDim,
-        cursor: "pointer",
-        fontSize: 12,
-        lineHeight: 1,
-        padding: 0,
-      }}
-    >
+    <IconBtn onClick={onClose} title="Close">
       ✕
-    </button>
+    </IconBtn>
   );
 }
 

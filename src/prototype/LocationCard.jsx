@@ -11,7 +11,7 @@ import {
   locationProduction,
   theme,
 } from "./data.js";
-import { Label, Coin } from "./kit.jsx";
+import { Label, Coin, IconBtn } from "./kit.jsx";
 import Chip from "./Chip.jsx";
 
 function Shield({ n, color }) {
@@ -25,7 +25,9 @@ function Shield({ n, color }) {
           strokeWidth="1.4"
         />
       </svg>
-      <span style={{ fontWeight: 800, fontSize: 15, color: theme.text }}>{n}</span>
+      <span style={{ fontFamily: theme.fontDisplay, fontWeight: 700, fontSize: 15, color: theme.text }}>
+        {n}
+      </span>
     </span>
   );
 }
@@ -40,40 +42,24 @@ export default function LocationCard({ locationId, control, width = 210, compact
   const garrison = garrisonStrength(locationId, control);
   const production = locationProduction(locationId, control);
   const faction = ctrl ? FACTIONS[ctrl] : null;
-  const height = Math.round(width * 1.52);
+  const height = Math.round(width * 1.54);
   const chipW = Math.max(46, Math.round(width * 0.235));
 
-  const flipBtn = (
-    <button
-      className="pc-int"
-      onClick={(e) => {
-        e.stopPropagation();
-        setShowBack((s) => !s);
-      }}
-      title="Flip card"
-      style={{
-        position: "absolute",
-        top: 6,
-        right: 6,
-        zIndex: 2,
-        width: 22,
-        height: 22,
-        borderRadius: 5,
-        border: `1px solid ${theme.border}`,
-        background: theme.panel2,
-        color: theme.textDim,
-        cursor: "pointer",
-        fontSize: 11,
-        padding: 0,
-      }}
-    >
-      ⮌
-    </button>
-  );
-
   return (
-    <div className="pc-flip" style={{ width, height, position: "relative" }}>
-      {flipBtn}
+    <div
+      className="pc-flip"
+      style={{ width, height, position: "relative", filter: "drop-shadow(0 6px 12px rgba(0,0,0,0.55))" }}
+    >
+      <IconBtn
+        title="Flip card"
+        onClick={(e) => {
+          e.stopPropagation();
+          setShowBack((s) => !s);
+        }}
+        style={{ position: "absolute", top: 6, right: 6, zIndex: 2 }}
+      >
+        ⮌
+      </IconBtn>
       <div
         className="pc-flip-inner"
         style={{ transform: showBack ? "rotateY(180deg)" : "none" }}
@@ -85,13 +71,16 @@ export default function LocationCard({ locationId, control, width = 210, compact
             borderRadius: 9,
             border: `1px solid ${theme.borderLit}`,
             background:
-              "repeating-linear-gradient(135deg, #20242c, #20242c 9px, #232830 9px, #232830 18px)",
+              "repeating-linear-gradient(135deg, #241e15, #241e15 9px, #2b2419 9px, #2b2419 18px)",
+            boxShadow: "inset 0 0 0 3px rgba(0,0,0,0.35)",
             display: "flex",
             flexDirection: "column",
             padding: 12,
           }}
         >
-          <Label>Location</Label>
+          <div style={{ textAlign: "center" }}>
+            <Label style={{ letterSpacing: 2.4 }}>· Location ·</Label>
+          </div>
           <div
             style={{
               flex: 1,
@@ -99,28 +88,33 @@ export default function LocationCard({ locationId, control, width = 210, compact
               flexDirection: "column",
               alignItems: "center",
               justifyContent: "center",
-              gap: 12,
+              gap: 13,
             }}
           >
             <div
               style={{
-                fontSize: width < 170 ? 16 : 20,
-                fontWeight: 800,
+                fontFamily: theme.fontDisplay,
+                fontSize: width < 170 ? 18 : 22,
+                fontWeight: 700,
+                letterSpacing: 1,
                 color: theme.text,
                 textAlign: "center",
+                textShadow: "0 2px 4px rgba(0,0,0,0.6)",
               }}
             >
               {loc.name}
             </div>
             <div
               style={{
-                padding: "5px 12px",
-                borderRadius: 6,
-                background: value.color,
-                color: "#15171c",
-                fontWeight: 800,
+                padding: "5px 13px",
+                borderRadius: 4,
+                background: `linear-gradient(180deg, ${value.color}, ${value.color}cc)`,
+                border: "1px solid rgba(0,0,0,0.4)",
+                color: "#16120b",
+                fontFamily: theme.fontDisplay,
+                fontWeight: 700,
                 fontSize: 11,
-                letterSpacing: 0.8,
+                letterSpacing: 1,
                 textTransform: "uppercase",
               }}
             >
@@ -139,74 +133,105 @@ export default function LocationCard({ locationId, control, width = 210, compact
           style={{
             borderRadius: 9,
             border: `1px solid ${theme.border}`,
-            borderLeft: `4px solid ${faction ? faction.color : theme.borderLit}`,
-            background: theme.panel2,
+            background: theme.plate,
             display: "flex",
             flexDirection: "column",
-            padding: 12,
-            gap: 9,
+            overflow: "hidden",
           }}
         >
-          <div>
-            <div style={{ fontSize: width < 170 ? 14 : 17, fontWeight: 800, color: theme.text }}>
+          {/* faction title banner */}
+          <div
+            style={{
+              background: faction
+                ? `linear-gradient(180deg, ${faction.color}, ${faction.color}99)`
+                : theme.panel3,
+              padding: "6px 11px",
+              borderBottom: "1px solid rgba(0,0,0,0.5)",
+            }}
+          >
+            <div
+              style={{
+                fontFamily: theme.fontDisplay,
+                fontSize: width < 170 ? 14 : 16,
+                fontWeight: 700,
+                letterSpacing: 0.8,
+                color: "#fff",
+                textShadow: "0 1px 3px rgba(0,0,0,0.7)",
+              }}
+            >
               {loc.name}
             </div>
-            <div style={{ fontSize: 10.5, color: faction ? faction.color : theme.textFaint, fontWeight: 700 }}>
+            <div
+              style={{
+                fontSize: 8.5,
+                fontWeight: 600,
+                letterSpacing: 1,
+                textTransform: "uppercase",
+                color: "rgba(255,255,255,0.82)",
+              }}
+            >
               {faction ? `Held — ${faction.name}` : "Uncontrolled"}
             </div>
           </div>
-          <div style={{ display: "flex", gap: 14 }}>
-            <div>
-              <Label>Garrison</Label>
-              <Shield n={garrison} color={theme.textDim} />
-            </div>
-            <div>
-              <Label>Scrap / turn</Label>
-              <div style={{ marginTop: 2 }}>
-                <Coin n={production} size={15} />
+
+          <div style={{ padding: 11, display: "flex", flexDirection: "column", gap: 9, flex: 1 }}>
+            <div style={{ display: "flex", gap: 14 }}>
+              <div>
+                <Label>Garrison</Label>
+                <div style={{ marginTop: 2 }}>
+                  <Shield n={garrison} color={theme.textDim} />
+                </div>
+              </div>
+              <div>
+                <Label>Scrap / turn</Label>
+                <div style={{ marginTop: 3 }}>
+                  <Coin n={production} size={15} />
+                </div>
               </div>
             </div>
-          </div>
-          <div>
-            <Label>Ability</Label>
-            <div
-              style={{
-                fontSize: 10.5,
-                color: loc.ability ? theme.text : theme.textFaint,
-                lineHeight: 1.35,
-                marginTop: 3,
-                maxHeight: compact ? 46 : "none",
-                overflow: "hidden",
-              }}
-            >
-              {loc.ability || "No innate ability."}
+            <div>
+              <Label>Ability</Label>
+              <div
+                className="pc-prose"
+                style={{
+                  fontSize: 10.5,
+                  color: loc.ability ? theme.textDim : theme.textFaint,
+                  lineHeight: 1.4,
+                  marginTop: 3,
+                  maxHeight: compact ? 46 : "none",
+                  overflow: "hidden",
+                }}
+              >
+                {loc.ability || "No innate ability."}
+              </div>
             </div>
-          </div>
-          <div style={{ marginTop: "auto" }}>
-            <Label>{`Chip slots — ${control?.chips?.length || 0}/${loc.chipSlots}`}</Label>
-            <div style={{ display: "flex", gap: 6, marginTop: 5, flexWrap: "wrap" }}>
-              {Array.from({ length: loc.chipSlots }).map((_, i) => {
-                const chipId = control?.chips?.[i];
-                if (chipId) return <Chip key={i} chipId={chipId} width={chipW} />;
-                return (
-                  <div
-                    key={i}
-                    style={{
-                      width: chipW,
-                      height: Math.round(chipW * 1.2),
-                      borderRadius: 7,
-                      border: `1.5px dashed ${theme.border}`,
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      color: theme.textFaint,
-                      fontSize: 16,
-                    }}
-                  >
-                    +
-                  </div>
-                );
-              })}
+            <div style={{ marginTop: "auto" }}>
+              <Label>{`Chip slots — ${control?.chips?.length || 0}/${loc.chipSlots}`}</Label>
+              <div style={{ display: "flex", gap: 6, marginTop: 5, flexWrap: "wrap" }}>
+                {Array.from({ length: loc.chipSlots }).map((_, i) => {
+                  const chipId = control?.chips?.[i];
+                  if (chipId) return <Chip key={i} chipId={chipId} width={chipW} />;
+                  return (
+                    <div
+                      key={i}
+                      style={{
+                        width: chipW,
+                        height: Math.round(chipW * 1.2),
+                        borderRadius: 7,
+                        border: `1.5px dashed ${theme.border}`,
+                        background: "rgba(0,0,0,0.2)",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        color: theme.textFaint,
+                        fontSize: 16,
+                      }}
+                    >
+                      +
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           </div>
         </div>

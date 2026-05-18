@@ -2,36 +2,58 @@
 // Self-contained so the dice mechanic is demonstrable without an engine.
 import { useState } from "react";
 import { theme } from "./data.js";
-import { Label } from "./kit.jsx";
+import { Label, Btn } from "./kit.jsx";
+
+const PIPS = {
+  1: [4],
+  2: [0, 8],
+  3: [0, 4, 8],
+  4: [0, 2, 6, 8],
+  5: [0, 2, 4, 6, 8],
+  6: [0, 2, 3, 5, 6, 8],
+};
 
 function Die({ n }) {
   return (
     <div
       style={{
-        width: 32,
-        height: 32,
+        width: 34,
+        height: 34,
         borderRadius: 7,
-        background: theme.panel3,
-        border: `1px solid ${theme.borderLit}`,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        fontSize: 17,
-        fontWeight: 800,
-        color: n == null ? theme.textFaint : theme.text,
+        background: "linear-gradient(160deg, #f4ecda, #cdbf9f)",
+        border: "1px solid #6b5f44",
+        boxShadow: "0 2px 5px rgba(0,0,0,0.55), inset 0 1px 2px rgba(255,255,255,0.65)",
+        display: "grid",
+        gridTemplateColumns: "repeat(3,1fr)",
+        gridTemplateRows: "repeat(3,1fr)",
+        padding: 5,
       }}
     >
-      {n == null ? "·" : n}
+      {Array.from({ length: 9 }).map((_, i) => (
+        <div key={i} style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
+          {n && PIPS[n].includes(i) && (
+            <span
+              style={{
+                width: 5,
+                height: 5,
+                borderRadius: "50%",
+                background: "#2a2118",
+                boxShadow: "inset 0 1px 1px rgba(0,0,0,0.6)",
+              }}
+            />
+          )}
+        </div>
+      ))}
     </div>
   );
 }
 
-function Side({ title, name, score, die, total, color, won }) {
+function Side({ title, name, score, die, total, color, won, decided }) {
   return (
     <div
       style={{
         flex: 1,
-        background: theme.panel2,
+        background: won ? `${color}1f` : theme.panel2,
         border: `1px solid ${won ? color : theme.border}`,
         borderRadius: 7,
         padding: 10,
@@ -39,22 +61,37 @@ function Side({ title, name, score, die, total, color, won }) {
         flexDirection: "column",
         gap: 6,
         alignItems: "center",
+        boxShadow: won ? `0 0 12px ${color}55` : "none",
+        opacity: decided && !won ? 0.62 : 1,
       }}
     >
       <Label>{title}</Label>
-      <div style={{ fontSize: 12, fontWeight: 800, color: theme.text, textAlign: "center" }}>
+      <div
+        style={{
+          fontFamily: theme.fontDisplay,
+          fontSize: 12,
+          fontWeight: 600,
+          color: theme.text,
+          textAlign: "center",
+        }}
+      >
         {name}
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-        <span style={{ fontSize: 22, fontWeight: 800, color }}>{score}</span>
+        <span style={{ fontFamily: theme.fontDisplay, fontSize: 24, fontWeight: 700, color }}>
+          {score}
+        </span>
         <span style={{ color: theme.textFaint, fontWeight: 700 }}>+</span>
         <Die n={die} />
       </div>
-      <div style={{ fontSize: 10, color: theme.textFaint }}>Strength + 1d6</div>
+      <div style={{ fontSize: 9.5, color: theme.textFaint }} className="pc-prose">
+        Strength + 1d6
+      </div>
       <div
         style={{
-          fontSize: 19,
-          fontWeight: 800,
+          fontFamily: theme.fontDisplay,
+          fontSize: 22,
+          fontWeight: 700,
           color: total == null ? theme.textFaint : won ? color : theme.textDim,
         }}
       >
@@ -84,13 +121,15 @@ export default function ContestPanel({ attacker, defender }) {
           total={aTotal}
           color={theme.accent2}
           won={winner === "attacker"}
+          decided={!!r}
         />
         <div
           style={{
             display: "flex",
             alignItems: "center",
-            fontSize: 11,
-            fontWeight: 800,
+            fontFamily: theme.fontDisplay,
+            fontSize: 12,
+            fontWeight: 700,
             color: theme.textFaint,
           }}
         >
@@ -104,37 +143,26 @@ export default function ContestPanel({ attacker, defender }) {
           total={dTotal}
           color={theme.accent}
           won={winner === "defender"}
+          decided={!!r}
         />
       </div>
-      <button
-        className="pc-int"
-        onClick={roll}
-        style={{
-          padding: "9px 0",
-          borderRadius: 7,
-          border: `1px solid ${theme.borderLit}`,
-          background: theme.accent,
-          color: "#15171c",
-          fontWeight: 800,
-          fontSize: 12,
-          letterSpacing: 0.5,
-          cursor: "pointer",
-        }}
-      >
+      <Btn variant="primary" full onClick={roll}>
         {r ? "Roll again" : "Roll 2d6"}
-      </button>
+      </Btn>
       {r && (
         <div
           style={{
             textAlign: "center",
-            fontSize: 12,
-            fontWeight: 800,
+            fontFamily: theme.fontDisplay,
+            fontSize: 12.5,
+            fontWeight: 600,
+            letterSpacing: 0.4,
             color: winner === "attacker" ? theme.good : theme.accent2,
           }}
         >
           {winner === "attacker"
             ? "Attacker wins — a section flips."
-            : "Defender holds (ties go to the defender)."}
+            : "Defender holds — ties go to the defender."}
         </div>
       )}
     </div>

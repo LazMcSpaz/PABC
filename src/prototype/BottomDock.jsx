@@ -77,9 +77,9 @@ export default function BottomDock({ state, tabHeight }) {
       <div
         style={{
           height: PANEL_H,
-          background: theme.panel,
-          borderTop: `1px solid ${theme.border}`,
-          boxShadow: "0 -10px 26px rgba(0,0,0,0.45)",
+          background: theme.plate,
+          borderTop: `1px solid #000`,
+          boxShadow: "0 -12px 30px rgba(0,0,0,0.55)",
           display: "flex",
           flexDirection: "column",
         }}
@@ -131,8 +131,9 @@ export default function BottomDock({ state, tabHeight }) {
         style={{
           height: tabHeight,
           display: "flex",
-          background: theme.panel2,
-          borderTop: `1px solid ${theme.border}`,
+          background: theme.plate,
+          borderTop: `2px solid #000`,
+          boxShadow: "inset 0 2px 0 rgba(232,169,63,0.16)",
         }}
       >
         {tabs.map((t) => {
@@ -145,22 +146,37 @@ export default function BottomDock({ state, tabHeight }) {
               style={{
                 flex: 1,
                 border: "none",
-                borderRight: `1px solid ${theme.border}`,
+                borderRight: `1px solid #000`,
                 borderTop: `2px solid ${active ? theme.accent : "transparent"}`,
-                background: active ? theme.panel3 : "transparent",
+                background: active
+                  ? "linear-gradient(180deg, rgba(232,169,63,0.18), rgba(232,169,63,0.03))"
+                  : "transparent",
                 color: active ? theme.text : theme.textDim,
-                fontSize: 12,
-                fontWeight: 800,
-                letterSpacing: 0.4,
+                fontFamily: theme.fontDisplay,
+                fontSize: 12.5,
+                fontWeight: 600,
+                letterSpacing: 1.2,
+                textTransform: "uppercase",
                 cursor: "pointer",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
-                gap: 7,
+                gap: 8,
               }}
             >
               {t.label}
-              <span style={{ color: theme.textFaint, fontWeight: 700 }}>{t.count}</span>
+              <span
+                style={{
+                  fontSize: 10,
+                  fontWeight: 700,
+                  color: active ? theme.accent : theme.textFaint,
+                  background: "rgba(0,0,0,0.35)",
+                  borderRadius: 3,
+                  padding: "1px 5px",
+                }}
+              >
+                {t.count}
+              </span>
               <span style={{ fontSize: 9, color: theme.textFaint }}>{active ? "▼" : "▲"}</span>
             </button>
           );
