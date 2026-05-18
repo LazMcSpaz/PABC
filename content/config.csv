@@ -1,0 +1,22 @@
+Setting,Value,Notes
+VP threshold,12,First faction to reach this wins immediately
+Base Actions per turn,2,Reset at the start of each turn
+Foothold cap,3,Max foothold score; a Town Hall chip raises a location's cap
+Unit base Strength,4,Universal across factions
+Unit base Movement,1,Universal across factions
+Unit chip-bay slots,2,
+Unit spawn cost,10,Scrap; recruiting also requires a Training Grounds
+Unit cap,1 + Training Grounds held,Base 1; +1 per Training Grounds you control
+Contest dice,1d6 per side,Added to each side's Strength; defender wins ties
+Tech score — start,1,All players begin at tech score 1
+Tech tier 2 — unlock at,3,Tech score >= 3
+Tech tier 3 — unlock at,6,Tech score >= 6
+Market row size — tier 1,5,Face-up chips available
+Market row size — tier 2,4,
+Market row size — tier 3,3,
+Garrison by strategic value,Low 4 / Medium 6 / High 8 / Very High 10,Derived — do not author per location
+Base chip slots by strategic value,Low 0 / Medium 1 / High 2 / Very High 3,Derived; minus 1 if the location holds an ability
+Test map shape,3-4-5-6-5-4-3,30 hexes
+Test map hex split,10 location / 13 encounter / 7 terrain,
+Capital chip — garrison bonus,TBD,Set during the content batch
+Capital chip — production bonus,TBD,Set during the content batch

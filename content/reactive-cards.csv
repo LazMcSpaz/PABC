@@ -1,0 +1,4 @@
+Card ID,Name,Timing,Trigger Event,Condition,Effect,Copies,Flavor
+air-evacuation,Air Evacuation,Your Turn,,,Move one of your units to any location you control,,
+emergency-reinforcements,Emergency Reinforcements,Reaction,Before a combat's dice roll,,Add +2 Strength to your unit or garrison for this combat,,
+vulture,Vulture,Reaction,Another player completes an encounter,They would gain scrap,Steal the scrap they would have taken as a reward,,
