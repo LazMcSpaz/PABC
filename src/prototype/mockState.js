@@ -47,14 +47,14 @@ const location = (id, control, unitId) => ({
   ...(unitId ? { unitId } : null),
 });
 
-// Board layout — a 3/4/5/5/5/4/3 hex field, the brief's "Catan-sized" map.
+// Board layout — a 3/4/5/6/5/4/3 hex field, the brief's "Catan-sized" map.
 // The four faction capitals sit at the cardinal points: Chigan (N),
 // Dambar (S), Korad (W) and Erport (E).
 export const ROWS = [
   ["t-nw", "chigan", "t-ne"],
   ["kansit", "e-1", "e-2", "omara"],
   ["t-w1", "theShelf", "e-3", "droit", "t-e1"],
-  ["korad", "e-4", "e-5", "e-6", "erport"],
+  ["korad", "e-4", "e-5", "e-6", "e-10", "erport"],
   ["t-w2", "concordan", "e-7", "tinTown", "t-e2"],
   ["t-sw", "e-8", "e-9", "t-se"],
   ["t-s1", "dambar", "t-s2"],
@@ -81,6 +81,7 @@ export const HEXES = {
   "e-4": encounter("e-4"),
   "e-5": encounter("e-5"),
   "e-6": encounter("e-6"),
+  "e-10": encounter("e-10"),
   erport: location("erport", held("plainers", 1, 3, ["capital"]), "fp-windriders"),
   // row 4
   "t-w2": terrain("t-w2"),

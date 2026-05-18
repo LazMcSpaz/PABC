@@ -5,10 +5,10 @@ import { useState } from "react";
 import { LOCATIONS, fullController, theme } from "./data.js";
 import { Label } from "./kit.jsx";
 import UnitCard from "./UnitCard.jsx";
-import LocationCard from "./LocationCard.jsx";
+import HoldingCard from "./HoldingCard.jsx";
 import MarketRow from "./MarketRow.jsx";
 
-const PANEL_H = 270;
+const PANEL_H = 300;
 
 function CapSlot({ note }) {
   return (
@@ -97,16 +97,10 @@ export default function BottomDock({ state, tabHeight }) {
             </div>
           )}
           {open === "holdings" && (
-            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              <div style={rowStyle}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                 {yourHolds.map((h) => (
-                  <LocationCard
-                    key={h.id}
-                    locationId={h.locationId}
-                    control={h.control}
-                    width={150}
-                    compact
-                  />
+                  <HoldingCard key={h.id} locationId={h.locationId} control={h.control} />
                 ))}
               </div>
               {yourPartials.length > 0 && (
