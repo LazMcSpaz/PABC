@@ -121,14 +121,22 @@ export function unitEffective(unit) {
   return { strength, movement };
 }
 
-// A held location's garrison Strength = base + defensive chip bonuses.
-export function garrisonStrength(locationId, control) {
-  let g = LOCATIONS[locationId]?.garrison || 0;
+// A location's garrison Strength, split into its base value and each
+// upgrade chip's bonus. `total` is the figure an attacker must beat.
+export function garrisonBreakdown(locationId, control) {
+  const base = LOCATIONS[locationId]?.garrison || 0;
+  const parts = [];
   for (const id of control?.chips || []) {
-    if (id === "defenseTurrets") g += 2;
-    else if (id === "capital") g += 1;
+    if (id === "defenseTurrets") parts.push({ label: "Defense Turrets", value: 2 });
+    else if (id === "capital") parts.push({ label: "Capital", value: 1 });
   }
-  return g;
+  const total = parts.reduce((sum, p) => sum + p.value, base);
+  return { base, parts, total };
+}
+
+// Convenience total — base + defensive chip bonuses.
+export function garrisonStrength(locationId, control) {
+  return garrisonBreakdown(locationId, control).total;
 }
 
 // Scrap produced per turn = base + production chip bonuses.
