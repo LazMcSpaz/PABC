@@ -18,5 +18,5 @@ Garrison by strategic value,Low 4 / Medium 6 / High 8 / Very High 10,Derived —
 Base chip slots by strategic value,Low 0 / Medium 1 / High 2 / Very High 3,Derived; minus 1 if the location holds an ability
 Test map shape,3-4-5-6-5-4-3,30 hexes
 Test map hex split,10 location / 13 encounter / 7 terrain,
-Capital chip — garrison bonus,TBD,Set during the content batch
-Capital chip — production bonus,TBD,Set during the content batch
+Capital chip — garrison bonus,2,
+Capital chip — production bonus,2,

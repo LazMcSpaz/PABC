@@ -1,4 +1,12 @@
 Card ID,Name,Timing,Trigger Event,Condition,Effect,Copies,Flavor
-air-evacuation,Air Evacuation,Your Turn,,,Move one of your units to any location you control,,
-emergency-reinforcements,Emergency Reinforcements,Reaction,Before a combat's dice roll,,Add +2 Strength to your unit or garrison for this combat,,
-vulture,Vulture,Reaction,Another player completes an encounter,They would gain scrap,Steal the scrap they would have taken as a reward,,
+air-evacuation,Air Evacuation,Your Turn,,You control the destination,Move one of your units to any location you control.,2,Tactical retreat. That's what we're calling it.
+emergency-reinforcements,Emergency Reinforcements,Reaction,Before a contest's dice roll,You have a unit or garrison at the location,Add +2 Strength to your unit or garrison for this contest.,3,Turns out there were more of them.
+vulture,Vulture,Reaction,Another player completes an encounter,They would gain Scrap,Steal the Scrap they would have received.,2,You did all that work. Shame.
+bad-roads,Bad Roads,Reaction,An enemy unit declares a move,,That unit's movement is reduced by 1 for this move. Minimum 1.,3,The route looked fine on the map.
+emergency-protocols,Emergency Protocols,Reaction,An enemy unit initiates a contest against you,,Force the attacker to spend 2 additional Scrap or abandon the contest.,2,This is going to cost you more than you planned.
+scavengers,Scavengers,Reaction,You lose a contest,,Gain 3 Scrap.,Free,3,Take something on the way out.
+counterfeit-orders,Counterfeit Orders,Reaction,An enemy player takes an Action,You have a unit adjacent to their target location,Negate that Action.,2,The orders looked legitimate. They weren't.
+sabotage,Sabotage,Your Turn,,Target location is enemy-held,Disable one chip at a target location.,2,You don't have to win to make it hurt.
+forced-march,Forced March,Your Turn,,,One of your units may move again this turn.,2,Rest later.
+inside-information,Inside Information,Reaction,Any player draws an encounter card,,Look at the drawn encounter card before it is resolved. You may resolve it instead.,2,Knowledge isn't power. Knowing first is.
+last-stand,Last Stand,Reaction,One of your units would be forced to retreat,,That unit holds its position. It takes a +4 to Strength until the start of your next turn.,2,Nobody's moving.
