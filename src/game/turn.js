@@ -2,7 +2,7 @@
 // Upkeep work (action reset, modifier expiry, foothold tick, scrap
 // production) and Cleanup.
 import { emit } from "./events.js";
-import { recomputeStats } from "./stats.js";
+import { recomputeStats, recomputeTech } from "./stats.js";
 import { activePlayerId } from "./targeting.js";
 
 function expireModifiers(state, pid) {
@@ -18,6 +18,7 @@ function expireModifiers(state, pid) {
 // owner's unit garrisons it and falls when absent; at -1 a section
 // decays to neutral. Capital locations are decay-immune.
 function tickFootholds(state, pid) {
+  let lostControl = false;
   for (const loc of Object.values(state.locations)) {
     if (loc.footholdOwner !== pid) continue;
     const hasCapital = loc.chips.some((u) => state.chips[u]?.chipId === "capital");
@@ -35,7 +36,10 @@ function tickFootholds(state, pid) {
         if (idx >= 0) loc.sections[idx] = "neutral";
         loc.foothold = 0;
         emit(state, "section_flipped", { hex: loc.hexId, cause: "decay" });
-        if (!loc.sections.every((s) => s === pid)) loc.controller = null;
+        if (!loc.sections.every((s) => s === pid)) {
+          loc.controller = null;
+          lostControl = true;
+        }
         if (!loc.sections.includes(pid)) {
           loc.footholdOwner = null;
           loc.foothold = null;
@@ -44,6 +48,8 @@ function tickFootholds(state, pid) {
       }
     }
   }
+  // A decay-driven control loss may have stripped a Labs from `pid` — sync.
+  if (lostControl) recomputeTech(state);
 }
 
 // Fully-held locations yield their scrap production to the controller.

@@ -7,7 +7,7 @@
 import { emit } from "./events.js";
 import { CONFIG } from "./config.js";
 import { CHIPS } from "./content.js";
-import { recomputeStats } from "./stats.js";
+import { recomputeStats, recomputeTech } from "./stats.js";
 
 const fail = (reason) => ({ ok: false, reason });
 
@@ -128,6 +128,9 @@ function captureLocation(state, loc, victor) {
   loc.footholdOwner = victor;
   loc.foothold = 0; // §6.3.2 — F activates at full control, starting at 0
   emit(state, "location_captured", { hex: loc.hexId, controller: victor, from });
+  // Control changed; a Labs chip on this location may have changed
+  // hands or been destroyed — sync Tech for everyone (§3).
+  recomputeTech(state);
 }
 
 function resolveLocationWin(state, pid, loc, params) {

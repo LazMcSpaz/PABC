@@ -23,8 +23,8 @@ export const CONFIG = {
   testMap: [3, 4, 5, 6, 5, 4, 3], // 30 hexes
   hexSplit: { location: 10, encounter: 13, terrain: 7 },
 
-  // Capital chip bonuses — provisional, pending the content batch.
-  capital: { garrisonBonus: 1, productionBonus: 1 },
+  // Capital chip bonuses (content/config.csv).
+  capital: { garrisonBonus: 2, productionBonus: 2 },
 };
 
 // Strategic-value ordering helper.

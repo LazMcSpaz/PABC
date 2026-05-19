@@ -53,5 +53,56 @@ export const CHIPS = {
 // the Market; placed on each faction's starting location at setup.
 export const CAPITAL = {
   id: "capital", name: "Capital", kind: "location", slots: 1, special: true,
-  desc: "Decay-immune; +1 garrison Strength, +1 scrap production",
+  desc: "Decay-immune; +2 garrison Strength, +2 scrap production",
+};
+
+// Look up the definition behind a chip instance — covers both the
+// Market's CHIPS and the special CAPITAL chip, so callers don't have to
+// branch.
+export function chipDefOf(state, chipUid) {
+  const inst = state.chips[chipUid];
+  if (!inst) return null;
+  if (inst.chipId === "capital") return CAPITAL;
+  return CHIPS[inst.chipId] || null;
+}
+
+// Location abilities (mechanical-spec §6.3, §13.2). Every High / Very
+// High location is assigned ONE of these at setup; it occupies one of
+// that location's chip slots. The v0.1 stubs here keep to existing
+// effect types — the real effects from content/location-abilities.csv
+// need new effect types (teleport, suppress-chip-bonuses, …) authored
+// with the content batch. Names and tiers match the CSV.
+export const ABILITIES = {
+  "rail-corridor": {
+    id: "rail-corridor", name: "Rail Corridor", eligibleTier: "veryHigh",
+    passives: [],
+    activated: [{
+      cost: { resource: 2 },
+      effects: [{ type: "ADJUST_RESOURCE", resource: "Resource", amount: 5, target: "controller" }],
+    }],
+  },
+  "knowledge-cache": {
+    id: "knowledge-cache", name: "Knowledge Cache", eligibleTier: "veryHigh",
+    passives: [],
+    activated: [{
+      cost: { action: 1 },
+      effects: [{ type: "ADJUST_RESOURCE", resource: "VP", amount: 1, target: "controller" }],
+    }],
+  },
+  "staging-ground": {
+    id: "staging-ground", name: "Staging Ground", eligibleTier: "high",
+    passives: [],
+    activated: [{
+      cost: {},
+      effects: [{ type: "GRANT_ACTIONS", amount: 1, target: "controller" }],
+    }],
+  },
+  "fortified-ruins": {
+    id: "fortified-ruins", name: "Fortified Ruins", eligibleTier: "high",
+    passives: [],
+    activated: [{
+      cost: { resource: 1 },
+      effects: [{ type: "ADJUST_RESOURCE", resource: "VP", amount: 1, target: "controller" }],
+    }],
+  },
 };
