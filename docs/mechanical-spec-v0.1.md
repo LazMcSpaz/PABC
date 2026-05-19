@@ -113,10 +113,12 @@ effects fire.
 | **Location** | placed at setup, or spawned by an Event | Board | contestable; `passives` granted to its controller while held at full control |
 
 Notes:
-- An **Upgrade** is a "chip" — a small-format record that occupies a slot.
-  It declares a `kind` (`unit` / `location`) and a `techLevel` (1–3). Its
-  `passives` apply continuously while installed. The **Capital** (§6.3.4)
-  is a special predefined chip.
+- An **Upgrade** is a "chip" — a small-format record that occupies slots.
+  It declares a `kind` (`unit` / `location`), a `techLevel` (1–3), and a
+  `slots` count — **1** by default, or **2** for powerful, rare chips (a
+  2-slot chip fills an entire unit bay). Its `passives` apply continuously
+  while installed; installing requires that many free slots. The
+  **Capital** (§6.3.4) is a special predefined chip.
 - A **Reactive** card has a trigger and is offered to its holder when a
   matching event occurs (§10); some are played on the holder's own turn.
 - "Sequenced" content (completing one reveals the next) is **not** a role
@@ -568,6 +570,7 @@ Every card and chip is a record of this shape. Cosmetic fields (`name`,
 
   // --- Upgrade (chip) only ---
   kind:      "unit" | "location",   // which slot type it installs into
+  slots:     1 | 2,                 // slots occupied; default 1
   techLevel: 1 | 2 | 3,             // Market tier
 
   // --- cosmetic (separable) ---

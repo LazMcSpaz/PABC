@@ -28,4 +28,4 @@ salvage-yard,Salvage Yard,Location,Common,3,Gain 1 Scrap when any contest at thi
 broadcast-tower,Broadcast Tower,Location,Common,4,You may reroll a single dice roll during one of your contests within 2 hexes of this location. Once per turn.,3,Presence isn't just physical.
 relay-station,Relay Station,Location,Rare,5,"Activated (free, once per turn): Discard one reactive card, then draw one reactive card.",2,Information moves faster than armies. Barely.
 fortified-gate,Fortified Gate,Location,Rare,7,Dual-slot. +3 garrison Strength. Enemy units that fail a contest here retreat two hexes.,2,Some doors say everything before anyone speaks.
-munitions-cache,Munitions Cache,Location,Rare,5,"Activated (3 Scrap): Destroy one chip at an enemy held location within 3 hexes.",2,Sometimes the cleanest move is scorched earth.
+munitions-cache,Munitions Cache,Location,Rare,5,"Activated (5 Scrap): Destroy one chip at an enemy held location within 3 hexes.",2,Sometimes the cleanest move is scorched earth.
