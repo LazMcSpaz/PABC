@@ -3,9 +3,11 @@
 // layer can be verified without the UI.
 import { createGame } from "./setup.js";
 import { startTurn, endTurn } from "./turn.js";
+import { performAction } from "./actions.js";
 import { applyEffect } from "./effects.js";
 import { activePlayerId } from "./targeting.js";
 import { FACTIONS, LOCATIONS } from "./content.js";
+import { CONFIG } from "./config.js";
 
 const seed = Number(process.argv[2]) || 42;
 const line = (s = "") => console.log(s);
@@ -63,6 +65,25 @@ line(
   `  after   scrap ${game.players[me].resource}  ` +
     `unit STR ${myUnit.strength}  actions ${game.players[me].actions.remaining}`,
 );
+
+// --- action layer (Layer 3.1: Move + Recruit) ---
+line("\nACTIONS  (Layer 3.1 — Move + Recruit)");
+const mover = Object.values(game.units).find((u) => u.owner === me);
+const dest = game.board.adjacency[mover.node][0];
+const mv = performAction(game, "move", { unit: mover.uid, to: dest });
+line(`  move ${mover.uid} -> ${dest}: ${mv.ok ? "ok" : "blocked — " + mv.reason}`);
+
+const homeLoc = Object.values(game.locations).find((l) => l.controller === me);
+const noTG = performAction(game, "recruit", { at: homeLoc.hexId });
+line(`  recruit, no Training Grounds: ${noTG.ok ? "ok" : "blocked — " + noTG.reason}`);
+
+// stage a Training Grounds chip + scrap, then the recruit succeeds
+const tgChip = game.nextId("chip");
+game.chips[tgChip] = { uid: tgChip, chipId: "training-grounds" };
+homeLoc.chips.push(tgChip);
+game.players[me].resource += CONFIG.unitRecruitCost;
+const rec = performAction(game, "recruit", { at: homeLoc.hexId });
+line(`  recruit, staged: ${rec.ok ? `ok — spawned ${rec.unit}` : "blocked — " + rec.reason}`);
 
 // --- play out round 1 ---
 line("\nPLAY ROUND 1  (each player ends their turn)");

@@ -120,6 +120,7 @@ export function createGame({ seed = Date.now() & 0xffffffff, factionIds } = {}) 
 
   return {
     seed,
+    nextId: uid, // shared instance id generator — used by runtime Recruit
     round: 1,
     phase: "Upkeep",
     turnOrder: [...playing],
