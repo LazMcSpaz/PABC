@@ -1,1 +1,7 @@
 Ability ID,Name,Eligible Tier,Effect,Flavor
+rail-corridor,Rail Corridor,Very High,"Activated (2 Scrap): Move one of your units from any location to this one immediately.",The rails don't care who laid them.
+knowledge-cache,Knowledge Cache,Very High,"Activated (1 Action): Draw one Reactive card.",Someone was storing things here they didn't want found.
+fortified-ruins,Fortified Ruins,High,"Passive: Contesting units cannot benefit from chip bonuses during contests at this location.",The old world built things to last. Some of them still do.
+staging-ground,Staging Ground,High,"Activated (free, once per turn): A unit moving from this location may move one additional hex.",Every good campaign starts somewhere.
+blacksite,Blacksite,Very High,"Activated (1 Action): Choose one chip installed on an enemy unit or location anywhere on the board. Disable it until the start of your next turn.",Whatever was happening here it wasn't in any public record.
+scrapyard,Scrapyard,High,"Activated (2 Scrap): Remove one chip from an enemy unit at this location and add it to the Market Row.",One faction's loss is everyone's opportunity.

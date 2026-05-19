@@ -1,11 +1,11 @@
 Location ID,Name,Real-World Basis,Strategic Value,Faction Affiliation,Scrap Production Min,Scrap Production Max,Flavor
-korad,Korad,"Boulder, CO",High,Versari,,,
-dambar,Dambar,"Denver, CO",Very High,Versari,,,
-kansit,Kansit,Kansas City,High,Goldgrass,,,
-omara,Omara,Omaha,Medium,Goldgrass,,,
-chigan,Chigan,Chicago,Very High,Grand Lakers,,,
-droit,Droit,Detroit,High,Grand Lakers,,,
-the-shelf,The Shelf,New settlement,High,Free Plainers,,,
-tin-town,Tin Town,New settlement,Medium,Free Plainers,,,
-concordan,Concordan,,Medium,Unaffiliated,,,
-erport,Erport,,Medium,Unaffiliated,,,
+korad,Korad,"Boulder, CO",High,Versari,3,3,Where the Versari keep their best work and their worst secrets.
+dambar,Dambar,"Denver, CO",Very High,Versari,3,6,The continent's brain. It knows this about itself.
+kansit,Kansit,Kansas City,Very High,Goldgrass,3,6,Every trade route on the plains runs through here eventually. The city charges accordingly.
+omara,Omara,Omaha,High,Goldgrass,3,3,Far enough north to feel the Laker wind. Close enough to Dambar to feel the other kind.
+chigan,Chigan,Chicago,Very High,Grand Lakers,3,6,The factories never fully stopped. Neither did the people who depend on them.
+droit,Droit,Detroit,High,Grand Lakers,3,3,Whoever holds the straits holds the conversation between east and west.
+the-shelf,The Shelf,New settlement,High,Free Plainers,2,4,Someone built here because it was defensible. Someone else is always trying to prove them wrong.
+tin-town,Tin Town,New settlement,High,Free Plainers,3,3,It looks like nothing. That's the first mistake people make about it.
+concordan,Concordan,,Medium,Unaffiliated,2,4,Unaffiliated by choice, not by accident. They've had offers.
+erport,Erport,,Medium,Unaffiliated,2,4,The last stop before open water. Or the first, depending on which way you're running.

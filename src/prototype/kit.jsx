@@ -122,6 +122,27 @@ export function Coin({ n, size = 16 }) {
   );
 }
 
+// A victory-point star — how many VP a location is worth.
+export function Vp({ n, size = 16 }) {
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+      <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden>
+        <path
+          d="M12 2 L14.47 8.6 L21.51 8.91 L15.99 13.3 L17.88 20.09 L12 16.2 L6.12 20.09 L8.01 13.3 L2.49 8.91 L9.53 8.6 Z"
+          fill="#e8a93f"
+          stroke="#4a3712"
+          strokeWidth="1"
+        />
+      </svg>
+      {n != null && (
+        <span style={{ fontFamily: theme.fontDisplay, fontWeight: 700, fontSize: 13, color: theme.text }}>
+          {n}
+        </span>
+      )}
+    </span>
+  );
+}
+
 export function Stat({ label, value, color = theme.text }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>

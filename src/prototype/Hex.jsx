@@ -2,6 +2,7 @@
 // draw an encounter on arrival; terrain is passable filler.
 import { LOCATIONS, FACTIONS, fullController, ownerColor, theme } from "./data.js";
 import ControlMeter from "./ControlMeter.jsx";
+import GarrisonValue from "./GarrisonValue.jsx";
 
 const HEX_W = 150;
 const HEX_H = Math.round(HEX_W * 1.1547);
@@ -21,9 +22,9 @@ function UnitToken({ unit }) {
       title={`${unit.name} — ${faction.name}`}
       style={{
         position: "absolute",
-        left: "50%",
-        bottom: "11%",
-        transform: "translateX(-50%)",
+        top: "50%",
+        right: "7%",
+        transform: "translateY(-50%)",
         width: 30,
         height: 30,
         borderRadius: "50%",
@@ -116,31 +117,13 @@ export default function Hex({ hex, unit, selected, onClick }) {
               footholdCap={hex.control.footholdCap}
               size={54}
             />
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 4,
-                fontFamily: theme.fontDisplay,
-                fontSize: 10,
-                fontWeight: 600,
-                letterSpacing: 0.6,
-                color: theme.textDim,
-                background: "rgba(0,0,0,0.4)",
-                padding: "1px 8px",
-                borderRadius: 999,
-              }}
-            >
-              <svg width="9" height="11" viewBox="0 0 14 16" aria-hidden>
-                <path
-                  d="M7 0.5 L13.2 2.7 V8 C13.2 11.7 10.6 14.4 7 15.5 C3.4 14.4 0.8 11.7 0.8 8 V2.7 Z"
-                  fill="none"
-                  stroke={theme.textDim}
-                  strokeWidth="1.5"
-                />
-              </svg>
-              {loc.garrison}
-            </div>
+            <GarrisonValue
+              locationId={hex.locationId}
+              control={hex.control}
+              height={11}
+              fontSize={11}
+              pill
+            />
           </>
         )}
         {hex.type === "encounter" && (

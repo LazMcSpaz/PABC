@@ -1,45 +1,29 @@
-// A location's card. Face-down (uncontrolled) shows name, strategic
-// value and garrison. Face-up (held) reveals scrap production, the
-// innate ability and chip slots. A corner button flips it for review.
-import { useState } from "react";
+// A location's card. Face-down (uncontrolled or contested) shows name,
+// strategic value, victory-point worth and garrison. Face-up (fully
+// held) reveals scrap production, the innate ability and chip slots.
+// Fog of war keeps the detailed face hidden — and shown without a flip
+// control — until a player fully controls the location.
 import {
   LOCATIONS,
   STRATEGIC_VALUE,
   FACTIONS,
   fullController,
-  garrisonStrength,
   locationProduction,
   theme,
 } from "./data.js";
-import { Label, Coin, IconBtn } from "./kit.jsx";
+import { Label, Coin, Vp } from "./kit.jsx";
 import Chip from "./Chip.jsx";
+import GarrisonValue from "./GarrisonValue.jsx";
 
-function Shield({ n, color }) {
-  return (
-    <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
-      <svg width="15" height="17" viewBox="0 0 14 16" aria-hidden>
-        <path
-          d="M7 0.5 L13.2 2.7 V8 C13.2 11.7 10.6 14.4 7 15.5 C3.4 14.4 0.8 11.7 0.8 8 V2.7 Z"
-          fill="none"
-          stroke={color}
-          strokeWidth="1.4"
-        />
-      </svg>
-      <span style={{ fontFamily: theme.fontDisplay, fontWeight: 700, fontSize: 15, color: theme.text }}>
-        {n}
-      </span>
-    </span>
-  );
-}
-
-export default function LocationCard({ locationId, control, width = 210, compact = false }) {
+export default function LocationCard({ locationId, control, width = 210 }) {
   const loc = LOCATIONS[locationId];
   const ctrl = fullController(control?.sections);
-  const [showBack, setShowBack] = useState(!!ctrl);
+  // Fog of war: the detailed face shows only once a player fully holds
+  // the location. While contested or neutral the card stays face-down.
+  const revealed = !!ctrl;
   if (!loc) return null;
 
   const value = STRATEGIC_VALUE[loc.value];
-  const garrison = garrisonStrength(locationId, control);
   const production = locationProduction(locationId, control);
   const faction = ctrl ? FACTIONS[ctrl] : null;
   const height = Math.round(width * 1.54);
@@ -50,21 +34,11 @@ export default function LocationCard({ locationId, control, width = 210, compact
       className="pc-flip"
       style={{ width, height, position: "relative", filter: "drop-shadow(0 6px 12px rgba(0,0,0,0.55))" }}
     >
-      <IconBtn
-        title="Flip card"
-        onClick={(e) => {
-          e.stopPropagation();
-          setShowBack((s) => !s);
-        }}
-        style={{ position: "absolute", top: 6, right: 6, zIndex: 2 }}
-      >
-        ⮌
-      </IconBtn>
       <div
         className="pc-flip-inner"
-        style={{ transform: showBack ? "rotateY(180deg)" : "none" }}
+        style={{ transform: revealed ? "rotateY(180deg)" : "none" }}
       >
-        {/* FACE-DOWN — uncontrolled */}
+        {/* FACE-DOWN — uncontrolled or contested */}
         <div
           className="pc-flip-face"
           style={{
@@ -121,9 +95,19 @@ export default function LocationCard({ locationId, control, width = 210, compact
               {value.label} value
             </div>
           </div>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <Label>Garrison</Label>
-            <Shield n={garrison} color={theme.textDim} />
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end" }}>
+            <div>
+              <Label>Garrison</Label>
+              <div style={{ marginTop: 2 }}>
+                <GarrisonValue locationId={locationId} control={control} />
+              </div>
+            </div>
+            <div style={{ textAlign: "right" }}>
+              <Label>Victory Pts</Label>
+              <div style={{ marginTop: 2 }}>
+                <Vp n={loc.vp} size={15} />
+              </div>
+            </div>
           </div>
         </div>
 
@@ -179,13 +163,19 @@ export default function LocationCard({ locationId, control, width = 210, compact
               <div>
                 <Label>Garrison</Label>
                 <div style={{ marginTop: 2 }}>
-                  <Shield n={garrison} color={theme.textDim} />
+                  <GarrisonValue locationId={locationId} control={control} />
                 </div>
               </div>
               <div>
                 <Label>Scrap / turn</Label>
                 <div style={{ marginTop: 3 }}>
                   <Coin n={production} size={15} />
+                </div>
+              </div>
+              <div>
+                <Label>Victory Pts</Label>
+                <div style={{ marginTop: 3 }}>
+                  <Vp n={loc.vp} size={15} />
                 </div>
               </div>
             </div>
@@ -198,8 +188,6 @@ export default function LocationCard({ locationId, control, width = 210, compact
                   color: loc.ability ? theme.textDim : theme.textFaint,
                   lineHeight: 1.4,
                   marginTop: 3,
-                  maxHeight: compact ? 46 : "none",
-                  overflow: "hidden",
                 }}
               >
                 {loc.ability || "No innate ability."}

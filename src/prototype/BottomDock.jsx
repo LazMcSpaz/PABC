@@ -1,13 +1,14 @@
-// Bottom tabs for the player's own things. Each tab slides a detail
-// panel up over the board; clicking the open tab slides it back down.
+// Bottom tabs for the player's own things. The tab bar is pinned to the
+// foot of the screen and is always visible; selecting a tab slides a
+// detail panel up over the board, and re-selecting it slides it away.
 import { useState } from "react";
 import { LOCATIONS, fullController, theme } from "./data.js";
 import { Label } from "./kit.jsx";
 import UnitCard from "./UnitCard.jsx";
-import LocationCard from "./LocationCard.jsx";
+import HoldingCard from "./HoldingCard.jsx";
 import MarketRow from "./MarketRow.jsx";
 
-const PANEL_H = 270;
+const PANEL_H = 300;
 
 function CapSlot({ note }) {
   return (
@@ -61,36 +62,30 @@ export default function BottomDock({ state, tabHeight }) {
   const rowStyle = { display: "flex", gap: 12, alignItems: "flex-start" };
 
   return (
-    <div
-      style={{
-        position: "fixed",
-        left: 0,
-        right: 0,
-        bottom: 0,
-        height: tabHeight + PANEL_H,
-        transform: open ? "translateY(0)" : `translateY(${PANEL_H}px)`,
-        transition: "transform 0.28s ease",
-        zIndex: 40,
-      }}
-    >
-      {/* slide-up panel */}
+    <>
+      {/* slide-up detail panel — sits directly above the tab bar */}
       <div
         style={{
+          position: "fixed",
+          left: 0,
+          right: 0,
+          bottom: tabHeight,
           height: PANEL_H,
+          zIndex: 39,
+          transform: open ? "translateY(0)" : `translateY(${PANEL_H}px)`,
+          transition: "transform 0.28s ease",
           background: theme.plate,
           borderTop: `1px solid #000`,
           boxShadow: "0 -12px 30px rgba(0,0,0,0.55)",
           display: "flex",
           flexDirection: "column",
+          pointerEvents: open ? "auto" : "none",
         }}
       >
         <div style={{ padding: "9px 14px 0" }}>
           <Label>{tabs.find((t) => t.id === open)?.label || ""}</Label>
         </div>
-        <div
-          className="pc-scroll"
-          style={{ flex: 1, overflow: "auto", padding: 14 }}
-        >
+        <div className="pc-scroll" style={{ flex: 1, overflow: "auto", padding: 14 }}>
           {open === "units" && (
             <div style={rowStyle}>
               {yourUnits.map((u) => (
@@ -102,16 +97,10 @@ export default function BottomDock({ state, tabHeight }) {
             </div>
           )}
           {open === "holdings" && (
-            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              <div style={rowStyle}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                 {yourHolds.map((h) => (
-                  <LocationCard
-                    key={h.id}
-                    locationId={h.locationId}
-                    control={h.control}
-                    width={150}
-                    compact
-                  />
+                  <HoldingCard key={h.id} locationId={h.locationId} control={h.control} />
                 ))}
               </div>
               {yourPartials.length > 0 && (
@@ -126,14 +115,19 @@ export default function BottomDock({ state, tabHeight }) {
         </div>
       </div>
 
-      {/* tab bar — always visible */}
+      {/* tab bar — pinned to the bottom of the screen, never moves */}
       <div
         style={{
+          position: "fixed",
+          left: 0,
+          right: 0,
+          bottom: 0,
           height: tabHeight,
+          zIndex: 41,
           display: "flex",
           background: theme.plate,
           borderTop: `2px solid #000`,
-          boxShadow: "inset 0 2px 0 rgba(232,169,63,0.16)",
+          boxShadow: "inset 0 2px 0 rgba(232,169,63,0.16), 0 -4px 14px rgba(0,0,0,0.45)",
         }}
       >
         {tabs.map((t) => {
@@ -182,6 +176,6 @@ export default function BottomDock({ state, tabHeight }) {
           );
         })}
       </div>
-    </div>
+    </>
   );
 }
