@@ -85,6 +85,33 @@ game.players[me].resource += CONFIG.unitRecruitCost;
 const rec = performAction(game, "recruit", { at: homeLoc.hexId });
 line(`  recruit, staged: ${rec.ok ? `ok — spawned ${rec.unit}` : "blocked — " + rec.reason}`);
 
+// --- contest resolver (Layer 3.2 — capture a Location, then a raid) ---
+line("\nCONTEST  (Layer 3.2 — Strength + 1d6 per side, defender wins ties)");
+
+// Stake the active player with Actions and a decisive unit so the demo
+// resolves the same way regardless of the dice.
+applyEffect(game, { type: "GRANT_ACTIONS", amount: 20, target: "active_player" }, ctx);
+const champ = Object.values(game.units).find((u) => u.owner === me);
+applyEffect(game, { type: "MODIFY_STAT", stat: "Strength", amount: 30, target: champ.uid, duration: "this_turn" }, ctx);
+
+// March onto a neutral Location and take all three sections.
+const prize = Object.values(game.locations).find((l) => l.controller === null);
+champ.node = prize.hexId;
+line(`  ${champ.uid} (STR ${champ.strength}) contests ${LOCATIONS[prize.locationId].name} — garrison ${prize.garrison}`);
+for (let i = 0; i < 3 && prize.controller !== me; i++) {
+  const r = performAction(game, "contest", { unit: champ.uid });
+  line(`   roll ${r.initiatorTotal} vs ${r.defenderTotal} -> ${r.won ? "won" : "lost"}; sections [${prize.sections.join(", ")}]`);
+}
+line(`  -> controller ${prize.controller || "neutral"}, foothold ${prize.foothold}`);
+
+// Raid: drop an enemy unit on the captured Location (no neutral sections
+// remain, so raids are legal) and contest it directly.
+const victim = Object.values(game.units).find((u) => u.owner !== me);
+victim.node = prize.hexId;
+const raid = performAction(game, "contest", { unit: champ.uid, target: victim.uid });
+line(`  raid ${victim.uid} (owner ${victim.owner}): roll ${raid.initiatorTotal} vs ${raid.defenderTotal} -> ${raid.won ? "won" : "lost"}`);
+line(`   ${victim.uid} retreated to ${victim.node}, immobilizedUntil ${victim.immobilizedUntil}`);
+
 // --- play out round 1 ---
 line("\nPLAY ROUND 1  (each player ends their turn)");
 for (let i = 0; i < game.turnOrder.length; i++) endTurn(game);

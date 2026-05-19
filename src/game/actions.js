@@ -7,6 +7,7 @@ import { activePlayerId } from "./targeting.js";
 import { bfsDistances } from "./board.js";
 import { CONFIG } from "./config.js";
 import { FACTIONS } from "./content.js";
+import { validateContest, runContest } from "./contest.js";
 
 const fail = (reason) => ({ ok: false, reason });
 
@@ -106,6 +107,7 @@ function runRecruit(state, { pid, player, params }) {
 const ACTIONS = {
   move: { cost: 1, validate: validateMove, run: runMove },
   recruit: { cost: 1, validate: validateRecruit, run: runRecruit },
+  contest: { cost: 1, validate: validateContest, run: runContest },
 };
 
 export function performAction(state, type, params = {}) {
