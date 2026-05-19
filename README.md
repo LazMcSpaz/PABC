@@ -22,8 +22,11 @@ Each begins holding one faction Capital and races to the victory-point goal.
 Core ideas:
 
 - **The Board** — a spatial hex map. Tiles are **locations** (contestable,
-  ownable), **encounter** tiles (draw from the encounter deck on arrival),
-  or open **wasteland**.
+  ownable), **field-encounter** tiles (draw from the field-encounter deck
+  when a unit ends Move on one), or open **wasteland**. Between rounds, a
+  parallel **world-encounter** system reads the state of the game and
+  fires ambient encounters and quest beats — see §15 of the mechanical
+  spec.
 - **Units** — each faction starts with one unit: a token on the map plus a
   stat card carrying `Strength` and `Movement`. Units move and fight; more
   can be recruited once the prerequisite is built.
