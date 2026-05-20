@@ -1,0 +1,38 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+      "Helvetica Neue", Arial, sans-serif;
+  }
+  input[type="text"],
+  input[type="number"],
+  textarea,
+  select {
+    @apply bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm text-slate-100;
+  }
+  input[type="text"]:focus,
+  input[type="number"]:focus,
+  textarea:focus,
+  select:focus {
+    @apply outline-none ring-1 ring-amber-400 border-amber-400;
+  }
+  button {
+    @apply select-none;
+  }
+}
+
+.react-flow__node {
+  @apply text-slate-100;
+}
+
+.react-flow__edge-path {
+  stroke: #94a3b8;
+  stroke-width: 1.5;
+}
+
+.react-flow__handle {
+  background: #64748b;
+}
