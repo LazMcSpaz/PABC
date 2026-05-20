@@ -6,7 +6,7 @@ import { startTurn, endTurn } from "./turn.js";
 import { performAction } from "./actions.js";
 import { applyEffect } from "./effects.js";
 import { activePlayerId } from "./targeting.js";
-import { FACTIONS, LOCATIONS, ABILITIES } from "./content.js";
+import { FACTIONS, LOCATIONS, ABILITIES, REACTIVES } from "./content.js";
 import { CONFIG } from "./config.js";
 
 const seed = Number(process.argv[2]) || 42;
@@ -165,6 +165,43 @@ const before = {
 const act = performAction(game, "activate", { location: korad.hexId });
 line(`  activate ${koradAbility.name} at Korad: ${act.ok ? "ok" : "blocked — " + act.reason}`);
 line(`   scrap ${before.scrap}->${game.players[me].resource}  vp ${before.vp}->${game.players[me].vp}  actions ${before.actions}->${game.players[me].actions.remaining}`);
+
+// --- Layer 4 — reaction window ---
+line("\nREACTION WINDOW  (Layer 4 — Reactives in defender's hand)");
+
+// Cancel out earlier this_turn buffs so the contest dice actually matter.
+applyEffect(game, { type: "MODIFY_STAT", stat: "Strength", amount: -33, target: champ.uid, duration: "this_turn" }, ctx);
+
+// Stage: goldgrass garrisons its capital (Omara) with its unit.
+const omara = Object.values(game.locations).find((l) => l.controller === "goldgrass");
+const goldUnit = Object.values(game.units).find((u) => u.owner === "goldgrass");
+goldUnit.node = omara.hexId;
+champ.node = omara.hexId;
+
+const giveReactive = (player, cardId) => {
+  const i = game.reactiveDeck.findIndex((c) => game.chips[c]?.chipId === cardId);
+  if (i < 0) return null;
+  const card = game.reactiveDeck.splice(i, 1)[0];
+  game.players[player].hand.push(card);
+  return card;
+};
+
+// Demo 1: defender holds Steady Hand (on-mode, +2 STR to defending unit)
+const sh = giveReactive("goldgrass", "steady-hand");
+line(`  ${LOCATIONS[omara.locationId].name}: garrison ${omara.garrison}, defender ${goldUnit.uid} STR ${goldUnit.strength}`);
+line(`  goldgrass holds Reactive: ${REACTIVES[game.chips[sh].chipId].name}`);
+line(`  champ STR ${champ.strength} attacks…`);
+const r1 = performAction(game, "contest", { unit: champ.uid });
+line(`   rolls ${r1.initiatorRoll} vs ${r1.defenderRoll}; totals ${r1.initiatorTotal} vs ${r1.defenderTotal} (defValue ${r1.defenderValue}); ${r1.won ? "won" : r1.cancelled ? "cancelled" : "lost"}`);
+line(`   hand=${game.players.goldgrass.hand.length} reactive-discard=${game.discards.reactive.length}`);
+
+// Demo 2: defender holds False Flag (replace-mode, cancels)
+const ff = giveReactive("goldgrass", "false-flag");
+line(`\n  goldgrass holds Reactive: ${REACTIVES[game.chips[ff].chipId].name}`);
+const sectionsBefore = [...omara.sections];
+const r2 = performAction(game, "contest", { unit: champ.uid });
+line(`   result: ${r2.won ? "won" : r2.cancelled ? "cancelled — contest aborted before the roll" : "lost"}`);
+line(`   sections unchanged: ${JSON.stringify(omara.sections) === JSON.stringify(sectionsBefore)}; hand=${game.players.goldgrass.hand.length} reactive-discard=${game.discards.reactive.length}`);
 
 // --- play out round 1 ---
 line("\nPLAY ROUND 1  (each player ends their turn)");

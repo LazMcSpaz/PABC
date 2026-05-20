@@ -1,7 +1,7 @@
 // Game setup — builds the initial GameState (mechanical-spec §13.3):
 // the board, players, locations, units, and the tiered Market.
 import { CONFIG } from "./config.js";
-import { FACTIONS, LOCATIONS, CHIPS, CAPITAL, ABILITIES } from "./content.js";
+import { FACTIONS, LOCATIONS, CHIPS, CAPITAL, ABILITIES, REACTIVES } from "./content.js";
 import { makeRng } from "./rng.js";
 import { createIdGen } from "./ids.js";
 import { buildHexGrid, generateLayout } from "./board.js";
@@ -144,7 +144,20 @@ export function createGame({ seed = Date.now() & 0xffffffff, factionIds } = {}) 
     chips,
     market,
     encounterDeck: [], // content pending — encounter design batch
-    reactiveDeck: [], // content pending
+    reactiveDeck: (() => {
+      // Every Reactive's `copies` expand into instances stored in the
+      // shared chips registry (same uid scheme as Market chips); the
+      // deck holds those uids, shuffled.
+      const seeds = [];
+      for (const def of Object.values(REACTIVES)) {
+        for (let i = 0; i < (def.copies || 1); i++) {
+          const u = uid("card");
+          chips[u] = { uid: u, chipId: def.id };
+          seeds.push(u);
+        }
+      }
+      return rng.shuffle(seeds);
+    })(),
     discards: { encounter: [], reactive: [], market: [] },
     removed: [],
     modifiers: [],
