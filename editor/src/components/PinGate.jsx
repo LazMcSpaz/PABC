@@ -79,7 +79,7 @@ function PinScreen({ expected, onUnlock }) {
               setPin(e.target.value);
               if (error) setError(null);
             }}
-            className="w-full text-lg text-center tracking-[0.4em]"
+            className="w-full text-lg text-center tracking-[0.4em] bg-slate-900 text-slate-100 caret-amber-400"
           />
         </label>
 
