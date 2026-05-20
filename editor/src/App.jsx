@@ -3,6 +3,7 @@ import { Header } from "./components/Header.jsx";
 import { WorldEncounterEditor } from "./components/WorldEncounterEditor.jsx";
 import { FieldEncounterEditor } from "./components/FieldEncounterEditor.jsx";
 import { QuestEditor } from "./components/QuestEditor.jsx";
+import { ImportModal } from "./components/ImportModal.jsx";
 import {
   listAll,
   loadWorldEncounter,
@@ -35,6 +36,7 @@ export default function App() {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState(null);
   const [validationErrors, setValidationErrors] = useState([]);
+  const [importOpen, setImportOpen] = useState(false);
 
   const refreshIndex = async () => {
     if (!supabaseConfigured) return;
@@ -158,12 +160,22 @@ export default function App() {
         current={current}
         onSelect={handleSelect}
         onNew={handleNew}
+        onImport={() => setImportOpen(true)}
         onSave={handleSave}
         onDelete={handleDelete}
         saving={saving}
         dirty={dirty}
         supabaseConfigured={supabaseConfigured}
         message={message}
+      />
+
+      <ImportModal
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        onImported={async () => {
+          await refreshIndex();
+          setMessage({ tone: "ok", text: "imported" });
+        }}
       />
 
       <main className="flex-1 max-w-6xl w-full mx-auto p-6">

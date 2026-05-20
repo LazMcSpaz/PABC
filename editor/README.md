@@ -12,6 +12,24 @@ game's Supabase instance. Source of truth for data shapes is
 - Deploys to Netlify; the root [`netlify.toml`](../netlify.toml) points
   the build at this folder.
 
+## Supabase setup (run once)
+
+The seven tables defined in
+[`../docs/content-schema-v0.1.md §1`](../docs/content-schema-v0.1.md) need
+to exist before the editor can talk to them. The schema, RLS policies,
+and a PostgREST reload notification are bundled in
+[`sql/0001_init.sql`](./sql/0001_init.sql).
+
+To apply it:
+
+1. Open the Supabase project → **SQL Editor → New query**.
+2. Paste the contents of `editor/sql/0001_init.sql`.
+3. Click **Run**.
+4. Reload the editor tab — the `index load failed` banner should clear.
+
+If PostgREST still serves a stale schema cache, force it via
+**Settings → API → Reload schema cache**.
+
 ## Local dev
 
 ```bash

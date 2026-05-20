@@ -3,6 +3,7 @@ export function Header({
   current,
   onSelect,
   onNew,
+  onImport,
   onDelete,
   onSave,
   saving,
@@ -75,6 +76,14 @@ export function Header({
           onClick={() => onNew("field")}
         >
           + field
+        </button>
+        <button
+          type="button"
+          className="px-2 py-1 text-xs rounded bg-slate-800 hover:bg-slate-700 border border-slate-700"
+          onClick={onImport}
+          title="Import JSON content"
+        >
+          import…
         </button>
       </div>
 
