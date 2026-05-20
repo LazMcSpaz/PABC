@@ -167,11 +167,20 @@ under Site → Settings → Build & deploy.
   engine-level eligibility gates from §15.7 — are edited as a toggle
   chip list in the beat form rather than as graph edges, to keep the
   decision tree visually clean.
-- Every encounter type — quest beats, world encounters, field encounters —
-  uses the same authoring surface: **Encounter** (id, image, text, art
-  notes) → **Choices** → type-specific delivery / trigger / copies
-  metadata. The image and choice tools are identical wherever they
-  appear; only the auxiliary metadata differs.
+- Every story — quest, world encounter, field encounter — is authored
+  the same way: a **decision tree** with N beats (N≥1). Each beat has
+  the same authoring surface (id · image · text · art notes ·
+  choices). The only difference between story types is the head-level
+  metadata: quests have a title + completion rewards, world
+  encounters have a trigger, field encounters have a deck-count.
+- For quests, sub-beats live in `quest_beats` and choices advance
+  the story via `ADVANCE_QUEST` effects.
+- For world / field encounters, sub-beats are stored as linked
+  encounter rows that never fire standalone — sub-beat field
+  encounters carry `copies = 0` (never seeded into the deck);
+  sub-beat world encounters carry `triggerCondition = false` (never
+  fires). Choices advance via `DELIVER_ENCOUNTER` effects. The
+  navigator hides sub-beats automatically.
 - Images can be attached to any encounter. Upload opens an in-browser
   cropper locked to 3:2 — drag the rectangle to position, pull corner
   handles to resize. The rightmost third is overlaid with the word
