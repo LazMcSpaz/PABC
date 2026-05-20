@@ -106,3 +106,51 @@ export const ABILITIES = {
     }],
   },
 };
+
+// Reactive cards (mechanical-spec §5, §10). Granted to a player's hand
+// by encounters; trigger on a matching event and either modify the
+// pending action (replace mode) or apply effects after it (on mode).
+// v0.1 stubs — the real Reactive set is content-team territory.
+export const REACTIVES = {
+  "steady-hand": {
+    id: "steady-hand",
+    name: "Steady Hand",
+    role: "Reactive",
+    copies: 3,
+    desc: "When a contest targets you, your defending unit gets +2 Strength this contest.",
+    triggers: [{
+      trigger: "contest_declared",
+      mode: "on",
+      condition: "defender-owns-source",
+      effects: [{
+        type: "MODIFY_STAT", stat: "Strength", amount: 2,
+        target: "defending_unit", duration: "this_contest",
+      }],
+    }],
+  },
+  "false-flag": {
+    id: "false-flag",
+    name: "False Flag",
+    role: "Reactive",
+    copies: 2,
+    desc: "Cancel a contest declared against you.",
+    triggers: [{
+      trigger: "contest_declared",
+      mode: "replace",
+      condition: "defender-owns-source",
+      effects: [{ type: "CANCEL" }],
+    }],
+  },
+  vulture: {
+    id: "vulture",
+    name: "Vulture",
+    role: "Reactive",
+    copies: 2,
+    desc: "Redirect a reward granted to an opponent — you take it instead.",
+    triggers: [{
+      trigger: "reward_granted",
+      mode: "replace",
+      effects: [{ type: "REDIRECT", field: "recipient", operation: "set", value: "self" }],
+    }],
+  },
+};

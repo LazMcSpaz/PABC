@@ -1,7 +1,9 @@
-// The event bus (mechanical-spec §10). `emit` records every event to the
-// game log and dispatches `on`-mode triggers. The `replace` reaction
-// window is added in Layer 4.
+// The event bus (mechanical-spec §10). `emit` logs every event and
+// fires `on`-mode subscribers. The `replace`-mode reaction window lives
+// in reactions.js and wraps `emit` for events that admit cancellation /
+// payload rewrites.
 import { applyEffects } from "./effects.js";
+import { CHIPS, CAPITAL, ABILITIES, REACTIVES } from "./content.js";
 
 export const EVENT_NAMES = new Set([
   "turn_started", "turn_ended", "round_ended",
@@ -17,29 +19,124 @@ export const EVENT_NAMES = new Set([
   "reward_granted",
 ]);
 
-// Collect `on`-mode trigger subscriptions matching an event from records
-// in play. Stub content carries no `triggers` yet, so this returns []
-// today — the dispatch path is in place for when chip / location /
-// ability content is authored.
+// Resolve a chip / card instance uid to its content def. Covers Market
+// chips (CHIPS), the Capital, and Reactive cards (REACTIVES) — all
+// stored in state.chips as { uid, chipId }.
+function defOf(state, uid) {
+  const inst = state.chips[uid];
+  if (!inst) return null;
+  if (inst.chipId === "capital") return CAPITAL;
+  return CHIPS[inst.chipId] || REACTIVES[inst.chipId] || null;
+}
+
+// Scan every source of triggers in the game state — locations, their
+// installed chips, their assigned abilities, unit chips, and Reactive
+// cards in player hands. Used by both `emit` (for `on` mode) and the
+// reaction window (for `replace` mode).
 export function collectTriggers(state, eventName) {
   const subs = [];
-  const scan = (record, source) => {
+  const addFrom = (record, source) => {
     for (const t of record?.triggers || []) {
-      if (t.trigger === eventName) subs.push({ ...t, source });
+      if (t.trigger !== eventName) continue;
+      subs.push({
+        source, mode: t.mode || "on",
+        condition: t.condition, effects: t.effects,
+      });
     }
   };
-  for (const loc of Object.values(state.locations)) scan(loc, loc);
+
+  for (const loc of Object.values(state.locations)) {
+    addFrom(loc, { kind: "location", uid: loc.hexId, owner: loc.controller });
+    for (const chipUid of loc.chips) {
+      const def = defOf(state, chipUid);
+      if (def?.triggers) {
+        addFrom(def, { kind: "location-chip", uid: chipUid, owner: loc.controller, hexId: loc.hexId });
+      }
+    }
+    if (loc.abilityId) {
+      const ab = ABILITIES[loc.abilityId];
+      if (ab?.triggers) {
+        addFrom(ab, { kind: "ability", uid: loc.abilityId, owner: loc.controller, hexId: loc.hexId });
+      }
+    }
+  }
+
+  for (const unit of Object.values(state.units)) {
+    for (const chipUid of unit.chips) {
+      const def = defOf(state, chipUid);
+      if (def?.triggers) {
+        addFrom(def, { kind: "unit-chip", uid: chipUid, owner: unit.owner, unitUid: unit.uid });
+      }
+    }
+  }
+
+  for (const player of Object.values(state.players)) {
+    for (const cardUid of player.hand) {
+      const inst = state.chips[cardUid];
+      const def = inst && REACTIVES[inst.chipId];
+      if (def?.triggers) {
+        addFrom(def, { kind: "reactive-card", uid: cardUid, cardId: inst.chipId, owner: player.id });
+      }
+    }
+  }
+
   return subs;
 }
 
-export function emit(state, name, payload = {}) {
+// Lightweight condition evaluator — the full DSL from content-schema
+// v0.1 lands with the encounter pipeline. v0.1 covers the keyword
+// shorthands the Reactive stubs actually use.
+export function evalCondition(state, condition, ctx) {
+  if (!condition) return true;
+  if (typeof condition === "function") return !!condition(state, ctx);
+  if (condition === "defender-owns-source") {
+    const p = ctx.event?.payload || {};
+    const defender = p.kind === "raid"
+      ? state.units[p.target]?.owner
+      : state.locations[p.hex]?.controller;
+    return defender != null && defender === ctx.source?.owner;
+  }
+  if (condition === "recipient-is-source") {
+    return ctx.event?.payload?.recipient === ctx.source?.owner;
+  }
+  return true;
+}
+
+// Move a Reactive from its holder's hand to the reactive discard.
+// Called when a subscriber backed by a hand-held card actually fires.
+export function playReactive(state, source) {
+  const hand = state.players[source.owner]?.hand;
+  if (!hand) return false;
+  const i = hand.indexOf(source.uid);
+  if (i < 0) return false;
+  hand.splice(i, 1);
+  state.discards.reactive.push(source.uid);
+  return true;
+}
+
+export function emit(state, name, payload = {}, ctx = {}) {
   if (!EVENT_NAMES.has(name)) throw new Error(`emit: unknown event "${name}"`);
   const event = { name, payload, round: state.round, turnIndex: state.activeIndex };
   state.log.push(event);
+
   for (const sub of collectTriggers(state, name)) {
-    if (sub.mode === "on") {
-      applyEffects(state, sub.effects, { source: sub.source, event });
+    if (sub.mode !== "on") continue;
+    const subCtx = { ...ctx, source: sub.source, event };
+    if (!evalCondition(state, sub.condition, subCtx)) continue;
+    // Reactive cards in hand must be "played" before their effects
+    // resolve. ctx.interact gates that for UI use; headless auto-plays.
+    if (sub.source.kind === "reactive-card") {
+      const want = ctx.interact
+        ? ctx.interact({ kind: "playReactive", card: sub.source.cardId, player: sub.source.owner, event: name })
+        : true;
+      if (!want) continue;
+      playReactive(state, sub.source);
+      // Note: card_played is emitted by the reaction window when it
+      // plays a card; on-mode plays from inside emit() would recurse,
+      // so we just log the move via the discard push above.
     }
+    applyEffects(state, sub.effects, subCtx);
   }
+
   return event;
 }

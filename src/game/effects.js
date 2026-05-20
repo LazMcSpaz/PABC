@@ -174,10 +174,19 @@ const EFFECTS = {
   // --- replacement mode — only meaningful inside a reaction window ---
   REDIRECT(state, e, ctx) {
     if (!ctx.pending) return;
+    let value = e.value;
+    // Resolve a token (e.g. "self") to a concrete pid — otherwise the
+    // payload field would be set to the literal string.
+    if (
+      typeof value === "string" &&
+      ["self", "controller", "triggering_player", "active_player"].includes(value)
+    ) {
+      value = resolveTargets(state, value, ctx)[0] ?? value;
+    }
     const cur = ctx.pending[e.field];
-    if (e.operation === "set") ctx.pending[e.field] = e.value;
-    else if (e.operation === "scale") ctx.pending[e.field] = cur * e.value;
-    else if (e.operation === "clamp") ctx.pending[e.field] = Math.min(cur, e.value);
+    if (e.operation === "set") ctx.pending[e.field] = value;
+    else if (e.operation === "scale") ctx.pending[e.field] = cur * value;
+    else if (e.operation === "clamp") ctx.pending[e.field] = Math.min(cur, value);
   },
 
   CANCEL(state, e, ctx) {

@@ -5,6 +5,7 @@
 // unit raids; Obstacle contests wire in with the encounter/obstacle
 // content batch (no Obstacle state exists yet).
 import { emit } from "./events.js";
+import { openReactionWindow } from "./reactions.js";
 import { CONFIG } from "./config.js";
 import { CHIPS } from "./content.js";
 import { recomputeStats, recomputeTech } from "./stats.js";
@@ -202,16 +203,27 @@ export function validateContest(state, { pid, params }) {
 export function runContest(state, { pid, params }) {
   const unit = state.units[params.unit];
   const t = resolveTarget(state, pid, unit, params);
-  const defValue = defenderValue(state, t);
 
-  // §9 step 1 — declare. The reaction window (§10) opens here in Layer 4;
-  // for now the dice follow immediately.
-  emit(state, "contest_declared", {
+  // §9 step 1 — declare. Open the reaction window so replace-mode
+  // Reactives may cancel the contest; on-mode subscribers fire when
+  // emit lands and can modify stats before the roll (e.g. a defender
+  // boost via MODIFY_STAT this_contest).
+  const defUnit = t.kind === "raid" ? t.unit : (t.loc ? defendingUnit(state, t.loc) : null);
+  const opened = openReactionWindow(state, "contest_declared", {
     initiator: unit.uid, player: pid, kind: t.kind, hex: unit.node,
     target: t.kind === "raid" ? t.unit.uid : unit.node,
-  });
+  }, { contest: { defendingUnit: defUnit?.uid ?? null } });
 
-  // §9 step 2 — roll 1d6 per side; the defender wins ties.
+  if (!opened) {
+    // Cancelled by a replace-mode reaction. The Action was already
+    // charged by the dispatcher; that doesn't reverse.
+    expireContestModifiers(state);
+    return { won: false, cancelled: true, kind: t.kind };
+  }
+
+  // §9 step 2 — roll. defValue and unit.strength are read AFTER the
+  // window so any MODIFY_STAT from on-mode subscribers is reflected.
+  const defValue = defenderValue(state, t);
   const initiatorRoll = state.rng.roll(CONFIG.contestDieSides);
   const defenderRoll = state.rng.roll(CONFIG.contestDieSides);
   const initiatorTotal = unit.strength + initiatorRoll;
@@ -225,6 +237,7 @@ export function runContest(state, { pid, params }) {
 
   if (!won) {
     emit(state, "contest_lost", { initiator: unit.uid, player: pid, ...detail });
+    expireContestModifiers(state);
     return { won: false, ...detail };
   }
 
@@ -233,5 +246,16 @@ export function runContest(state, { pid, params }) {
   else resolveRaidWin(state, pid, t.unit, params);
 
   checkVictory(state);
+  expireContestModifiers(state);
   return { won: true, winner: state.winnerId || null, ...detail };
+}
+
+// MODIFY_STAT effects with `duration: "this_contest"` (e.g. defender
+// boosts from on-mode reactions) live only for the contest in which
+// they were raised. Cleared at the end of every contest, whichever way
+// it resolves.
+function expireContestModifiers(state) {
+  const before = state.modifiers.length;
+  state.modifiers = state.modifiers.filter((m) => m.duration !== "this_contest");
+  if (state.modifiers.length !== before) recomputeStats(state);
 }
