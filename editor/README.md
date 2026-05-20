@@ -25,7 +25,9 @@ To apply it:
 1. Open the Supabase project → **SQL Editor → New query**.
 2. Paste the contents of `editor/sql/0001_init.sql`.
 3. Click **Run**.
-4. Reload the editor tab — the `index load failed` banner should clear.
+4. Run any later migrations (e.g. `sql/0002_choice_outcome_text.sql`)
+   the same way — they're additive and re-runnable.
+5. Reload the editor tab — the `index load failed` banner should clear.
 
 If PostgREST still serves a stale schema cache, force it via
 **Settings → API → Reload schema cache**.
@@ -156,9 +158,24 @@ under Site → Settings → Build & deploy.
 
 - Header navigator lists every world encounter, field encounter, and quest
   in three groups; selecting one loads it immediately.
-- Quest editor renders the beat graph in React Flow. Drag from one beat's
-  bottom handle to another's top to add a prereq edge; select an edge and
-  press Backspace to remove it; click a beat to edit it inline below.
+- Quest editor renders the quest as a **decision tree** in React Flow:
+  beats are rectangles; each beat's choices hang below as pills. Dragging
+  a choice's bottom handle onto another beat's top handle wires the
+  choice into that beat (the editor adds an `ADVANCE_QUEST` effect on
+  the choice with the target beat id). Click a beat (or any of its
+  choices) to edit the beat inline below. Prerequisites — the
+  engine-level eligibility gates from §15.7 — are edited as a toggle
+  chip list in the beat form rather than as graph edges, to keep the
+  decision tree visually clean.
+- Beats can carry an authored image. Upload from the beat form opens an
+  in-browser cropper locked to 3:2 — drag the rectangle to position,
+  pull corner handles to resize. The rightmost third is overlaid with
+  the word "fade" during cropping to remind authors that the engine
+  fades that band in-game. On confirm the image is JPEG-encoded
+  (quality 0.85, max 1500×1000), committed to
+  `src/game/content/images/beats/<beat-id>.jpg` on the content branch,
+  and the beat's `imagePath` is set. Previews load through the
+  authenticated contents API so private repos work.
 - World / field encounter editors are structured forms. Trigger conditions
   and choice conditions use the DSL builder; placement hexes use the
   HexFilter form.

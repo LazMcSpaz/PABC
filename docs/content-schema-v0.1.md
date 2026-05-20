@@ -67,7 +67,8 @@ owner; no recipient/mode columns needed.
 | `placementFilter` | TEXT | HexFilter JSON; required for `'discovered'` |
 | `mode` | TEXT | `'private' \| 'public'`; default by quest mode |
 | `recipient` | TEXT | nullable; for `'private'` beats |
-| `art` | TEXT | nullable |
+| `art` | TEXT | nullable; free-text art-direction notes |
+| `imagePath` | TEXT | nullable; relative repo path to a JPEG (3:2). Engine fades the rightmost third on display. |
 | `text` | TEXT | |
 
 ### `quest_beat_prereqs`
@@ -84,7 +85,8 @@ owner; no recipient/mode columns needed.
 | `parentKind` | TEXT | `'world_encounter' \| 'field_encounter' \| 'quest_beat'` |
 | `parentId` | TEXT | id within the parent table |
 | `ordinal` | INT | 0..2 (max 3 choices per encounter) |
-| `label` | TEXT | |
+| `label` | TEXT | button text shown to the player |
+| `outcomeText` | TEXT | nullable; narrative shown after this choice is taken, before / alongside the effects firing |
 | `condition` | TEXT | DSL JSON; nullable; hides the choice if false |
 | `deferredDelay` | INT | nullable; rounds to defer this choice's effects |
 

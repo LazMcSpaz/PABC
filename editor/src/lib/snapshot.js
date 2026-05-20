@@ -57,6 +57,7 @@ export async function loadSnapshot() {
     choicesByParent.get(key).push({
       id: c.id,
       label: c.label,
+      outcomeText: c.outcomeText ?? null,
       condition: decodeJson(c.condition),
       deferredDelay: c.deferredDelay,
       effects: effectsByParent.get(`choice:${c.id}`) ?? [],
@@ -107,6 +108,7 @@ export async function loadSnapshot() {
       mode: b.mode,
       recipient: b.recipient,
       art: b.art,
+      imagePath: b.imagePath ?? null,
       text: b.text,
       choices: choicesByParent.get(`quest_beat:${b.id}`) ?? [],
     });

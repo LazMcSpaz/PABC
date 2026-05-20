@@ -71,16 +71,19 @@ export async function commitFiles(files, { message }) {
   );
   const baseTreeSha = parentCommit.data.tree.sha;
 
-  // 3. Blob each file. Base64-encode content for binary safety, though
-  //    all our files are UTF-8 text.
+  // 3. Blob each file. Caller may pass UTF-8 text (default) or
+  //    already-base64-encoded bytes via `encoding: "base64"` — used for
+  //    image uploads where the source is a Blob.
   const blobs = await Promise.all(
-    files.map((f) =>
-      gh(`/repos/${repo}/git/blobs`, {
+    files.map((f) => {
+      const base64 =
+        f.encoding === "base64" ? f.content : utf8ToBase64(f.content);
+      return gh(`/repos/${repo}/git/blobs`, {
         method: "POST",
         token,
-        body: { content: utf8ToBase64(f.content), encoding: "base64" },
-      }).then((r) => ({ path: f.path, sha: r.data.sha })),
-    ),
+        body: { content: base64, encoding: "base64" },
+      }).then((r) => ({ path: f.path, sha: r.data.sha }));
+    }),
   );
 
   // 4. Build a new tree off the parent's tree.
