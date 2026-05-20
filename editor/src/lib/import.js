@@ -73,6 +73,7 @@ const ALLOWED_COLUMNS = {
     "mode",
     "recipient",
     "art",
+    "imagePath",
     "text",
   ]),
   quest_beat_prereqs: new Set(["beatId", "prereqBeatId"]),

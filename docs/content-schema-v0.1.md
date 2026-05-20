@@ -67,7 +67,8 @@ owner; no recipient/mode columns needed.
 | `placementFilter` | TEXT | HexFilter JSON; required for `'discovered'` |
 | `mode` | TEXT | `'private' \| 'public'`; default by quest mode |
 | `recipient` | TEXT | nullable; for `'private'` beats |
-| `art` | TEXT | nullable |
+| `art` | TEXT | nullable; free-text art-direction notes |
+| `imagePath` | TEXT | nullable; relative repo path to a JPEG (3:2). Engine fades the rightmost third on display. |
 | `text` | TEXT | |
 
 ### `quest_beat_prereqs`

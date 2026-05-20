@@ -108,6 +108,7 @@ export async function loadSnapshot() {
       mode: b.mode,
       recipient: b.recipient,
       art: b.art,
+      imagePath: b.imagePath ?? null,
       text: b.text,
       choices: choicesByParent.get(`quest_beat:${b.id}`) ?? [],
     });
