@@ -181,28 +181,23 @@ The editor renders each key as a labeled form field; unset = not
 applied. **Compound operators (OR / NOT) are deferred** to a later
 revision.
 
-```js
-{
-  type?:               'location' | 'encounter' | 'terrain' | 'any',
-  controlledBy?:       <pid> | 'neutral' | 'any-player' | 'any',
-  notControlledBy?:    <pid> | 'any-player',
-  withinHexesOf?:      { hex: <hexId>, range: int },
-  outsideHexesOf?:     { hex: <hexId>, range: int },
-  hasChip?:            <chipId>,
-  notHasChip?:         <chipId>,
-  factionAffiliation?: <fid> | 'unaffiliated' | 'any',
-  strategicValue?:     'low' | 'medium' | 'high' | 'veryHigh',
-  hasAbility?:         <abilityId> | 'any' | 'none',
-}
-```
+| Key | Required | Value |
+|---|---|---|
+| `type` | no | `'location'` \| `'encounter'` \| `'terrain'` \| `'any'` |
+| `controlledBy` | no | pid \| `'neutral'` \| `'any-player'` \| `'any'` |
+| `notControlledBy` | no | pid \| `'any-player'` |
+| `withinHexesOf` | no | object: `{ hex: <hexId>, range: int }` |
+| `outsideHexesOf` | no | object: `{ hex: <hexId>, range: int }` |
+| `hasChip` | no | chipId |
+| `notHasChip` | no | chipId |
+| `factionAffiliation` | no | fid \| `'unaffiliated'` \| `'any'` |
+| `strategicValue` | no | `'low'` \| `'medium'` \| `'high'` \| `'veryHigh'` |
+| `hasAbility` | no | abilityId \| `'any'` \| `'none'` |
 
 Example — "an encounter hex within 2 of versari's capital, not
 controlled by anyone":
-```js
-{ type: 'encounter',
-  withinHexesOf: { hex: 'h4-0', range: 2 },
-  notControlledBy: 'any-player' }
-```
+
+`{ type: 'encounter', withinHexesOf: { hex: 'h4-0', range: 2 }, notControlledBy: 'any-player' }`
 
 If multiple hexes match, placement picks one via the seeded RNG.
 
@@ -216,44 +211,46 @@ evaluator (~120 lines, single module `dsl.js`). The same DSL serves
 trigger `condition`, trigger `strength`, choice `condition`, beat
 `deliverCondition`, and `CANCEL.condition`.
 
-### Grammar
+### Grammar — a `Cond` is one of these forms
 
-```
-Cond  := { all: [Cond, ...] }                // AND
-       | { any: [Cond, ...] }                // OR
-       | { not: Cond }                       // NOT
-       | { op: Op, left: Val, right: Val }   // atomic predicate
-       | { has_flag: { player: Tok, flag: string } }
-       | { quest_active: <questId> }
-       | { quest_completed: { player: Tok, questId: string } }
-       | { controls_count: { player: Tok, strategicValue?: string } }  // returns int
-       | { control_duration: { player: Tok, hex: <hexId> } }           // returns int
-       | true | false
+| Form | Returns | Notes |
+|---|---|---|
+| `{ all: [Cond, ...] }` | bool | logical AND |
+| `{ any: [Cond, ...] }` | bool | logical OR |
+| `{ not: Cond }` | bool | logical NOT |
+| `{ op: Op, left: Val, right: Val }` | bool | atomic predicate |
+| `{ has_flag: { player: Tok, flag: string } }` | bool | |
+| `{ quest_active: <questId> }` | bool | |
+| `{ quest_completed: { player: Tok, questId: string } }` | bool | |
+| `{ controls_count: { player: Tok, strategicValue?: string } }` | int | usable as a `Val` |
+| `{ control_duration: { player: Tok, hex: <hexId> } }` | int | usable as a `Val` |
+| `true` \| `false` | bool | literal |
 
-Op    := 'eq' | 'ne' | 'gt' | 'gte' | 'lt' | 'lte'
+**`Op`** is one of: `'eq'`, `'ne'`, `'gt'`, `'gte'`, `'lt'`, `'lte'`.
 
-Val   := number | string | boolean
-       | <path>            // dot-path string into state
-       | Cond              // recursive — helpers that return int
+**`Val`** is one of: a number, a string, a boolean, a path expression
+(a dot-path string into state — see below), or a recursive `Cond` that
+returns an int.
 
-Tok   := one of the recipient tokens (§3), or a literal pid
-```
+**`Tok`** is one of the recipient tokens (§3), or a literal pid.
 
 ### Path expressions
 
-A string with dot syntax, evaluated against the engine state:
+Dot-syntax strings evaluated against the engine state:
 
-```
-world.raidCounts.versari            → int
-world.ignoreCounts.goldgrass        → int
-players.versari.tracks.trust        → int
-players.versari.resource            → int
-players.versari.vp                  → int
-players.versari.tech                → int
-factionStanding.versari.versari     → int
-state.round                         → int
-state.activeQuests.<id>.beatIndex   → int
-```
+| Path | Resolves to |
+|---|---|
+| `world.raidCounts.<fid>` | int |
+| `world.ignoreCounts.<fid>` | int |
+| `players.<pid>.tracks.trust` | int |
+| `players.<pid>.tracks.reputation` | int |
+| `players.<pid>.tracks.alignment` | int |
+| `players.<pid>.resource` | int |
+| `players.<pid>.vp` | int |
+| `players.<pid>.tech` | int |
+| `factionStanding.<fid>.<pid>` | int |
+| `state.round` | int |
+| `state.activeQuests.<questId>.beatIndex` | int |
 
 Unknown paths evaluate to `null`. `null` in any numeric comparison
 returns `false`.
@@ -263,35 +260,22 @@ returns `false`.
 Used only as `triggerStrength`. Same grammar plus a top-level
 `if`-cascade returning integers 1–5:
 
-```
-Strength := int  (1..5)
-          | { if: [Cond, Strength, Cond, Strength, ..., Strength] }
-            // pairs of (cond, value); final element is the fallback
-```
+- `Strength := int (1..5)` — a bare integer
+- `Strength := { if: [Cond, Strength, Cond, Strength, ..., Strength] }` — pairs of `(cond, value)`; the final element is the fallback
 
 ### Examples
 
 Condition — "versari has been raided 3+ times recently AND trust < −2":
-```json
-{ "all": [
-    { "op": "gt", "left": "world.raidCounts.versari", "right": 3 },
-    { "op": "lt", "left": "players.versari.tracks.trust", "right": -2 }
-] }
-```
+
+`{ "all": [ { "op": "gt", "left": "world.raidCounts.versari", "right": 3 }, { "op": "lt", "left": "players.versari.tracks.trust", "right": -2 } ] }`
 
 Strength cascade — escalating urgency:
-```json
-{ "if": [
-    { "op": "gt", "left": "world.raidCounts.versari", "right": 5 }, 5,
-    { "op": "gt", "left": "world.raidCounts.versari", "right": 3 }, 3,
-    1
-] }
-```
+
+`{ "if": [ { "op": "gt", "left": "world.raidCounts.versari", "right": 5 }, 5, { "op": "gt", "left": "world.raidCounts.versari", "right": 3 }, 3, 1 ] }`
 
 Choice condition — "active player has completed quest X":
-```json
-{ "quest_completed": { "player": "active", "questId": "the-fixer-line" } }
-```
+
+`{ "quest_completed": { "player": "active", "questId": "the-fixer-line" } }`
 
 ---
 
