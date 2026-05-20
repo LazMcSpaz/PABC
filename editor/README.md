@@ -46,6 +46,10 @@ Env vars:
 | `VITE_SUPABASE_URL` | the project URL |
 | `VITE_SUPABASE_ANON_KEY` | the anon (publishable) key |
 | `VITE_EDITOR_PIN` | optional. If set, shows a PIN entry screen before the editor. Unset = no gate (handy for local dev). |
+| `VITE_GITHUB_TOKEN` | optional. Fine-grained PAT for the auto-commit pipeline (see below). |
+| `VITE_GITHUB_REPO` | optional. `owner/name` of the repo to commit into. Defaults to `LazMcSpaz/PABC`. |
+| `VITE_GITHUB_CONTENT_BRANCH` | optional. Destination branch for the snapshot. Defaults to `content/auto-snapshot`. |
+| `VITE_GITHUB_BASE_BRANCH` | optional. Branch to fork from when creating the content branch. Defaults to `main`. |
 
 The editor reads / writes the seven tables directly via the anon key.
 Without the Supabase env vars the UI still loads but every load/save
@@ -54,6 +58,75 @@ call throws.
 The PIN is bundled into the JS at build time — it gates casual access
 from a deploy URL, not real security. The single trusted-user model
 from the brief still applies.
+
+## Auto-commit pipeline → engine
+
+After every successful save / import / delete (and via a manual "sync"
+button in the header), the editor:
+
+1. Reads a full snapshot of all seven content tables from Supabase.
+2. Reassembles the polymorphic relations — choices nested under their
+   parent encounter / beat; effects nested under their parent choice or
+   quest reward bucket — and parses every TEXT-of-JSON column back into
+   a real object.
+3. Renders four files (deterministic, sorted keys):
+   - `src/game/content/world-encounters.js`
+   - `src/game/content/field-encounters.js`
+   - `src/game/content/quests.js`
+   - `src/game/content/index.js`
+4. Commits them in a single atomic commit (Git Data API) to
+   `VITE_GITHUB_CONTENT_BRANCH`, creating the branch from
+   `VITE_GITHUB_BASE_BRANCH` if needed.
+
+The header shows a sync indicator: **synced** / **syncing…** /
+**sync failed** with the last commit sha on hover. Clicking it triggers
+a manual sync.
+
+When you're ready for the engine to pick up new content, merge the
+content branch into `main` manually. The engine imports from
+`src/game/content/index.js`.
+
+### Token scoping
+
+The `VITE_GITHUB_TOKEN` ends up in the JS bundle just like the PIN. To
+keep blast radius minimal, generate a **fine-grained personal access
+token** scoped to this one repository, with only:
+
+- **Contents: Read and write**
+- **Metadata: Read-only** (required)
+
+Nothing else. The token can write content files to your repo and
+nothing else; the PIN gate keeps casual visitors out of the editor in
+the first place.
+
+### Output shape
+
+Each generated file exports a single object keyed by id. Polymorphic
+relations are reassembled inline, so the engine consumes a tree with no
+further joins:
+
+```js
+// src/game/content/world-encounters.js
+export const WORLD_ENCOUNTERS = {
+  "we_xxx": {
+    id: "we_xxx",
+    mode: "private",
+    recipient: "active",
+    triggerCondition: { ... },   // parsed DSL
+    triggerStrength: 3,
+    triggerCooldown: 4,
+    choices: [
+      { id, label, condition, deferredDelay, effects: [{ id, type, params }] }
+    ],
+    ...
+  },
+  ...
+};
+```
+
+For quests, each beat carries its `prerequisites: [beatId]` array
+inline, and `completion: { rewardForClaimant, sharedSideEffects }`
+holds the two reward buckets.
 
 ## Netlify deploy
 
