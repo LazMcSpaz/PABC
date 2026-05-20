@@ -27,7 +27,8 @@ a build step exports the DB to engine-consumable JS.
 | `recipient` | TEXT | recipient token (§3); nullable for `placement` |
 | `expiresIn` | INT | nullable; `placement` mode only |
 | `publicGroupChoice` | INT | 0/1; `public` mode only |
-| `art` | TEXT | nullable |
+| `art` | TEXT | nullable; free-text art-direction notes |
+| `imagePath` | TEXT | nullable; relative repo path to a JPEG (3:2). Engine fades the rightmost third on display. |
 | `text` | TEXT | |
 | `triggerCondition` | TEXT | DSL JSON (§5) |
 | `triggerStrength` | TEXT | DSL JSON returning 1–5 |
@@ -43,7 +44,8 @@ editor does not author triggers separately.
 |---|---|---|
 | `id` | TEXT PK | |
 | `copies` | INT | how many seed the deck |
-| `art` | TEXT | nullable |
+| `art` | TEXT | nullable; free-text art-direction notes |
+| `imagePath` | TEXT | nullable; relative repo path to a JPEG (3:2). Engine fades the rightmost third on display. |
 | `text` | TEXT | |
 
 Field encounters are always delivered in `private` mode to the unit's
