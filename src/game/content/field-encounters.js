@@ -2,7 +2,7 @@
 // Do not edit by hand — any changes here will be overwritten on the next
 // editor save. Source of truth lives in the Supabase content tables.
 // Schema: docs/content-schema-v0.1.md.
-// Generated at 2026-05-20T20:10:32.137Z.
+// Generated at 2026-05-20T21:27:51.953Z.
 
 export const FIELD_ENCOUNTERS = {
   "fe_buried_cache": {
@@ -32,7 +32,8 @@ export const FIELD_ENCOUNTERS = {
           }
         ],
         "id": "ch_cache_dig",
-        "label": "Dig it up"
+        "label": "Dig it up",
+        "outcomeText": null
       },
       {
         "condition": null,
@@ -101,14 +102,16 @@ export const FIELD_ENCOUNTERS = {
           }
         ],
         "id": "ch_cache_mark",
-        "label": "Mark the spot and wait"
+        "label": "Mark the spot and wait",
+        "outcomeText": null
       },
       {
         "condition": null,
         "deferredDelay": null,
         "effects": [],
         "id": "ch_cache_leave",
-        "label": "Leave it where it lies"
+        "label": "Leave it where it lies",
+        "outcomeText": null
       }
     ],
     "copies": 2,
@@ -142,7 +145,8 @@ export const FIELD_ENCOUNTERS = {
           }
         ],
         "id": "ch_burned_track",
-        "label": "Track them"
+        "label": "Track them",
+        "outcomeText": null
       },
       {
         "condition": null,
@@ -159,7 +163,8 @@ export const FIELD_ENCOUNTERS = {
           }
         ],
         "id": "ch_burned_salvage",
-        "label": "Salvage what's left"
+        "label": "Salvage what's left",
+        "outcomeText": null
       },
       {
         "condition": null,
@@ -185,7 +190,8 @@ export const FIELD_ENCOUNTERS = {
           }
         ],
         "id": "ch_burned_report",
-        "label": "Report the camp to the nearest settlement"
+        "label": "Report the camp to the nearest settlement",
+        "outcomeText": null
       }
     ],
     "copies": 1,
@@ -245,7 +251,8 @@ export const FIELD_ENCOUNTERS = {
           }
         ],
         "id": "ch_widow_carry",
-        "label": "Carry the package east"
+        "label": "Carry the package east",
+        "outcomeText": null
       },
       {
         "condition": null,
@@ -280,7 +287,8 @@ export const FIELD_ENCOUNTERS = {
           }
         ],
         "id": "ch_widow_open",
-        "label": "Open it first"
+        "label": "Open it first",
+        "outcomeText": null
       },
       {
         "condition": null,
@@ -297,7 +305,8 @@ export const FIELD_ENCOUNTERS = {
           }
         ],
         "id": "ch_widow_decline",
-        "label": "Refuse, kindly"
+        "label": "Refuse, kindly",
+        "outcomeText": null
       }
     ],
     "copies": 1,
@@ -331,7 +340,8 @@ export const FIELD_ENCOUNTERS = {
           }
         ],
         "id": "ch_silo_open",
-        "label": "Open the silo"
+        "label": "Open the silo",
+        "outcomeText": null
       },
       {
         "condition": null,
@@ -357,7 +367,8 @@ export const FIELD_ENCOUNTERS = {
           }
         ],
         "id": "ch_silo_seal",
-        "label": "Seal it and walk away"
+        "label": "Seal it and walk away",
+        "outcomeText": null
       },
       {
         "condition": null,
@@ -400,7 +411,8 @@ export const FIELD_ENCOUNTERS = {
           }
         ],
         "id": "ch_silo_call_reader",
-        "label": "Send for someone who reads"
+        "label": "Send for someone who reads",
+        "outcomeText": null
       }
     ],
     "copies": 2,
@@ -443,7 +455,8 @@ export const FIELD_ENCOUNTERS = {
           }
         ],
         "id": "ch_lakers_buy",
-        "label": "Pay his price in Scrap"
+        "label": "Pay his price in Scrap",
+        "outcomeText": null
       },
       {
         "condition": null,
@@ -479,7 +492,8 @@ export const FIELD_ENCOUNTERS = {
           }
         ],
         "id": "ch_lakers_owe",
-        "label": "Accept the favor terms"
+        "label": "Accept the favor terms",
+        "outcomeText": null
       },
       {
         "condition": null,
@@ -496,7 +510,8 @@ export const FIELD_ENCOUNTERS = {
           }
         ],
         "id": "ch_lakers_walk",
-        "label": "Walk away"
+        "label": "Walk away",
+        "outcomeText": null
       }
     ],
     "copies": 2,
@@ -521,7 +536,8 @@ export const FIELD_ENCOUNTERS = {
           }
         ],
         "id": "ch_terminal_study",
-        "label": "Stay and study it"
+        "label": "Stay and study it",
+        "outcomeText": null
       },
       {
         "condition": null,
@@ -547,7 +563,8 @@ export const FIELD_ENCOUNTERS = {
           }
         ],
         "id": "ch_terminal_strip",
-        "label": "Strip it for parts"
+        "label": "Strip it for parts",
+        "outcomeText": null
       },
       {
         "condition": null,
@@ -582,7 +599,8 @@ export const FIELD_ENCOUNTERS = {
           }
         ],
         "id": "ch_terminal_versari",
-        "label": "Send word to a Versari scholar"
+        "label": "Send word to a Versari scholar",
+        "outcomeText": null
       }
     ],
     "copies": 1,
@@ -678,7 +696,8 @@ export const FIELD_ENCOUNTERS = {
           }
         ],
         "id": "ch_pirate_accept",
-        "label": "Shake on it"
+        "label": "Shake on it",
+        "outcomeText": null
       },
       {
         "condition": null,
@@ -704,7 +723,8 @@ export const FIELD_ENCOUNTERS = {
           }
         ],
         "id": "ch_pirate_counter",
-        "label": "Counter — Scrap instead of a favor"
+        "label": "Counter — Scrap instead of a favor",
+        "outcomeText": null
       },
       {
         "condition": null,
@@ -730,7 +750,8 @@ export const FIELD_ENCOUNTERS = {
           }
         ],
         "id": "ch_pirate_refuse",
-        "label": "Refuse and prepare"
+        "label": "Refuse and prepare",
+        "outcomeText": null
       }
     ],
     "copies": 1,
@@ -765,7 +786,8 @@ export const FIELD_ENCOUNTERS = {
           }
         ],
         "id": "ch_railwalker_scrap",
-        "label": "Pay him in Scrap"
+        "label": "Pay him in Scrap",
+        "outcomeText": null
       },
       {
         "condition": null,
@@ -792,7 +814,8 @@ export const FIELD_ENCOUNTERS = {
           }
         ],
         "id": "ch_railwalker_meal",
-        "label": "Share rations and a fire"
+        "label": "Share rations and a fire",
+        "outcomeText": null
       },
       {
         "condition": null,
@@ -809,7 +832,8 @@ export const FIELD_ENCOUNTERS = {
           }
         ],
         "id": "ch_railwalker_decline",
-        "label": "Move on"
+        "label": "Move on",
+        "outcomeText": null
       }
     ],
     "copies": 2,
@@ -843,7 +867,8 @@ export const FIELD_ENCOUNTERS = {
           }
         ],
         "id": "ch_reader_listen",
-        "label": "Sit and listen properly"
+        "label": "Sit and listen properly",
+        "outcomeText": null
       },
       {
         "condition": null,
@@ -860,7 +885,8 @@ export const FIELD_ENCOUNTERS = {
           }
         ],
         "id": "ch_reader_dismiss",
-        "label": "Thank her and continue"
+        "label": "Thank her and continue",
+        "outcomeText": null
       },
       {
         "condition": null,
@@ -894,7 +920,8 @@ export const FIELD_ENCOUNTERS = {
           }
         ],
         "id": "ch_reader_send_scout",
-        "label": "Send a scout south to look"
+        "label": "Send a scout south to look",
+        "outcomeText": null
       }
     ],
     "copies": 1,
@@ -928,7 +955,8 @@ export const FIELD_ENCOUNTERS = {
           }
         ],
         "id": "ch_crossroads_goldgrass",
-        "label": "Side with the Coalition"
+        "label": "Side with the Coalition",
+        "outcomeText": null
       },
       {
         "condition": null,
@@ -954,7 +982,8 @@ export const FIELD_ENCOUNTERS = {
           }
         ],
         "id": "ch_crossroads_lakers",
-        "label": "Side with the Lakers"
+        "label": "Side with the Lakers",
+        "outcomeText": null
       },
       {
         "condition": null,
@@ -980,7 +1009,8 @@ export const FIELD_ENCOUNTERS = {
           }
         ],
         "id": "ch_crossroads_neither",
-        "label": "Suggest the settlement decides for itself"
+        "label": "Suggest the settlement decides for itself",
+        "outcomeText": null
       }
     ],
     "copies": 1,
@@ -1014,7 +1044,8 @@ export const FIELD_ENCOUNTERS = {
           }
         ],
         "id": "ch_courier_help",
-        "label": "Help with the wheel"
+        "label": "Help with the wheel",
+        "outcomeText": null
       },
       {
         "condition": null,
@@ -1049,7 +1080,8 @@ export const FIELD_ENCOUNTERS = {
           }
         ],
         "id": "ch_courier_inspect",
-        "label": "Look inside the satchel"
+        "label": "Look inside the satchel",
+        "outcomeText": null
       },
       {
         "condition": null,
@@ -1066,7 +1098,8 @@ export const FIELD_ENCOUNTERS = {
           }
         ],
         "id": "ch_courier_ignore",
-        "label": "Leave them to it"
+        "label": "Leave them to it",
+        "outcomeText": null
       }
     ],
     "copies": 2,
@@ -1100,7 +1133,8 @@ export const FIELD_ENCOUNTERS = {
           }
         ],
         "id": "ch_water_pay",
-        "label": "Pay him to dig"
+        "label": "Pay him to dig",
+        "outcomeText": null
       },
       {
         "condition": null,
@@ -1126,7 +1160,8 @@ export const FIELD_ENCOUNTERS = {
           }
         ],
         "id": "ch_water_offer_passage",
-        "label": "Offer passage home in exchange"
+        "label": "Offer passage home in exchange",
+        "outcomeText": null
       },
       {
         "condition": null,
@@ -1152,7 +1187,8 @@ export const FIELD_ENCOUNTERS = {
           }
         ],
         "id": "ch_water_dismiss",
-        "label": "Tell him to stay out of your country"
+        "label": "Tell him to stay out of your country",
+        "outcomeText": null
       }
     ],
     "copies": 1,
