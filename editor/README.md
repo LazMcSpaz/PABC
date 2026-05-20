@@ -21,15 +21,45 @@ npm install
 npm run dev                     # http://localhost:5174
 ```
 
-Two env vars:
+Env vars:
 
 | Var | Value |
 |---|---|
 | `VITE_SUPABASE_URL` | the project URL |
 | `VITE_SUPABASE_ANON_KEY` | the anon (publishable) key |
+| `VITE_EDITOR_PIN` | optional. If set, shows a PIN entry screen before the editor. Unset = no gate (handy for local dev). |
 
 The editor reads / writes the seven tables directly via the anon key.
-Without the env vars the UI still loads but every load/save call throws.
+Without the Supabase env vars the UI still loads but every load/save
+call throws.
+
+The PIN is bundled into the JS at build time — it gates casual access
+from a deploy URL, not real security. The single trusted-user model
+from the brief still applies.
+
+## Netlify deploy
+
+A repo-root `netlify.toml` points Netlify at `editor/`:
+
+```toml
+[build]
+  base = "editor"
+  command = "npm install && npm run build"
+  publish = "dist"
+```
+
+To set up a fresh Netlify site:
+
+1. New site → Import from GitHub → pick the repo.
+2. Leave the build settings empty — `netlify.toml` provides them.
+3. Site → Settings → Environment variables → add `VITE_SUPABASE_URL`,
+   `VITE_SUPABASE_ANON_KEY`, and optionally `VITE_EDITOR_PIN`.
+4. Trigger a redeploy so the env vars get baked in.
+
+If you already created the site without the root `netlify.toml`,
+either pull `main` (which now contains it) and redeploy, or set
+**Base directory: `editor`** and **Publish directory: `editor/dist`**
+under Site → Settings → Build & deploy.
 
 ## What the editor does
 
