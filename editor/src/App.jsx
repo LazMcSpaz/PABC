@@ -23,6 +23,11 @@ import {
   validateQuest,
 } from "./lib/validation.js";
 import { newId } from "./lib/id.js";
+import {
+  pushContentSnapshot,
+  githubConfigured,
+  githubSettings,
+} from "./lib/sync.js";
 
 export default function App() {
   const [index, setIndex] = useState({
@@ -37,6 +42,35 @@ export default function App() {
   const [message, setMessage] = useState(null);
   const [validationErrors, setValidationErrors] = useState([]);
   const [importOpen, setImportOpen] = useState(false);
+  const [syncState, setSyncState] = useState(() => ({
+    configured: githubConfigured(),
+    status: "idle",
+    branch: githubConfigured() ? githubSettings().branch : null,
+    lastCommit: null,
+    error: null,
+  }));
+
+  const runSync = async (reason) => {
+    if (!githubConfigured()) return;
+    setSyncState((s) => ({ ...s, status: "syncing", error: null }));
+    try {
+      const result = await pushContentSnapshot({ reason });
+      setSyncState((s) => ({
+        ...s,
+        status: "ok",
+        lastCommit: result.commitSha,
+        branch: result.branch,
+        error: null,
+      }));
+      setMessage({
+        tone: "ok",
+        text: `synced to ${result.branch} @ ${result.commitSha.slice(0, 7)}${result.created ? " (branch created)" : ""}`,
+      });
+    } catch (e) {
+      setSyncState((s) => ({ ...s, status: "error", error: e.message }));
+      setMessage({ tone: "error", text: `sync failed: ${e.message}` });
+    }
+  };
 
   const refreshIndex = async () => {
     if (!supabaseConfigured) return;
@@ -130,6 +164,9 @@ export default function App() {
       setDirty(false);
       setMessage({ tone: "ok", text: "saved" });
       await refreshIndex();
+      if (githubConfigured()) {
+        runSync(`save ${current.kind}:${current.id}`);
+      }
     } catch (e) {
       setMessage({ tone: "error", text: `save failed: ${e.message}` });
     } finally {
@@ -148,6 +185,9 @@ export default function App() {
       setDirty(false);
       await refreshIndex();
       setMessage({ tone: "ok", text: "deleted" });
+      if (githubConfigured()) {
+        runSync(`delete ${current.kind}:${current.id}`);
+      }
     } catch (e) {
       setMessage({ tone: "error", text: `delete failed: ${e.message}` });
     }
@@ -163,10 +203,12 @@ export default function App() {
         onImport={() => setImportOpen(true)}
         onSave={handleSave}
         onDelete={handleDelete}
+        onSync={() => runSync("manual")}
         saving={saving}
         dirty={dirty}
         supabaseConfigured={supabaseConfigured}
         message={message}
+        syncState={syncState}
       />
 
       <ImportModal
@@ -175,6 +217,9 @@ export default function App() {
         onImported={async () => {
           await refreshIndex();
           setMessage({ tone: "ok", text: "imported" });
+          if (githubConfigured()) {
+            runSync("import");
+          }
         }}
       />
 

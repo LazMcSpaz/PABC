@@ -6,10 +6,12 @@ export function Header({
   onImport,
   onDelete,
   onSave,
+  onSync,
   saving,
   dirty,
   supabaseConfigured,
   message,
+  syncState,
 }) {
   return (
     <header className="bg-slate-900 border-b border-slate-800 px-4 py-3 flex items-center gap-3 sticky top-0 z-10">
@@ -91,6 +93,7 @@ export function Header({
         {!supabaseConfigured && (
           <span className="text-xs text-rose-400">supabase not configured</span>
         )}
+        <SyncIndicator state={syncState} onSync={onSync} />
         {message && (
           <span
             className={`text-xs ${message.tone === "error" ? "text-rose-400" : "text-emerald-400"}`}
@@ -117,5 +120,49 @@ export function Header({
         </button>
       </div>
     </header>
+  );
+}
+
+function SyncIndicator({ state, onSync }) {
+  if (!state || !state.configured) {
+    return (
+      <span
+        className="text-xs text-slate-500"
+        title="Set VITE_GITHUB_TOKEN and VITE_GITHUB_REPO to enable auto-export"
+      >
+        no sync
+      </span>
+    );
+  }
+  const tone = {
+    idle: "text-slate-400",
+    syncing: "text-amber-300",
+    ok: "text-emerald-400",
+    error: "text-rose-400",
+  }[state.status] ?? "text-slate-400";
+  const label = {
+    idle: state.lastCommit ? "synced" : "not synced yet",
+    syncing: "syncing…",
+    ok: "synced",
+    error: "sync failed",
+  }[state.status] ?? state.status;
+  const title = [
+    `branch: ${state.branch}`,
+    state.lastCommit ? `last commit: ${state.lastCommit.slice(0, 7)}` : null,
+    state.error ?? null,
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  return (
+    <button
+      type="button"
+      onClick={onSync}
+      title={title}
+      disabled={state.status === "syncing"}
+      className={`text-xs px-2 py-1 rounded border border-slate-800 hover:bg-slate-800 ${tone}`}
+    >
+      {label} ↻
+    </button>
   );
 }
