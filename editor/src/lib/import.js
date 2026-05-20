@@ -82,6 +82,7 @@ const ALLOWED_COLUMNS = {
     "parentId",
     "ordinal",
     "label",
+    "outcomeText",
     "condition",
     "deferredDelay",
   ]),

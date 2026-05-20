@@ -15,6 +15,7 @@ export function ChoiceList({ choices, onChange, context, maxChoices = 3 }) {
       {
         id: newId("ch"),
         label: "",
+        outcomeText: "",
         condition: null,
         deferredDelay: null,
         effects: [],
@@ -63,6 +64,19 @@ export function ChoiceList({ choices, onChange, context, maxChoices = 3 }) {
               remove
             </button>
           </div>
+
+          <label className="flex flex-col gap-1">
+            <span className="text-xs uppercase tracking-wide text-slate-400">
+              outcome text (narrative shown after choosing)
+            </span>
+            <textarea
+              value={c.outcomeText ?? ""}
+              onChange={(e) => setAt(i, { ...c, outcomeText: e.target.value })}
+              rows={3}
+              placeholder="What the player sees after picking this choice. Effects fire alongside."
+              className="w-full"
+            />
+          </label>
 
           <DslBuilder
             label="condition (optional — hides choice if false)"
