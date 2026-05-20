@@ -1,7 +1,7 @@
 [build]
   base = "editor"
   command = "npm install && npm run build"
-  publish = "editor/dist"
+  publish = "dist"
 
 [build.environment]
   NODE_VERSION = "20"
