@@ -7,6 +7,7 @@ import { performAction } from "./actions.js";
 import { applyEffect } from "./effects.js";
 import { activePlayerId } from "./targeting.js";
 import { FACTIONS, LOCATIONS, ABILITIES, REACTIVES } from "./content.js";
+import { loadFieldEncounters, findUnsupportedTypes, choiceIsRunnable } from "./content-loader.js";
 import { CONFIG } from "./config.js";
 
 const seed = Number(process.argv[2]) || 42;
@@ -202,6 +203,34 @@ const sectionsBefore = [...omara.sections];
 const r2 = performAction(game, "contest", { unit: champ.uid });
 line(`   result: ${r2.won ? "won" : r2.cancelled ? "cancelled — contest aborted before the roll" : "lost"}`);
 line(`   sections unchanged: ${JSON.stringify(omara.sections) === JSON.stringify(sectionsBefore)}; hand=${game.players.goldgrass.hand.length} reactive-discard=${game.discards.reactive.length}`);
+
+// --- Editor → engine snapshot smoke test ---
+line("\nCONTENT SNAPSHOT  (editor → engine pipeline smoke test)");
+const fieldEncs = loadFieldEncounters();
+const ids = Object.keys(fieldEncs);
+line(`  loaded ${ids.length} field encounter${ids.length === 1 ? "" : "s"} from src/game/content/`);
+
+const unsupported = findUnsupportedTypes(fieldEncs);
+if (unsupported.length) {
+  line(`  effect types pending engine support: ${unsupported.join(", ")}`);
+}
+
+const runnable = ids.filter((id) => fieldEncs[id].choices.some(choiceIsRunnable));
+line(`  ${runnable.length}/${ids.length} encounters have at least one fully-runnable choice today`);
+
+if (runnable.length) {
+  const pickId = runnable[0];
+  const enc = fieldEncs[pickId];
+  const choiceIdx = enc.choices.findIndex(choiceIsRunnable);
+  const choice = enc.choices[choiceIdx];
+  line(`  demo: "${pickId}" → choice "${choice.label}"`);
+  const scrapBefore = game.players[me].resource;
+  const vpBefore = game.players[me].vp;
+  const techBefore = game.players[me].tech;
+  for (const eff of choice.effects) applyEffect(game, eff, ctx);
+  const dr = (a, b) => `${a}->${b}`;
+  line(`   active player ${me}: scrap ${dr(scrapBefore, game.players[me].resource)}, vp ${dr(vpBefore, game.players[me].vp)}, tech ${dr(techBefore, game.players[me].tech)}`);
+}
 
 // --- play out round 1 ---
 line("\nPLAY ROUND 1  (each player ends their turn)");
