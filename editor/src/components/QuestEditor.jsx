@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import ReactFlow, {
   Background,
   Controls,
@@ -20,20 +20,13 @@ import { EffectList } from "./EffectEditor.jsx";
 import { DslBuilder } from "./DslBuilder.jsx";
 import { HexFilterBuilder } from "./HexFilterBuilder.jsx";
 import { RecipientPicker } from "./RecipientPicker.jsx";
-import { ImageCropper } from "./ImageCropper.jsx";
+import { EncounterImageEditor } from "./EncounterImageEditor.jsx";
 import {
   QUEST_MODES,
   BEAT_DELIVER_MODES,
   BEAT_MODES,
 } from "../lib/schema.js";
 import { newId } from "../lib/id.js";
-import {
-  uploadBeatImage,
-  deleteBeatImage,
-  loadImageDataUri,
-  pathForBeatImage,
-} from "../lib/images.js";
-import { githubConfigured } from "../lib/github.js";
 
 const nodeTypes = { beat: BeatNode, choice: ChoiceNode };
 
@@ -445,266 +438,113 @@ function BeatEditor({ beat, quest, onChange, onDelete, onPrereqsChange, context 
   const set = (key, v) => onChange({ ...beat, [key]: v });
 
   return (
-    <SectionCard
-      title={`Beat — ${beat.id}`}
-      actions={
-        <IconButton variant="danger" onClick={onDelete}>
-          delete beat
-        </IconButton>
-      }
-    >
-      <div className="grid grid-cols-3 gap-3">
-        <Field label="id">
-          <TextInput value={beat.id} onChange={(v) => set("id", v)} />
-        </Field>
-        <Field label="ordinal">
-          <NumberInput value={beat.ordinal} onChange={(v) => set("ordinal", v)} />
-        </Field>
-        <Field label="deliver">
-          <Select
-            value={beat.deliver}
-            onChange={(v) => set("deliver", v)}
-            options={BEAT_DELIVER_MODES}
-          />
-        </Field>
-        <Field label="mode">
-          <Select
-            value={beat.mode}
-            onChange={(v) => set("mode", v)}
-            options={BEAT_MODES}
-          />
-        </Field>
-        {beat.mode === "private" && (
-          <Field label="recipient" className="col-span-2">
-            <RecipientPicker
-              value={beat.recipient}
-              onChange={(v) => set("recipient", v)}
+    <>
+      <SectionCard
+        title={`Encounter — beat ${beat.id}`}
+        actions={
+          <IconButton variant="danger" onClick={onDelete}>
+            delete beat
+          </IconButton>
+        }
+      >
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="id">
+            <TextInput value={beat.id} onChange={(v) => set("id", v)} />
+          </Field>
+          <Field label="ordinal">
+            <NumberInput
+              value={beat.ordinal}
+              onChange={(v) => set("ordinal", v)}
             />
           </Field>
-        )}
-        <Field label="art" className="col-span-3">
-          <TextInput value={beat.art} onChange={(v) => set("art", v)} />
-        </Field>
-        <Field label="text" className="col-span-3">
-          <TextArea value={beat.text} onChange={(v) => set("text", v)} rows={4} />
-        </Field>
-      </div>
+          <div className="col-span-2">
+            <EncounterImageEditor
+              kind="beat"
+              id={beat.id}
+              imagePath={beat.imagePath}
+              onChange={(v) => set("imagePath", v)}
+            />
+          </div>
+          <Field label="text" className="col-span-2">
+            <TextArea
+              value={beat.text}
+              onChange={(v) => set("text", v)}
+              rows={4}
+            />
+          </Field>
+          <Field
+            label="art (free-text direction notes)"
+            className="col-span-2"
+          >
+            <TextInput
+              value={beat.art}
+              onChange={(v) => set("art", v)}
+              placeholder="optional art-direction notes"
+            />
+          </Field>
+        </div>
+      </SectionCard>
 
-      {beat.deliver === "conditional" && (
-        <Field label="deliverCondition">
-          <DslBuilder
-            value={beat.deliverCondition}
-            onChange={(v) => set("deliverCondition", v)}
-          />
-        </Field>
-      )}
-      {beat.deliver === "discovered" && (
-        <Field label="placementFilter">
-          <HexFilterBuilder
-            value={beat.placementFilter}
-            onChange={(v) => set("placementFilter", v)}
-            allowNull={false}
-          />
-        </Field>
-      )}
-
-      <PrereqEditor
-        beatId={beat.id}
-        beats={quest.beats ?? []}
-        prereqs={quest.prereqs ?? []}
-        onChange={onPrereqsChange}
-      />
-
-      <BeatImageEditor
-        beatId={beat.id}
-        imagePath={beat.imagePath}
-        onChange={(v) => set("imagePath", v)}
-      />
-
-      <div className="flex flex-col gap-2 mt-3">
-        <span className="text-xs uppercase tracking-wide text-slate-400">
-          choices
-        </span>
+      <SectionCard title="Choices (up to 3)">
         <ChoiceList
           choices={beat.choices ?? []}
           onChange={(v) => set("choices", v)}
           context={context}
         />
-      </div>
-    </SectionCard>
-  );
-}
+      </SectionCard>
 
-function BeatImageEditor({ beatId, imagePath, onChange }) {
-  const [pickedFile, setPickedFile] = useState(null);
-  const [preview, setPreview] = useState(null);
-  const [loadingPreview, setLoadingPreview] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState(null);
-
-  const configured = githubConfigured();
-
-  // Load (or refresh) the preview when imagePath changes.
-  useEffect(() => {
-    if (!imagePath || !configured) {
-      setPreview(null);
-      return;
-    }
-    let cancelled = false;
-    setLoadingPreview(true);
-    loadImageDataUri(imagePath)
-      .then((uri) => {
-        if (!cancelled) setPreview(uri);
-      })
-      .catch((e) => {
-        if (!cancelled) setError(`preview failed: ${e.message}`);
-      })
-      .finally(() => {
-        if (!cancelled) setLoadingPreview(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [imagePath, configured]);
-
-  const onPick = (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setError(null);
-    setPickedFile(file);
-    e.target.value = ""; // allow re-picking the same file later
-  };
-
-  const onCropConfirm = async (blob) => {
-    setPickedFile(null);
-    setBusy(true);
-    setError(null);
-    try {
-      const result = await uploadBeatImage({ beatId, blob });
-      onChange(result.path);
-      // Force a preview refresh after commit lands.
-      const uri = await loadImageDataUri(result.path);
-      setPreview(uri);
-    } catch (e) {
-      setError(`upload failed: ${e.message}`);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const onRemove = async () => {
-    if (!confirm("Remove this beat's image? The file will be deleted from the content branch.")) return;
-    setBusy(true);
-    setError(null);
-    try {
-      await deleteBeatImage({ beatId, path: imagePath });
-      onChange(null);
-      setPreview(null);
-    } catch (e) {
-      setError(`delete failed: ${e.message}`);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <div className="flex flex-col gap-2 mt-3">
-      <span className="text-xs uppercase tracking-wide text-slate-400">
-        image (3:2, rightmost third fades in-game)
-      </span>
-
-      {!configured && (
-        <div className="text-xs text-rose-400">
-          GitHub sync not configured — set VITE_GITHUB_TOKEN and VITE_GITHUB_REPO
-          to enable image uploads.
-        </div>
-      )}
-
-      <div className="flex items-start gap-3">
-        <div className="w-64 aspect-[3/2] bg-slate-950/60 border border-slate-800 rounded overflow-hidden relative flex items-center justify-center">
-          {loadingPreview && (
-            <span className="text-xs text-slate-500">loading…</span>
-          )}
-          {!loadingPreview && preview && (
-            <>
-              <img
-                src={preview}
-                alt=""
-                className="absolute inset-0 w-full h-full object-cover"
+      <SectionCard title="Delivery">
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="deliver">
+            <Select
+              value={beat.deliver}
+              onChange={(v) => set("deliver", v)}
+              options={BEAT_DELIVER_MODES}
+            />
+          </Field>
+          <Field label="mode">
+            <Select
+              value={beat.mode}
+              onChange={(v) => set("mode", v)}
+              options={BEAT_MODES}
+            />
+          </Field>
+          {beat.mode === "private" && (
+            <Field label="recipient" className="col-span-2">
+              <RecipientPicker
+                value={beat.recipient}
+                onChange={(v) => set("recipient", v)}
               />
-              <div
-                className="absolute top-0 bottom-0 right-0 flex items-center justify-center pointer-events-none"
-                style={{
-                  width: "33.3333%",
-                  background:
-                    "linear-gradient(to right, rgba(15,23,42,0.15), rgba(15,23,42,0.85))",
-                }}
-              >
-                <span className="text-slate-100 text-[10px] uppercase tracking-[0.3em] font-semibold opacity-70">
-                  fade
-                </span>
-              </div>
-            </>
-          )}
-          {!loadingPreview && !preview && (
-            <span className="text-xs text-slate-500">no image</span>
+            </Field>
           )}
         </div>
 
-        <div className="flex flex-col gap-2 text-xs text-slate-300">
-          {imagePath && (
-            <div>
-              <span className="text-slate-500">path</span>
-              <div className="font-mono break-all text-slate-300 max-w-md">
-                {imagePath}
-              </div>
-            </div>
-          )}
-          <div className="flex items-center gap-2">
-            <label
-              className={`px-2 py-1 rounded border cursor-pointer ${
-                configured && !busy
-                  ? "bg-slate-800 border-slate-700 hover:bg-slate-700 text-slate-200"
-                  : "bg-slate-900 border-slate-800 text-slate-600 cursor-not-allowed"
-              }`}
-            >
-              {imagePath ? "replace…" : "upload image…"}
-              <input
-                type="file"
-                accept="image/*"
-                disabled={!configured || busy}
-                onChange={onPick}
-                className="hidden"
-              />
-            </label>
-            {imagePath && (
-              <button
-                type="button"
-                onClick={onRemove}
-                disabled={busy}
-                className="px-2 py-1 text-xs rounded bg-rose-900/60 hover:bg-rose-800 border border-rose-800 text-rose-100 disabled:opacity-50"
-              >
-                remove
-              </button>
-            )}
-            {busy && <span className="text-amber-300">working…</span>}
-          </div>
-          {error && <span className="text-rose-400">{error}</span>}
-          <div className="text-slate-500">
-            target file: <code>{pathForBeatImage(beatId)}</code>
-          </div>
-        </div>
-      </div>
+        {beat.deliver === "conditional" && (
+          <Field label="deliverCondition">
+            <DslBuilder
+              value={beat.deliverCondition}
+              onChange={(v) => set("deliverCondition", v)}
+            />
+          </Field>
+        )}
+        {beat.deliver === "discovered" && (
+          <Field label="placementFilter">
+            <HexFilterBuilder
+              value={beat.placementFilter}
+              onChange={(v) => set("placementFilter", v)}
+              allowNull={false}
+            />
+          </Field>
+        )}
 
-      {pickedFile && (
-        <ImageCropper
-          file={pickedFile}
-          beatId={beatId}
-          onCancel={() => setPickedFile(null)}
-          onConfirm={onCropConfirm}
+        <PrereqEditor
+          beatId={beat.id}
+          beats={quest.beats ?? []}
+          prereqs={quest.prereqs ?? []}
+          onChange={onPrereqsChange}
         />
-      )}
-    </div>
+      </SectionCard>
+    </>
   );
 }
 

@@ -1,63 +1,64 @@
 // Image upload / fetch / delete against the GitHub content branch.
 // Uses the same fine-grained PAT and target branch as the snapshot
-// sync. Beat images live at src/game/content/images/beats/<id>.jpg —
-// auto-named after the beat id so the file path is fully derivable
-// from data.
+// sync. Images for any encounter type are auto-named after the
+// encounter id so the file path is fully derivable from data.
 
 import { commitFiles, githubConfigured } from "./github.js";
 
 const API = "https://api.github.com";
 
-export const BEAT_IMAGE_DIR = "src/game/content/images/beats";
+export const IMAGE_DIRS = {
+  beat: "src/game/content/images/beats",
+  world: "src/game/content/images/world",
+  field: "src/game/content/images/field",
+};
 
-export function pathForBeatImage(beatId) {
-  if (!beatId) throw new Error("beatId required");
-  return `${BEAT_IMAGE_DIR}/${beatId}.jpg`;
+export function pathForImage(kind, id) {
+  const dir = IMAGE_DIRS[kind];
+  if (!dir) throw new Error(`unknown image kind '${kind}'`);
+  if (!id) throw new Error("id required");
+  return `${dir}/${id}.jpg`;
 }
 
-export async function uploadBeatImage({ beatId, blob }) {
+export async function uploadImage({ kind, id, blob }) {
   if (!githubConfigured()) {
     throw new Error("GitHub sync is not configured.");
   }
-  const path = pathForBeatImage(beatId);
+  const path = pathForImage(kind, id);
   const base64 = await blobToBase64(blob);
   const result = await commitFiles(
     [{ path, content: base64, encoding: "base64" }],
     {
-      message: `Editor: upload beat image ${beatId}.jpg (${formatBytes(blob.size)})`,
+      message: `Editor: upload ${kind} image ${id}.jpg (${formatBytes(blob.size)})`,
     },
   );
-  // Bust the preview cache for this path.
   imageDataUriCache.delete(path);
   return { ...result, path };
 }
 
-export async function deleteBeatImage({ beatId, path }) {
+export async function deleteImage({ path }) {
   if (!githubConfigured()) {
     throw new Error("GitHub sync is not configured.");
   }
-  const filePath = path || pathForBeatImage(beatId);
-  const { token, repo, branch } = githubSettings();
+  const { token, repo, branch } = settings();
 
-  // Look up sha on the content branch — Contents API needs it to delete.
   const lookup = await fetch(
-    `${API}/repos/${repo}/contents/${filePath}?ref=${encodeURIComponent(branch)}`,
+    `${API}/repos/${repo}/contents/${path}?ref=${encodeURIComponent(branch)}`,
     { headers: ghHeaders(token) },
   );
   if (lookup.status === 404) {
-    // Nothing to delete; treat as success.
-    imageDataUriCache.delete(filePath);
+    imageDataUriCache.delete(path);
     return { deleted: false };
   }
   if (!lookup.ok) {
     throw new Error(`lookup failed: ${lookup.status}`);
   }
   const meta = await lookup.json();
-  const del = await fetch(`${API}/repos/${repo}/contents/${filePath}`, {
+  const del = await fetch(`${API}/repos/${repo}/contents/${path}`, {
     method: "DELETE",
     headers: { ...ghHeaders(token), "Content-Type": "application/json" },
     body: JSON.stringify({
-      message: `Editor: remove beat image ${filePath}`,
+      message: `Editor: remove image ${path}`,
       sha: meta.sha,
       branch,
     }),
@@ -66,7 +67,7 @@ export async function deleteBeatImage({ beatId, path }) {
     const text = await del.text().catch(() => "");
     throw new Error(`delete failed: ${del.status}: ${text}`);
   }
-  imageDataUriCache.delete(filePath);
+  imageDataUriCache.delete(path);
   return { deleted: true };
 }
 
@@ -79,7 +80,7 @@ export async function loadImageDataUri(path) {
   if (!githubConfigured()) return null;
   if (imageDataUriCache.has(path)) return imageDataUriCache.get(path);
 
-  const { token, repo, branch } = githubSettings();
+  const { token, repo, branch } = settings();
   const res = await fetch(
     `${API}/repos/${repo}/contents/${path}?ref=${encodeURIComponent(branch)}`,
     { headers: ghHeaders(token) },
@@ -92,8 +93,6 @@ export async function loadImageDataUri(path) {
     throw new Error(`image fetch failed: ${res.status}`);
   }
   const meta = await res.json();
-  // meta.content is base64 with embedded newlines; data URI is fine
-  // with those, but strip them for cleanliness.
   const base64 = (meta.content || "").replace(/\n/g, "");
   const mime = guessMimeFromPath(path);
   const dataUri = `data:${mime};base64,${base64}`;
@@ -117,8 +116,7 @@ function ghHeaders(token) {
   };
 }
 
-// Inlined to avoid an import cycle; same settings shape as github.js.
-function githubSettings() {
+function settings() {
   return {
     token: import.meta.env.VITE_GITHUB_TOKEN,
     repo: import.meta.env.VITE_GITHUB_REPO,

@@ -71,6 +71,7 @@ export async function loadSnapshot() {
     expiresIn: row.expiresIn,
     publicGroupChoice: Boolean(row.publicGroupChoice),
     art: row.art,
+    imagePath: row.imagePath ?? null,
     text: row.text,
     triggerCondition: decodeJson(row.triggerCondition),
     triggerStrength: decodeJson(row.triggerStrength),
@@ -83,6 +84,7 @@ export async function loadSnapshot() {
     id: row.id,
     copies: row.copies,
     art: row.art,
+    imagePath: row.imagePath ?? null,
     text: row.text,
     choices: choicesByParent.get(`field_encounter:${row.id}`) ?? [],
   }));

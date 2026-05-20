@@ -167,15 +167,20 @@ under Site → Settings → Build & deploy.
   engine-level eligibility gates from §15.7 — are edited as a toggle
   chip list in the beat form rather than as graph edges, to keep the
   decision tree visually clean.
-- Beats can carry an authored image. Upload from the beat form opens an
-  in-browser cropper locked to 3:2 — drag the rectangle to position,
-  pull corner handles to resize. The rightmost third is overlaid with
-  the word "fade" during cropping to remind authors that the engine
-  fades that band in-game. On confirm the image is JPEG-encoded
-  (quality 0.85, max 1500×1000), committed to
-  `src/game/content/images/beats/<beat-id>.jpg` on the content branch,
-  and the beat's `imagePath` is set. Previews load through the
-  authenticated contents API so private repos work.
+- Every encounter type — quest beats, world encounters, field encounters —
+  uses the same authoring surface: **Encounter** (id, image, text, art
+  notes) → **Choices** → type-specific delivery / trigger / copies
+  metadata. The image and choice tools are identical wherever they
+  appear; only the auxiliary metadata differs.
+- Images can be attached to any encounter. Upload opens an in-browser
+  cropper locked to 3:2 — drag the rectangle to position, pull corner
+  handles to resize. The rightmost third is overlaid with the word
+  "fade" during cropping to remind authors that the engine fades that
+  band in-game. On confirm the image is JPEG-encoded (quality 0.85,
+  max 1500×1000), committed to the content branch, and the encounter's
+  `imagePath` is set. Files are auto-named after the encounter id:
+  `src/game/content/images/{beats,world,field}/<id>.jpg`. Previews
+  load through the authenticated contents API so private repos work.
 - World / field encounter editors are structured forms. Trigger conditions
   and choice conditions use the DSL builder; placement hexes use the
   HexFilter form.

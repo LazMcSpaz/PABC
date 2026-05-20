@@ -15,7 +15,7 @@ const MAX_OUTPUT_H = 1000;
 
 const JPEG_QUALITY = 0.85;
 
-export function ImageCropper({ file, beatId, onCancel, onConfirm }) {
+export function ImageCropper({ file, id, targetPath, onCancel, onConfirm }) {
   const [imageUrl, setImageUrl] = useState(null);
   const [naturalSize, setNaturalSize] = useState(null);
   const [crop, setCrop] = useState(null); // in image-native pixels
@@ -139,7 +139,7 @@ export function ImageCropper({ file, beatId, onCancel, onConfirm }) {
         <header className="px-4 py-3 border-b border-slate-800 flex items-center">
           <h2 className="text-sm font-semibold text-slate-200">
             Crop image for{" "}
-            <code className="text-slate-300">{beatId}</code>
+            <code className="text-slate-300">{id}</code>
           </h2>
           <span className="ml-3 text-xs text-slate-500">
             3:2 locked · drag to position · corners to resize
@@ -251,8 +251,8 @@ export function ImageCropper({ file, beatId, onCancel, onConfirm }) {
 
         <footer className="px-4 py-3 border-t border-slate-800 flex items-center gap-2">
           <span className="text-xs text-slate-500">
-            output: <code>src/game/content/images/beats/{beatId}.jpg</code> ·
-            committed to the content branch on confirm
+            output: <code>{targetPath}</code> · committed to the content
+            branch on confirm
           </span>
           <div className="ml-auto flex items-center gap-2">
             <button
