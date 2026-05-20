@@ -1,7 +1,7 @@
 // Game setup — builds the initial GameState (mechanical-spec §13.3):
 // the board, players, locations, units, and the tiered Market.
 import { CONFIG } from "./config.js";
-import { FACTIONS, LOCATIONS, CHIPS, CAPITAL } from "./content.js";
+import { FACTIONS, LOCATIONS, CHIPS, CAPITAL, ABILITIES } from "./content.js";
 import { makeRng } from "./rng.js";
 import { createIdGen } from "./ids.js";
 import { buildHexGrid, generateLayout } from "./board.js";
@@ -62,9 +62,20 @@ export function createGame({ seed = Date.now() & 0xffffffff, factionIds } = {}) 
       production += CONFIG.capital.productionBonus;
     }
 
-    // TODO (content batch): assign every High / Very High location a
-    // random ability from content/location-abilities, which also costs
-    // the location one chip slot.
+    // Every High / Very High location gets one random ability (§6.3),
+    // and that ability costs the location one of its chip slots.
+    let abilityId = null;
+    if (def.strategicValue === "high" || def.strategicValue === "veryHigh") {
+      const pool = Object.values(ABILITIES).filter(
+        (a) => a.eligibleTier === def.strategicValue || a.eligibleTier === "either",
+      );
+      if (pool.length) abilityId = rng.pick(pool).id;
+    }
+    const chipSlots = Math.max(
+      0,
+      CONFIG.chipSlotsByValue[def.strategicValue] - (abilityId ? 1 : 0),
+    );
+
     locations[hexId] = {
       hexId,
       locationId: locId,
@@ -73,11 +84,11 @@ export function createGame({ seed = Date.now() & 0xffffffff, factionIds } = {}) 
       sections: Array(3).fill(controller || "neutral"),
       foothold: controller ? 0 : null,
       footholdCap: CONFIG.footholdCap,
-      chipSlots: CONFIG.chipSlotsByValue[def.strategicValue],
+      chipSlots,
       chips: locChips,
       garrison,
       production,
-      abilityId: null,
+      abilityId,
     };
   }
 
@@ -120,6 +131,7 @@ export function createGame({ seed = Date.now() & 0xffffffff, factionIds } = {}) 
 
   return {
     seed,
+    rng, // live seeded generator — contest dice draw from it
     nextId: uid, // shared instance id generator — used by runtime Recruit
     round: 1,
     phase: "Upkeep",

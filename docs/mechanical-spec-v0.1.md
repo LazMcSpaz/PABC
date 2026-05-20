@@ -11,7 +11,9 @@ touching the engine.
 > configuration constants** (§14), **removes** the `Permanent` /
 > `One-Shot` roles and the Tableau / Anchor zones, and adds the
 > **tech-tier Market progression**. Content is authored in the
-> `content/` sheets and poured into the §13 schemas.
+> `content/` sheets and poured into the §13 schemas. **§15 (added
+> post-v0.1) extends the engine with the trigger-driven encounter and
+> quest system** — a parallel channel to the §10 event bus.
 
 ---
 
@@ -61,6 +63,11 @@ not conflate them.
   Events.
 - There is **no player-level combat stat** — a *player* is never itself a
   contest entity. Units and Locations are.
+
+In addition to the pools above, players carry three signed **narrative
+tracks** — `trust`, `reputation`, `alignment` — used by the encounter
+and quest system. They behave like `VP` and `Tech` (accumulated, never
+spent) but are scoped to that system; see §15.2.
 
 ## 4. Zones
 
@@ -265,6 +272,12 @@ surplus `Movement` does not count — its player draws the top of the
 `Tech`, …); an **Obstacle** / **Location** is placed on the Board. The
 node is then **spent** and becomes plain terrain.
 
+> This is the **field-encounter** mechanic, formalised in §15.8. The
+> deck reference here is the same as `state.fieldEncounterDeck`. Field
+> encounters are one of three delivery modes for the encounter system
+> (§15.5); the other two (private and public) are driven by the trigger
+> evaluator (§15.4).
+
 ### 6.6 Starting position
 
 Factions are **cosmetic** in v0.1 — a name, a colour, and two affiliated
@@ -376,6 +389,11 @@ results are **standardized** and need no `outcomes` authoring.
 
 The core of reaction cards and "steal another player's reward" — designed
 in from the start.
+
+> A **second, parallel** trigger channel — the end-of-round trigger
+> evaluator that drives ambient encounters and quests — is defined in
+> §15.4. It is condition-poll-driven where this section is event-
+> driven; both coexist and do not interfere.
 
 ### 10.1 The event bus
 
@@ -556,6 +574,11 @@ Inside a reaction window, void the pending action entirely.
 - **Information / interactive:** PEEK, FORCE_CHOICE, SURCHARGE
 - **Replacement (reaction window only):** REDIRECT, CANCEL
 
+The encounter and quest system (§15) adds further effect types —
+`ADJUST_TRACK`, `ADJUST_STANDING`, `SET_PLAYER_FLAG`, `QUEUE_DEFERRED`,
+`START_QUEST`, `ADVANCE_QUEST`, `COMPLETE_QUEST`, `PLACE_ENCOUNTER`,
+`DELIVER_ENCOUNTER` — each a single additive handler; see §15.10.
+
 ## 13. Data Schemas
 
 ### 13.1 Card / chip schema
@@ -628,6 +651,12 @@ Held by the engine during play, not authored:
 - **Location:** `{ controller | null, sections[3], foothold F,
   chips[≤slots], garrison, production, ability, node }`
 
+The state shape is extended by §15.11 for the encounter and quest
+system — additional player fields (`tracks`, `flags`, `activeQuests`,
+`completedQuests`), a `state.world` object, the `state.factionStanding`
+matrix, `state.triggerCooldowns`, `state.deferred`, and
+`state.activeQuests`.
+
 ## 14. Configuration & Open Questions
 
 ### 14.1 Locked constants (v0.1)
@@ -650,14 +679,410 @@ Held by the engine during play, not authored:
 
 ### 14.2 Still open
 
-- **Encounter deck** — card design and deck composition (next design pass).
+- **Encounter / quest content** — the encounter-system *architecture* is
+  defined in §15; specific encounter, trigger and quest records are
+  authored in `content/encounters/`, `content/triggers/`, `content/quests/`.
 - **Reactive card set** — the full list and how copies are seeded into the
   `reactiveDeck`.
 - **Chip costs and `techLevel` assignments** — set in the content batch.
-- **Capital chip** — the garrison / production bonus values.
 - **Location ability list** — authored in `content/location-abilities.csv`.
+  Real effects (teleport, suppress-chip-bonuses, …) still need new effect
+  types beyond v0.1's set.
 - **Capital re-establishment** — cost / trigger to rebuild a lost Capital.
 - **Multi-player raid edge case** — two units on a *third* player's
   Location: may they raid each other, or only contest the controller?
 - **Reaction-window priority** among competing `replace` subscribers —
   seat order is the v0.1 default; confirm.
+
+---
+
+## 15. The Encounter & Quest System
+
+The pieces in §6.5 (encounter nodes) and §10 (the event bus) describe
+**reactive** mechanics — things that fire in response to a specific
+gameplay event. This section adds a second, parallel channel:
+**ambient narrative triggers** that read the broader state of the game
+and decide, between rounds, that something interesting should happen.
+It also adds a quest spine — multi-beat sequences delivered through the
+same channel.
+
+These additions are layered *on top of* the existing engine, not a
+rewrite. Field encounters (§6.5) keep their semantics and are referred
+to as such where the distinction matters. Reactive cards (§10) remain
+the event-driven counterpart.
+
+### 15.1 Overview
+
+| Subsystem | Reads | Writes | Cadence |
+|---|---|---|---|
+| **Trigger evaluation** (§15.4) | world state, player state, faction standing | nothing directly — fires encounters | end of every round |
+| **Encounter delivery** (§15.5) | encounter definition | player choice → effects | event-driven (when a trigger fires, when a unit ends Move on a marker, on a quest beat unlock) |
+| **Deferred queue** (§15.6) | due-round queue | effect application | end of every round, before triggers |
+| **Quest engine** (§15.7) | active-quest state, beat prerequisites | beat delivery, completion rewards | event-driven on quest start / beat completion |
+| **Faction standing** (§15.3) | nothing — pure data | modified by effects | continuously |
+| **Field encounters** (§15.8) | the `fieldEncounterDeck` | encounter delivery | when a unit ends Move on an encounter hex |
+
+All six communicate through plain effects (§12 / §15.10) and the
+existing event bus. **Faction Standing** was added as a late
+requirement specifically as a test of architectural flexibility: it is
+a value that triggers *read*, choices *modify*, and the faction AI
+*consults*. No subsystem branches on it; it slots in as data.
+
+### 15.2 Player tracks
+
+Three new player-level numeric tracks supplement `VP` and `Tech` (§3).
+They are signed integers, accumulated across the game and never spent.
+
+| Track | Range guidance | Modified by | Read by |
+|---|---|---|---|
+| **`trust`** | ~[−10, +10] | encounter choices, quest outcomes | triggers, strength scoring, quest unlock conditions |
+| **`reputation`** | ~[−10, +10] | encounter choices, public events | the same, plus faction-standing thresholds |
+| **`alignment`** | ~[−10, +10] | quest outcomes, certain Reactives | which faction quest-lines a player qualifies for |
+
+Modified via `ADJUST_TRACK` (§15.10). Stored under `player.tracks`
+(§15.11). The ranges are guidance for content authors, not engine
+caps — the engine clamps nothing, leaving room for extreme content.
+
+### 15.3 World state and faction standing
+
+The engine maintains a single **`state.world`** object alongside the
+per-player state, plus a faction-by-player **standing matrix**.
+
+`state.world` holds:
+- `controlHistory[]` — `{ hex, controller, fromRound, toRound|null }`
+  entries appended on every Location capture / loss. Lets a trigger
+  ask "how long has player X held Y?" or "has this hex changed hands
+  twice recently?"
+- `raidCounts` and `ignoreCounts` — per-faction rolling counters
+  (raids carried out against the faction; engagements that were
+  passed up). Decayed slightly each round so they reflect recency.
+- `eventTimeline[]` — a compact significant-event log used by
+  deferred resolution and faction-memory lookups. Distinct from the
+  unbounded event-bus log (§10.1).
+- `encounterHexCooldowns` — when each field-encounter hex refreshes.
+- `encounterMarkers` — placement-mode encounters waiting on the map.
+
+`state.factionStanding` is a `fid → { pid → number }` matrix, range
+guidance ~[−10, +10]. A faction's standing toward a player is modified by
+`ADJUST_STANDING` (§15.10) — emitted by encounter choices, quest
+outcomes, threshold checks (track crossings, alignment shifts), and
+engine-internal hooks (e.g. capturing an affiliated Location grants
+that faction a standing decrement toward the captor).
+
+Standing is consulted by:
+- Trigger condition / strength scoring (§15.4).
+- The faction AI when allocating its turn actions — a faction with
+  strongly negative standing toward a player will weight Move /
+  Contest toward targeting that player. The AI module is a separate
+  layer; the engine just exposes standing for it to read.
+
+### 15.4 Trigger evaluation
+
+Triggers are the engine's way of deciding, at end of every round, that
+something narratively significant should happen. They are **separate
+from the §10 event bus**: the bus is synchronous and event-payload-
+driven; triggers are asynchronous and state-condition-driven.
+
+**Trigger definition:**
+
+```js
+{
+  id:        string,
+  cooldown:  number,                     // rounds before it can fire again
+  condition: (state, ctx) => boolean,    // eligibility
+  strength:  (state, ctx) => 1|2|3|4|5,  // narrative urgency
+  encounter: EncounterRef | EncounterDef,
+}
+```
+
+**Evaluation algorithm** — runs in the turn loop after `round_ended`
+(§7 Cleanup, §15.12) in this order:
+
+1. Resolve any due deferred effects (§15.6).
+2. Build the eligible pool: skip any trigger on cooldown
+   (`state.triggerCooldowns[id] > current round`) or whose
+   `condition` returns false.
+3. Score each eligible trigger with `strength(state, ctx)`.
+4. Sort by strength descending. **Fire the top two.** Ties at the
+   cutoff resolved by the seeded RNG.
+5. For each fired trigger, set
+   `state.triggerCooldowns[id] = round + trigger.cooldown` and
+   deliver its encounter (§15.5).
+
+Strength is a 1–5 scalar by design — the buckets force authors to
+make deliberate priority choices instead of fine-tuning floats.
+A trigger that fires at strength 5 is "this should happen now";
+strength 1 is "only if nothing else wants the slot."
+
+### 15.5 Encounter delivery
+
+An **encounter** is the unit of player-facing narrative content: art,
+text, and 2–3 labeled choices that produce effects.
+
+```js
+{
+  id:        string,
+  mode:      "private" | "public" | "placement",
+  recipient: "active" | "lowest-standing" | pid | …,    // private mode
+  expiresIn: number?,                                   // placement mode
+  art:       string,
+  text:      string,
+  choices: [
+    {
+      label, condition?,
+      effects:  [Effect],
+      deferred?: { delayRounds, effects: [Effect] },
+    },
+  ],
+}
+```
+
+**Delivery modes:**
+
+- **`private`** — a single player decides. The engine raises an
+  interactive request to that player via the same `ctx.interact`
+  abstraction the effect library already uses (§12). Other players
+  wait. Headless harnesses see the same auto-pick semantics as
+  `FORCE_CHOICE` (first option).
+- **`public`** — all players see the encounter and pick independently;
+  the engine resolves them in seat order. An encounter can opt into
+  "one player chooses for the group" via a config flag.
+- **`placement`** — the engine drops a marker on the Board (a chosen
+  hex, or one matching a filter) and adds it to
+  `state.world.encounterMarkers`. The encounter resolves only when
+  a unit ends a Move on the marker's hex — at which point delivery
+  switches to `private` mode with that unit's owner as recipient.
+  If `expiresIn` elapses before discovery, the marker is removed
+  and the encounter fizzles.
+
+Field encounters (§15.8) are a degenerate case of placement: every
+encounter hex is a permanent marker drawing from a shared deck.
+
+### 15.6 Deferred consequences
+
+A choice's effect list can declare effects that fire later instead of
+immediately, via `QUEUE_DEFERRED` (§15.10) or the `choice.deferred`
+shorthand on the encounter schema:
+
+```
+state.deferred[] = [
+  { dueRound, effects: [Effect], source, ctx },
+  …
+]
+```
+
+At end of every round, **before** trigger evaluation, the engine
+sweeps the queue: for each entry with `dueRound <= state.round`, run
+`applyEffects(state, entry.effects, entry.ctx)` and remove. The
+sweep runs first so deferred effects update the state that
+conditions then read.
+
+Deferred effects are invisible to the UI until they fire. They are
+engine state and persist across saves (when save/load is added).
+
+### 15.7 Quest progression
+
+A **quest** is a sequence of one or more encounter beats sharing a
+storyline and gated by prerequisites.
+
+```js
+{
+  id:    string,
+  mode:  "single-player" | "global",
+  beats: [
+    {
+      id,
+      prerequisites?: [beatId],
+      deliver:    "auto" | "discovered" | "conditional",
+      condition?: (state, quest) => boolean,   // for "conditional"
+      placement?: HexFilter,                   // for "discovered"
+      encounter:  EncounterRef | EncounterDef,
+    },
+  ],
+  completion: {
+    rewardForClaimant:   [Effect],
+    sharedSideEffects?: [Effect],   // optional, on every player
+  },
+}
+```
+
+**Quest lifecycle:**
+
+1. `START_QUEST { questId, claimant }` (§15.10) adds the quest to
+   `state.activeQuests`. For `single-player`, `claimant` is the
+   acting player; other players cannot start the same quest. For
+   `global`, `claimant` is initially `null`; the first player to
+   complete the final beat becomes the claimant.
+2. The engine examines each beat with prerequisites now met. For
+   each, it begins delivery per the beat's `deliver` mode (auto =
+   immediate; discovered = drop a placement marker; conditional =
+   wait for `condition` to come true, checked at end-of-round).
+3. A beat's encounter resolves through the normal delivery system.
+   On resolution it emits `ADVANCE_QUEST { questId, beatId }`
+   (§15.10) — typically as an effect on one of the choices. The
+   engine then evaluates the next beats.
+4. When the final beat completes, the engine runs
+   `completion.rewardForClaimant` for the claimant and
+   `completion.sharedSideEffects` (if any) for everyone, emits
+   `quest_completed`, and moves the quest record from
+   `state.activeQuests` to `player.completedQuests`.
+
+**Single-player exclusivity:** other players' triggers that would
+start a single-player quest already claimed are no-ops — the trigger
+fires but its encounter's `START_QUEST` effect short-circuits.
+
+**Global broadcast:** beats of a global quest are delivered as
+`public` encounters by default (configurable per beat).
+
+### 15.8 Field encounters
+
+The §6.5 encounter-node mechanic, formalised and renamed:
+
+- An **encounter hex** is a Board node typed `"encounter"`.
+- When a unit ends a Move on an encounter hex, the engine draws the
+  top of the `fieldEncounterDeck` (renamed from `encounterDeck`)
+  and delivers it via the encounter system in `private` mode to
+  that unit's owner.
+- After resolution the hex enters a refresh cooldown
+  (`state.world.encounterHexCooldowns[hex] = round + N`); during
+  that window the hex behaves as plain terrain. After the cooldown
+  it becomes drawable again.
+
+Field encounters and world encounters share the encounter schema. A
+deck record can be promoted to a triggered world encounter and vice
+versa with no schema change — only the delivery mode and trigger
+wiring differ.
+
+### 15.9 Content pipeline
+
+```
+content/
+  encounters/
+    <encounter-id>.js      exports an EncounterDef
+    index.js               aggregates by id
+  triggers/
+    <trigger-id>.js        exports a TriggerDef
+    index.js
+  quests/
+    <quest-id>.js          exports a QuestDef
+    index.js
+  field-encounter-deck.js  the deck used by §15.8
+```
+
+The engine imports only the `index.js` files. Adding content = author
+a file and register in the index. **Adding a new effect type** = add
+one handler to `EFFECTS` in `src/game/effects.js` (§12) and one entry
+to the §15.10 list; nothing else.
+
+### 15.10 New effect types
+
+All additive; one handler each in the effect library (§12). Targeting
+follows §11.
+
+- **`ADJUST_TRACK`** — `{ track: "trust"|"reputation"|"alignment", amount, target }`. Mirrors `ADJUST_RESOURCE` for player tracks.
+- **`ADJUST_STANDING`** — `{ faction, player, amount }`. Modifies the matrix.
+- **`SET_PLAYER_FLAG`** — `{ flag, value, target, duration? }`. Player-scoped flag store. (§12.5's `SET_FLAG` is entity-scoped — units / locations / chips — and remains as-is.)
+- **`QUEUE_DEFERRED`** — `{ effects, delayRounds, target }`. Schedule effects for a future round.
+- **`START_QUEST`** — `{ questId, claimant }`.
+- **`ADVANCE_QUEST`** — `{ questId, beatId }`.
+- **`COMPLETE_QUEST`** — `{ questId }`. Rarely authored — usually emitted by the engine when the final beat resolves.
+- **`PLACE_ENCOUNTER`** — `{ encounterId, hex?, hexFilter?, expiresIn? }`. Drop a placement marker.
+- **`DELIVER_ENCOUNTER`** — `{ encounterId, mode?, recipient? }`. Force-deliver a private or public encounter outside the trigger system (e.g. from a quest beat with `deliver: "auto"`).
+
+The replacement-mode effects from §12 (`REDIRECT`, `CANCEL`) apply to
+encounter delivery payloads as well — a Reactive card can `REDIRECT`
+an encounter's recipient or `CANCEL` the encounter inside a reaction
+window.
+
+### 15.11 State extensions (additions to §13.3)
+
+```js
+// per-player additions
+player.tracks            = { trust: 0, reputation: 0, alignment: 0 };
+player.flags             = {};                  // key → { value, duration? }
+player.activeQuests      = {};                  // questId → { beatIndex, data }
+player.completedQuests   = {};                  // questId → { round, outcome }
+player.encounterCooldowns = {};                 // per-player cooldowns (reserved)
+
+// state-level additions
+state.world = {
+  controlHistory:        [],
+  raidCounts:            { /* fid: n */ },
+  ignoreCounts:          { /* fid: n */ },
+  eventTimeline:         [],
+  encounterHexCooldowns: {},
+  encounterMarkers:      { /* hex: { encounterId, expiresAt } */ },
+};
+state.factionStanding   = { /* fid: { pid: n } */ };
+state.triggerCooldowns  = {};                   // triggerId → roundDueAgain
+state.deferred          = [];                   // [{ dueRound, effects, ctx, source }]
+state.activeQuests      = { /* questId: { claimant, beatIndex, deliveredBeats[] } */ };
+state.fieldEncounterDeck = state.encounterDeck; // renamed; alias kept transiently
+```
+
+### 15.12 Turn-loop integration
+
+`turn.js endTurn`, on the round-rollover branch (existing
+`emit("round_ended")`), runs in this order, then continues into the
+next player's `startTurn`:
+
+```
+emit round_ended
+  ↓
+resolve deferred queue (entries with dueRound <= round)
+  ↓
+trigger evaluation: filter, score, fire top 2 → encounter delivery
+  ↓
+expire placement markers whose expiresAt has elapsed
+  ↓
+decay world counters (raidCounts / ignoreCounts × ~0.9)
+  ↓
+next round / next active player startTurn  (existing flow)
+```
+
+`startTurn`'s existing Upkeep work (action reset, foothold tick,
+production collection) is unchanged. Encounter-choice effects that
+schedule new deferred work simply append to `state.deferred` for a
+future round to pick up.
+
+### 15.13 Implementation map to the current codebase
+
+New modules under `src/game/`:
+
+| File | Responsibility |
+|---|---|
+| `triggers.js` | trigger registry, end-of-round evaluator, cooldown bookkeeping |
+| `encounters.js` | encounter delivery (private / public / placement), interactive choice request, marker management on the Board |
+| `quests.js` | quest lifecycle, beat unlocking, claim enforcement, global-quest broadcast |
+| `standing.js` | faction-standing accessors, threshold hooks, AI read API |
+| `deferred.js` | the deferred-effect queue and its sweep |
+
+Changes to existing modules:
+
+| File | Change |
+|---|---|
+| `setup.js` | initialise the new state additions (§15.11); rename `encounterDeck` → `fieldEncounterDeck` (keep alias) |
+| `effects.js` | add the §15.10 handlers; teach `getZone` about deferred storage if needed |
+| `turn.js` | hook the round-rollover sequence in §15.12 |
+| `actions.js` | the existing `Move` handler already triggers field encounters on Move-end (§6.5); extend that path to also check `state.world.encounterMarkers[hex]` for a placement encounter and deliver it |
+| `events.js` | add the new event names: `encounter_delivered`, `trigger_fired`, `quest_started`, `quest_advanced`, `quest_completed`, `standing_changed`, `track_changed`, `deferred_resolved` |
+| `targeting.js` | add tokens for quest / standing scenarios as they're needed: `claimant`, `most_recently_raided`, etc. |
+| `content.js` | export the new content collections (encounters, triggers, quests); the spec-content separation in §2 keeps engine code free of content branches |
+
+No existing handler needs to change behaviour. The §15 code paths are
+guarded by data: the trigger evaluator does nothing if no triggers
+are registered, the quest engine does nothing without active quests,
+the deferred sweep is a no-op on an empty queue. Layer 3.1–3.3
+harnesses continue to pass.
+
+### 15.14 What this replaces / supersedes
+
+- **§6.5** is reframed as field encounters (§15.8) — same mechanic,
+  formal name.
+- **§10** is unchanged. The trigger evaluator in §15.4 is parallel,
+  not a replacement.
+- **§12.5 (`SET_FLAG`)** stays as the entity flag store. The new
+  `SET_PLAYER_FLAG` (§15.10) is the player-scoped parallel.
+- **§14.2** open items for encounter / quest *architecture* are now
+  resolved here; specific record content remains an open authoring
+  task.

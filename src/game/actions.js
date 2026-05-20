@@ -6,7 +6,10 @@ import { emit } from "./events.js";
 import { activePlayerId } from "./targeting.js";
 import { bfsDistances } from "./board.js";
 import { CONFIG } from "./config.js";
-import { FACTIONS } from "./content.js";
+import { FACTIONS, CHIPS, ABILITIES, chipDefOf } from "./content.js";
+import { validateContest, runContest } from "./contest.js";
+import { recomputeStats, recomputeTech } from "./stats.js";
+import { applyEffects } from "./effects.js";
 
 const fail = (reason) => ({ ok: false, reason });
 
@@ -102,10 +105,129 @@ function runRecruit(state, { pid, player, params }) {
   return { unit: u };
 }
 
+// --- Acquire ---------------------------------------------------------
+// Buy a face-up Market chip and install it on one of your units (kind
+// `unit`) or a location you fully control (kind `location`). The chip's
+// `techLevel` must be at or below the player's unlocked Market tier
+// (§4.1). The vacated row refills from the tier deck.
+function unlockedTier(tech) {
+  if (tech >= CONFIG.tech.tier3) return 3;
+  if (tech >= CONFIG.tech.tier2) return 2;
+  return 1;
+}
+
+function findInMarket(state, chipUid) {
+  for (const [tierKey, t] of Object.entries(state.market.tiers)) {
+    if (t.row.includes(chipUid)) return { tier: Number(tierKey), row: t.row, deck: t.deck };
+  }
+  return null;
+}
+
+function slotsUsed(state, chipUids) {
+  let n = 0;
+  for (const c of chipUids) n += chipDefOf(state, c)?.slots ?? 1;
+  return n;
+}
+
+function validateAcquire(state, { pid, player, params }) {
+  if (!params.chip) return fail("specify which chip to acquire (params.chip)");
+  const found = findInMarket(state, params.chip);
+  if (!found) return fail("that chip is not in any market row");
+  if (found.tier > unlockedTier(player.tech))
+    return fail(`tier ${found.tier} requires more Tech`);
+
+  const def = CHIPS[state.chips[params.chip]?.chipId];
+  if (!def) return fail("unknown chip");
+  if (player.resource < (def.cost || 0)) return fail("not enough scrap");
+
+  const into = params.into || {};
+  if (def.kind === "unit") {
+    const unit = state.units[into.unit];
+    if (!unit) return fail("specify a unit to install into (params.into.unit)");
+    if (unit.owner !== pid) return fail("not your unit");
+    if (slotsUsed(state, unit.chips) + def.slots > CONFIG.unit.baySlots)
+      return fail("not enough Bay slots");
+  } else {
+    const loc = state.locations[into.location];
+    if (!loc) return fail("specify a location to install into (params.into.location)");
+    if (loc.controller !== pid) return fail("you do not fully control that location");
+    if (slotsUsed(state, loc.chips) + def.slots > loc.chipSlots)
+      return fail("not enough Location slots");
+  }
+  return { ok: true };
+}
+
+function runAcquire(state, { pid, player, params }) {
+  const found = findInMarket(state, params.chip);
+  const chipUid = found.row.splice(found.row.indexOf(params.chip), 1)[0];
+  if (found.deck.length) found.row.push(found.deck.shift());
+
+  const def = CHIPS[state.chips[chipUid].chipId];
+  player.resource -= def.cost || 0;
+  emit(state, "resource_spent", {
+    player: pid, resource: "Resource", amount: -(def.cost || 0),
+  });
+
+  if (def.kind === "unit") {
+    state.units[params.into.unit].chips.push(chipUid);
+    recomputeStats(state);
+  } else {
+    state.locations[params.into.location].chips.push(chipUid);
+  }
+
+  emit(state, "card_acquired", {
+    player: pid, chip: chipUid, chipId: def.id, tier: found.tier,
+  });
+  recomputeTech(state); // a fresh Labs may have moved the player's Tech
+  return { chip: chipUid, chipId: def.id, tier: found.tier };
+}
+
+// --- Activate --------------------------------------------------------
+// Invoke a location ability (§13.2). The dispatcher charges the
+// ability's own `cost.action`; the ability also pays any `cost.resource`
+// in its runner.
+function getActivatable(state, params) {
+  const loc = state.locations[params.location];
+  if (!loc || !loc.abilityId) return null;
+  const ability = ABILITIES[loc.abilityId];
+  if (!ability) return null;
+  return { loc, ability, opt: ability.activated?.[params.abilityIndex || 0] };
+}
+
+function activateActionCost(state, { params }) {
+  return getActivatable(state, params)?.opt?.cost?.action ?? 0;
+}
+
+function validateActivate(state, { pid, player, params }) {
+  const got = getActivatable(state, params);
+  if (!got) return fail("no activatable ability at that location");
+  if (got.loc.controller !== pid) return fail("you do not fully control that location");
+  if (!got.opt) return fail("no such activated option");
+  const cost = got.opt.cost || {};
+  if (cost.resource && player.resource < cost.resource) return fail("not enough scrap");
+  return { ok: true };
+}
+
+function runActivate(state, { pid, player, params }) {
+  const { loc, ability, opt } = getActivatable(state, params);
+  const cost = opt.cost || {};
+  if (cost.resource) {
+    player.resource -= cost.resource;
+    emit(state, "resource_spent", {
+      player: pid, resource: "Resource", amount: -cost.resource,
+    });
+  }
+  applyEffects(state, opt.effects || [], { sourcePlayer: pid, source: loc });
+  return { location: loc.hexId, ability: ability.id };
+}
+
 // --- dispatch --------------------------------------------------------
 const ACTIONS = {
   move: { cost: 1, validate: validateMove, run: runMove },
   recruit: { cost: 1, validate: validateRecruit, run: runRecruit },
+  contest: { cost: 1, validate: validateContest, run: runContest },
+  acquire: { cost: 1, validate: validateAcquire, run: runAcquire },
+  activate: { cost: activateActionCost, validate: validateActivate, run: runActivate },
 };
 
 export function performAction(state, type, params = {}) {
@@ -120,10 +242,11 @@ export function performAction(state, type, params = {}) {
 
   const check = def.validate(state, arg);
   if (!check.ok) return check;
-  if (player.actions.remaining < def.cost) return fail("not enough Actions");
+  const cost = typeof def.cost === "function" ? def.cost(state, arg) : def.cost;
+  if (player.actions.remaining < cost) return fail("not enough Actions");
 
-  player.actions.remaining -= def.cost;
-  emit(state, "action_spent", { player: pid, action: type, cost: def.cost });
+  player.actions.remaining -= cost;
+  emit(state, "action_spent", { player: pid, action: type, cost });
 
   const result = def.run(state, arg) || {};
   return { ok: true, action: type, ...result };

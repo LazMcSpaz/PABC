@@ -6,7 +6,7 @@ import { startTurn, endTurn } from "./turn.js";
 import { performAction } from "./actions.js";
 import { applyEffect } from "./effects.js";
 import { activePlayerId } from "./targeting.js";
-import { FACTIONS, LOCATIONS } from "./content.js";
+import { FACTIONS, LOCATIONS, ABILITIES } from "./content.js";
 import { CONFIG } from "./config.js";
 
 const seed = Number(process.argv[2]) || 42;
@@ -84,6 +84,87 @@ homeLoc.chips.push(tgChip);
 game.players[me].resource += CONFIG.unitRecruitCost;
 const rec = performAction(game, "recruit", { at: homeLoc.hexId });
 line(`  recruit, staged: ${rec.ok ? `ok — spawned ${rec.unit}` : "blocked — " + rec.reason}`);
+
+// --- contest resolver (Layer 3.2 — capture a Location, then a raid) ---
+line("\nCONTEST  (Layer 3.2 — Strength + 1d6 per side, defender wins ties)");
+
+// Stake the active player with Actions and a decisive unit so the demo
+// resolves the same way regardless of the dice.
+applyEffect(game, { type: "GRANT_ACTIONS", amount: 20, target: "active_player" }, ctx);
+const champ = Object.values(game.units).find((u) => u.owner === me);
+applyEffect(game, { type: "MODIFY_STAT", stat: "Strength", amount: 30, target: champ.uid, duration: "this_turn" }, ctx);
+
+// March onto a neutral Location and take all three sections.
+const prize = Object.values(game.locations).find((l) => l.controller === null);
+champ.node = prize.hexId;
+line(`  ${champ.uid} (STR ${champ.strength}) contests ${LOCATIONS[prize.locationId].name} — garrison ${prize.garrison}`);
+for (let i = 0; i < 3 && prize.controller !== me; i++) {
+  const r = performAction(game, "contest", { unit: champ.uid });
+  line(`   roll ${r.initiatorTotal} vs ${r.defenderTotal} -> ${r.won ? "won" : "lost"}; sections [${prize.sections.join(", ")}]`);
+}
+line(`  -> controller ${prize.controller || "neutral"}, foothold ${prize.foothold}`);
+
+// Raid: drop an enemy unit on the captured Location (no neutral sections
+// remain, so raids are legal) and contest it directly.
+const victim = Object.values(game.units).find((u) => u.owner !== me);
+victim.node = prize.hexId;
+const raid = performAction(game, "contest", { unit: champ.uid, target: victim.uid });
+line(`  raid ${victim.uid} (owner ${victim.owner}): roll ${raid.initiatorTotal} vs ${raid.defenderTotal} -> ${raid.won ? "won" : "lost"}`);
+line(`   ${victim.uid} retreated to ${victim.node}, immobilizedUntil ${victim.immobilizedUntil}`);
+
+// --- Layer 3.3 — Acquire + Activate + tech progression ---
+line("\nMARKET / ACQUIRE  (Layer 3.3)");
+applyEffect(game, { type: "ADJUST_RESOURCE", resource: "Resource", amount: 30, target: "active_player" }, ctx);
+
+// Pull a specific chip into a tier's face-up row by swapping out a
+// non-protected chip — keeps the demo deterministic regardless of the
+// seed's market shuffle. Chips passed through this helper are protected
+// from later swaps, so multiple ensures stack without clobbering.
+const protectedChipIds = new Set();
+const ensureInRow = (tier, chipId) => {
+  protectedChipIds.add(chipId);
+  const m = game.market.tiers[tier];
+  if (m.row.some((c) => game.chips[c]?.chipId === chipId)) return;
+  const i = m.deck.findIndex((c) => game.chips[c]?.chipId === chipId);
+  if (i < 0) return;
+  const [pulled] = m.deck.splice(i, 1);
+  const victimIdx = m.row.findIndex((c) => !protectedChipIds.has(game.chips[c]?.chipId));
+  if (victimIdx < 0) { m.row.push(pulled); return; }
+  const victim = m.row.splice(victimIdx, 1, pulled)[0];
+  m.deck.push(victim);
+};
+const findChip = (tier, chipId) =>
+  game.market.tiers[tier].row.find((c) => game.chips[c]?.chipId === chipId);
+
+ensureInRow(1, "new-recruits");
+ensureInRow(1, "labs");
+ensureInRow(2, "sharpened-blades");
+
+line(`  tier 1 row: ${game.market.tiers[1].row.map((c) => game.chips[c].chipId).join(", ")}`);
+line(`  champ STR ${champ.strength}; scrap ${game.players[me].resource}`);
+const acq1 = performAction(game, "acquire", { chip: findChip(1, "new-recruits"), into: { unit: champ.uid } });
+line(`  acquire new-recruits -> ${acq1.ok ? `ok (chip ${acq1.chip})` : "blocked — " + acq1.reason}`);
+line(`  champ STR ${champ.strength}; scrap ${game.players[me].resource}`);
+
+line(`\nTECH  versari tech ${game.players[me].tech}`);
+performAction(game, "acquire", { chip: findChip(1, "labs"), into: { location: prize.hexId } });
+ensureInRow(1, "labs"); // bring a second copy face-up
+performAction(game, "acquire", { chip: findChip(1, "labs"), into: { location: prize.hexId } });
+line(`  installed 2 Labs at ${LOCATIONS[prize.locationId].name} -> tech ${game.players[me].tech}`);
+
+const acq2 = performAction(game, "acquire", { chip: findChip(2, "sharpened-blades"), into: { unit: champ.uid } });
+line(`  acquire sharpened-blades (tier 2) -> ${acq2.ok ? "ok" : "blocked — " + acq2.reason}; champ STR ${champ.strength}`);
+
+line("\nACTIVATE");
+const korad = Object.values(game.locations).find((l) => l.locationId === "korad");
+const koradAbility = ABILITIES[korad.abilityId];
+const before = {
+  scrap: game.players[me].resource, vp: game.players[me].vp,
+  actions: game.players[me].actions.remaining,
+};
+const act = performAction(game, "activate", { location: korad.hexId });
+line(`  activate ${koradAbility.name} at Korad: ${act.ok ? "ok" : "blocked — " + act.reason}`);
+line(`   scrap ${before.scrap}->${game.players[me].resource}  vp ${before.vp}->${game.players[me].vp}  actions ${before.actions}->${game.players[me].actions.remaining}`);
 
 // --- play out round 1 ---
 line("\nPLAY ROUND 1  (each player ends their turn)");
