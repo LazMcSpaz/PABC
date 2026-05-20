@@ -1,0 +1,12 @@
+[build]
+  base = "editor"
+  command = "npm install && npm run build"
+  publish = "editor/dist"
+
+[build.environment]
+  NODE_VERSION = "20"
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
