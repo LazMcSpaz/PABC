@@ -197,52 +197,76 @@ export function validateChoice(choice, ctx, errors = [], path = "choice") {
   return errors;
 }
 
-export function validateWorldEncounter(enc, ctx) {
+// Validates a multi-beat story (kind = "world" | "field"). Head-level
+// metadata + an ordered array of beats (each with id, text, choices).
+function validateStoryBeats(story, errors, ctx) {
+  const beats = story.beats ?? [];
+  if (beats.length === 0) {
+    errors.push("story.beats: at least one beat required");
+    return;
+  }
+  beats.forEach((b, i) => {
+    if (!b.id) errors.push(`beat[${i}].id required`);
+    if (!b.text) errors.push(`beat[${i}].text required`);
+    (b.choices ?? []).forEach((c, j) =>
+      validateChoice(c, ctx, errors, `beat[${i}].choice[${j}]`),
+    );
+    if ((b.choices ?? []).length > 3) {
+      errors.push(`beat[${i}]: at most 3 choices`);
+    }
+  });
+}
+
+export function validateWorldEncounter(story, ctx) {
   const errors = [];
-  if (!enc.id) errors.push("world_encounter.id required");
-  if (!enc.mode) errors.push("world_encounter.mode required");
-  if (enc.mode !== "placement") {
-    if (!enc.recipient) errors.push("world_encounter.recipient required for non-placement modes");
-    else if (!isValidRecipient(enc.recipient)) {
-      errors.push(`world_encounter.recipient: invalid '${enc.recipient}'`);
+  if (!story.id) errors.push("world_encounter.id required");
+  if (!story.mode) errors.push("world_encounter.mode required");
+  if (story.mode !== "placement") {
+    if (!story.recipient) {
+      errors.push(
+        "world_encounter.recipient required for non-placement modes",
+      );
+    } else if (!isValidRecipient(story.recipient)) {
+      errors.push(`world_encounter.recipient: invalid '${story.recipient}'`);
     }
   }
-  if (!enc.text) errors.push("world_encounter.text required");
-  if (enc.triggerCondition != null) validateCond(enc.triggerCondition, errors, "triggerCondition");
+  if (story.triggerCondition != null)
+    validateCond(story.triggerCondition, errors, "triggerCondition");
   else errors.push("world_encounter.triggerCondition required");
-  if (enc.triggerStrength != null) validateStrength(enc.triggerStrength, errors, "triggerStrength");
+  if (story.triggerStrength != null)
+    validateStrength(story.triggerStrength, errors, "triggerStrength");
   else errors.push("world_encounter.triggerStrength required");
-  if (enc.triggerCooldown == null || !Number.isInteger(Number(enc.triggerCooldown))) {
+  if (
+    story.triggerCooldown == null ||
+    !Number.isInteger(Number(story.triggerCooldown))
+  ) {
     errors.push("world_encounter.triggerCooldown must be integer");
   }
-  if (enc.mode === "placement" && enc.placementFilter != null) {
-    validateHexFilter(enc.placementFilter, errors, "placementFilter");
+  if (story.mode === "placement" && story.placementFilter != null) {
+    validateHexFilter(story.placementFilter, errors, "placementFilter");
   }
-  if (enc.mode === "placement" && enc.expiresIn != null && !Number.isInteger(Number(enc.expiresIn))) {
+  if (
+    story.mode === "placement" &&
+    story.expiresIn != null &&
+    !Number.isInteger(Number(story.expiresIn))
+  ) {
     errors.push("world_encounter.expiresIn must be integer");
   }
-  (enc.choices ?? []).forEach((c, i) =>
-    validateChoice(c, ctx, errors, `choice[${i}]`),
-  );
-  if ((enc.choices ?? []).length > 3) {
-    errors.push("world_encounter: at most 3 choices");
-  }
+  validateStoryBeats(story, errors, ctx);
   return errors;
 }
 
-export function validateFieldEncounter(enc, ctx) {
+export function validateFieldEncounter(story, ctx) {
   const errors = [];
-  if (!enc.id) errors.push("field_encounter.id required");
-  if (!enc.text) errors.push("field_encounter.text required");
-  if (enc.copies == null || !Number.isInteger(Number(enc.copies)) || Number(enc.copies) < 1) {
+  if (!story.id) errors.push("field_encounter.id required");
+  if (
+    story.copies == null ||
+    !Number.isInteger(Number(story.copies)) ||
+    Number(story.copies) < 1
+  ) {
     errors.push("field_encounter.copies must be a positive integer");
   }
-  (enc.choices ?? []).forEach((c, i) =>
-    validateChoice(c, ctx, errors, `choice[${i}]`),
-  );
-  if ((enc.choices ?? []).length > 3) {
-    errors.push("field_encounter: at most 3 choices");
-  }
+  validateStoryBeats(story, errors, ctx);
   return errors;
 }
 
