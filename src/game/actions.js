@@ -10,6 +10,7 @@ import { FACTIONS, CHIPS, ABILITIES, chipDefOf } from "./content.js";
 import { validateContest, runContest } from "./contest.js";
 import { recomputeStats, recomputeTech } from "./stats.js";
 import { applyEffects } from "./effects.js";
+import { drawFieldEncounter, resolveMarkerOnHex } from "./encounters.js";
 
 const fail = (reason) => ({ ok: false, reason });
 
@@ -45,10 +46,16 @@ function runMove(state, { params }) {
   unit.node = params.to;
   emit(state, "unit_moved", { unit: unit.uid, from, to: params.to });
 
-  if (state.board.hexes[params.to].type === "encounter" && state.encounterDeck.length) {
-    const card = state.encounterDeck.shift();
-    state.discards.encounter.push(card);
-    emit(state, "encounter_resolved", { unit: unit.uid, hex: params.to, card });
+  // §15.5 placement markers take precedence — they're authored to land
+  // on a specific hex and one-shot when discovered.
+  const markerResult = resolveMarkerOnHex(state, params.to, unit);
+  // §15.8 field-encounter hexes draw from the deck unless the hex is
+  // still in its refresh cooldown.
+  if (!markerResult && state.board.hexes[params.to].type === "encounter") {
+    const cooldownUntil = state.world?.encounterHexCooldowns?.[params.to] || 0;
+    if (state.round >= cooldownUntil) {
+      drawFieldEncounter(state, unit);
+    }
   }
   return {};
 }

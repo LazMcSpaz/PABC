@@ -2,6 +2,7 @@
 // the board, players, locations, units, and the tiered Market.
 import { CONFIG } from "./config.js";
 import { FACTIONS, LOCATIONS, CHIPS, CAPITAL, ABILITIES, REACTIVES } from "./content.js";
+import { FIELD_ENCOUNTERS } from "./content/index.js";
 import { makeRng } from "./rng.js";
 import { createIdGen } from "./ids.js";
 import { buildHexGrid, generateLayout } from "./board.js";
@@ -40,6 +41,12 @@ export function createGame({ seed = Date.now() & 0xffffffff, factionIds } = {}) 
       actions: { remaining: CONFIG.baseActions, max: CONFIG.baseActions },
       unitCap: 1,
       hand: [],
+      // Layer 5 (encounter & quest system) per spec §15.11
+      tracks: { trust: 0, reputation: 0, alignment: 0 },
+      flags: {},
+      activeQuests: {},
+      completedQuests: {},
+      encounterCooldowns: {},
     };
   }
 
@@ -89,6 +96,7 @@ export function createGame({ seed = Date.now() & 0xffffffff, factionIds } = {}) 
       garrison,
       production,
       abilityId,
+      strategicValue: def.strategicValue, // surfaced for the DSL controls_count helper
     };
   }
 
@@ -143,7 +151,17 @@ export function createGame({ seed = Date.now() & 0xffffffff, factionIds } = {}) 
     units,
     chips,
     market,
-    encounterDeck: [], // content pending — encounter design batch
+    encounterDeck: (() => {
+      // Field-encounter deck (§15.8). Each authored encounter expands
+      // into `copies` entries (id strings — encounters carry no
+      // per-instance state, unlike chips).
+      const seeds = [];
+      for (const def of Object.values(FIELD_ENCOUNTERS)) {
+        const copies = def.copies || 1;
+        for (let i = 0; i < copies; i++) seeds.push(def.id);
+      }
+      return rng.shuffle(seeds);
+    })(),
     reactiveDeck: (() => {
       // Every Reactive's `copies` expand into instances stored in the
       // shared chips registry (same uid scheme as Market chips); the
@@ -165,5 +183,22 @@ export function createGame({ seed = Date.now() & 0xffffffff, factionIds } = {}) 
     surcharges: [],
     winnerId: null,
     log: [],
+    // Layer 5 (encounter & quest system) per spec §15.11
+    world: {
+      controlHistory: Object.values(locations)
+        .filter((l) => l.controller)
+        .map((l) => ({ hex: l.hexId, controller: l.controller, fromRound: 0, toRound: null })),
+      raidCounts: Object.fromEntries(playing.map((f) => [f, 0])),
+      ignoreCounts: Object.fromEntries(playing.map((f) => [f, 0])),
+      eventTimeline: [],
+      encounterHexCooldowns: {},
+      encounterMarkers: {},
+    },
+    factionStanding: Object.fromEntries(
+      playing.map((fid) => [fid, Object.fromEntries(playing.map((pid) => [pid, 0]))]),
+    ),
+    triggerCooldowns: {},
+    deferred: [],
+    activeQuests: {},
   };
 }

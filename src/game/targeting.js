@@ -1,12 +1,25 @@
 // Targeting resolver (mechanical-spec §11) — maps a target token to a
 // list of entity ids. v0.1 covers the player-scope tokens; unit/card
 // tokens are passed through as explicit uids or resolved via `interact`.
+//
+// Engine tokens use snake_case (`active_player`); the content schema
+// (docs/content-schema-v0.1.md §3) uses hyphenated forms (`active`,
+// `triggering-player`). The alias table lets the same resolver accept
+// both, so engine code and editor-authored content can share targeting
+// without a translation step.
+const TOKEN_ALIASES = {
+  active: "active_player",
+  "triggering-player": "triggering_player",
+  each: "all_players",
+  "chosen-by-active": "chosen_opponent",
+};
 
 export function activePlayerId(state) {
   return state.turnOrder[state.activeIndex];
 }
 
 export function resolveTargets(state, token, ctx = {}) {
+  if (typeof token === "string" && TOKEN_ALIASES[token]) token = TOKEN_ALIASES[token];
   const active = activePlayerId(state);
   const owner = ctx.sourcePlayer || ctx.source?.owner || ctx.source?.controller || active;
 
@@ -39,6 +52,8 @@ export function resolveTargets(state, token, ctx = {}) {
       return ctx.contest?.defendingUnit ? [ctx.contest.defendingUnit] : [];
     case "entity":
       return ctx.contest?.targetEntity ? [ctx.contest.targetEntity] : [];
+    case "claimant":
+      return ctx.claimant ? [ctx.claimant] : [];
     default:
       // an explicit player id / unit uid / hex id passed straight through
       return [token];

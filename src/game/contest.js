@@ -9,6 +9,7 @@ import { openReactionWindow } from "./reactions.js";
 import { CONFIG } from "./config.js";
 import { CHIPS } from "./content.js";
 import { recomputeStats, recomputeTech } from "./stats.js";
+import { onLocationCaptured, onRaidWon } from "./standing.js";
 
 const fail = (reason) => ({ ok: false, reason });
 
@@ -132,6 +133,9 @@ function captureLocation(state, loc, victor) {
   // Control changed; a Labs chip on this location may have changed
   // hands or been destroyed — sync Tech for everyone (§3).
   recomputeTech(state);
+  // §15.3 — the affiliated faction (if any) loses standing toward
+  // the new controller.
+  onLocationCaptured(state, loc.hexId, victor, from);
 }
 
 function resolveLocationWin(state, pid, loc, params) {
@@ -157,6 +161,10 @@ function chooseRetreat(state, unit, preferred) {
 // A raid win (§9): the defending unit retreats, then the winner takes
 // ONE — immobilize it through its next turn, or destroy one of its chips.
 function resolveRaidWin(state, pid, defUnit, params) {
+  // §15.3 — raided faction loses standing toward the raider; recent-
+  // raid counter increments (decays each round in the world pipeline).
+  onRaidWon(state, pid, defUnit);
+
   const dest = chooseRetreat(state, defUnit, params.retreatTo);
   if (dest) {
     const from = defUnit.node;
