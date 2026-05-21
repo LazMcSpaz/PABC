@@ -6,6 +6,7 @@ import { recomputeStats, recomputeTech } from "./stats.js";
 import { activePlayerId } from "./targeting.js";
 import { sweepDeferred } from "./deferred.js";
 import { evaluateTriggers } from "./triggers.js";
+import { evaluateConditionalBeats } from "./quests.js";
 
 function expireModifiers(state, pid) {
   const own = new Set(
@@ -123,6 +124,7 @@ export function endTurn(state) {
 function runRoundEnd(state) {
   sweepDeferred(state);
   evaluateTriggers(state);
+  evaluateConditionalBeats(state);
   expirePlacementMarkers(state);
   decayWorldCounters(state);
 }

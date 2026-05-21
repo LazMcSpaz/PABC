@@ -10,25 +10,26 @@
 import { FIELD_ENCOUNTERS, WORLD_ENCOUNTERS, QUESTS } from "./content/index.js";
 import { EFFECTS } from "./effects.js";
 
-// Flatten `{ type, params: { … } }` → `{ type, … }`. Recurses into
-// nested effect lists (FORCE_CHOICE.options, QUEUE_DEFERRED.effects).
+// Flatten `{ type, params: { … } }` → `{ type, … }`. Accepts both the
+// editor's nested format AND already-flat engine-native effects (so
+// harness-authored test content and editor content can mix freely).
+// Recurses into nested effect lists (FORCE_CHOICE.options,
+// QUEUE_DEFERRED.effects).
 export function normalizeEffect(raw) {
   if (!raw || typeof raw !== "object") return raw;
-  const { type, params = {} } = raw;
-  const out = { type };
-  for (const [k, v] of Object.entries(params)) {
-    if (k === "effects" && Array.isArray(v)) {
-      out.effects = v.map(normalizeEffect);
-    } else if (k === "options" && Array.isArray(v)) {
-      out.options = v.map((o) => ({
-        ...o,
-        effects: (o.effects || []).map(normalizeEffect),
-      }));
-    } else {
-      out[k] = v;
-    }
+  const hasNestedParams =
+    raw.params && typeof raw.params === "object" && !Array.isArray(raw.params);
+  const base = hasNestedParams ? { type: raw.type, ...raw.params } : { ...raw };
+  if (Array.isArray(base.effects)) {
+    base.effects = base.effects.map(normalizeEffect);
   }
-  return out;
+  if (Array.isArray(base.options)) {
+    base.options = base.options.map((o) => ({
+      ...o,
+      effects: (o.effects || []).map(normalizeEffect),
+    }));
+  }
+  return base;
 }
 
 // Pass-through normaliser: any field the editor adds (imagePath,
@@ -45,6 +46,25 @@ export function normalizeEncounter(raw) {
   return {
     ...raw,
     choices: (raw.choices || []).map(normalizeChoice),
+  };
+}
+
+export function normalizeBeat(raw) {
+  return {
+    ...raw,
+    choices: (raw.choices || []).map(normalizeChoice),
+  };
+}
+
+export function normalizeQuest(raw) {
+  return {
+    ...raw,
+    beats: (raw.beats || []).map(normalizeBeat),
+    completion: {
+      ...(raw.completion || {}),
+      rewardForClaimant: (raw.completion?.rewardForClaimant || []).map(normalizeEffect),
+      sharedSideEffects: (raw.completion?.sharedSideEffects || []).map(normalizeEffect),
+    },
   };
 }
 

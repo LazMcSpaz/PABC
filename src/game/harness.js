@@ -9,6 +9,7 @@ import { activePlayerId } from "./targeting.js";
 import { FACTIONS, LOCATIONS, ABILITIES, REACTIVES } from "./content.js";
 import { loadFieldEncounters, findUnsupportedTypes, choiceIsRunnable, WORLD_ENCOUNTERS } from "./content-loader.js";
 import { evalCond, evalStrength } from "./dsl.js";
+import { registerQuest } from "./quests.js";
 import { CONFIG } from "./config.js";
 
 const seed = Number(process.argv[2]) || 42;
@@ -295,6 +296,33 @@ const lastResolved = [...game.log].reverse().find((e) => e.name === "encounter_r
 if (lastDelivered) line(`  delivered: ${lastDelivered.payload.encounter} → "${lastDelivered.payload.choiceLabel}"`);
 if (lastResolved) line(`  resolved:  ${lastResolved.payload.encounter}`);
 line(`  ${me} deltas: scrap ${scrapPre}→${game.players[me].resource}, tech ${techPre}→${game.players[me].tech}, tracks {trust ${tracksPre.trust}→${game.players[me].tracks.trust}, reputation ${tracksPre.reputation}→${game.players[me].tracks.reputation}, alignment ${tracksPre.alignment}→${game.players[me].tracks.alignment}}`);
+
+// --- Layer 5.4 quest engine (auto-delivered multi-beat quest) ---
+line("\nQUEST  (Layer 5.4 — 2-beat single-player quest)");
+registerQuest({
+  id: "engine-test",
+  mode: "single-player",
+  title: "Engine Test Quest",
+  beats: [
+    { id: "beat-a", deliver: "auto", text: "First contact.",
+      choices: [{ id: "ca", label: "Continue", effects: [] }] },
+    { id: "beat-b", deliver: "auto", text: "Resolution.",
+      prerequisites: ["beat-a"],
+      choices: [{ id: "cb", label: "Continue", effects: [] }] },
+  ],
+  completion: {
+    rewardForClaimant: [
+      { type: "ADJUST_RESOURCE", resource: "Resource", amount: 10, target: "self" },
+    ],
+  },
+});
+const scrapPreQuest = game.players[me].resource;
+applyEffect(game, { type: "START_QUEST", questId: "engine-test", claimant: "active" }, ctx);
+const completedQ = game.players[me].completedQuests["engine-test"];
+line(`  started "engine-test"; activeQuests=${Object.keys(game.activeQuests).join(",") || "(none)"}`);
+line(`  beat events: ${game.log.filter((e) => e.name === "quest_advanced").map((e) => e.payload.beatId).join(" → ") || "(none)"}`);
+line(`  completed: ${completedQ ? `at round ${completedQ.round}, claimant ${completedQ.claimant}` : "(no)"}`);
+line(`  ${me} scrap from completion reward: ${scrapPreQuest} → ${game.players[me].resource}`);
 
 // --- Layer 5.2 end-of-round pipeline (deferred sweep + triggers) ---
 line("\nROUND-END PIPELINE  (Layer 5.2 — deferred sweep + trigger eval)");

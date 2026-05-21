@@ -52,6 +52,8 @@ export function resolveTargets(state, token, ctx = {}) {
       return ctx.contest?.defendingUnit ? [ctx.contest.defendingUnit] : [];
     case "entity":
       return ctx.contest?.targetEntity ? [ctx.contest.targetEntity] : [];
+    case "claimant":
+      return ctx.claimant ? [ctx.claimant] : [];
     default:
       // an explicit player id / unit uid / hex id passed straight through
       return [token];

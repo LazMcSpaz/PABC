@@ -41,19 +41,23 @@ function headlessPick(eligible) {
 export function deliverEncounter(state, encounterId, options = {}, ctx = {}) {
   const enc = getEncounter(encounterId);
   if (!enc) return null;
+  return deliverEncounterDef(state, enc, options, ctx);
+}
+
+// Lower-level variant — takes an encounter def directly. Used by
+// quests.js to dispatch beats (which are encounter-shaped but live in
+// a separate registry).
+export function deliverEncounterDef(state, enc, options = {}, ctx = {}) {
   const mode = options.mode || enc.mode || "private";
-
   if (mode === "placement") return placeEncounterMarker(state, enc, options, ctx);
-
   const recipients = resolveRecipients(state, enc, mode, options, ctx);
   if (!recipients.length) return null;
-
   const results = [];
   for (const pid of recipients) {
     const result = presentToPlayer(state, enc, pid, ctx);
     if (result) results.push(result);
   }
-  return { encounterId, mode, recipients, results };
+  return { encounterId: enc.id, mode, recipients, results };
 }
 
 function resolveRecipients(state, enc, mode, options, ctx) {
