@@ -7,7 +7,11 @@ import { makeRng } from "./rng.js";
 import { createIdGen } from "./ids.js";
 import { buildHexGrid, generateLayout } from "./board.js";
 
-export function createGame({ seed = Date.now() & 0xffffffff, factionIds } = {}) {
+export function createGame({
+  seed = Date.now() & 0xffffffff,
+  factionIds,
+  humanFactionId = null,
+} = {}) {
   const rng = makeRng(seed);
   const uid = createIdGen();
   const playing = factionIds || Object.keys(FACTIONS); // v0.1: default all four
@@ -35,6 +39,7 @@ export function createGame({ seed = Date.now() & 0xffffffff, factionIds } = {}) 
     players[fid] = {
       id: fid,
       factionId: fid,
+      isAI: humanFactionId != null && humanFactionId !== fid,
       resource: 0,
       vp: 0,
       tech: CONFIG.tech.start,
@@ -137,10 +142,49 @@ export function createGame({ seed = Date.now() & 0xffffffff, factionIds } = {}) 
     };
   }
 
+  // --- field encounter deck (§15.8). Each authored encounter expands
+  // into `copies` entries (id strings — encounters carry no per-instance
+  // state, unlike chips).
+  const encounterDeck = (() => {
+    const seeds = [];
+    for (const def of Object.values(FIELD_ENCOUNTERS)) {
+      const copies = def.copies || 1;
+      for (let i = 0; i < copies; i++) seeds.push(def.id);
+    }
+    return rng.shuffle(seeds);
+  })();
+
+  // --- reactive deck. Every Reactive's `copies` expand into instances
+  // stored in the shared chips registry; the deck holds those uids.
+  const reactiveDeck = (() => {
+    const seeds = [];
+    for (const def of Object.values(REACTIVES)) {
+      for (let i = 0; i < (def.copies || 1); i++) {
+        const u = uid("card");
+        chips[u] = { uid: u, chipId: def.id };
+        seeds.push(u);
+      }
+    }
+    return rng.shuffle(seeds);
+  })();
+
+  // --- deal opening reactives. Without these, defenders can never react
+  // and the demo loses its tactical flavour. Only deal in demo mode
+  // (humanFactionId set) so the headless harness keeps its determinism.
+  if (humanFactionId != null) {
+    const handSize = 2;
+    for (const fid of playing) {
+      for (let i = 0; i < handSize && reactiveDeck.length; i++) {
+        players[fid].hand.push(reactiveDeck.shift());
+      }
+    }
+  }
+
   return {
     seed,
     rng, // live seeded generator — contest dice draw from it
     nextId: uid, // shared instance id generator — used by runtime Recruit
+    humanFactionId,
     round: 1,
     phase: "Upkeep",
     turnOrder: [...playing],
@@ -151,31 +195,8 @@ export function createGame({ seed = Date.now() & 0xffffffff, factionIds } = {}) 
     units,
     chips,
     market,
-    encounterDeck: (() => {
-      // Field-encounter deck (§15.8). Each authored encounter expands
-      // into `copies` entries (id strings — encounters carry no
-      // per-instance state, unlike chips).
-      const seeds = [];
-      for (const def of Object.values(FIELD_ENCOUNTERS)) {
-        const copies = def.copies || 1;
-        for (let i = 0; i < copies; i++) seeds.push(def.id);
-      }
-      return rng.shuffle(seeds);
-    })(),
-    reactiveDeck: (() => {
-      // Every Reactive's `copies` expand into instances stored in the
-      // shared chips registry (same uid scheme as Market chips); the
-      // deck holds those uids, shuffled.
-      const seeds = [];
-      for (const def of Object.values(REACTIVES)) {
-        for (let i = 0; i < (def.copies || 1); i++) {
-          const u = uid("card");
-          chips[u] = { uid: u, chipId: def.id };
-          seeds.push(u);
-        }
-      }
-      return rng.shuffle(seeds);
-    })(),
+    encounterDeck,
+    reactiveDeck,
     discards: { encounter: [], reactive: [], market: [] },
     removed: [],
     modifiers: [],

@@ -11,6 +11,7 @@ import { loadFieldEncounters, findUnsupportedTypes, choiceIsRunnable, WORLD_ENCO
 import { evalCond, evalStrength } from "./dsl.js";
 import { registerQuest } from "./quests.js";
 import { CONFIG } from "./config.js";
+import { takeAITurn } from "./ai.js";
 
 const seed = Number(process.argv[2]) || 42;
 const line = (s = "") => console.log(s);
@@ -370,4 +371,50 @@ line("\nEVENT LOG  (last 14)");
 for (const ev of game.log.slice(-14)) {
   line(`  ${ev.name.padEnd(18)} ${JSON.stringify(ev.payload)}`);
 }
+line("");
+
+// --- Demo Phase 2 — rule-based AI ---
+// Fresh game with versari as the human (stand-in: endTurn) and the other
+// three factions driven by takeAITurn until a winner emerges.
+line("AI SMOKE TEST  (Demo Phase 2 — rule-based AI driving 3 factions)");
+const aiGame = createGame({ seed, humanFactionId: "versari" });
+startTurn(aiGame);
+line(`  fresh game, seed ${seed}; isAI ${
+  JSON.stringify(Object.fromEntries(Object.entries(aiGame.players).map(([k, p]) => [k, p.isAI])))
+}`);
+line(`  initial hands: ${
+  Object.entries(aiGame.players).map(([k, p]) => `${k}=${p.hand.length}`).join(" ")
+}`);
+let safety = 200;
+const actionCounts = Object.fromEntries(aiGame.turnOrder.map((p) => [p, 0]));
+const captureCounts = Object.fromEntries(aiGame.turnOrder.map((p) => [p, 0]));
+const captureSubBefore = aiGame.log.filter((e) => e.name === "location_captured").length;
+while (!aiGame.winnerId && safety-- > 0) {
+  const pid = activePlayerId(aiGame);
+  const actionsBefore = aiGame.players[pid].actions.remaining;
+  const capsBefore = aiGame.log.filter((e) => e.name === "location_captured").length;
+  if (aiGame.players[pid].isAI) takeAITurn(aiGame);
+  else endTurn(aiGame); // stand-in for the human
+  actionCounts[pid] += actionsBefore - aiGame.players[pid].actions.remaining;
+  captureCounts[pid] += aiGame.log.filter((e) => e.name === "location_captured").length - capsBefore;
+}
+line(`  finished at round ${aiGame.round}, winner ${aiGame.winnerId || "(none)"}`);
+line(`  final VP: ${
+  Object.entries(aiGame.players).map(([k, p]) => `${k}=${p.vp}`).join("  ")
+}`);
+line(`  actions spent: ${
+  Object.entries(actionCounts).map(([k, n]) => `${k}=${n}`).join("  ")
+}`);
+line(`  captures: ${
+  Object.entries(captureCounts).map(([k, n]) => `${k}=${n}`).join("  ")
+}`);
+const evCount = (name) => aiGame.log.filter((e) => e.name === name).length;
+line(`  event totals — unit_moved=${evCount("unit_moved")} contest_declared=${evCount("contest_declared")} contest_won=${evCount("contest_won")} contest_lost=${evCount("contest_lost")} section_flipped=${evCount("section_flipped")}`);
+line(`  encounters resolved=${evCount("encounter_resolved")} cards_played=${evCount("card_played")}`);
+const unitPositions = Object.values(aiGame.units).map((u) => `${u.uid}=${u.owner}@${u.node}`).join(" ");
+line(`  unit positions: ${unitPositions}`);
+const locStanding = Object.values(aiGame.locations)
+  .map((l) => `${l.locationId}[${l.controller || "—"}:${l.sections.map((s) => s.slice(0, 3)).join(",")}]`)
+  .join(" ");
+line(`  location standing: ${locStanding}`);
 line("");
