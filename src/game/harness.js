@@ -7,7 +7,7 @@ import { performAction } from "./actions.js";
 import { applyEffect } from "./effects.js";
 import { activePlayerId } from "./targeting.js";
 import { FACTIONS, LOCATIONS, ABILITIES, REACTIVES } from "./content.js";
-import { loadFieldEncounters, findUnsupportedTypes, choiceIsRunnable } from "./content-loader.js";
+import { loadFieldEncounters, findUnsupportedTypes, choiceIsRunnable, WORLD_ENCOUNTERS } from "./content-loader.js";
 import { evalCond, evalStrength } from "./dsl.js";
 import { CONFIG } from "./config.js";
 
@@ -270,9 +270,25 @@ const s1 = { if: [
 ] };
 line(`  strength cascade by tech: ${evalStrength(game, s1)}`);
 
+// --- Layer 5.2 end-of-round pipeline (deferred sweep + triggers) ---
+line("\nROUND-END PIPELINE  (Layer 5.2 — deferred sweep + trigger eval)");
+applyEffect(game, { type: "QUEUE_DEFERRED",
+  delayRounds: 1, target: "active",
+  effects: [{ type: "ADJUST_RESOURCE", resource: "Resource", amount: 7, target: "active" }],
+}, ctx);
+line(`  queued packet (delayRounds=1, +7 scrap to ${me}); queue size now ${game.deferred.length}`);
+line(`  trigger registry: ${Object.keys(WORLD_ENCOUNTERS).length} world encounter${Object.keys(WORLD_ENCOUNTERS).length === 1 ? "" : "s"} (eval is a no-op until authoring lands)`);
+const versariScrapPrePipeline = game.players[me].resource;
+const queueSizePrePipeline = game.deferred.length;
+const resolvedLogBefore = game.log.filter((e) => e.name === "deferred_resolved").length;
+
 // --- play out round 1 ---
 line("\nPLAY ROUND 1  (each player ends their turn)");
 for (let i = 0; i < game.turnOrder.length; i++) endTurn(game);
+const resolvedLogAfter = game.log.filter((e) => e.name === "deferred_resolved").length;
+line(`  deferred_resolved events fired during round-end: ${resolvedLogAfter - resolvedLogBefore}`);
+line(`  deferred queue: ${queueSizePrePipeline} -> ${game.deferred.length} (remaining = the 5.1 packet at dueRound=3)`);
+line(`  ${me} scrap: ${versariScrapPrePipeline} (pre-pipeline) -> ${game.players[me].resource} (post-pipeline + new upkeep production)`);
 line(`  -> now round ${game.round}, phase ${game.phase}, active ${activePlayerId(game)}`);
 for (const p of Object.values(game.players)) {
   line(`  ${FACTIONS[p.factionId].name.padEnd(20)} scrap ${p.resource}`);

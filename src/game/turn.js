@@ -4,6 +4,8 @@
 import { emit } from "./events.js";
 import { recomputeStats, recomputeTech } from "./stats.js";
 import { activePlayerId } from "./targeting.js";
+import { sweepDeferred } from "./deferred.js";
+import { evaluateTriggers } from "./triggers.js";
 
 function expireModifiers(state, pid) {
   const own = new Set(
@@ -96,7 +98,9 @@ export function startTurn(state) {
   return state;
 }
 
-// End the active player's turn, run Cleanup, advance to the next.
+// End the active player's turn, run Cleanup, advance to the next. On
+// round rollover, runs the §15.12 end-of-round pipeline before the
+// next player's Upkeep starts.
 export function endTurn(state) {
   if (state.winnerId) return state;
   const pid = activePlayerId(state);
@@ -109,6 +113,39 @@ export function endTurn(state) {
     state.activeIndex = 0;
     state.round += 1;
     emit(state, "round_ended", { round: state.round - 1 });
+    runRoundEnd(state);
   }
   return startTurn(state);
+}
+
+// The §15.12 round-end pipeline. Deferred resolution comes first so a
+// queued consequence can update the state that triggers then read.
+function runRoundEnd(state) {
+  sweepDeferred(state);
+  evaluateTriggers(state);
+  expirePlacementMarkers(state);
+  decayWorldCounters(state);
+}
+
+function expirePlacementMarkers(state) {
+  const markers = state.world?.encounterMarkers;
+  if (!markers) return;
+  for (const [hex, m] of Object.entries(markers)) {
+    if (m.expiresAt != null && m.expiresAt < state.round) delete markers[hex];
+  }
+}
+
+// Soft decay so raid / ignore counters reflect *recent* activity
+// (§15.3). Multiplicative, floored — counter at 10 takes 22 rounds to
+// reach 0 with no new entries; gentle enough that a single skipped
+// round doesn't erase context.
+function decayWorldCounters(state) {
+  const w = state.world;
+  if (!w) return;
+  for (const k of Object.keys(w.raidCounts || {})) {
+    w.raidCounts[k] = Math.floor(w.raidCounts[k] * 0.9);
+  }
+  for (const k of Object.keys(w.ignoreCounts || {})) {
+    w.ignoreCounts[k] = Math.floor(w.ignoreCounts[k] * 0.9);
+  }
 }

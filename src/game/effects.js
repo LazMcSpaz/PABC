@@ -213,14 +213,19 @@ const EFFECTS = {
   },
 
   QUEUE_DEFERRED(state, e, ctx) {
-    // Pushes a packet onto state.deferred; the turn-loop sweep in
-    // Layer 5.2 picks up entries with dueRound <= current round.
+    // Snapshot the active player at queue time so an `active` /
+    // `active_player` token inside the deferred effects lands on the
+    // original queuer rather than whoever happens to be active when
+    // the packet resolves N rounds later. Other tokens
+    // (`controller`, `claimant`, …) keep their resolution-time semantics.
+    const active = state.turnOrder[state.activeIndex];
+    const effects = (e.effects || []).map((eff) => snapshotActiveToken(eff, active));
     state.deferred = state.deferred || [];
     state.deferred.push({
       dueRound: state.round + (e.delayRounds || 0),
-      effects: e.effects || [],
-      target: e.target,
+      effects,
       source: ctx.source || null,
+      originalActive: active,
       queuedAt: state.round,
     });
   },
@@ -247,6 +252,28 @@ const EFFECTS = {
     if (ctx.pending) ctx.pending.cancelled = true;
   },
 };
+
+// Walk an effect tree and replace any `active` / `active_player` token
+// in player-bearing fields with a concrete pid. Used by QUEUE_DEFERRED
+// so the deferred sweep doesn't reinterpret who "active" means.
+function snapshotActiveToken(eff, pid) {
+  if (!eff || typeof eff !== "object") return eff;
+  const sub = (v) => (v === "active" || v === "active_player" ? pid : v);
+  const out = { ...eff };
+  for (const k of ["target", "player", "recipient", "chooser"]) {
+    if (k in out) out[k] = sub(out[k]);
+  }
+  if (Array.isArray(eff.effects)) {
+    out.effects = eff.effects.map((e) => snapshotActiveToken(e, pid));
+  }
+  if (Array.isArray(eff.options)) {
+    out.options = eff.options.map((o) => ({
+      ...o,
+      effects: (o.effects || []).map((e) => snapshotActiveToken(e, pid)),
+    }));
+  }
+  return out;
+}
 
 export function applyEffect(state, effect, ctx = {}) {
   const handler = EFFECTS[effect.type];
