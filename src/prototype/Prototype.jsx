@@ -1,7 +1,7 @@
 // Root of the look-pass prototype. The board is front-and-centre;
 // everything else lives in peripheral bars — a top faction bar and a
 // bottom tab dock — with a floating tabbed window for hex inspection.
-import { useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "./prototype.css";
 import { theme } from "./data.js";
 import { Btn } from "./kit.jsx";
@@ -12,8 +12,12 @@ import FactionBar from "./FactionBar.jsx";
 import BottomDock from "./BottomDock.jsx";
 import { createGame } from "../game/setup.js";
 import { startTurn, endTurn } from "../game/turn.js";
+import { performAction } from "../game/actions.js";
 import { takeAITurn } from "../game/ai.js";
 import { activePlayerId } from "../game/targeting.js";
+import { bfsDistances } from "../game/board.js";
+import { CHIPS as ENGINE_CHIPS } from "../game/content.js";
+import { CONFIG } from "../game/config.js";
 import { adaptState } from "./engineAdapter.js";
 
 const TOP_H = 56;
@@ -28,8 +32,6 @@ const INITIAL_HUMAN = "versari";
 function bootGame() {
   const game = createGame({ seed: INITIAL_SEED, humanFactionId: INITIAL_HUMAN });
   startTurn(game);
-  // If the human happens not to be first in seat order, run AIs until
-  // it's their turn.
   driveAIsThroughHumanTurn(game);
   return game;
 }
@@ -60,22 +62,116 @@ export default function Prototype() {
   const gameRef = useRef(null);
   if (!gameRef.current) gameRef.current = bootGame();
   const [tick, setTick] = useState(0);
-  const bumpTick = () => setTick((t) => t + 1);
+  const bumpTick = useCallback(() => setTick((t) => t + 1), []);
 
   const state = useMemo(() => adaptState(gameRef.current), [tick]);
   const [selectedHexId, setSelectedHexId] = useState(null);
+  const [selectedUnitId, setSelectedUnitId] = useState(null);
+  const [toast, setToast] = useState(null); // { kind: "error"|"info", text }
   const you = state.players[state.youId];
   const isYourTurn = state.activeId === state.youId && !state.winnerId;
 
-  function selectHex(id) {
-    setSelectedHexId((cur) => (cur === id ? null : id));
+  // Auto-dismiss toasts.
+  useEffect(() => {
+    if (!toast) return undefined;
+    const t = setTimeout(() => setToast(null), 3000);
+    return () => clearTimeout(t);
+  }, [toast]);
+
+  // Drop selection when a turn changes — selected unit may no longer be
+  // yours / be ready.
+  useEffect(() => {
+    if (!selectedUnitId) return;
+    const unit = state.units[selectedUnitId];
+    if (!unit || unit.owner !== state.youId) setSelectedUnitId(null);
+  }, [state, selectedUnitId]);
+
+  // Compute the set of hexes the selected unit can reach this turn.
+  const reachable = useMemo(() => {
+    if (!isYourTurn || !selectedUnitId) return null;
+    const unit = state.units[selectedUnitId];
+    if (!unit || unit.immobilized || unit.effectiveMovement <= 0) return null;
+    const dists = bfsDistances(gameRef.current.board.adjacency, unit.node);
+    const out = new Set();
+    for (const [hex, d] of Object.entries(dists)) {
+      if (d > 0 && d <= unit.effectiveMovement) out.add(hex);
+    }
+    return out;
+  }, [tick, isYourTurn, selectedUnitId, state]);
+
+  // --- action handlers ----------------------------------------------
+
+  function runAction(type, params, successMsg) {
+    const r = performAction(gameRef.current, type, params);
+    if (!r.ok) {
+      setToast({ kind: "error", text: r.reason });
+      return r;
+    }
+    if (successMsg) setToast({ kind: "info", text: successMsg });
+    bumpTick();
+    return r;
   }
-  function closeWindow() {
-    setSelectedHexId(null);
+
+  function onHexClick(hexId) {
+    // Reachable hex with selected unit → Move. Don't open inspector.
+    if (
+      isYourTurn &&
+      selectedUnitId &&
+      reachable?.has(hexId) &&
+      state.units[selectedUnitId]?.node !== hexId
+    ) {
+      const r = runAction("move", { unit: selectedUnitId, to: hexId });
+      if (r.ok) setSelectedHexId(hexId);
+      return;
+    }
+
+    // Otherwise toggle the inspector. If the hex holds your unit, also
+    // auto-select that unit (saves a click).
+    setSelectedHexId((cur) => (cur === hexId ? null : hexId));
+    const hex = state.hexes[hexId];
+    const unit = hex?.unitId ? state.units[hex.unitId] : null;
+    if (unit && unit.owner === state.youId) {
+      setSelectedUnitId(unit.uid);
+    }
+  }
+
+  function onSelectUnit(unitUid) {
+    setSelectedUnitId(unitUid);
+    const unit = state.units[unitUid];
+    if (unit) setSelectedHexId(unit.node);
+  }
+
+  function onContest(params) {
+    return runAction("contest", params);
+  }
+  function onActivate(hexId) {
+    return runAction("activate", { location: hexId }, "Ability activated.");
+  }
+  function onRecruit(hexId) {
+    return runAction("recruit", { at: hexId }, "Unit recruited.");
+  }
+  function onAcquire(uiChip) {
+    // uiChip is { uid, chipId, engineChipId }. Pick an install target:
+    // unit chip → strongest of your units with bay slots; location chip
+    // → cheapest controlled location with free chip slots.
+    const def = gameRef.current.chips[uiChip.uid];
+    const engineId = def?.chipId;
+    const enginePool = gameRef.current.market.tiers[1]?.row || [];
+    if (!enginePool.includes(uiChip.uid)) {
+      setToast({ kind: "error", text: "Chip is no longer in the market." });
+      return;
+    }
+    const into = pickAcquireTarget(gameRef.current, state.youId, engineId);
+    if (!into) {
+      setToast({ kind: "error", text: "No legal install target for this chip." });
+      return;
+    }
+    runAction("acquire", { chip: uiChip.uid, into }, "Chip installed.");
   }
 
   function onEndTurn() {
     if (!isYourTurn) return;
+    setSelectedUnitId(null);
     endTurn(gameRef.current);
     driveAIsThroughHumanTurn(gameRef.current);
     bumpTick();
@@ -130,6 +226,7 @@ export default function Prototype() {
             }}
           >
             Round {state.round} · {state.phase} Phase
+            {!isYourTurn && !state.winnerId ? ` · ${state.activeId} (AI)` : ""}
           </span>
         </div>
 
@@ -180,17 +277,63 @@ export default function Prototype() {
           <Bracket corner="tr" />
           <Bracket corner="bl" />
           <Bracket corner="br" />
-          <HexBoard state={state} selectedHexId={selectedHexId} onSelect={selectHex} />
+          <HexBoard
+            state={state}
+            selectedHexId={selectedHexId}
+            selectedUnitId={selectedUnitId}
+            reachable={reachable}
+            onSelect={onHexClick}
+          />
         </div>
       </BoardViewport>
 
       {/* INSPECTOR — floating tabbed window, opens on hex selection */}
       {selectedHexId && (
-        <Inspector state={state} selectedHexId={selectedHexId} onClose={closeWindow} />
+        <Inspector
+          state={state}
+          selectedHexId={selectedHexId}
+          selectedUnitId={selectedUnitId}
+          isYourTurn={isYourTurn}
+          onClose={() => setSelectedHexId(null)}
+          onSelectUnit={onSelectUnit}
+          onContest={onContest}
+          onActivate={onActivate}
+          onRecruit={onRecruit}
+        />
       )}
 
       {/* BOTTOM — slide-up tabs for the player's own cards */}
-      <BottomDock state={state} tabHeight={TAB_H} />
+      <BottomDock
+        state={state}
+        tabHeight={TAB_H}
+        isYourTurn={isYourTurn}
+        selectedUnitId={selectedUnitId}
+        onSelectUnit={onSelectUnit}
+        onAcquire={onAcquire}
+      />
+
+      {toast && (
+        <div
+          style={{
+            position: "fixed",
+            bottom: TAB_H + 18,
+            left: "50%",
+            transform: "translateX(-50%)",
+            zIndex: 65,
+            background: toast.kind === "error" ? "#3a1a14" : theme.plate,
+            border: `1px solid ${toast.kind === "error" ? theme.accent2 : theme.borderLit}`,
+            borderRadius: 6,
+            padding: "8px 16px",
+            color: theme.text,
+            fontFamily: theme.fontDisplay,
+            fontSize: 12.5,
+            letterSpacing: 0.6,
+            boxShadow: theme.shadowDeep,
+          }}
+        >
+          {toast.text}
+        </div>
+      )}
 
       {state.winnerId && (
         <div
@@ -243,4 +386,36 @@ export default function Prototype() {
       )}
     </div>
   );
+}
+
+// Pick an install target for an Acquire — mirrors the AI's logic so the
+// user doesn't have to navigate a sub-modal for the demo. Returns
+// { unit } or { location } shaped param for performAction("acquire").
+function pickAcquireTarget(game, pid, engineChipId) {
+  const chipDef = ENGINE_CHIPS[engineChipId];
+  if (!chipDef) return null;
+  const slotsUsed = (chipUids) => chipUids.reduce((n, c) => {
+    const id = game.chips[c]?.chipId;
+    if (id === "capital") return n + 1;
+    return n + (ENGINE_CHIPS[id]?.slots ?? 1);
+  }, 0);
+
+  if (chipDef.kind === "unit") {
+    const mine = Object.values(game.units)
+      .filter((u) => u.owner === pid)
+      .sort((a, b) => b.strength - a.strength);
+    for (const u of mine) {
+      if (slotsUsed(u.chips) + chipDef.slots <= CONFIG.unit.baySlots) {
+        return { unit: u.uid };
+      }
+    }
+    return null;
+  }
+  const mine = Object.values(game.locations).filter((l) => l.controller === pid);
+  for (const loc of mine) {
+    if (slotsUsed(loc.chips) + chipDef.slots <= loc.chipSlots) {
+      return { location: loc.hexId };
+    }
+  }
+  return null;
 }

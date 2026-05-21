@@ -34,7 +34,14 @@ function CapSlot({ note }) {
   );
 }
 
-export default function BottomDock({ state, tabHeight }) {
+export default function BottomDock({
+  state,
+  tabHeight,
+  isYourTurn,
+  selectedUnitId,
+  onSelectUnit,
+  onAcquire,
+}) {
   const [open, setOpen] = useState(null);
 
   const you = state.players[state.youId];
@@ -56,7 +63,7 @@ export default function BottomDock({ state, tabHeight }) {
   const tabs = [
     { id: "units", label: "Your Units", count: yourUnits.length },
     { id: "holdings", label: "Your Holdings", count: yourHolds.length },
-    { id: "market", label: "Market", count: state.market.length },
+    { id: "market", label: "Market", count: state.marketChips?.length || state.market.length },
   ];
 
   const rowStyle = { display: "flex", gap: 12, alignItems: "flex-start" };
@@ -88,9 +95,22 @@ export default function BottomDock({ state, tabHeight }) {
         <div className="pc-scroll" style={{ flex: 1, overflow: "auto", padding: 14 }}>
           {open === "units" && (
             <div style={rowStyle}>
-              {yourUnits.map((u) => (
-                <UnitCard key={u.id} unit={u} />
-              ))}
+              {yourUnits.map((u) => {
+                const selected = u.id === selectedUnitId;
+                return (
+                  <div
+                    key={u.id}
+                    onClick={() => isYourTurn && !u.immobilized && onSelectUnit?.(u.id)}
+                    style={{
+                      cursor: isYourTurn && !u.immobilized ? "pointer" : "default",
+                      outline: selected ? `2px solid ${theme.accent}` : "none",
+                      borderRadius: 9,
+                    }}
+                  >
+                    <UnitCard unit={u} />
+                  </div>
+                );
+              })}
               <CapSlot
                 note={`Unit cap ${yourUnits.length}/${you.unitCap}. Build a Training Grounds to recruit more.`}
               />
@@ -111,7 +131,9 @@ export default function BottomDock({ state, tabHeight }) {
               )}
             </div>
           )}
-          {open === "market" && <MarketRow state={state} />}
+          {open === "market" && (
+            <MarketRow state={state} isYourTurn={isYourTurn} onAcquire={onAcquire} />
+          )}
         </div>
       </div>
 
