@@ -4,6 +4,7 @@
 // payload rewrites.
 import { applyEffects } from "./effects.js";
 import { CHIPS, CAPITAL, ABILITIES, REACTIVES } from "./content.js";
+import { evalCond as dslEvalCond } from "./dsl.js";
 
 export const EVENT_NAMES = new Set([
   "turn_started", "turn_ended", "round_ended",
@@ -103,6 +104,8 @@ export function evalCondition(state, condition, ctx) {
   if (condition === "recipient-is-source") {
     return ctx.event?.payload?.recipient === ctx.source?.owner;
   }
+  // Object-form conditions are full DSL expressions — delegate.
+  if (typeof condition === "object") return dslEvalCond(state, condition, ctx);
   return true;
 }
 

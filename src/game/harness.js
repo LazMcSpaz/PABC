@@ -324,6 +324,23 @@ line(`  beat events: ${game.log.filter((e) => e.name === "quest_advanced").map((
 line(`  completed: ${completedQ ? `at round ${completedQ.round}, claimant ${completedQ.claimant}` : "(no)"}`);
 line(`  ${me} scrap from completion reward: ${scrapPreQuest} → ${game.players[me].resource}`);
 
+// --- Layer 5.5 faction-standing hooks ---
+line("\nFACTION STANDING  (Layer 5.5 — engine-internal hooks)");
+line(`  current: raidCounts.goldgrass=${game.world.raidCounts.goldgrass} (incremented by the 3.2 raid hook), standing.goldgrass.${me}=${game.factionStanding.goldgrass[me]} (raid -1 + 5.1 demo +1 = 0)`);
+// Capture goldgrass-affiliated Omara. champ is still on Omara from
+// the 5.1 demos; re-buff strength since this_turn buffs were spent.
+champ.node = omara.hexId;
+applyEffect(game, { type: "MODIFY_STAT", stat: "Strength", amount: 35, target: champ.uid, duration: "this_turn" }, ctx);
+const standingBefore = game.factionStanding.goldgrass[me];
+let contestsForCapture = 0;
+while (omara.controller !== me && contestsForCapture < 6) {
+  const r = performAction(game, "contest", { unit: champ.uid });
+  contestsForCapture++;
+  if (!r.ok || r.cancelled === undefined && !r.won) break; // safety
+}
+line(`  ${me} attacks ${LOCATIONS[omara.locationId].name} (goldgrass-affiliated): captured after ${contestsForCapture} contests`);
+line(`  standing.goldgrass.${me}: ${standingBefore} → ${game.factionStanding.goldgrass[me]} (capture penalty -2)`);
+
 // --- Layer 5.2 end-of-round pipeline (deferred sweep + triggers) ---
 line("\nROUND-END PIPELINE  (Layer 5.2 — deferred sweep + trigger eval)");
 applyEffect(game, { type: "QUEUE_DEFERRED",
