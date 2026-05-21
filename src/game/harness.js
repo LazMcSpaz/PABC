@@ -270,6 +270,32 @@ const s1 = { if: [
 ] };
 line(`  strength cascade by tech: ${evalStrength(game, s1)}`);
 
+// --- Layer 5.3 encounter delivery (field draw on Move-end) ---
+line("\nFIELD ENCOUNTER  (Layer 5.3 — Move-end draws from the deck)");
+// Park the champ adjacent to an encounter hex, then Move onto it.
+const encounterHex = Object.values(game.board.hexes).find((h) => {
+  if (h.type !== "encounter") return false;
+  // adjacent to at least one terrain/location hex so we can stage from there
+  return game.board.adjacency[h.id]?.length > 0;
+});
+const stagingHex = game.board.adjacency[encounterHex.id][0];
+champ.node = stagingHex;
+applyEffect(game, { type: "GRANT_ACTIONS", amount: 5, target: "active_player" }, ctx);
+applyEffect(game, { type: "MODIFY_STAT", stat: "Movement", amount: 5, target: champ.uid, duration: "this_turn" }, ctx);
+const deckBefore = game.encounterDeck.length;
+const scrapPre = game.players[me].resource;
+const techPre = game.players[me].tech;
+const tracksPre = { ...game.players[me].tracks };
+line(`  deck size before: ${deckBefore}; champ ${champ.uid} on ${stagingHex} → moves to encounter hex ${encounterHex.id}`);
+const fe = performAction(game, "move", { unit: champ.uid, to: encounterHex.id });
+line(`  move: ${fe.ok ? "ok" : "blocked — " + fe.reason}`);
+line(`  deck size after: ${game.encounterDeck.length}; encounter discard: ${game.discards.encounter.length}; hex cooldown until round ${game.world.encounterHexCooldowns[encounterHex.id]}`);
+const lastDelivered = [...game.log].reverse().find((e) => e.name === "encounter_delivered");
+const lastResolved = [...game.log].reverse().find((e) => e.name === "encounter_resolved");
+if (lastDelivered) line(`  delivered: ${lastDelivered.payload.encounter} → "${lastDelivered.payload.choiceLabel}"`);
+if (lastResolved) line(`  resolved:  ${lastResolved.payload.encounter}`);
+line(`  ${me} deltas: scrap ${scrapPre}→${game.players[me].resource}, tech ${techPre}→${game.players[me].tech}, tracks {trust ${tracksPre.trust}→${game.players[me].tracks.trust}, reputation ${tracksPre.reputation}→${game.players[me].tracks.reputation}, alignment ${tracksPre.alignment}→${game.players[me].tracks.alignment}}`);
+
 // --- Layer 5.2 end-of-round pipeline (deferred sweep + triggers) ---
 line("\nROUND-END PIPELINE  (Layer 5.2 — deferred sweep + trigger eval)");
 applyEffect(game, { type: "QUEUE_DEFERRED",

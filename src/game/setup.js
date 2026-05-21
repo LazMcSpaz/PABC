@@ -2,6 +2,7 @@
 // the board, players, locations, units, and the tiered Market.
 import { CONFIG } from "./config.js";
 import { FACTIONS, LOCATIONS, CHIPS, CAPITAL, ABILITIES, REACTIVES } from "./content.js";
+import { FIELD_ENCOUNTERS } from "./content/index.js";
 import { makeRng } from "./rng.js";
 import { createIdGen } from "./ids.js";
 import { buildHexGrid, generateLayout } from "./board.js";
@@ -150,7 +151,17 @@ export function createGame({ seed = Date.now() & 0xffffffff, factionIds } = {}) 
     units,
     chips,
     market,
-    encounterDeck: [], // content pending — encounter design batch
+    encounterDeck: (() => {
+      // Field-encounter deck (§15.8). Each authored encounter expands
+      // into `copies` entries (id strings — encounters carry no
+      // per-instance state, unlike chips).
+      const seeds = [];
+      for (const def of Object.values(FIELD_ENCOUNTERS)) {
+        const copies = def.copies || 1;
+        for (let i = 0; i < copies; i++) seeds.push(def.id);
+      }
+      return rng.shuffle(seeds);
+    })(),
     reactiveDeck: (() => {
       // Every Reactive's `copies` expand into instances stored in the
       // shared chips registry (same uid scheme as Market chips); the

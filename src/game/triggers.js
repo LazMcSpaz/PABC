@@ -15,6 +15,7 @@
 import { WORLD_ENCOUNTERS } from "./content/index.js";
 import { evalCond, evalStrength } from "./dsl.js";
 import { emit } from "./events.js";
+import { deliverEncounter } from "./encounters.js";
 
 const FIRE_PER_ROUND = 2;
 
@@ -54,11 +55,9 @@ export function evaluateTriggers(state, ctx = {}) {
     emit(state, "trigger_fired", {
       trigger: trigger.id, strength, round: state.round,
     });
-    emit(state, "encounter_delivered", {
-      encounter: trigger.encounter.id,
-      mode: trigger.encounter.mode,
-      via: "trigger",
-    });
+    // Real delivery — encounters.js routes by mode (private / public /
+    // placement) and emits encounter_delivered itself.
+    deliverEncounter(state, trigger.encounter.id, {}, ctx);
   }
   return fired;
 }
