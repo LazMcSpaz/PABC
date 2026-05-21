@@ -18,7 +18,11 @@ import { activePlayerId } from "../game/targeting.js";
 import { bfsDistances } from "../game/board.js";
 import { CHIPS as ENGINE_CHIPS } from "../game/content.js";
 import { CONFIG } from "../game/config.js";
+import { getEncounter } from "../game/encounters.js";
+import { evalCond } from "../game/dsl.js";
 import { adaptState } from "./engineAdapter.js";
+import EncounterModal from "./EncounterModal.jsx";
+import EventFeed from "./EventFeed.jsx";
 
 const TOP_H = 56;
 const TAB_H = 44;
@@ -68,6 +72,7 @@ export default function Prototype() {
   const [selectedHexId, setSelectedHexId] = useState(null);
   const [selectedUnitId, setSelectedUnitId] = useState(null);
   const [toast, setToast] = useState(null); // { kind: "error"|"info", text }
+  const [encounterPrompt, setEncounterPrompt] = useState(null); // pending move + encounter pick
   const you = state.players[state.youId];
   const isYourTurn = state.activeId === state.youId && !state.winnerId;
 
@@ -101,8 +106,8 @@ export default function Prototype() {
 
   // --- action handlers ----------------------------------------------
 
-  function runAction(type, params, successMsg) {
-    const r = performAction(gameRef.current, type, params);
+  function runAction(type, params, ctx, successMsg) {
+    const r = performAction(gameRef.current, type, params, ctx || {});
     if (!r.ok) {
       setToast({ kind: "error", text: r.reason });
       return r;
@@ -110,6 +115,34 @@ export default function Prototype() {
     if (successMsg) setToast({ kind: "info", text: successMsg });
     bumpTick();
     return r;
+  }
+
+  function peekFieldEncounter(game, destHex) {
+    if (game.board.hexes[destHex]?.type !== "encounter") return null;
+    const cooldownUntil = game.world?.encounterHexCooldowns?.[destHex] || 0;
+    if (game.round < cooldownUntil) return null;
+    const id = game.encounterDeck?.[0];
+    if (!id) return null;
+    return getEncounter(id);
+  }
+
+  function eligibleChoiceIds(game, encounter, pid) {
+    const subCtx = { sourcePlayer: pid };
+    return (encounter.choices || [])
+      .filter((c) => c.condition == null || evalCond(game, c.condition, subCtx))
+      .map((c) => c.id);
+  }
+
+  function doMoveWithEncounterChoice(unitUid, dest, choiceId) {
+    const ctx = {
+      interact: (req) => {
+        if (req.kind === "encounterChoice") return choiceId;
+        return req?.options ? req.options[0] : null; // fallback to first
+      },
+    };
+    const r = runAction("move", { unit: unitUid, to: dest }, ctx);
+    if (r.ok) setSelectedHexId(dest);
+    setEncounterPrompt(null);
   }
 
   function onHexClick(hexId) {
@@ -120,6 +153,20 @@ export default function Prototype() {
       reachable?.has(hexId) &&
       state.units[selectedUnitId]?.node !== hexId
     ) {
+      // Pre-flight: if the move would draw a field encounter, surface
+      // the choice modal first and stash the pending move on it.
+      const enc = peekFieldEncounter(gameRef.current, hexId);
+      if (enc && (enc.choices || []).length > 0) {
+        const elig = eligibleChoiceIds(gameRef.current, enc, state.youId);
+        setEncounterPrompt({
+          encounter: enc,
+          choices: enc.choices,
+          eligibleIds: elig.length ? elig : enc.choices.map((c) => c.id),
+          unitUid: selectedUnitId,
+          dest: hexId,
+        });
+        return;
+      }
       const r = runAction("move", { unit: selectedUnitId, to: hexId });
       if (r.ok) setSelectedHexId(hexId);
       return;
@@ -145,10 +192,10 @@ export default function Prototype() {
     return runAction("contest", params);
   }
   function onActivate(hexId) {
-    return runAction("activate", { location: hexId }, "Ability activated.");
+    return runAction("activate", { location: hexId }, null, "Ability activated.");
   }
   function onRecruit(hexId) {
-    return runAction("recruit", { at: hexId }, "Unit recruited.");
+    return runAction("recruit", { at: hexId }, null, "Unit recruited.");
   }
   function onAcquire(uiChip) {
     // uiChip is { uid, chipId, engineChipId }. Pick an install target:
@@ -166,7 +213,7 @@ export default function Prototype() {
       setToast({ kind: "error", text: "No legal install target for this chip." });
       return;
     }
-    runAction("acquire", { chip: uiChip.uid, into }, "Chip installed.");
+    runAction("acquire", { chip: uiChip.uid, into }, null, "Chip installed.");
   }
 
   function onEndTurn() {
@@ -271,21 +318,24 @@ export default function Prototype() {
       </header>
 
       {/* BOARD — the field of battle; drag to pan, wheel to zoom */}
-      <BoardViewport>
-        <div style={{ position: "relative", padding: 30 }}>
-          <Bracket corner="tl" />
-          <Bracket corner="tr" />
-          <Bracket corner="bl" />
-          <Bracket corner="br" />
-          <HexBoard
-            state={state}
-            selectedHexId={selectedHexId}
-            selectedUnitId={selectedUnitId}
-            reachable={reachable}
-            onSelect={onHexClick}
-          />
-        </div>
-      </BoardViewport>
+      <div style={{ position: "relative", flex: 1, display: "flex", minHeight: 0 }}>
+        <BoardViewport>
+          <div style={{ position: "relative", padding: 30 }}>
+            <Bracket corner="tl" />
+            <Bracket corner="tr" />
+            <Bracket corner="bl" />
+            <Bracket corner="br" />
+            <HexBoard
+              state={state}
+              selectedHexId={selectedHexId}
+              selectedUnitId={selectedUnitId}
+              reachable={reachable}
+              onSelect={onHexClick}
+            />
+          </div>
+        </BoardViewport>
+        <EventFeed engineState={gameRef.current} tick={tick} />
+      </div>
 
       {/* INSPECTOR — floating tabbed window, opens on hex selection */}
       {selectedHexId && (
@@ -333,6 +383,22 @@ export default function Prototype() {
         >
           {toast.text}
         </div>
+      )}
+
+      {encounterPrompt && (
+        <EncounterModal
+          encounter={encounterPrompt.encounter}
+          choices={encounterPrompt.choices}
+          eligibleIds={encounterPrompt.eligibleIds}
+          onPick={(choiceId) =>
+            doMoveWithEncounterChoice(
+              encounterPrompt.unitUid,
+              encounterPrompt.dest,
+              choiceId,
+            )
+          }
+          onCancel={() => setEncounterPrompt(null)}
+        />
       )}
 
       {state.winnerId && (

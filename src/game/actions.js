@@ -40,7 +40,7 @@ function validateMove(state, { pid, params }) {
   return { ok: true };
 }
 
-function runMove(state, { params }) {
+function runMove(state, { params, ctx }) {
   const unit = state.units[params.unit];
   const from = unit.node;
   unit.node = params.to;
@@ -48,13 +48,13 @@ function runMove(state, { params }) {
 
   // §15.5 placement markers take precedence — they're authored to land
   // on a specific hex and one-shot when discovered.
-  const markerResult = resolveMarkerOnHex(state, params.to, unit);
+  const markerResult = resolveMarkerOnHex(state, params.to, unit, ctx);
   // §15.8 field-encounter hexes draw from the deck unless the hex is
   // still in its refresh cooldown.
   if (!markerResult && state.board.hexes[params.to].type === "encounter") {
     const cooldownUntil = state.world?.encounterHexCooldowns?.[params.to] || 0;
     if (state.round >= cooldownUntil) {
-      drawFieldEncounter(state, unit);
+      drawFieldEncounter(state, unit, ctx);
     }
   }
   return {};
@@ -215,7 +215,7 @@ function validateActivate(state, { pid, player, params }) {
   return { ok: true };
 }
 
-function runActivate(state, { pid, player, params }) {
+function runActivate(state, { pid, player, params, ctx }) {
   const { loc, ability, opt } = getActivatable(state, params);
   const cost = opt.cost || {};
   if (cost.resource) {
@@ -224,7 +224,7 @@ function runActivate(state, { pid, player, params }) {
       player: pid, resource: "Resource", amount: -cost.resource,
     });
   }
-  applyEffects(state, opt.effects || [], { sourcePlayer: pid, source: loc });
+  applyEffects(state, opt.effects || [], { ...ctx, sourcePlayer: pid, source: loc });
   return { location: loc.hexId, ability: ability.id };
 }
 
@@ -237,7 +237,7 @@ const ACTIONS = {
   activate: { cost: activateActionCost, validate: validateActivate, run: runActivate },
 };
 
-export function performAction(state, type, params = {}) {
+export function performAction(state, type, params = {}, ctx = {}) {
   if (state.winnerId) return fail("the game is already won");
   if (state.phase !== "Main") return fail("actions are only legal in the Main phase");
   const def = ACTIONS[type];
@@ -245,7 +245,7 @@ export function performAction(state, type, params = {}) {
 
   const pid = activePlayerId(state);
   const player = state.players[pid];
-  const arg = { pid, player, params };
+  const arg = { pid, player, params, ctx };
 
   const check = def.validate(state, arg);
   if (!check.ok) return check;
