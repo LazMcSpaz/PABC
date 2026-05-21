@@ -60,7 +60,7 @@ export function ensureUiConstantsSynced() {
     if (!uiDef) continue;
     uiDef.garrison = CONFIG.garrisonByValue[def.strategicValue] ?? uiDef.garrison;
     uiDef.chipSlots = CONFIG.chipSlotsByValue[def.strategicValue] ?? uiDef.chipSlots;
-    uiDef.vp = def.vpPerRound ?? uiDef.vp;
+    uiDef.vp = def.vpReward ?? uiDef.vp;
     // engine production is a range [min,max] — show the midpoint
     if (Array.isArray(def.production)) {
       uiDef.production = Math.round((def.production[0] + def.production[1]) / 2);

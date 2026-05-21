@@ -7,7 +7,7 @@
 import { emit } from "./events.js";
 import { openReactionWindow } from "./reactions.js";
 import { CONFIG } from "./config.js";
-import { CHIPS } from "./content.js";
+import { CHIPS, LOCATIONS } from "./content.js";
 import { recomputeStats, recomputeTech } from "./stats.js";
 import { onLocationCaptured, onRaidWon } from "./standing.js";
 
@@ -130,6 +130,26 @@ function captureLocation(state, loc, victor) {
   loc.footholdOwner = victor;
   loc.foothold = 0; // §6.3.2 — F activates at full control, starting at 0
   emit(state, "location_captured", { hex: loc.hexId, controller: victor, from });
+
+  // VP is banked once per Location, on the FIRST capture only —
+  // subsequent recaptures don't re-pay (loc.vpAwarded gates it). The
+  // value comes from LOCATIONS[id].vpReward (1/2/3 by strategic
+  // value). Sets winnerId if this push crosses the threshold.
+  if (!loc.vpAwarded) {
+    const reward = LOCATIONS[loc.locationId]?.vpReward || 0;
+    if (reward > 0) {
+      const p = state.players[victor];
+      p.vp += reward;
+      loc.vpAwarded = true;
+      emit(state, "resource_gained", {
+        player: victor, resource: "VP", amount: reward, source: "capture",
+      });
+      if (p.vp >= CONFIG.vpThreshold && !state.winnerId) {
+        state.winnerId = victor;
+      }
+    }
+  }
+
   // Control changed; a Labs chip on this location may have changed
   // hands or been destroyed — sync Tech for everyone (§3).
   recomputeTech(state);

@@ -75,8 +75,8 @@ function formatEvent(ev, engineState) {
       return null; // already implied by encounter_delivered
     case "resource_gained":
       if (p.resource === "VP") {
-        const label = p.source === "control"
-          ? `+${p.amount} VP from holdings`
+        const label = p.source === "capture"
+          ? `+${p.amount} VP (capture)`
           : p.source
             ? `+${p.amount} VP (${p.source})`
             : `+${p.amount} VP`;
@@ -107,6 +107,8 @@ function formatEvent(ev, engineState) {
       return { color: theme.accent, text: ev.name.replace("_", " ") };
     case "deferred_resolved":
       return { color: theme.textDim, text: "Deferred packet fired" };
+    case "market_churned":
+      return null; // too noisy if surfaced every turn — it just is
     case "round_ended":
       return { color: theme.textFaint, text: `— round ${p.round} ended —` };
     case "turn_ended":
