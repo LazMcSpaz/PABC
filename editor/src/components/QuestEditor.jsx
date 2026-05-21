@@ -1,12 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
-import ReactFlow, {
-  Background,
-  Controls,
-  Handle,
-  Position,
-  applyNodeChanges,
-  addEdge,
-} from "reactflow";
+import { useState } from "react";
 import {
   Field,
   TextInput,
@@ -21,14 +13,14 @@ import { EffectList } from "./EffectEditor.jsx";
 import { DslBuilder } from "./DslBuilder.jsx";
 import { HexFilterBuilder } from "./HexFilterBuilder.jsx";
 import { RecipientPicker } from "./RecipientPicker.jsx";
+import { EncounterImageEditor } from "./EncounterImageEditor.jsx";
+import { BeatTreeView } from "./BeatTreeView.jsx";
 import {
   QUEST_MODES,
   BEAT_DELIVER_MODES,
   BEAT_MODES,
 } from "../lib/schema.js";
 import { newId } from "../lib/id.js";
-
-const nodeTypes = { beat: BeatNode };
 
 export function QuestEditor({ value, onChange, context }) {
   const [selectedBeatId, setSelectedBeatId] = useState(
@@ -37,90 +29,18 @@ export function QuestEditor({ value, onChange, context }) {
 
   const set = (key, v) => onChange({ ...value, [key]: v });
 
-  const nodes = useMemo(
-    () =>
-      (value.beats ?? []).map((b, i) => ({
-        id: b.id,
-        type: "beat",
-        position: positionForBeat(b, i),
-        data: {
-          beat: b,
-          selected: b.id === selectedBeatId,
-          onSelect: () => setSelectedBeatId(b.id),
-        },
-      })),
-    [value.beats, selectedBeatId],
-  );
-
-  const edges = useMemo(
-    () =>
-      (value.prereqs ?? []).map((p) => ({
-        id: `${p.prereqBeatId}->${p.beatId}`,
-        source: p.prereqBeatId,
-        target: p.beatId,
-        animated: false,
-      })),
-    [value.prereqs],
-  );
-
-  const onNodesChange = useCallback(
-    (changes) => {
-      const nextBeats = (value.beats ?? []).slice();
-      const updated = applyNodeChanges(
-        changes,
-        nextBeats.map((b, i) => ({
-          id: b.id,
-          position: positionForBeat(b, i),
-          data: {},
-        })),
-      );
-      const idToPos = new Map(updated.map((n) => [n.id, n.position]));
-      const remapped = nextBeats.map((b) => {
-        const pos = idToPos.get(b.id);
-        if (!pos) return b;
-        return { ...b, _x: pos.x, _y: pos.y };
-      });
-      onChange({ ...value, beats: remapped });
-    },
-    [value, onChange],
-  );
-
-  const onConnect = useCallback(
-    (params) => {
-      const next = addEdge(params, edges);
-      const newPrereqs = next.map((e) => ({
-        beatId: e.target,
-        prereqBeatId: e.source,
-      }));
-      onChange({ ...value, prereqs: dedupePrereqs(newPrereqs) });
-    },
-    [edges, value, onChange],
-  );
-
-  const onEdgesDelete = useCallback(
-    (deleted) => {
-      const removed = new Set(
-        deleted.map((e) => `${e.source}->${e.target}`),
-      );
-      const next = (value.prereqs ?? []).filter(
-        (p) => !removed.has(`${p.prereqBeatId}->${p.beatId}`),
-      );
-      onChange({ ...value, prereqs: next });
-    },
-    [value, onChange],
-  );
-
   const addBeat = () => {
     const id = newId("beat");
     const beat = {
       id,
-      ordinal: (value.beats?.length ?? 0),
+      ordinal: value.beats?.length ?? 0,
       deliver: "auto",
       deliverCondition: null,
       placementFilter: null,
       mode: value.mode === "global" ? "public" : "private",
       recipient: value.mode === "global" ? null : "claimant",
       art: "",
+      imagePath: null,
       text: "",
       choices: [],
     };
@@ -129,9 +49,7 @@ export function QuestEditor({ value, onChange, context }) {
   };
 
   const updateBeat = (id, updater) => {
-    const next = (value.beats ?? []).map((b) =>
-      b.id === id ? updater(b) : b,
-    );
+    const next = (value.beats ?? []).map((b) => (b.id === id ? updater(b) : b));
     onChange({ ...value, beats: next });
   };
 
@@ -141,7 +59,16 @@ export function QuestEditor({ value, onChange, context }) {
     const prereqs = (value.prereqs ?? []).filter(
       (p) => p.beatId !== id && p.prereqBeatId !== id,
     );
-    onChange({ ...value, beats, prereqs });
+    const cleaned = beats.map((b) => ({
+      ...b,
+      choices: (b.choices ?? []).map((c) => ({
+        ...c,
+        effects: (c.effects ?? []).filter(
+          (e) => !(e.type === "ADVANCE_QUEST" && e.params?.beatId === id),
+        ),
+      })),
+    }));
+    onChange({ ...value, beats: cleaned, prereqs });
     if (selectedBeatId === id) setSelectedBeatId(beats[0]?.id ?? null);
   };
 
@@ -158,46 +85,45 @@ export function QuestEditor({ value, onChange, context }) {
             <TextInput value={value.title} onChange={(v) => set("title", v)} />
           </Field>
           <Field label="mode">
-            <Select value={value.mode} onChange={(v) => set("mode", v)} options={QUEST_MODES} />
+            <Select
+              value={value.mode}
+              onChange={(v) => set("mode", v)}
+              options={QUEST_MODES}
+            />
           </Field>
         </div>
       </SectionCard>
 
       <SectionCard
-        title="Beat graph"
+        title="Decision tree"
         actions={
           <IconButton onClick={addBeat} variant="primary">
             + beat
           </IconButton>
         }
       >
-        <div className="text-xs text-slate-500">
-          Drag beats to reorganise. Drag from one beat's bottom handle to
-          another's top to create a prerequisite edge. Click a beat to edit
-          its details below.
+        <div className="text-xs text-slate-500 leading-relaxed">
+          Beats are rectangles; their choices hang below as pills. Drag a
+          choice's bottom handle onto another beat's top handle to wire the
+          choice into that beat. Click a beat to edit it inline.
         </div>
-        <div style={{ height: 380 }} className="bg-slate-950/60 rounded border border-slate-800">
-          <ReactFlow
-            nodes={nodes}
-            edges={edges}
-            nodeTypes={nodeTypes}
-            onNodesChange={onNodesChange}
-            onConnect={onConnect}
-            onEdgesDelete={onEdgesDelete}
-            fitView
-            proOptions={{ hideAttribution: true }}
-          >
-            <Background gap={16} color="#1e293b" />
-            <Controls />
-          </ReactFlow>
-        </div>
+        <BeatTreeView
+          beats={value.beats ?? []}
+          onBeatsChange={(nextBeats) => set("beats", nextBeats)}
+          advanceEffectType="ADVANCE_QUEST"
+          buildAdvanceParams={(beatId) => ({ questId: value.id, beatId })}
+          selectedBeatId={selectedBeatId}
+          onSelectBeat={setSelectedBeatId}
+        />
       </SectionCard>
 
       {selectedBeat && (
         <BeatEditor
           beat={selectedBeat}
+          quest={value}
           onChange={(updated) => updateBeat(selectedBeat.id, () => updated)}
           onDelete={() => deleteBeat(selectedBeat.id)}
+          onPrereqsChange={(prereqs) => set("prereqs", prereqs)}
           context={context}
         />
       )}
@@ -221,124 +147,176 @@ export function QuestEditor({ value, onChange, context }) {
   );
 }
 
-function BeatNode({ data }) {
-  const b = data.beat;
-  return (
-    <div
-      onClick={data.onSelect}
-      className={`min-w-[180px] cursor-pointer rounded-md border bg-slate-900 px-3 py-2 text-xs shadow ${
-        data.selected ? "border-amber-400" : "border-slate-700"
-      }`}
-    >
-      <Handle type="target" position={Position.Top} />
-      <div className="font-semibold text-slate-100 mb-1">{b.id}</div>
-      <div className="text-slate-500">
-        deliver: <span className="text-slate-300">{b.deliver}</span>
-      </div>
-      <div className="text-slate-500">
-        mode: <span className="text-slate-300">{b.mode}</span>
-      </div>
-      {b.choices?.length > 0 && (
-        <div className="text-slate-500">
-          {b.choices.length} choice{b.choices.length === 1 ? "" : "s"}
-        </div>
-      )}
-      <Handle type="source" position={Position.Bottom} />
-    </div>
-  );
-}
-
-function BeatEditor({ beat, onChange, onDelete, context }) {
+function BeatEditor({
+  beat,
+  quest,
+  onChange,
+  onDelete,
+  onPrereqsChange,
+  context,
+}) {
   const set = (key, v) => onChange({ ...beat, [key]: v });
 
   return (
-    <SectionCard
-      title={`Beat — ${beat.id}`}
-      actions={
-        <IconButton variant="danger" onClick={onDelete}>
-          delete beat
-        </IconButton>
-      }
-    >
-      <div className="grid grid-cols-3 gap-3">
-        <Field label="id">
-          <TextInput value={beat.id} onChange={(v) => set("id", v)} />
-        </Field>
-        <Field label="ordinal">
-          <NumberInput value={beat.ordinal} onChange={(v) => set("ordinal", v)} />
-        </Field>
-        <Field label="deliver">
-          <Select
-            value={beat.deliver}
-            onChange={(v) => set("deliver", v)}
-            options={BEAT_DELIVER_MODES}
-          />
-        </Field>
-        <Field label="mode">
-          <Select
-            value={beat.mode}
-            onChange={(v) => set("mode", v)}
-            options={BEAT_MODES}
-          />
-        </Field>
-        {beat.mode === "private" && (
-          <Field label="recipient" className="col-span-2">
-            <RecipientPicker value={beat.recipient} onChange={(v) => set("recipient", v)} />
+    <>
+      <SectionCard
+        title={`Encounter — beat ${beat.id}`}
+        actions={
+          <IconButton variant="danger" onClick={onDelete}>
+            delete beat
+          </IconButton>
+        }
+      >
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="id">
+            <TextInput value={beat.id} onChange={(v) => set("id", v)} />
           </Field>
-        )}
-        <Field label="art" className="col-span-3">
-          <TextInput value={beat.art} onChange={(v) => set("art", v)} />
-        </Field>
-        <Field label="text" className="col-span-3">
-          <TextArea value={beat.text} onChange={(v) => set("text", v)} rows={4} />
-        </Field>
-      </div>
+          <Field label="ordinal">
+            <NumberInput
+              value={beat.ordinal}
+              onChange={(v) => set("ordinal", v)}
+            />
+          </Field>
+          <div className="col-span-2">
+            <EncounterImageEditor
+              kind="beat"
+              id={beat.id}
+              imagePath={beat.imagePath}
+              onChange={(v) => set("imagePath", v)}
+            />
+          </div>
+          <Field label="text" className="col-span-2">
+            <TextArea
+              value={beat.text}
+              onChange={(v) => set("text", v)}
+              rows={4}
+            />
+          </Field>
+          <Field
+            label="art (free-text direction notes)"
+            className="col-span-2"
+          >
+            <TextInput
+              value={beat.art}
+              onChange={(v) => set("art", v)}
+              placeholder="optional art-direction notes"
+            />
+          </Field>
+        </div>
+      </SectionCard>
 
-      {beat.deliver === "conditional" && (
-        <Field label="deliverCondition">
-          <DslBuilder
-            value={beat.deliverCondition}
-            onChange={(v) => set("deliverCondition", v)}
-          />
-        </Field>
-      )}
-      {beat.deliver === "discovered" && (
-        <Field label="placementFilter">
-          <HexFilterBuilder
-            value={beat.placementFilter}
-            onChange={(v) => set("placementFilter", v)}
-            allowNull={false}
-          />
-        </Field>
-      )}
-
-      <div className="flex flex-col gap-2 mt-3">
-        <span className="text-xs uppercase tracking-wide text-slate-400">
-          choices
-        </span>
+      <SectionCard title="Choices (up to 3)">
         <ChoiceList
           choices={beat.choices ?? []}
           onChange={(v) => set("choices", v)}
           context={context}
         />
-      </div>
-    </SectionCard>
+      </SectionCard>
+
+      <SectionCard title="Delivery">
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="deliver">
+            <Select
+              value={beat.deliver}
+              onChange={(v) => set("deliver", v)}
+              options={BEAT_DELIVER_MODES}
+            />
+          </Field>
+          <Field label="mode">
+            <Select
+              value={beat.mode}
+              onChange={(v) => set("mode", v)}
+              options={BEAT_MODES}
+            />
+          </Field>
+          {beat.mode === "private" && (
+            <Field label="recipient" className="col-span-2">
+              <RecipientPicker
+                value={beat.recipient}
+                onChange={(v) => set("recipient", v)}
+              />
+            </Field>
+          )}
+        </div>
+
+        {beat.deliver === "conditional" && (
+          <Field label="deliverCondition">
+            <DslBuilder
+              value={beat.deliverCondition}
+              onChange={(v) => set("deliverCondition", v)}
+            />
+          </Field>
+        )}
+        {beat.deliver === "discovered" && (
+          <Field label="placementFilter">
+            <HexFilterBuilder
+              value={beat.placementFilter}
+              onChange={(v) => set("placementFilter", v)}
+              allowNull={false}
+            />
+          </Field>
+        )}
+
+        <PrereqEditor
+          beatId={beat.id}
+          beats={quest.beats ?? []}
+          prereqs={quest.prereqs ?? []}
+          onChange={onPrereqsChange}
+        />
+      </SectionCard>
+    </>
   );
 }
 
-function positionForBeat(b, i) {
-  if (typeof b._x === "number" && typeof b._y === "number") {
-    return { x: b._x, y: b._y };
-  }
-  return { x: 100 + (i % 4) * 230, y: 60 + Math.floor(i / 4) * 130 };
-}
+function PrereqEditor({ beatId, beats, prereqs, onChange }) {
+  const current = new Set(
+    prereqs.filter((p) => p.beatId === beatId).map((p) => p.prereqBeatId),
+  );
 
-function dedupePrereqs(prereqs) {
-  const seen = new Set();
-  return prereqs.filter((p) => {
-    const k = `${p.prereqBeatId}->${p.beatId}`;
-    if (seen.has(k)) return false;
-    seen.add(k);
-    return true;
-  });
+  const toggle = (otherBeatId) => {
+    let next;
+    if (current.has(otherBeatId)) {
+      next = prereqs.filter(
+        (p) => !(p.beatId === beatId && p.prereqBeatId === otherBeatId),
+      );
+    } else {
+      next = [...prereqs, { beatId, prereqBeatId: otherBeatId }];
+    }
+    onChange(next);
+  };
+
+  const others = beats.filter((b) => b.id !== beatId);
+  if (others.length === 0) return null;
+
+  return (
+    <div className="flex flex-col gap-2 mt-3">
+      <span className="text-xs uppercase tracking-wide text-slate-400">
+        prerequisites
+      </span>
+      <div className="text-xs text-slate-500">
+        Other beats that must complete before this one becomes eligible.
+        Separate from the decision tree — this is engine-level gating.
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {others.map((b) => {
+          const on = current.has(b.id);
+          return (
+            <button
+              key={b.id}
+              type="button"
+              onClick={() => toggle(b.id)}
+              className={`px-2 py-1 text-xs rounded border ${
+                on
+                  ? "bg-amber-500 border-amber-400 text-slate-950"
+                  : "bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700"
+              }`}
+            >
+              {on ? "✓ " : ""}
+              {b.id}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
 }

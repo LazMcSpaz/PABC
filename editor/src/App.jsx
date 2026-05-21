@@ -4,18 +4,12 @@ import { WorldEncounterEditor } from "./components/WorldEncounterEditor.jsx";
 import { FieldEncounterEditor } from "./components/FieldEncounterEditor.jsx";
 import { QuestEditor } from "./components/QuestEditor.jsx";
 import { ImportModal } from "./components/ImportModal.jsx";
+import { listAll, loadQuest, saveQuest, deleteQuest } from "./lib/api.js";
 import {
-  listAll,
-  loadWorldEncounter,
-  loadFieldEncounter,
-  loadQuest,
-  saveWorldEncounter,
-  saveFieldEncounter,
-  saveQuest,
-  deleteWorldEncounter,
-  deleteFieldEncounter,
-  deleteQuest,
-} from "./lib/api.js";
+  loadStory,
+  saveStory,
+  deleteStory,
+} from "./lib/story.js";
 import { supabaseConfigured } from "./lib/supabase.js";
 import {
   validateWorldEncounter,
@@ -288,22 +282,19 @@ function kindKey(kind) {
 }
 
 async function loadForKind(kind, id) {
-  if (kind === "world") return loadWorldEncounter(id);
-  if (kind === "field") return loadFieldEncounter(id);
+  if (kind === "world" || kind === "field") return loadStory(kind, id);
   if (kind === "quest") return loadQuest(id);
   throw new Error(`unknown kind ${kind}`);
 }
 
 async function saveForKind(kind, draft) {
-  if (kind === "world") return saveWorldEncounter(draft);
-  if (kind === "field") return saveFieldEncounter(draft);
+  if (kind === "world" || kind === "field") return saveStory(draft);
   if (kind === "quest") return saveQuest(draft);
   throw new Error(`unknown kind ${kind}`);
 }
 
 async function deleteForKind(kind, id) {
-  if (kind === "world") return deleteWorldEncounter(id);
-  if (kind === "field") return deleteFieldEncounter(id);
+  if (kind === "world" || kind === "field") return deleteStory(kind, id);
   if (kind === "quest") return deleteQuest(id);
   throw new Error(`unknown kind ${kind}`);
 }
@@ -327,27 +318,25 @@ function validate(kind, draft, ctx) {
 function blankForKind(kind, id) {
   if (kind === "world") {
     return {
+      kind: "world",
       id,
       mode: "private",
       recipient: "active",
       expiresIn: null,
       publicGroupChoice: false,
-      art: "",
-      text: "",
       triggerCondition: { op: "eq", left: 0, right: 0 },
       triggerStrength: 1,
       triggerCooldown: 4,
       placementFilter: null,
-      choices: [],
+      beats: [blankBeat(id, true)],
     };
   }
   if (kind === "field") {
     return {
+      kind: "field",
       id,
       copies: 1,
-      art: "",
-      text: "",
-      choices: [],
+      beats: [blankBeat(id, true)],
     };
   }
   if (kind === "quest") {
@@ -362,4 +351,15 @@ function blankForKind(kind, id) {
     };
   }
   return null;
+}
+
+function blankBeat(id, isHead = false) {
+  return {
+    id,
+    isHead,
+    art: "",
+    imagePath: null,
+    text: "",
+    choices: [],
+  };
 }

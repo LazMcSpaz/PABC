@@ -21,18 +21,42 @@ const decodeJson = (v) => {
 
 export async function listAll() {
   const [worlds, fields, quests] = await Promise.all([
-    sb().from("world_encounters").select("id, mode").order("id"),
-    sb().from("field_encounters").select("id").order("id"),
+    sb()
+      .from("world_encounters")
+      .select("id, mode, triggerCondition")
+      .order("id"),
+    sb().from("field_encounters").select("id, copies").order("id"),
     sb().from("quests").select("id, title, mode").order("id"),
   ]);
   if (worlds.error) throw worlds.error;
   if (fields.error) throw fields.error;
   if (quests.error) throw quests.error;
+
+  // Hide sub-beats: their sentinels are copies=0 (field) or
+  // triggerCondition===false (world). They're only reachable via
+  // DELIVER_ENCOUNTER, never standalone, so they don't belong in the
+  // navigator. (See lib/story.js.)
+  const worldEncounters = (worlds.data ?? []).filter((r) => {
+    const cond = decodeJsonSafe(r.triggerCondition);
+    return cond !== false;
+  });
+  const fieldEncounters = (fields.data ?? []).filter((r) => r.copies !== 0);
+
   return {
-    worldEncounters: worlds.data ?? [],
-    fieldEncounters: fields.data ?? [],
+    worldEncounters,
+    fieldEncounters,
     quests: quests.data ?? [],
   };
+}
+
+function decodeJsonSafe(v) {
+  if (v == null || v === "") return null;
+  if (typeof v !== "string") return v;
+  try {
+    return JSON.parse(v);
+  } catch {
+    return null;
+  }
 }
 
 // ----- World encounters -----
