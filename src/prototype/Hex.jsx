@@ -15,7 +15,7 @@ const FILLS = {
   location: "linear-gradient(165deg, #3f3526 0%, #221c13 100%)",
 };
 
-function UnitToken({ unit }) {
+function UnitToken({ unit, selected }) {
   const faction = FACTIONS[unit.owner];
   return (
     <div
@@ -25,12 +25,14 @@ function UnitToken({ unit }) {
         top: "50%",
         right: "7%",
         transform: "translateY(-50%)",
-        width: 30,
-        height: 30,
+        width: selected ? 34 : 30,
+        height: selected ? 34 : 30,
         borderRadius: "50%",
         background: `radial-gradient(circle at 36% 30%, ${faction.color}, #14110c 145%)`,
-        border: "2px solid #100d09",
-        boxShadow: `0 3px 6px rgba(0,0,0,0.6), 0 0 9px ${faction.color}99, inset 0 1px 2px rgba(255,255,255,0.3)`,
+        border: selected ? `2px solid ${theme.accent}` : "2px solid #100d09",
+        boxShadow: selected
+          ? `0 3px 6px rgba(0,0,0,0.6), 0 0 16px ${theme.accent}, inset 0 1px 2px rgba(255,255,255,0.3)`
+          : `0 3px 6px rgba(0,0,0,0.6), 0 0 9px ${faction.color}99, inset 0 1px 2px rgba(255,255,255,0.3)`,
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
@@ -65,7 +67,7 @@ function Plaque({ children }) {
   );
 }
 
-export default function Hex({ hex, unit, selected, onClick }) {
+export default function Hex({ hex, unit, selected, reachable, unitSelected, onClick }) {
   const isLocation = hex.type === "location";
   const loc = isLocation ? LOCATIONS[hex.locationId] : null;
   const ctrl = isLocation ? fullController(hex.control?.sections) : null;
@@ -73,17 +75,21 @@ export default function Hex({ hex, unit, selected, onClick }) {
   let rim = "#4a4231";
   if (hex.type === "encounter") rim = "#3c5b65";
   else if (isLocation) rim = ctrl ? ownerColor(ctrl) : "#5a5040";
+  if (reachable) rim = theme.good;
   if (selected) rim = theme.accent;
 
   let filter = "drop-shadow(0 4px 4px rgba(0,0,0,0.55))";
   if (selected) filter = `drop-shadow(0 0 9px ${theme.accent}) ` + filter;
+  else if (reachable) filter = `drop-shadow(0 0 8px ${theme.good}cc) ` + filter;
   else if (ctrl) filter = `drop-shadow(0 0 6px ${ownerColor(ctrl)}88) ` + filter;
+
+  const cursor = reachable ? "pointer" : undefined;
 
   return (
     <div
       className="pc-hex-cell"
       onClick={onClick}
-      style={{ width: HEX_W, height: HEX_H, position: "relative", filter }}
+      style={{ width: HEX_W, height: HEX_H, position: "relative", filter, cursor }}
     >
       {/* beveled rim */}
       <div
@@ -167,7 +173,7 @@ export default function Hex({ hex, unit, selected, onClick }) {
           </div>
         )}
       </div>
-      {unit && <UnitToken unit={unit} />}
+      {unit && <UnitToken unit={unit} selected={unitSelected} />}
     </div>
   );
 }

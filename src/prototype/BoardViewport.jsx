@@ -70,8 +70,14 @@ export default function BoardViewport({ children }) {
 
   const onPointerDown = (e) => {
     if (e.button !== 0) return;
-    vpRef.current.setPointerCapture(e.pointerId);
-    drag.current = { sx: e.clientX, sy: e.clientY, ox: view.x, oy: view.y };
+    // Don't capture yet — capture redirects pointerup (and the
+    // subsequent click) to the viewport, which would steal clicks
+    // from hex / unit / button targets nested inside the board. We
+    // only capture once the gesture is unmistakably a drag.
+    drag.current = {
+      sx: e.clientX, sy: e.clientY, ox: view.x, oy: view.y,
+      pointerId: e.pointerId, captured: false,
+    };
     moved.current = false;
     setGrabbing(true);
   };
@@ -80,12 +86,24 @@ export default function BoardViewport({ children }) {
     if (!d) return;
     const dx = e.clientX - d.sx;
     const dy = e.clientY - d.sy;
-    if (!moved.current && Math.hypot(dx, dy) > 4) moved.current = true;
-    setView((v) => ({ ...v, x: d.ox + dx, y: d.oy + dy }));
+    if (!moved.current && Math.hypot(dx, dy) > 4) {
+      moved.current = true;
+      // Promote to a captured drag now that we know it's a pan, not a
+      // tap. From here on we want pointer events even if the cursor
+      // leaves the viewport.
+      if (!d.captured) {
+        try { vpRef.current?.setPointerCapture(d.pointerId); } catch {}
+        d.captured = true;
+      }
+    }
+    if (moved.current) setView((v) => ({ ...v, x: d.ox + dx, y: d.oy + dy }));
   };
   const endDrag = (e) => {
     const vp = vpRef.current;
-    if (vp?.hasPointerCapture?.(e.pointerId)) vp.releasePointerCapture(e.pointerId);
+    const d = drag.current;
+    if (d?.captured && vp?.hasPointerCapture?.(e.pointerId)) {
+      vp.releasePointerCapture(e.pointerId);
+    }
     drag.current = null;
     setGrabbing(false);
   };

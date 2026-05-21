@@ -208,7 +208,7 @@ export function validateContest(state, { pid, params }) {
   return { ok: true };
 }
 
-export function runContest(state, { pid, params }) {
+export function runContest(state, { pid, params, ctx = {} }) {
   const unit = state.units[params.unit];
   const t = resolveTarget(state, pid, unit, params);
 
@@ -220,7 +220,7 @@ export function runContest(state, { pid, params }) {
   const opened = openReactionWindow(state, "contest_declared", {
     initiator: unit.uid, player: pid, kind: t.kind, hex: unit.node,
     target: t.kind === "raid" ? t.unit.uid : unit.node,
-  }, { contest: { defendingUnit: defUnit?.uid ?? null } });
+  }, { ...ctx, contest: { defendingUnit: defUnit?.uid ?? null } });
 
   if (!opened) {
     // Cancelled by a replace-mode reaction. The Action was already

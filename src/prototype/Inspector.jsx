@@ -12,10 +12,9 @@ import {
   unitEffective,
   theme,
 } from "./data.js";
-import { Label, IconBtn } from "./kit.jsx";
+import { Label, IconBtn, Btn } from "./kit.jsx";
 import LocationCard from "./LocationCard.jsx";
 import ControlMeter from "./ControlMeter.jsx";
-import ContestPanel from "./ContestPanel.jsx";
 
 const WIN_W = 430;
 const BODY_H = 430;
@@ -61,7 +60,8 @@ function Big({ children }) {
 
 // --- per-hex tab models --------------------------------------------------
 
-function locationModel(state, hex) {
+function locationModel(state, hex, actions) {
+  const { isYourTurn, selectedUnitId, onSelectUnit, onContest, onActivate, onRecruit } = actions;
   const loc = LOCATIONS[hex.locationId];
   const control = hex.control;
   const ctrl = fullController(control.sections);
@@ -71,6 +71,12 @@ function locationModel(state, hex) {
   const hasNeutral = control.sections.includes("neutral");
   const claimed = control.sections.some((s) => s !== "neutral");
   const contestable = yourUnitHere && ctrl !== state.youId;
+  const youControlHere = ctrl === state.youId;
+  const hasTrainingGrounds = control.chips.includes("trainingGrounds");
+  const yourUnitCount = Object.values(state.units).filter(
+    (u) => u.owner === state.youId,
+  ).length;
+  const you = state.players[state.youId];
 
   let footholdText;
   if (!ctrl) {
@@ -121,6 +127,8 @@ function locationModel(state, hex) {
 
   if (unit) {
     const eff = unitEffective(unit);
+    const yours = unit.owner === state.youId;
+    const isSelected = yours && unit.id === selectedUnitId;
     tabs.push({
       id: "unit",
       label: "Unit",
@@ -131,7 +139,7 @@ function locationModel(state, hex) {
             <span style={{ fontSize: 11, color: theme.textDim, fontWeight: 600 }}>
               {" "}
               — {FACTIONS[unit.owner].name}
-              {unit.owner === state.youId ? " (yours)" : ""}
+              {yours ? " (yours)" : ""}
             </span>
           </div>
           <div style={{ display: "flex", gap: 26 }}>
@@ -154,6 +162,16 @@ function locationModel(state, hex) {
               </span>
             </Field>
           </div>
+          {yours && isYourTurn && !unit.immobilized && (
+            <Btn
+              variant={isSelected ? "ghost" : "primary"}
+              full
+              disabled={isSelected}
+              onClick={() => onSelectUnit?.(unit.id)}
+            >
+              {isSelected ? "Selected — click a green hex to move" : "Select for action"}
+            </Btn>
+          )}
         </div>
       ),
     });
@@ -170,13 +188,83 @@ function locationModel(state, hex) {
               ? "Neutral sections still stand — the contest is forced onto the garrison."
               : "Beat the holder to flip one of their sections to your control."}
           </div>
-          <ContestPanel
-            attacker={{ name: unit.name, strength: unitEffective(unit).strength }}
-            defender={{
-              name: hasNeutral ? "Garrison" : FACTIONS[ctrl]?.name || "Holder",
-              value: garrisonStrength(hex.locationId, control),
-            }}
-          />
+          <div style={{
+            background: theme.panel2,
+            border: `1px solid ${theme.border}`,
+            borderRadius: 7,
+            padding: 12,
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+          }}>
+            <div>
+              <Label>Attacker</Label>
+              <div style={{ fontFamily: theme.fontDisplay, fontWeight: 700, fontSize: 14 }}>{unit.name}</div>
+              <div style={{ fontSize: 11, color: theme.textDim }}>Strength {unitEffective(unit).strength}</div>
+            </div>
+            <span style={{ fontFamily: theme.fontDisplay, fontWeight: 700, color: theme.textFaint }}>VS</span>
+            <div style={{ textAlign: "right" }}>
+              <Label>Defender</Label>
+              <div style={{ fontFamily: theme.fontDisplay, fontWeight: 700, fontSize: 14 }}>
+                {hasNeutral ? "Garrison" : FACTIONS[ctrl]?.name || "Holder"}
+              </div>
+              <div style={{ fontSize: 11, color: theme.textDim }}>
+                Value {garrisonStrength(hex.locationId, control)}
+              </div>
+            </div>
+          </div>
+          {isYourTurn && (
+            <Btn
+              variant="primary"
+              full
+              onClick={() => onContest?.({ unit: unit.id })}
+            >
+              Contest (1 Action, +1d6)
+            </Btn>
+          )}
+        </div>
+      ),
+    });
+  }
+
+  if (youControlHere && (hex.abilityId || hasTrainingGrounds)) {
+    tabs.push({
+      id: "manage",
+      label: "Manage",
+      render: () => (
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          {hex.abilityId && (
+            <div>
+              <Label>Activate ability</Label>
+              <div className="pc-prose" style={{ ...PROSE, marginBottom: 7 }}>
+                Spend the listed cost to invoke {loc.name}'s ability.
+              </div>
+              <Btn
+                variant="primary"
+                full
+                disabled={!isYourTurn}
+                onClick={() => onActivate?.(hex.id)}
+              >
+                Activate
+              </Btn>
+            </div>
+          )}
+          {hasTrainingGrounds && (
+            <div>
+              <Label>Recruit a unit</Label>
+              <div className="pc-prose" style={{ ...PROSE, marginBottom: 7 }}>
+                Costs 10 scrap + 1 Action. Cap {yourUnitCount + 1}.
+              </div>
+              <Btn
+                variant="primary"
+                full
+                disabled={!isYourTurn || you.scrap < 10}
+                onClick={() => onRecruit?.(hex.id)}
+              >
+                Recruit (10 scrap)
+              </Btn>
+            </div>
+          )}
         </div>
       ),
     });
@@ -189,7 +277,8 @@ function locationModel(state, hex) {
   };
 }
 
-function encounterModel(state, hex) {
+function encounterModel(state, hex, actions) {
+  const { isYourTurn, selectedUnitId, onSelectUnit } = actions;
   const unit = hex.unitId ? state.units[hex.unitId] : null;
   const tabs = [
     {
@@ -205,16 +294,31 @@ function encounterModel(state, hex) {
     },
   ];
   if (unit) {
+    const yours = unit.owner === state.youId;
+    const isSelected = yours && unit.id === selectedUnitId;
     tabs.push({
       id: "unit",
       label: "Unit",
       render: () => (
-        <div style={{ fontFamily: theme.fontDisplay, fontSize: 17, fontWeight: 700, color: ownerColor(unit.owner) }}>
-          {unit.name}
-          <span style={{ fontSize: 11, color: theme.textDim, fontWeight: 600 }}>
-            {" "}
-            — {FACTIONS[unit.owner].name}
-          </span>
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <div style={{ fontFamily: theme.fontDisplay, fontSize: 17, fontWeight: 700, color: ownerColor(unit.owner) }}>
+            {unit.name}
+            <span style={{ fontSize: 11, color: theme.textDim, fontWeight: 600 }}>
+              {" "}
+              — {FACTIONS[unit.owner].name}
+              {yours ? " (yours)" : ""}
+            </span>
+          </div>
+          {yours && isYourTurn && !unit.immobilized && (
+            <Btn
+              variant={isSelected ? "ghost" : "primary"}
+              full
+              disabled={isSelected}
+              onClick={() => onSelectUnit?.(unit.id)}
+            >
+              {isSelected ? "Selected — click a green hex to move" : "Select for action"}
+            </Btn>
+          )}
         </div>
       ),
     });
@@ -241,7 +345,17 @@ function terrainModel() {
   };
 }
 
-export default function Inspector({ state, selectedHexId, onClose }) {
+export default function Inspector({
+  state,
+  selectedHexId,
+  selectedUnitId,
+  isYourTurn,
+  onClose,
+  onSelectUnit,
+  onContest,
+  onActivate,
+  onRecruit,
+}) {
   const [active, setActive] = useState(0);
 
   // Every fresh selection starts on the first tab.
@@ -252,9 +366,11 @@ export default function Inspector({ state, selectedHexId, onClose }) {
   const hex = selectedHexId ? state.hexes[selectedHexId] : null;
   if (!hex) return null;
 
+  const actions = { isYourTurn, selectedUnitId, onSelectUnit, onContest, onActivate, onRecruit };
+
   let model;
-  if (hex.type === "location") model = locationModel(state, hex);
-  else if (hex.type === "encounter") model = encounterModel(state, hex);
+  if (hex.type === "location") model = locationModel(state, hex, actions);
+  else if (hex.type === "encounter") model = encounterModel(state, hex, actions);
   else model = terrainModel();
 
   const { title, subtitle, tabs } = model;

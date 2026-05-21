@@ -104,6 +104,12 @@ export function evalCondition(state, condition, ctx) {
   if (condition === "recipient-is-source") {
     return ctx.event?.payload?.recipient === ctx.source?.owner;
   }
+  // The loser of a contest is the `player` in the payload (the
+  // initiator who failed). Symmetric to `defender-owns-source` so a
+  // card held by the loser can fire on contest_lost.
+  if (condition === "loser-is-source") {
+    return ctx.event?.payload?.player === ctx.source?.owner;
+  }
   // Object-form conditions are full DSL expressions — delegate.
   if (typeof condition === "object") return dslEvalCond(state, condition, ctx);
   return true;

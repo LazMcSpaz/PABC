@@ -1,0 +1,227 @@
+// Engine ↔ prototype-UI adapter. The engine speaks kebab-case ids and
+// keeps unit position on the unit (state.units[uid].node); the prototype
+// components expect camelCase ids and a reverse hex → unitId pointer.
+// This module owns the translation in one place so the components stay
+// shape-agnostic.
+
+import { CONFIG } from "../game/config.js";
+import { LOCATIONS as ENGINE_LOCATIONS, CHIPS as ENGINE_CHIPS } from "../game/content.js";
+import {
+  LOCATIONS as UI_LOCATIONS,
+  UNIT_UPGRADES,
+  LOCATION_UPGRADES,
+  ALL_UPGRADES,
+} from "./data.js";
+
+// --- id translation (engine kebab-case ↔ UI camelCase) --------------
+
+const ENGINE_TO_UI_LOC = {
+  "the-shelf": "theShelf",
+  "tin-town": "tinTown",
+};
+const ENGINE_TO_UI_CHIP = {
+  "sharpened-blades": "sharpenedBlades",
+  "new-recruits": "newRecruits",
+  "training-grounds": "trainingGrounds",
+  "defense-turrets": "defenseTurrets",
+  "logistics-hub": "logisticsHub",
+  "town-hall": "townHall",
+  "recon-team": "reconTeam",
+};
+const UI_TO_ENGINE_CHIP = Object.fromEntries(
+  Object.entries(ENGINE_TO_UI_CHIP).map(([e, u]) => [u, e]),
+);
+
+export function engineLocationIdToUi(engineId) {
+  return ENGINE_TO_UI_LOC[engineId] || engineId;
+}
+export function engineChipIdToUi(engineId) {
+  return ENGINE_TO_UI_CHIP[engineId] || engineId;
+}
+export function uiChipIdToEngine(uiId) {
+  return UI_TO_ENGINE_CHIP[uiId] || uiId;
+}
+
+// --- one-time sync: align UI display constants with engine reality ---
+//
+// The look-pass mock chose vp/garrison/chipSlots numbers that didn't
+// match the engine. The engine is the source of truth at runtime, so
+// patch the UI tables once at module load so static lookups (UI's
+// `garrisonBreakdown`, `locationProduction`, etc.) read engine-correct
+// values. Without this, displayed garrison strengths would be wrong.
+let synced = false;
+export function ensureUiConstantsSynced() {
+  if (synced) return;
+  synced = true;
+
+  for (const [engineId, def] of Object.entries(ENGINE_LOCATIONS)) {
+    const uiId = engineLocationIdToUi(engineId);
+    const uiDef = UI_LOCATIONS[uiId];
+    if (!uiDef) continue;
+    uiDef.garrison = CONFIG.garrisonByValue[def.strategicValue] ?? uiDef.garrison;
+    uiDef.chipSlots = CONFIG.chipSlotsByValue[def.strategicValue] ?? uiDef.chipSlots;
+    uiDef.vp = def.vpPerRound ?? uiDef.vp;
+    // engine production is a range [min,max] — show the midpoint
+    if (Array.isArray(def.production)) {
+      uiDef.production = Math.round((def.production[0] + def.production[1]) / 2);
+    }
+  }
+
+  // Labs / Recon Team / others missing from the UI palette — add lookup
+  // entries so the Chip component can render them. Effect strings copied
+  // from content.js descs.
+  const ensureChip = (id, defaults) => {
+    if (UNIT_UPGRADES[id] || LOCATION_UPGRADES[id] || ALL_UPGRADES[id]) return;
+    LOCATION_UPGRADES[id] = { id, ...defaults };
+    ALL_UPGRADES[id] = LOCATION_UPGRADES[id];
+  };
+  ensureChip("labs", {
+    name: "Labs", kind: "location", cost: ENGINE_CHIPS.labs?.cost ?? 3,
+    effect: ENGINE_CHIPS.labs?.desc ?? "+1 Tech score",
+  });
+}
+
+// --- state shape adaptation -----------------------------------------
+
+// Build the `rows: [[hexId, …]]` layout from engine hex coordinates.
+function buildRows(state) {
+  const byRow = {};
+  for (const h of Object.values(state.board.hexes)) {
+    (byRow[h.row] ||= []).push(h);
+  }
+  return Object.keys(byRow)
+    .map(Number)
+    .sort((a, b) => a - b)
+    .map((r) => byRow[r].sort((a, b) => a.col - b.col).map((h) => h.id));
+}
+
+function adaptChips(state, chipUids) {
+  return (chipUids || []).map((uid) => engineChipIdToUi(state.chips[uid]?.chipId));
+}
+
+function adaptChipsWithUids(state, chipUids) {
+  return (chipUids || []).map((uid) => ({
+    uid,
+    chipId: engineChipIdToUi(state.chips[uid]?.chipId),
+  }));
+}
+
+function turnOrdinal(state) {
+  return state.round * state.turnOrder.length + state.activeIndex;
+}
+
+function isImmobilized(state, unit) {
+  if (unit.immobilizedUntil == null) return false;
+  return turnOrdinal(state) <= unit.immobilizedUntil;
+}
+
+export function adaptState(state) {
+  ensureUiConstantsSynced();
+
+  // hex → unit reverse pointer
+  const unitAt = {};
+  for (const u of Object.values(state.units)) unitAt[u.node] = u.uid;
+
+  const units = {};
+  for (const u of Object.values(state.units)) {
+    units[u.uid] = {
+      id: u.uid,
+      uid: u.uid,
+      owner: u.owner,
+      name: u.name,
+      // Use base stats here so UI's unitEffective() can re-derive deltas
+      // from the chip list.
+      strength: u.baseStrength,
+      movement: u.baseMovement,
+      effectiveStrength: u.strength,
+      effectiveMovement: u.movement,
+      chips: adaptChips(state, u.chips),
+      chipUids: [...u.chips],
+      immobilized: isImmobilized(state, u),
+      node: u.node,
+    };
+  }
+
+  const hexes = {};
+  for (const h of Object.values(state.board.hexes)) {
+    const hex = {
+      id: h.id,
+      type: h.type,
+      row: h.row,
+      col: h.col,
+    };
+    if (unitAt[h.id]) hex.unitId = unitAt[h.id];
+    if (h.type === "location") {
+      const loc = state.locations[h.id];
+      hex.locationId = engineLocationIdToUi(loc.locationId);
+      hex.engineLocationId = loc.locationId;
+      hex.control = {
+        sections: [...loc.sections],
+        foothold: loc.foothold,
+        footholdCap: loc.footholdCap,
+        chips: adaptChips(state, loc.chips),
+        chipUids: [...loc.chips],
+      };
+      hex.garrison = loc.garrison; // engine's live garrison (incl. capital bonus)
+      hex.production = loc.production;
+      hex.abilityId = loc.abilityId;
+      hex.controller = loc.controller;
+    }
+    hexes[h.id] = hex;
+  }
+
+  const players = {};
+  for (const [pid, p] of Object.entries(state.players)) {
+    players[pid] = {
+      id: pid,
+      scrap: p.resource,
+      vp: p.vp,
+      tech: p.tech,
+      actions: { ...p.actions },
+      unitCap: 1 + countTrainingGrounds(state, pid),
+      isAI: !!p.isAI,
+      hand: [...p.hand],
+      handChips: adaptChipsWithUids(state, p.hand),
+    };
+  }
+
+  // Market — flatten the tier-1 row for the existing MarketRow component.
+  // (Tier 2 / 3 surfaces stay out of scope per the demo plan; see Acquire
+  // panel notes.)
+  const marketTier1 = state.market.tiers[1]?.row || [];
+  const market = marketTier1.map((uid) => engineChipIdToUi(state.chips[uid]?.chipId));
+  const marketChips = marketTier1.map((uid) => ({
+    uid,
+    chipId: engineChipIdToUi(state.chips[uid]?.chipId),
+    engineChipId: state.chips[uid]?.chipId,
+  }));
+
+  return {
+    round: state.round,
+    phase: state.phase,
+    youId: state.humanFactionId,
+    activeId: state.turnOrder[state.activeIndex],
+    vpGoal: CONFIG.vpThreshold,
+    players,
+    units,
+    hexes,
+    rows: buildRows(state),
+    market,
+    marketChips,
+    winnerId: state.winnerId,
+    // Surface the raw engine state so Phase-4 action handlers can reach
+    // engine APIs without re-deriving everything.
+    engineState: state,
+  };
+}
+
+function countTrainingGrounds(state, pid) {
+  let n = 0;
+  for (const loc of Object.values(state.locations)) {
+    if (loc.controller !== pid) continue;
+    for (const c of loc.chips) {
+      if (state.chips[c]?.chipId === "training-grounds") n++;
+    }
+  }
+  return n;
+}

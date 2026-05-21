@@ -13,17 +13,19 @@ export const FACTIONS = {
 // strategicValue drives garrison Strength and chip slots (see config).
 // affiliation: a faction id, or null for unaffiliated.
 // production: [min, max] scrap/turn — PROVISIONAL ranges by value.
+// vpPerRound: VP awarded to the controller at Upkeep — drives the win
+// race. 0 for low/medium so high/veryHigh stay worth fighting for.
 export const LOCATIONS = {
-  korad: { id: "korad", name: "Korad", strategicValue: "high", affiliation: "versari", production: [3, 4] },
-  dambar: { id: "dambar", name: "Dambar", strategicValue: "veryHigh", affiliation: "versari", production: [4, 5] },
-  kansit: { id: "kansit", name: "Kansit", strategicValue: "high", affiliation: "goldgrass", production: [3, 4] },
-  omara: { id: "omara", name: "Omara", strategicValue: "medium", affiliation: "goldgrass", production: [2, 3] },
-  chigan: { id: "chigan", name: "Chigan", strategicValue: "veryHigh", affiliation: "lakers", production: [4, 5] },
-  droit: { id: "droit", name: "Droit", strategicValue: "high", affiliation: "lakers", production: [3, 4] },
-  "the-shelf": { id: "the-shelf", name: "The Shelf", strategicValue: "high", affiliation: "plainers", production: [3, 4] },
-  "tin-town": { id: "tin-town", name: "Tin Town", strategicValue: "medium", affiliation: "plainers", production: [2, 3] },
-  concordan: { id: "concordan", name: "Concordan", strategicValue: "medium", affiliation: null, production: [2, 3] },
-  erport: { id: "erport", name: "Erport", strategicValue: "medium", affiliation: null, production: [2, 3] },
+  korad: { id: "korad", name: "Korad", strategicValue: "high", affiliation: "versari", production: [3, 4], vpPerRound: 1 },
+  dambar: { id: "dambar", name: "Dambar", strategicValue: "veryHigh", affiliation: "versari", production: [4, 5], vpPerRound: 2 },
+  kansit: { id: "kansit", name: "Kansit", strategicValue: "high", affiliation: "goldgrass", production: [3, 4], vpPerRound: 1 },
+  omara: { id: "omara", name: "Omara", strategicValue: "medium", affiliation: "goldgrass", production: [2, 3], vpPerRound: 0 },
+  chigan: { id: "chigan", name: "Chigan", strategicValue: "veryHigh", affiliation: "lakers", production: [4, 5], vpPerRound: 2 },
+  droit: { id: "droit", name: "Droit", strategicValue: "high", affiliation: "lakers", production: [3, 4], vpPerRound: 1 },
+  "the-shelf": { id: "the-shelf", name: "The Shelf", strategicValue: "high", affiliation: "plainers", production: [3, 4], vpPerRound: 1 },
+  "tin-town": { id: "tin-town", name: "Tin Town", strategicValue: "medium", affiliation: "plainers", production: [2, 3], vpPerRound: 0 },
+  concordan: { id: "concordan", name: "Concordan", strategicValue: "medium", affiliation: null, production: [2, 3], vpPerRound: 0 },
+  erport: { id: "erport", name: "Erport", strategicValue: "medium", affiliation: null, production: [2, 3], vpPerRound: 0 },
 };
 
 // Upgrade chips. kind = which slot type; slots = slots occupied (2-slot
@@ -110,11 +112,31 @@ export const ABILITIES = {
 // Reactive cards (mechanical-spec §5, §10). Granted to a player's hand
 // by encounters; trigger on a matching event and either modify the
 // pending action (replace mode) or apply effects after it (on mode).
-// v0.1 stubs — the real Reactive set is content-team territory.
+// The set below mirrors content/reactive-cards.csv. Rows that need
+// effect types not in the v0.1 effect library (MOVE_UNIT, DISABLE_CHIP,
+// targeted action grants, ALT_COST_OR_CANCEL surcharges) or events not
+// yet windowed (move_declared, action_declared, encounter_drawn,
+// unit_retreats) are omitted — listed in the commit message.
 export const REACTIVES = {
   "steady-hand": {
     id: "steady-hand",
     name: "Steady Hand",
+    role: "Reactive",
+    copies: 3,
+    desc: "When a contest targets you, your defending unit gets +2 Strength this contest.",
+    triggers: [{
+      trigger: "contest_declared",
+      mode: "on",
+      condition: "defender-owns-source",
+      effects: [{
+        type: "MODIFY_STAT", stat: "Strength", amount: 2,
+        target: "defending_unit", duration: "this_contest",
+      }],
+    }],
+  },
+  "emergency-reinforcements": {
+    id: "emergency-reinforcements",
+    name: "Emergency Reinforcements",
     role: "Reactive",
     copies: 3,
     desc: "When a contest targets you, your defending unit gets +2 Strength this contest.",
@@ -151,6 +173,19 @@ export const REACTIVES = {
       trigger: "reward_granted",
       mode: "replace",
       effects: [{ type: "REDIRECT", field: "recipient", operation: "set", value: "self" }],
+    }],
+  },
+  scavengers: {
+    id: "scavengers",
+    name: "Scavengers",
+    role: "Reactive",
+    copies: 3,
+    desc: "When you lose a contest, gain 3 Scrap.",
+    triggers: [{
+      trigger: "contest_lost",
+      mode: "on",
+      condition: "loser-is-source",
+      effects: [{ type: "ADJUST_RESOURCE", resource: "Resource", amount: 3, target: "self" }],
     }],
   },
 };

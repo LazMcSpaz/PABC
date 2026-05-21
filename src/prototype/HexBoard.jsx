@@ -1,11 +1,16 @@
-// The hex field — a 3/4/5/4/3 layout. Pointy-top hexes tile flush
-// within a row; rows overlap vertically and centred rows interlock.
+// The hex field. Pointy-top hexes tile flush within a row; rows
+// overlap vertically and centred rows interlock.
 import Hex, { HEX_H } from "./Hex.jsx";
-import { theme } from "./data.js";
 
 const ROW_OVERLAP = Math.round(HEX_H * 0.25);
 
-export default function HexBoard({ state, selectedHexId, onSelect }) {
+export default function HexBoard({
+  state,
+  selectedHexId,
+  selectedUnitId,
+  reachable,
+  onSelect,
+}) {
   return (
     <div
       style={{
@@ -33,6 +38,8 @@ export default function HexBoard({ state, selectedHexId, onSelect }) {
                 hex={hex}
                 unit={unit}
                 selected={hexId === selectedHexId}
+                reachable={reachable?.has(hexId) || false}
+                unitSelected={unit && unit.uid === selectedUnitId}
                 onClick={() => onSelect(hexId)}
               />
             );
