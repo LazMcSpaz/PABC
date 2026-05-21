@@ -171,6 +171,60 @@ const EFFECTS = {
     }
   },
 
+  // --- Layer 5 / spec §15.10 ---
+
+  ADJUST_TRACK(state, e, ctx) {
+    for (const pid of resolveTargets(state, e.target, ctx)) {
+      const p = state.players[pid];
+      if (!p) continue;
+      p.tracks = p.tracks || { trust: 0, reputation: 0, alignment: 0 };
+      p.tracks[e.track] = (p.tracks[e.track] || 0) + (e.amount || 0);
+      emit(state, "track_changed", {
+        player: pid, track: e.track, value: p.tracks[e.track], delta: e.amount,
+      });
+    }
+  },
+
+  ADJUST_STANDING(state, e, ctx) {
+    // `player` is a token / pid; `faction` is a faction id.
+    const pid = resolveTargets(state, e.player, ctx)[0];
+    const fid = e.faction;
+    if (!pid || !fid) return;
+    state.factionStanding[fid] = state.factionStanding[fid] || {};
+    state.factionStanding[fid][pid] = (state.factionStanding[fid][pid] || 0) + (e.amount || 0);
+    emit(state, "standing_changed", {
+      faction: fid, player: pid, value: state.factionStanding[fid][pid], delta: e.amount,
+    });
+  },
+
+  SET_PLAYER_FLAG(state, e, ctx) {
+    // Player-scoped flag store, parallel to §12.5 SET_FLAG which stays
+    // entity-scoped (unit / location / chip).
+    for (const pid of resolveTargets(state, e.target, ctx)) {
+      const p = state.players[pid];
+      if (!p) continue;
+      p.flags = p.flags || {};
+      p.flags[e.flag] = {
+        value: e.value !== undefined ? e.value : true,
+        duration: e.duration || "permanent",
+        setAt: state.round,
+      };
+    }
+  },
+
+  QUEUE_DEFERRED(state, e, ctx) {
+    // Pushes a packet onto state.deferred; the turn-loop sweep in
+    // Layer 5.2 picks up entries with dueRound <= current round.
+    state.deferred = state.deferred || [];
+    state.deferred.push({
+      dueRound: state.round + (e.delayRounds || 0),
+      effects: e.effects || [],
+      target: e.target,
+      source: ctx.source || null,
+      queuedAt: state.round,
+    });
+  },
+
   // --- replacement mode — only meaningful inside a reaction window ---
   REDIRECT(state, e, ctx) {
     if (!ctx.pending) return;

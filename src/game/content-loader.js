@@ -1,36 +1,23 @@
 // Bridge between the editor's content snapshot format
 // (src/game/content/*.js, auto-generated) and the engine's effect /
-// targeting conventions. The editor emits effects shaped
-// `{ id, type, params: { ... } }` and targeting tokens from the
-// content-schema vocabulary (`active`, …); the engine expects effects
-// shaped `{ type, ...params }` and tokens like `active_player`. This
-// module reads the snapshot, normalises both, and reports which
-// effect types are still unsupported by the current engine.
+// applyEffect convention. The editor emits effects shaped
+// `{ id, type, params: { … } }`; the engine expects `{ type, …params }`.
+// This module flattens that shape and reports which effect types the
+// snapshot uses but the engine doesn't yet implement.
+//
+// Token aliasing (`active` → `active_player`) lives in targeting.js so
+// engine code and editor content share one resolver.
 import { FIELD_ENCOUNTERS, WORLD_ENCOUNTERS, QUESTS } from "./content/index.js";
 import { EFFECTS } from "./effects.js";
 
-// Content-schema §3 → engine §11 token aliases.
-const TOKEN_ALIASES = {
-  active: "active_player",
-  // `controller`, `triggering_player`, `each_opponent`, etc. already
-  // match between vocabularies; add aliases here as new ones appear.
-};
-
-function aliasToken(token) {
-  return typeof token === "string" ? (TOKEN_ALIASES[token] || token) : token;
-}
-
-// Flatten `{ type, params: { … } }` → `{ type, … }`, alias tokens, and
-// recurse into nested effect lists (FORCE_CHOICE options,
-// QUEUE_DEFERRED.effects).
+// Flatten `{ type, params: { … } }` → `{ type, … }`. Recurses into
+// nested effect lists (FORCE_CHOICE.options, QUEUE_DEFERRED.effects).
 export function normalizeEffect(raw) {
   if (!raw || typeof raw !== "object") return raw;
   const { type, params = {} } = raw;
   const out = { type };
   for (const [k, v] of Object.entries(params)) {
-    if (k === "target" || k === "chooser" || k === "from" || k === "to") {
-      out[k] = aliasToken(v);
-    } else if (k === "effects" && Array.isArray(v)) {
+    if (k === "effects" && Array.isArray(v)) {
       out.effects = v.map(normalizeEffect);
     } else if (k === "options" && Array.isArray(v)) {
       out.options = v.map((o) => ({
@@ -44,30 +31,26 @@ export function normalizeEffect(raw) {
   return out;
 }
 
+// Pass-through normaliser: any field the editor adds (imagePath,
+// outcomeText, …) flows through unchanged. The engine reads what it
+// understands and ignores the rest.
 export function normalizeChoice(raw) {
   return {
-    id: raw.id,
-    label: raw.label,
-    outcomeText: raw.outcomeText,
-    condition: raw.condition,
-    deferredDelay: raw.deferredDelay,
+    ...raw,
     effects: (raw.effects || []).map(normalizeEffect),
   };
 }
 
 export function normalizeEncounter(raw) {
   return {
-    id: raw.id,
-    art: raw.art,
-    text: raw.text,
-    copies: raw.copies,
+    ...raw,
     choices: (raw.choices || []).map(normalizeChoice),
   };
 }
 
 // Walk every effect (including nested) and collect any `type` that has
-// no handler in `EFFECTS`. Used by the smoke test to report what's
-// pending engine support without crashing on it.
+// no handler in EFFECTS. Used by the smoke test to report unsupported
+// effect types without crashing on them.
 export function findUnsupportedTypes(snapshot) {
   const missing = new Set();
   const walk = (eff) => {

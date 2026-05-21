@@ -8,6 +8,7 @@ import { applyEffect } from "./effects.js";
 import { activePlayerId } from "./targeting.js";
 import { FACTIONS, LOCATIONS, ABILITIES, REACTIVES } from "./content.js";
 import { loadFieldEncounters, findUnsupportedTypes, choiceIsRunnable } from "./content-loader.js";
+import { evalCond, evalStrength } from "./dsl.js";
 import { CONFIG } from "./config.js";
 
 const seed = Number(process.argv[2]) || 42;
@@ -231,6 +232,43 @@ if (runnable.length) {
   const dr = (a, b) => `${a}->${b}`;
   line(`   active player ${me}: scrap ${dr(scrapBefore, game.players[me].resource)}, vp ${dr(vpBefore, game.players[me].vp)}, tech ${dr(techBefore, game.players[me].tech)}`);
 }
+
+// --- Layer 5.1 effect handlers (track, standing, player flag, deferred) ---
+line("\nLAYER 5.1 EFFECTS  (track / standing / player flag / deferred queue)");
+applyEffect(game, { type: "ADJUST_TRACK", track: "trust", amount: 3, target: "active" }, ctx);
+applyEffect(game, { type: "ADJUST_TRACK", track: "reputation", amount: -2, target: "active" }, ctx);
+applyEffect(game, { type: "ADJUST_STANDING", faction: "lakers", player: "active", amount: -2 }, ctx);
+applyEffect(game, { type: "ADJUST_STANDING", faction: "goldgrass", player: "active", amount: 1 }, ctx);
+applyEffect(game, { type: "SET_PLAYER_FLAG", flag: "met-the-fixer", value: true, target: "active" }, ctx);
+applyEffect(game, { type: "QUEUE_DEFERRED",
+  delayRounds: 2, target: "active",
+  effects: [{ type: "ADJUST_RESOURCE", resource: "Resource", amount: 5, target: "active_player" }],
+}, ctx);
+const meP = game.players[me];
+line(`  ${me} tracks: trust=${meP.tracks.trust} reputation=${meP.tracks.reputation} alignment=${meP.tracks.alignment}`);
+line(`  standing toward ${me}: lakers=${game.factionStanding.lakers[me]}, goldgrass=${game.factionStanding.goldgrass[me]}`);
+line(`  ${me} flags: ${Object.keys(meP.flags).join(", ") || "(none)"}`);
+line(`  deferred queue: ${game.deferred.length} packet(s), next due round ${game.deferred[0]?.dueRound} (resolves in Layer 5.2)`);
+
+// --- DSL evaluator ---
+line("\nDSL EVALUATOR  (Layer 5.1 — content-schema §5 grammar)");
+const c1 = { op: "gte", left: "players.versari.tech", right: 1 };
+line(`  versari.tech >= 1: ${evalCond(game, c1)}`);
+const c2 = { all: [
+  { op: "gt", left: "players.versari.resource", right: 0 },
+  { has_flag: { player: "active", flag: "met-the-fixer" } },
+] };
+line(`  AND: versari.resource > 0 AND has-flag "met-the-fixer": ${evalCond(game, c2)}`);
+const c3 = { controls_count: { player: "active" } };
+line(`  controls_count(active): ${evalCond(game, c3)}`);
+const c4 = { op: "lt", left: "factionStanding.lakers.versari", right: 0 };
+line(`  factionStanding.lakers.versari < 0: ${evalCond(game, c4)}`);
+const s1 = { if: [
+  { op: "gt", left: "players.versari.tech", right: 5 }, 5,
+  { op: "gt", left: "players.versari.tech", right: 2 }, 3,
+  1,
+] };
+line(`  strength cascade by tech: ${evalStrength(game, s1)}`);
 
 // --- play out round 1 ---
 line("\nPLAY ROUND 1  (each player ends their turn)");

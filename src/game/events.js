@@ -17,6 +17,10 @@ export const EVENT_NAMES = new Set([
   "obstacle_claimed", "encounter_resolved",
   "location_spawned", "section_flipped", "location_captured", "location_decayed",
   "reward_granted",
+  // Layer 5 — encounter & quest system (spec §15.13)
+  "encounter_delivered", "trigger_fired",
+  "quest_started", "quest_advanced", "quest_completed",
+  "standing_changed", "track_changed", "deferred_resolved",
 ]);
 
 // Resolve a chip / card instance uid to its content def. Covers Market

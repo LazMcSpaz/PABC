@@ -40,6 +40,12 @@ export function createGame({ seed = Date.now() & 0xffffffff, factionIds } = {}) 
       actions: { remaining: CONFIG.baseActions, max: CONFIG.baseActions },
       unitCap: 1,
       hand: [],
+      // Layer 5 (encounter & quest system) per spec §15.11
+      tracks: { trust: 0, reputation: 0, alignment: 0 },
+      flags: {},
+      activeQuests: {},
+      completedQuests: {},
+      encounterCooldowns: {},
     };
   }
 
@@ -89,6 +95,7 @@ export function createGame({ seed = Date.now() & 0xffffffff, factionIds } = {}) 
       garrison,
       production,
       abilityId,
+      strategicValue: def.strategicValue, // surfaced for the DSL controls_count helper
     };
   }
 
@@ -165,5 +172,22 @@ export function createGame({ seed = Date.now() & 0xffffffff, factionIds } = {}) 
     surcharges: [],
     winnerId: null,
     log: [],
+    // Layer 5 (encounter & quest system) per spec §15.11
+    world: {
+      controlHistory: Object.values(locations)
+        .filter((l) => l.controller)
+        .map((l) => ({ hex: l.hexId, controller: l.controller, fromRound: 0, toRound: null })),
+      raidCounts: Object.fromEntries(playing.map((f) => [f, 0])),
+      ignoreCounts: Object.fromEntries(playing.map((f) => [f, 0])),
+      eventTimeline: [],
+      encounterHexCooldowns: {},
+      encounterMarkers: {},
+    },
+    factionStanding: Object.fromEntries(
+      playing.map((fid) => [fid, Object.fromEntries(playing.map((pid) => [pid, 0]))]),
+    ),
+    triggerCooldowns: {},
+    deferred: [],
+    activeQuests: {},
   };
 }
