@@ -3,7 +3,7 @@
 // bottom tab dock — with a floating tabbed window for hex inspection.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "./prototype.css";
-import { theme } from "./data.js";
+import { FACTIONS as UI_FACTIONS, theme } from "./data.js";
 import { Btn } from "./kit.jsx";
 import HexBoard from "./HexBoard.jsx";
 import BoardViewport from "./BoardViewport.jsx";
@@ -27,14 +27,8 @@ import EventFeed from "./EventFeed.jsx";
 const TOP_H = 56;
 const TAB_H = 44;
 
-// Initial seed + human faction. A future setup screen (Phase 6) will let
-// the player choose these; for now they are fixed so dev iteration is
-// deterministic.
-const INITIAL_SEED = 42;
-const INITIAL_HUMAN = "versari";
-
-function bootGame() {
-  const game = createGame({ seed: INITIAL_SEED, humanFactionId: INITIAL_HUMAN });
+function bootGame(seed, humanFactionId) {
+  const game = createGame({ seed, humanFactionId });
   startTurn(game);
   driveAIsThroughHumanTurn(game);
   return game;
@@ -60,11 +54,13 @@ function Bracket({ corner }) {
   return <div className="pc-bracket" style={map[corner]} />;
 }
 
-export default function Prototype() {
+export default function Prototype({ config, onNewGame }) {
   // The engine mutates a single GameState in place; we hold a ref to it
   // and bump a tick to trigger a re-adapt + re-render after each mutation.
   const gameRef = useRef(null);
-  if (!gameRef.current) gameRef.current = bootGame();
+  if (!gameRef.current) {
+    gameRef.current = bootGame(config?.seed ?? 42, config?.humanFactionId ?? "versari");
+  }
   const [tick, setTick] = useState(0);
   const bumpTick = useCallback(() => setTick((t) => t + 1), []);
 
@@ -402,54 +398,103 @@ export default function Prototype() {
       )}
 
       {state.winnerId && (
+        <EndOverlay state={state} onNewGame={onNewGame} />
+      )}
+    </div>
+  );
+}
+
+function EndOverlay({ state, onNewGame }) {
+  const winner = state.players[state.winnerId];
+  const winnerFaction = UI_FACTIONS[state.winnerId];
+  const sorted = Object.values(state.players).sort((a, b) => b.vp - a.vp);
+  return (
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 70,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        background: "rgba(0,0,0,0.78)",
+      }}
+    >
+      <div
+        style={{
+          background: theme.plate,
+          border: `2px solid ${winnerFaction?.color || theme.accent}`,
+          borderRadius: 12,
+          padding: "30px 44px",
+          textAlign: "center",
+          boxShadow: theme.shadowDeep,
+          minWidth: 320,
+        }}
+      >
         <div
           style={{
-            position: "fixed",
-            inset: 0,
-            zIndex: 70,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            background: "rgba(0,0,0,0.6)",
-            pointerEvents: "none",
+            fontFamily: theme.fontDisplay,
+            fontSize: 12,
+            letterSpacing: 3,
+            textTransform: "uppercase",
+            color: theme.textFaint,
+            fontWeight: 600,
           }}
         >
-          <div
-            style={{
-              background: theme.plate,
-              border: `2px solid ${theme.accent}`,
-              borderRadius: 12,
-              padding: "30px 50px",
-              textAlign: "center",
-              boxShadow: theme.shadowDeep,
-              pointerEvents: "auto",
-            }}
-          >
-            <div
-              style={{
-                fontFamily: theme.fontDisplay,
-                fontSize: 14,
-                letterSpacing: 2,
-                textTransform: "uppercase",
-                color: theme.textFaint,
-                marginBottom: 8,
-              }}
-            >
-              Victory
-            </div>
-            <div
-              style={{
-                fontFamily: theme.fontDisplay,
-                fontSize: 32,
-                fontWeight: 700,
-                color: theme.accent,
-              }}
-            >
-              {state.players[state.winnerId]?.id}
-            </div>
-          </div>
+          Victory
         </div>
-      )}
+        <div
+          style={{
+            fontFamily: theme.fontDisplay,
+            fontSize: 30,
+            fontWeight: 800,
+            color: winnerFaction?.color || theme.accent,
+            marginTop: 6,
+            letterSpacing: 1.4,
+          }}
+        >
+          {winnerFaction?.name || winner?.id}
+        </div>
+        <div
+          style={{
+            marginTop: 18,
+            display: "flex",
+            flexDirection: "column",
+            gap: 5,
+          }}
+        >
+          {sorted.map((p) => {
+            const f = UI_FACTIONS[p.id];
+            return (
+              <div
+                key={p.id}
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  fontSize: 12.5,
+                  color: theme.text,
+                  borderTop: `1px solid ${theme.border}`,
+                  padding: "5px 0",
+                }}
+              >
+                <span style={{ color: f?.color, fontWeight: 600 }}>
+                  {f?.short || p.id}
+                  {p.id === state.winnerId ? " ★" : ""}
+                </span>
+                <span style={{ fontFamily: theme.fontDisplay, fontWeight: 700 }}>
+                  {p.vp} VP
+                </span>
+              </div>
+            );
+          })}
+        </div>
+        <div style={{ marginTop: 22, display: "flex", justifyContent: "center" }}>
+          <Btn variant="primary" onClick={onNewGame}>
+            New Game
+          </Btn>
+        </div>
+      </div>
     </div>
   );
 }
