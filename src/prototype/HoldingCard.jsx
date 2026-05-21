@@ -28,6 +28,9 @@ export default function HoldingCard({ locationId, control }) {
   const faction = ctrl ? FACTIONS[ctrl] : null;
   const production = locationProduction(locationId, control);
   const chipCount = control?.chips?.length || 0;
+  // Prefer engine-derived slot count (subtracts 1 for an assigned
+  // ability per §6.3) over the UI's static lookup.
+  const chipSlots = control?.chipSlots ?? loc.chipSlots;
 
   return (
     <div
@@ -96,9 +99,9 @@ export default function HoldingCard({ locationId, control }) {
           </StatCol>
         </div>
         <div>
-          <Label>{`Chip slots — ${chipCount}/${loc.chipSlots}`}</Label>
+          <Label>{`Chip slots — ${chipCount}/${chipSlots}`}</Label>
           <div style={{ display: "flex", gap: 6, marginTop: 5, flexWrap: "wrap" }}>
-            {Array.from({ length: loc.chipSlots }).map((_, i) => {
+            {Array.from({ length: chipSlots }).map((_, i) => {
               const chipId = control?.chips?.[i];
               if (chipId) return <Chip key={i} chipId={chipId} width={50} />;
               return (

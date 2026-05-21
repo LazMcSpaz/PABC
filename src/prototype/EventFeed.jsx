@@ -75,10 +75,16 @@ function formatEvent(ev, engineState) {
       return null; // already implied by encounter_delivered
     case "resource_gained":
       if (p.resource === "VP") {
-        return { color: theme.accent, text: `${who(p.player)} +${p.amount} VP` };
+        const label = p.source === "control"
+          ? `+${p.amount} VP from holdings`
+          : p.source
+            ? `+${p.amount} VP (${p.source})`
+            : `+${p.amount} VP`;
+        return { color: theme.accent, text: `${who(p.player)} ${label}` };
       }
       if (p.amount >= 5) {
-        return { color: theme.textDim, text: `${who(p.player)} +${p.amount} ${p.resource.toLowerCase()}` };
+        const label = p.source ? ` (${p.source})` : "";
+        return { color: theme.textDim, text: `${who(p.player)} +${p.amount} ${p.resource.toLowerCase()}${label}` };
       }
       return null;
     case "resource_spent":

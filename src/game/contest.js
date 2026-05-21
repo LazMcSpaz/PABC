@@ -231,9 +231,17 @@ export function runContest(state, { pid, params, ctx = {} }) {
 
   // §9 step 2 — roll. defValue and unit.strength are read AFTER the
   // window so any MODIFY_STAT from on-mode subscribers is reflected.
+  //
+  // House rule (departs from spec §9): a Location defended purely by
+  // its garrison — no defending unit on the hex — does NOT roll a
+  // d6. Its total is the static garrison value (incl. chip bonuses).
+  // Raids and unit-backed Location defences still roll on both sides.
   const defValue = defenderValue(state, t);
+  const defenderRollsDie =
+    t.kind === "raid" ||
+    (t.kind === "location" && !!defendingUnit(state, t.loc));
   const initiatorRoll = state.rng.roll(CONFIG.contestDieSides);
-  const defenderRoll = state.rng.roll(CONFIG.contestDieSides);
+  const defenderRoll = defenderRollsDie ? state.rng.roll(CONFIG.contestDieSides) : 0;
   const initiatorTotal = unit.strength + initiatorRoll;
   const defenderTotal = defValue + defenderRoll;
   const won = initiatorTotal > defenderTotal;
@@ -241,6 +249,7 @@ export function runContest(state, { pid, params, ctx = {} }) {
   const detail = {
     kind: t.kind, defenderValue: defValue,
     initiatorRoll, defenderRoll, initiatorTotal, defenderTotal,
+    defenderRolled: defenderRollsDie,
   };
 
   if (!won) {
