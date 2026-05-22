@@ -2,8 +2,9 @@
 // Upkeep work (action reset, modifier expiry, foothold tick, scrap
 // production) and Cleanup.
 import { emit } from "./events.js";
-import { recomputeStats, recomputeTech } from "./stats.js";
+import { recomputeStats, recomputeResearch } from "./stats.js";
 import { reinforcementRoute } from "./board.js";
+import { TECH_NODES, hasTechNode } from "./tech.js";
 import { CONFIG } from "./config.js";
 import { activePlayerId } from "./targeting.js";
 import { sweepDeferred } from "./deferred.js";
@@ -54,8 +55,8 @@ function tickFootholds(state, pid) {
       }
     }
   }
-  // A decay-driven control loss may have stripped a Labs from `pid` — sync.
-  if (lostControl) recomputeTech(state);
+  // A decay-driven control loss may have stripped a Lab from `pid` — sync.
+  if (lostControl) recomputeResearch(state);
 }
 
 // Fully-held locations yield their scrap production to the controller
@@ -64,10 +65,14 @@ function tickFootholds(state, pid) {
 // pass and would have forced the win to land on round-12 regardless
 // of play.
 function collectProduction(state, pid) {
+  // §17.5 Economy entry (Industry): +1 scrap per fully-held Location.
+  const econBonus = hasTechNode(state, pid, "eco-entry")
+    ? TECH_NODES["eco-entry"].effect.amount
+    : 0;
   let gained = 0;
   for (const loc of Object.values(state.locations)) {
     if (loc.controller !== pid) continue;
-    gained += loc.production;
+    gained += loc.production + econBonus;
   }
   if (gained > 0) {
     state.players[pid].resource += gained;

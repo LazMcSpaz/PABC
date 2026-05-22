@@ -15,7 +15,7 @@ import {
 import { Label, IconBtn, Btn } from "./kit.jsx";
 import LocationCard from "./LocationCard.jsx";
 import ControlMeter from "./ControlMeter.jsx";
-import { previewLocationContest } from "./engineAdapter.js";
+import { previewLocationContest, previewAttackerStrength } from "./engineAdapter.js";
 
 const WIN_W = 430;
 const BODY_H = 430;
@@ -131,7 +131,8 @@ function locationModel(state, hex, actions) {
 
   if (contestable) {
     const preview = previewLocationContest(state.engineState, hex.id);
-    const atkStr = unit.effectiveStrength ?? unitEffective(unit).strength;
+    const atkPreview = previewAttackerStrength(state.engineState, hex.id, unit.owner);
+    const atkStr = atkPreview.total; // combined stack Strength + concentration
     const defVal = preview ? preview.value : garrisonStrength(hex.locationId, control);
     const defenderRolls = preview ? preview.defenderRollsDie : true;
     const enemyUnitHere = Object.values(state.units).find(
@@ -158,7 +159,10 @@ function locationModel(state, hex, actions) {
           }}>
             <div>
               <Label>You (attacker)</Label>
-              <div style={{ fontFamily: theme.fontDisplay, fontWeight: 700, fontSize: 14 }}>{unit.name}</div>
+              <div style={{ fontFamily: theme.fontDisplay, fontWeight: 700, fontSize: 14 }}>
+                {unit.name}
+                {atkPreview.units > 1 ? ` +${atkPreview.units - 1} stacked` : ""}
+              </div>
               <div style={{ fontSize: 11, color: theme.textDim }}>{atkStr} + 1d6</div>
             </div>
             <span style={{ fontFamily: theme.fontDisplay, fontWeight: 700, color: theme.textFaint }}>VS</span>

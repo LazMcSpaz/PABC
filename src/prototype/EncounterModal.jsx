@@ -5,7 +5,7 @@
 import { theme } from "./data.js";
 import { Btn } from "./kit.jsx";
 
-export default function EncounterModal({ encounter, choices, eligibleIds, onPick, onCancel }) {
+export default function EncounterModal({ encounter, choices, eligibleIds, redrawsLeft = 0, onRedraw, onPick, onCancel }) {
   return (
     <div
       style={{
@@ -149,12 +149,20 @@ export default function EncounterModal({ encounter, choices, eligibleIds, onPick
           style={{
             padding: "10px 16px",
             display: "flex",
-            justifyContent: "flex-end",
+            justifyContent: "space-between",
+            alignItems: "center",
             gap: 10,
             borderTop: `1px solid ${theme.border}`,
             background: "rgba(0,0,0,0.18)",
           }}
         >
+          {redrawsLeft > 0 ? (
+            <Btn variant="ghost" onClick={onRedraw} title="Recon: discard this card and draw the next">
+              Discard &amp; redraw ({redrawsLeft})
+            </Btn>
+          ) : (
+            <span />
+          )}
           <Btn variant="ghost" onClick={onCancel}>
             Cancel move
           </Btn>

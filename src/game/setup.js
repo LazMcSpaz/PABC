@@ -69,6 +69,13 @@ export function createGame({
       vp: 0,
       tech: CONFIG.tech.start,
       actions: { remaining: CONFIG.baseActions, max: CONFIG.baseActions },
+      // §17 Tech Wheel. `research` = permanent + Lab-derived (recomputed);
+      // `techLevel` = derived band; `techWheel` = assigned node ids in
+      // assignment order (LIFO peel on a level drop).
+      research: 0,
+      permanentResearch: 0,
+      techLevel: 1,
+      techWheel: [],
       unitCap: 1,
       hand: [],
       // Layer 5 (encounter & quest system) per spec §15.11

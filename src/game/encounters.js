@@ -14,6 +14,7 @@ import { applyEffects, EFFECTS } from "./effects.js";
 import { resolveTargets } from "./targeting.js";
 import { bfsDistances } from "./board.js";
 import { emit } from "./events.js";
+import { hasTechNode } from "./tech.js";
 
 // One-time normalisation — flatten {type, params} once instead of on
 // every delivery. Editor-added fields (imagePath, outcomeText, …) pass
@@ -130,16 +131,45 @@ function applyChoiceEffects(state, choice, pid, ctx) {
 // the unit's owner.
 const FIELD_HEX_COOLDOWN = 3;
 
+// Recon Team chips on `pid`'s fully-held Locations — each grants one
+// encounter discard (stacks with the §17.5 Intelligence entry node).
+function reconTeamCount(state, pid) {
+  let n = 0;
+  for (const loc of Object.values(state.locations)) {
+    if (loc.controller !== pid) continue;
+    for (const c of loc.chips) if (state.chips[c]?.chipId === "recon-team") n++;
+  }
+  return n;
+}
+
 export function drawFieldEncounter(state, unit, ctx = {}) {
-  // Reshuffle discard back in if the deck has run dry.
-  if (!state.encounterDeck?.length) {
-    if (state.discards.encounter?.length) {
+  const ensureDeck = () => {
+    if (!state.encounterDeck?.length && state.discards.encounter?.length) {
       state.encounterDeck = state.rng.shuffle(state.discards.encounter);
       state.discards.encounter = [];
-    } else {
-      return null;
     }
+    return (state.encounterDeck?.length || 0) > 0;
+  };
+  if (!ensureDeck()) return null;
+
+  // §17.5 Intelligence (Recon) + the Recon Team chip each grant one
+  // discard-and-redraw. A discard sends the drawn card to the deck bottom
+  // and draws the next; after the last discard the player is committed.
+  // Headless / AI (no ctx.interact) commit to the first draw, so the
+  // harness stays deterministic.
+  let redraws = (hasTechNode(state, unit.owner, "int-entry") ? 1 : 0)
+    + reconTeamCount(state, unit.owner);
+  while (redraws > 0 && ctx.interact && state.encounterDeck.length > 1) {
+    const top = state.encounterDeck[0];
+    const wantDiscard = ctx.interact({
+      kind: "encounterRedraw", encounter: top, player: unit.owner, remaining: redraws,
+    });
+    if (!wantDiscard) break;
+    state.encounterDeck.push(state.encounterDeck.shift()); // bottom of deck
+    ensureDeck();
+    redraws -= 1;
   }
+
   const encounterId = state.encounterDeck.shift();
   state.discards.encounter.push(encounterId);
   state.world.encounterHexCooldowns[unit.node] = state.round + FIELD_HEX_COOLDOWN;

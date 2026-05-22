@@ -8,9 +8,10 @@ import { emit } from "./events.js";
 import { openReactionWindow } from "./reactions.js";
 import { CONFIG } from "./config.js";
 import { CHIPS, LOCATIONS, FACTIONS } from "./content.js";
-import { recomputeStats, recomputeTech } from "./stats.js";
+import { recomputeStats, recomputeResearch } from "./stats.js";
 import { onLocationCaptured, onRaidWon } from "./standing.js";
 import { makeUnit } from "./setup.js";
+import { TECH_NODES, hasTechNode } from "./tech.js";
 
 const fail = (reason) => ({ ok: false, reason });
 
@@ -32,6 +33,17 @@ function defendingUnit(state, loc) {
     if (!best || u.strength > best.strength) best = u;
   }
   return best;
+}
+
+// Combined effective Strength of every unit `owner` has stacked on `hex`.
+// Stacked units fight as one: their strengths sum (the Concentration
+// bonus is added on top of this, separately).
+function stackStrength(state, owner, hex) {
+  let s = 0;
+  for (const u of Object.values(state.units)) {
+    if (u.owner === owner && u.node === hex) s += u.strength;
+  }
+  return s;
 }
 
 // §16.6 Concentration — +1 (capped at +3) per *additional* friendly unit
@@ -94,14 +106,14 @@ function resolveTarget(state, pid, unit, params) {
   return fail("nothing to contest on this hex");
 }
 
-// The defender's value before its die roll (§9).
+// The defender's value before its die roll (§9). Stacked defending units
+// fight together — their Strengths sum (§ combined-stack rule).
 function defenderValue(state, t) {
-  if (t.kind === "raid") return t.unit.strength; // already includes chips
+  if (t.kind === "raid") return stackStrength(state, t.unit.owner, t.unit.node);
   const loc = t.loc;
   let v = loc.garrison + chipGarrison(state, loc);
-  if (!loc.sections.includes("neutral")) {
-    const du = defendingUnit(state, loc);
-    if (du) v += du.strength;
+  if (!loc.sections.includes("neutral") && loc.controller) {
+    v += stackStrength(state, loc.controller, loc.hexId);
   }
   return v;
 }
@@ -177,9 +189,10 @@ function captureLocation(state, loc, victor) {
     }
   }
 
-  // Control changed; a Labs chip on this location may have changed
-  // hands or been destroyed — sync Tech for everyone (§3).
-  recomputeTech(state);
+  // Control changed; a Lab on this location may have changed hands or
+  // been destroyed — resync Research for everyone (§17.3: tech denial is
+  // emergent — the captor's Research rises, the former owner's falls).
+  recomputeResearch(state);
   // §15.3 — the affiliated faction (if any) loses standing toward
   // the new controller.
   onLocationCaptured(state, loc.hexId, victor, from);
@@ -474,6 +487,14 @@ export function runContest(state, { pid, params, ctx = {} }) {
   const defenderUnit = t.kind === "raid" ? t.unit : locDefUnit;
   const defHex = t.kind === "raid" ? t.unit.node : t.loc.hexId;
 
+  // Combined stack Strength: every friendly unit on the contesting hex
+  // fights together, so their Strengths sum (Concentration is added on top).
+  const atkStrength = stackStrength(state, pid, unit.node);
+  const atkAllies = atkStrength - unit.strength; // contribution from stacked allies
+  const defAllies = defenderUnit
+    ? stackStrength(state, defenderUnit.owner, defHex) - defenderUnit.strength
+    : 0;
+
   // §16.6 combat levers — additive modifiers computed before the roll.
   const atkConcentration = concentration(state, pid, unit.node, unit.uid);
   const atkVeteran = unit.veteran ? CONFIG.combat.veteranBonus : 0;
@@ -486,24 +507,34 @@ export function runContest(state, { pid, params, ctx = {} }) {
     if (defenderUnit.veteran) defVeteran = CONFIG.combat.veteranBonus;
   }
 
+  // §17.5 Military entry (Doctrine): +1 to that player's contest roll,
+  // whether they are attacking or defending. The defending player is the
+  // raided unit's owner / the Location's controller (even garrison-only).
+  const milAmt = TECH_NODES["mil-entry"].effect.amount;
+  const defOwner = t.kind === "raid" ? t.unit.owner : t.loc.controller;
+  const atkMilitary = hasTechNode(state, pid, "mil-entry") ? milAmt : 0;
+  const defMilitary = defOwner && hasTechNode(state, defOwner, "mil-entry") ? milAmt : 0;
+
   // House rule (departs from spec §9): a Location defended purely by its
   // garrison — no defending unit — does NOT roll a d6.
   const defenderRollsDie = t.kind === "raid" || (t.kind === "location" && !!defenderUnit);
   const initiatorRoll = state.rng.roll(CONFIG.contestDieSides);
   const defenderRoll = defenderRollsDie ? state.rng.roll(CONFIG.contestDieSides) : 0;
-  const initiatorTotal = unit.strength + atkConcentration + atkVeteran + initiatorRoll;
+  const initiatorTotal = atkStrength + atkConcentration + atkVeteran + atkMilitary + initiatorRoll;
   const defenderTotal =
-    defValue + defConcentration + defMountain + defFortify + defVeteran + defenderRoll;
+    defValue + defConcentration + defMountain + defFortify + defVeteran + defMilitary + defenderRoll;
   const won = initiatorTotal > defenderTotal;
 
   const detail = {
     kind: t.kind, defenderValue: defValue,
     initiatorRoll, defenderRoll, initiatorTotal, defenderTotal,
     defenderRolled: defenderRollsDie,
-    // §16.6 breakdown for the UI
+    // §16.6 / §17.5 breakdown for the UI
     attackerConcentration: atkConcentration, attackerVeteran: atkVeteran,
+    attackerAllies: atkAllies, attackerMilitary: atkMilitary,
     defenderConcentration: defConcentration, defenderMountain: defMountain,
     defenderFortify: defFortify, defenderVeteran: defVeteran,
+    defenderAllies: defAllies, defenderMilitary: defMilitary,
   };
   const winnerUnit = won ? attackerUnit : defenderUnit;
   const loserUnit = won ? defenderUnit : attackerUnit;

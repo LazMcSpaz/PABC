@@ -251,7 +251,11 @@ export function adaptState(state) {
       id: pid,
       scrap: p.resource,
       vp: p.vp,
-      tech: p.tech,
+      // §17 Tech Wheel
+      research: p.research || 0,
+      techLevel: p.techLevel || 1,
+      techWheel: [...(p.techWheel || [])],
+      abilityPointsAvailable: (p.techLevel || 1) - 1 - (p.techWheel?.length || 0),
       actions: { ...p.actions },
       unitCap: CONFIG.baseUnitCap + countTrainingGrounds(state, pid),
       isAI: !!p.isAI,
@@ -284,6 +288,8 @@ export function adaptState(state) {
     youId: state.humanFactionId,
     activeId: state.turnOrder[state.activeIndex],
     vpGoal: CONFIG.vpThreshold,
+    techThresholds: [...CONFIG.tech.researchThresholds],
+    maxTechLevel: CONFIG.tech.maxLevel,
     players,
     units,
     hexes,
@@ -331,6 +337,22 @@ function countTrainingGrounds(state, pid) {
   return n;
 }
 
+// Attacker-side preview: the combined Strength of `ownerId`'s stack on
+// `hexId` plus its Concentration bonus — what the attacker brings before
+// the d6. Mirrors contest.js (stackStrength + concentration).
+export function previewAttackerStrength(state, hexId, ownerId) {
+  let strength = 0;
+  let n = 0;
+  for (const u of Object.values(state.units)) {
+    if (u.owner !== ownerId || u.node !== hexId) continue;
+    strength += u.strength;
+    n += 1;
+  }
+  const concentration =
+    Math.min(n - 1, CONFIG.combat.concentrationCap) * CONFIG.combat.concentrationPerUnit;
+  return { strength, concentration, units: n, total: strength + concentration };
+}
+
 // Preview a Location contest's defender side exactly as contest.js would
 // resolve it, so the UI shows the true number the attacker must beat —
 // not just the bare garrison. Mirrors defenderValue() + the
@@ -348,13 +370,17 @@ export function previewLocationContest(state, hexId) {
   // A defending unit only counts when the Location is fully held by its
   // controller (no neutral sections) and that controller has a unit on
   // the hex — same gate as contest.js defendingUnit().
+  // Stacked defenders fight together: sum the controller's units on the
+  // hex (the strongest is the "lead" for display / attrition).
   let defendingUnit = null;
+  let defenderStack = 0;
   if (!hasNeutral && loc.controller) {
     for (const u of Object.values(state.units)) {
       if (u.owner !== loc.controller || u.node !== loc.hexId) continue;
+      defenderStack += u.strength;
       if (!defendingUnit || u.strength > defendingUnit.strength) defendingUnit = u;
     }
-    if (defendingUnit) value += defendingUnit.strength;
+    value += defenderStack;
   }
 
   // §16.6 combat levers on the defender side.
@@ -381,7 +407,10 @@ export function previewLocationContest(state, hexId) {
     defendingUnit: defendingUnit
       ? { uid: defendingUnit.uid, owner: defendingUnit.owner, strength: defendingUnit.strength }
       : null,
-    modifiers: { mountain, concentration, fortify, veteran },
+    modifiers: {
+      mountain, concentration, fortify, veteran,
+      allies: defendingUnit ? defenderStack - defendingUnit.strength : 0,
+    },
     hasNeutral,
     defenderRollsDie,
   };
