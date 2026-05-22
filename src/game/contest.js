@@ -13,16 +13,6 @@ import { onLocationCaptured, onRaidWon } from "./standing.js";
 
 const fail = (reason) => ({ ok: false, reason });
 
-// The ordinal of a player's *next* turn. A raided unit is immobilized
-// "through its next turn" (§9); turnOrdinal = round*N + activeIndex is
-// strictly increasing, and validateMove blocks Move while it is <= this.
-function nextTurnOrdinal(state, pid) {
-  const n = state.turnOrder.length;
-  const seat = state.turnOrder.indexOf(pid);
-  const round = seat > state.activeIndex ? state.round : state.round + 1;
-  return round * n + seat;
-}
-
 // Garrison Strength contributed by a Location's installed chips. No v0.1
 // chip carries a structured `garrison` bonus yet, so this is 0 today —
 // the hook is here for the content batch (e.g. Defense Turrets).
@@ -163,46 +153,103 @@ function resolveLocationWin(state, pid, loc, params) {
   if (loc.sections.every((s) => s === pid)) captureLocation(state, loc, pid);
 }
 
-// An adjacent hex the loser may retreat to (§9): not controlled by a
-// hostile player, not a still-garrisoned neutral Location. The winner
-// chooses (params.retreatTo); the first valid hex is the headless default.
-function chooseRetreat(state, unit, preferred) {
-  const valid = (state.board.adjacency[unit.node] || []).filter((hex) => {
+// Slots a chip list occupies (Capital counts as 1).
+function slotsUsedOf(state, chipUids) {
+  let n = 0;
+  for (const c of chipUids) {
+    const id = state.chips[c]?.chipId;
+    n += id === "capital" ? 1 : CHIPS[id]?.slots ?? 1;
+  }
+  return n;
+}
+
+// Greedy salvage default (§16.4): take the dead unit's chips in order,
+// as many as fit in `bayFree` slots. Capital is never salvageable.
+function autoSalvage(state, chips, bayFree) {
+  const taken = [];
+  let free = bayFree;
+  for (const c of chips) {
+    if (state.chips[c]?.chipId === "capital") continue;
+    const sl = CHIPS[state.chips[c]?.chipId]?.slots ?? 1;
+    if (sl <= free) { taken.push(c); free -= sl; }
+  }
+  return taken;
+}
+
+// §16.4 — remove a unit from play. If a `killer` unit exists and the dead
+// unit carried chips, the killer salvages up to its free Bay space (the
+// rest are scrapped); a garrison / null killer scraps everything.
+export function destroyUnit(state, unitUid, killerUid, ctx = {}) {
+  const dead = state.units[unitUid];
+  if (!dead) return;
+  const chips = dead.chips.filter((c) => state.chips[c]?.chipId !== "capital");
+  delete state.units[unitUid];
+  emit(state, "unit_destroyed", { unit: unitUid, owner: dead.owner, killer: killerUid || null });
+
+  const killer = killerUid ? state.units[killerUid] : null;
+  if (killer && chips.length) {
+    const bayFree = CONFIG.unit.baySlots - slotsUsedOf(state, killer.chips);
+    let taken = autoSalvage(state, chips, bayFree);
+    if (ctx.interact) {
+      const picked = ctx.interact({ kind: "salvage", chips: [...chips], bayFree, killer: killerUid });
+      if (Array.isArray(picked)) {
+        // Honour the choice but never exceed bay space.
+        taken = autoSalvage(state, picked.filter((c) => chips.includes(c)), bayFree);
+      }
+    }
+    for (const c of chips) {
+      if (taken.includes(c)) killer.chips.push(c);
+      else state.removed.push(c);
+    }
+    if (taken.length) emit(state, "unit_salvaged", { killer: killerUid, from: unitUid, chips: taken });
+    recomputeStats(state);
+  } else {
+    for (const c of chips) state.removed.push(c);
+  }
+}
+
+// §16.4 — drop `n` from a unit's base Strength (its HP), recompute derived
+// stats, and destroy it at 0 (the `killer` may then salvage). `note`
+// tallies the loss for the contest's UI detail.
+export function loseBaseStrength(state, unitUid, n, killerUid, ctx, note) {
+  const unit = state.units[unitUid];
+  if (!unit) return;
+  const applied = Math.min(n, unit.baseStrength);
+  unit.baseStrength -= applied;
+  recomputeStats(state);
+  emit(state, "base_strength_changed", { unit: unitUid, amount: -applied, baseStrength: unit.baseStrength });
+  if (note) note(unit, applied);
+  if (unit.baseStrength <= 0) destroyUnit(state, unitUid, killerUid, ctx);
+}
+
+// Adjacent hexes a raid loser may retreat to (§16.4): not controlled by a
+// hostile player, not a still-garrisoned neutral Location.
+function validRetreatHexes(state, unit) {
+  return (state.board.adjacency[unit.node] || []).filter((hex) => {
     const loc = state.locations[hex];
     if (!loc) return true; // terrain / encounter
     if (loc.controller && loc.controller !== unit.owner) return false;
     if (loc.sections.includes("neutral")) return false;
     return true;
-  });
-  if (preferred && valid.includes(preferred)) return preferred;
-  return valid.length ? [...valid].sort()[0] : null;
+  }).sort();
 }
 
-// A raid win (§9): the defending unit retreats, then the winner takes
-// ONE — immobilize it through its next turn, or destroy one of its chips.
-function resolveRaidWin(state, pid, defUnit, params) {
-  // §15.3 — raided faction loses standing toward the raider; recent-
-  // raid counter increments (decays each round in the world pipeline).
-  onRaidWon(state, pid, defUnit);
-
-  const dest = chooseRetreat(state, defUnit, params.retreatTo);
-  if (dest) {
-    const from = defUnit.node;
-    defUnit.node = dest;
-    emit(state, "unit_retreated", { unit: defUnit.uid, from, to: dest });
+// §16.4 — a surviving raid loser MAY retreat one hex (the loser chooses
+// whether and where). Headless default: first valid hex; `params.retreatTo`
+// overrides; ctx.interact lets the UI prompt (and "stay" cancels).
+function offerRetreat(state, unit, ctx, preferred) {
+  const opts = validRetreatHexes(state, unit);
+  if (!opts.length) return;
+  let dest = opts[0];
+  if (preferred && opts.includes(preferred)) dest = preferred;
+  else if (ctx.interact) {
+    const pick = ctx.interact({ kind: "retreat", unit: unit.uid, options: [...opts, "stay"] });
+    if (pick === "stay" || !opts.includes(pick)) return;
+    dest = pick;
   }
-
-  if (params.raidChoice === "destroyChip" && defUnit.chips.length) {
-    const chipUid =
-      params.raidChipTarget && defUnit.chips.includes(params.raidChipTarget)
-        ? params.raidChipTarget
-        : defUnit.chips[defUnit.chips.length - 1];
-    defUnit.chips.splice(defUnit.chips.indexOf(chipUid), 1);
-    state.removed.push(chipUid);
-    recomputeStats(state);
-  } else {
-    defUnit.immobilizedUntil = nextTurnOrdinal(state, defUnit.owner);
-  }
+  const from = unit.node;
+  unit.node = dest;
+  emit(state, "unit_retreated", { unit: unit.uid, from, to: dest });
 }
 
 // A player wins immediately at the VP threshold (§3 / §14.1). Checked
@@ -276,19 +323,78 @@ export function runContest(state, { pid, params, ctx = {} }) {
     defenderRolled: defenderRollsDie,
   };
 
-  if (!won) {
+  // §16.4 attrition cast. The defending *unit* only exists when a held
+  // Location has no neutral sections and a unit stands on it (a bare
+  // garrison has no Strength to lose); raids always pit two units.
+  const attackerUnit = unit;
+  const locDefUnit =
+    t.kind === "location" && !t.loc.sections.includes("neutral")
+      ? defendingUnit(state, t.loc)
+      : null;
+  const defenderUnit = t.kind === "raid" ? t.unit : locDefUnit;
+  const winnerUnit = won ? attackerUnit : defenderUnit;
+  const loserUnit = won ? defenderUnit : attackerUnit;
+  const margin = won ? initiatorTotal - defenderTotal : defenderTotal - initiatorTotal;
+
+  const lost = { attacker: 0, defender: 0 };
+  const note = (u, n) => { if (u.owner === pid) lost.attacker += n; else lost.defender += n; };
+
+  // Snapshot the loser's hex / owner before any death or retreat moves it.
+  const loserUid = loserUnit?.uid ?? null;
+  const loserHex = loserUnit ? loserUnit.node : t.kind === "location" ? t.loc.hexId : null;
+  const loserOwner = loserUnit ? loserUnit.owner : t.kind === "location" ? t.loc.controller : null;
+
+  // Emit the result and apply the section / standing outcome first (§16.4
+  // — "after the section/raid result is applied"), then attrition.
+  if (won) {
+    emit(state, "contest_won", { initiator: unit.uid, player: pid, ...detail });
+    if (t.kind === "location") resolveLocationWin(state, pid, t.loc, params);
+    else onRaidWon(state, pid, t.unit); // standing hook; retreat after attrition
+  } else {
     emit(state, "contest_lost", { initiator: unit.uid, player: pid, ...detail });
-    expireContestModifiers(state);
-    return { won: false, ...detail };
   }
 
-  emit(state, "contest_won", { initiator: unit.uid, player: pid, ...detail });
-  if (t.kind === "location") resolveLocationWin(state, pid, t.loc, params);
-  else resolveRaidWin(state, pid, t.unit, params);
+  const logStart = state.log.length;
+
+  // 1. Loser −1 (garrison loser has no unit to wound).
+  if (loserUid && state.units[loserUid]) {
+    loseBaseStrength(state, loserUid, 1, winnerUnit?.uid ?? null, ctx, note);
+  }
+  // 2. Rout: an overwhelming margin spills a casualty to a 2nd friendly
+  //    unit stacked on the loser's hex.
+  if (margin >= CONFIG.attrition.routMargin && loserOwner) {
+    const second = Object.values(state.units).find(
+      (u) => u.node === loserHex && u.owner === loserOwner && u.uid !== loserUid,
+    );
+    if (second) loseBaseStrength(state, second.uid, 1, winnerUnit?.uid ?? null, ctx, note);
+  }
+  // 3. Pyrrhic: a winner that barely won (margin 0 — defender ties — or 1)
+  //    also loses 1, but only if the winner is a unit.
+  if (margin <= 1 && winnerUnit && state.units[winnerUnit.uid]) {
+    loseBaseStrength(state, winnerUnit.uid, 1, null, ctx, note);
+  }
+
+  // §16.4 raid retreat — a surviving raid loser may fall back one hex
+  // (replaces the old immobilize / destroy-chip outcomes).
+  if (won && t.kind === "raid" && loserUid && state.units[loserUid]) {
+    offerRetreat(state, state.units[loserUid], ctx, params.retreatTo);
+  }
+
+  const killed = state.log.slice(logStart).filter((e) => e.name === "unit_destroyed").map((e) => e.payload.unit);
+  const salvageEv = state.log.slice(logStart).find((e) => e.name === "unit_salvaged");
 
   checkVictory(state);
   expireContestModifiers(state);
-  return { won: true, winner: state.winnerId || null, ...detail };
+  return {
+    won,
+    winner: won ? state.winnerId || null : null,
+    ...detail,
+    margin,
+    attackerStrLost: lost.attacker,
+    defenderStrLost: lost.defender,
+    killed,
+    salvage: salvageEv ? salvageEv.payload.chips : null,
+  };
 }
 
 // MODIFY_STAT effects with `duration: "this_contest"` (e.g. defender

@@ -5,6 +5,7 @@ import { createGame } from "./setup.js";
 import { startTurn, endTurn } from "./turn.js";
 import { performAction } from "./actions.js";
 import { applyEffect } from "./effects.js";
+import { recomputeStats } from "./stats.js";
 import { activePlayerId } from "./targeting.js";
 import { FACTIONS, LOCATIONS, ABILITIES, REACTIVES } from "./content.js";
 import { loadFieldEncounters, findUnsupportedTypes, choiceIsRunnable, WORLD_ENCOUNTERS } from "./content-loader.js";
@@ -481,6 +482,64 @@ line("\n  [Phase 2] two-unit start, cap 3, cheaper recruit");
   const r5 = performAction(g, "recruit", { at: home.hexId });
   check("recruit allowed up to baseUnitCap + Training Grounds (4)", r3.ok && r4.ok);
   check("recruit blocked past cap", !r5.ok && r5.reason === "unit cap reached");
+}
+
+// --- Phase 3: attrition, death, salvage ---
+line("\n  [Phase 3] attrition, death, salvage");
+{
+  const g = createGame({ seed });
+  startTurn(g);
+  const me = g.turnOrder[0];
+  const foe = g.turnOrder[1];
+  const terrain = Object.values(g.board.hexes).find((h) => h.type === "terrain");
+  g.rng.roll = () => 1; // deterministic: equal dice cancel, margin = strength diff
+  const myUnits = Object.values(g.units).filter((u) => u.owner === me);
+  const foeUnits = Object.values(g.units).filter((u) => u.owner === foe);
+  const atk = myUnits[0];
+  const vic = foeUnits[0];
+  const setStr = (u, n) => { u.baseStrength = n; recomputeStats(g); };
+  const stage = () => {
+    atk.node = terrain.id; atk.moveRemaining = atk.movement; atk.chips = [];
+    vic.node = terrain.id; vic.chips = [];
+    g.players[me].actions.remaining = 5;
+    recomputeStats(g);
+  };
+
+  stage(); setStr(atk, 6); setStr(vic, 4);
+  let r = performAction(g, "contest", { unit: atk.uid, target: vic.uid });
+  check("loser loses 1 base Strength", r.won && r.defenderStrLost === 1 && vic.baseStrength === 3);
+
+  stage(); setStr(atk, 5); setStr(vic, 4);
+  const atkBefore = atk.baseStrength;
+  r = performAction(g, "contest", { unit: atk.uid, target: vic.uid });
+  check("pyrrhic win (margin 1) costs the winner 1",
+    r.won && r.margin === 1 && r.attackerStrLost === 1 && atk.baseStrength === atkBefore - 1);
+
+  stage(); setStr(atk, 9); setStr(vic, 4);
+  const vic2 = foeUnits[1]; vic2.node = terrain.id; setStr(vic2, 4);
+  r = performAction(g, "contest", { unit: atk.uid, target: vic.uid });
+  check("rout (margin >=4) spills a casualty to a 2nd stacked unit",
+    r.won && r.margin >= 4 && vic.baseStrength === 3 && vic2.baseStrength === 3);
+
+  stage(); setStr(atk, 9);
+  const chip = g.nextId("chip"); g.chips[chip] = { uid: chip, chipId: "new-recruits" };
+  vic.chips = [chip]; setStr(vic, 1);
+  r = performAction(g, "contest", { unit: atk.uid, target: vic.uid });
+  check("a unit at 0 base Strength is destroyed", !g.units[vic.uid] && r.killed.includes(vic.uid));
+  check("the killer salvages the dead unit's chip",
+    atk.chips.includes(chip) && r.salvage && r.salvage.includes(chip));
+}
+
+// --- ADJUST_BASE_STRENGTH effect (encounters can wound / heal) ---
+line("\n  [Phase 3] ADJUST_BASE_STRENGTH effect");
+{
+  const g = createGame({ seed }); startTurn(g);
+  const u = Object.values(g.units)[0];
+  u.baseStrength = 2; recomputeStats(g);
+  applyEffect(g, { type: "ADJUST_BASE_STRENGTH", amount: 5, target: u.uid }, {});
+  check("heal clamps to base cap (4)", u.baseStrength === CONFIG.unit.baseStrengthCap);
+  applyEffect(g, { type: "ADJUST_BASE_STRENGTH", amount: -10, target: u.uid }, {});
+  check("wound to 0 destroys the unit", !g.units[u.uid]);
 }
 
 line(`\n  v0.2 verification: ${v2pass} passed, ${v2fail} failed`);

@@ -56,6 +56,24 @@ function formatEvent(ev, engineState) {
     }
     case "location_decayed":
       return { color: theme.accent2, text: `Foothold decayed at ${p.hex}` };
+    case "unit_destroyed":
+      return { color: theme.accent2, text: `${who(p.owner)} lost a unit` };
+    case "unit_salvaged":
+      return { color: theme.textDim, text: `Salvaged ${(p.chips || []).length} chip(s)` };
+    case "base_strength_changed":
+      return null; // attrition detail lives in the contest overlay
+    case "unit_reinforced": {
+      const u = engineState.units[p.unit];
+      return { color: theme.good, text: `${who(u?.owner)} unit healed +${p.amount}` };
+    }
+    case "reinforcement_requested":
+      return { color: theme.textDim, text: `${who(p.player)} sent reinforcements (ETA ${p.eta})` };
+    case "reinforcement_arrived":
+      return { color: theme.good, text: `${who(p.player)} reinforcements arrived` };
+    case "veteran_promoted": {
+      const u = engineState.units[p.unit];
+      return { color: theme.accent, text: `${who(u?.owner)} unit promoted to Veteran` };
+    }
     case "card_played":
       return {
         color: factionColor(p.player),

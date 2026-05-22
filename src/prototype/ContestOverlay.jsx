@@ -106,6 +106,33 @@ function Total({ show, value, color }) {
   );
 }
 
+// v0.2 §16.4 — the attrition aftermath: who bled, who died, what was
+// salvaged. Rendered under the winner banner.
+function AttritionLine({ viz }) {
+  if (viz.cancelled) return null;
+  const parts = [];
+  if (viz.attackerStrLost > 0) parts.push(`${viz.attacker.name} −${viz.attackerStrLost} Str`);
+  if (viz.defenderStrLost > 0) parts.push(`${viz.defender.name} −${viz.defenderStrLost} Str`);
+  const killCount = (viz.killed || []).length;
+  if (killCount > 0) parts.push(`${killCount} unit${killCount === 1 ? "" : "s"} destroyed`);
+  const salvageCount = (viz.salvage || []).length;
+  if (salvageCount > 0) parts.push(`salvaged ${salvageCount} chip${salvageCount === 1 ? "" : "s"}`);
+  if (!parts.length) return null;
+  return (
+    <div
+      style={{
+        marginTop: 6,
+        fontSize: 11,
+        letterSpacing: 0.4,
+        color: theme.textDim,
+        fontWeight: 600,
+      }}
+    >
+      {parts.join(" · ")}
+    </div>
+  );
+}
+
 export default function ContestOverlay({ viz, onClose }) {
   // phase: 0 rolling · 1 leftDie · 2 leftTotal · 3 rightDie · 4 rightTotal · 5 done
   const [phase, setPhase] = useState(viz.cancelled ? 5 : 0);
@@ -280,6 +307,7 @@ export default function ContestOverlay({ viz, onClose }) {
               >
                 {winnerText}
               </div>
+              <AttritionLine viz={viz} />
               <div style={{ marginTop: 12 }}>
                 <Btn variant="primary" onClick={onClose}>
                   Exit

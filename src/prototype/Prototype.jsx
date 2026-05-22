@@ -257,6 +257,11 @@ export default function Prototype({ config, onNewGame }) {
       won: r.won,
       cancelled: r.cancelled,
       kind: r.kind,
+      // v0.2 §16.4 — attrition / death / salvage summary
+      attackerStrLost: r.attackerStrLost || 0,
+      defenderStrLost: r.defenderStrLost || 0,
+      killed: r.killed || [],
+      salvage: r.salvage || null,
     });
     return r;
   }
