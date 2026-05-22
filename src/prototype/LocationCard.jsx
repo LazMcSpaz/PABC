@@ -194,9 +194,9 @@ export default function LocationCard({ locationId, control, width = 210 }) {
               </div>
             </div>
             <div style={{ marginTop: "auto" }}>
-              <Label>{`Chip slots — ${control?.chips?.length || 0}/${loc.chipSlots}`}</Label>
+              <Label>{`Chip slots — ${control?.chips?.length || 0}/${control?.chipSlots ?? loc.chipSlots}`}</Label>
               <div style={{ display: "flex", gap: 6, marginTop: 5, flexWrap: "wrap" }}>
-                {Array.from({ length: loc.chipSlots }).map((_, i) => {
+                {Array.from({ length: control?.chipSlots ?? loc.chipSlots }).map((_, i) => {
                   const chipId = control?.chips?.[i];
                   if (chipId) return <Chip key={i} chipId={chipId} width={chipW} />;
                   return (

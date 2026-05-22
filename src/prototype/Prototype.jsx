@@ -23,6 +23,7 @@ import { evalCond } from "../game/dsl.js";
 import { adaptState } from "./engineAdapter.js";
 import EncounterModal from "./EncounterModal.jsx";
 import EventFeed from "./EventFeed.jsx";
+import UnitPanel from "./UnitPanel.jsx";
 
 const TOP_H = 56;
 const TAB_H = 44;
@@ -168,20 +169,20 @@ export default function Prototype({ config, onNewGame }) {
       return;
     }
 
-    // Otherwise toggle the inspector. If the hex holds your unit, also
-    // auto-select that unit (saves a click).
+    // Otherwise toggle the inspector. Hex selection no longer touches
+    // unit selection — those are independent now (unit tokens have
+    // their own click handler).
     setSelectedHexId((cur) => (cur === hexId ? null : hexId));
-    const hex = state.hexes[hexId];
-    const unit = hex?.unitId ? state.units[hex.unitId] : null;
-    if (unit && unit.owner === state.youId) {
-      setSelectedUnitId(unit.uid);
-    }
+  }
+
+  function onUnitClick(unit) {
+    // Toggle: clicking the already-selected unit deselects.
+    setSelectedUnitId((cur) => (cur === unit.uid ? null : unit.uid));
   }
 
   function onSelectUnit(unitUid) {
+    // Path used by BottomDock's Unit cards.
     setSelectedUnitId(unitUid);
-    const unit = state.units[unitUid];
-    if (unit) setSelectedHexId(unit.node);
   }
 
   function onContest(params) {
@@ -327,9 +328,17 @@ export default function Prototype({ config, onNewGame }) {
               selectedUnitId={selectedUnitId}
               reachable={reachable}
               onSelect={onHexClick}
+              onUnitClick={onUnitClick}
             />
           </div>
         </BoardViewport>
+        {selectedUnitId && state.units[selectedUnitId] && (
+          <UnitPanel
+            unit={state.units[selectedUnitId]}
+            hex={state.hexes[state.units[selectedUnitId].node]}
+            onClose={() => setSelectedUnitId(null)}
+          />
+        )}
         <EventFeed engineState={gameRef.current} tick={tick} />
       </div>
 

@@ -125,57 +125,8 @@ function locationModel(state, hex, actions) {
     },
   ];
 
-  if (unit) {
-    const eff = unitEffective(unit);
-    const yours = unit.owner === state.youId;
-    const isSelected = yours && unit.id === selectedUnitId;
-    tabs.push({
-      id: "unit",
-      label: "Unit",
-      render: () => (
-        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-          <div style={{ fontFamily: theme.fontDisplay, fontSize: 18, fontWeight: 700, color: ownerColor(unit.owner) }}>
-            {unit.name}
-            <span style={{ fontSize: 11, color: theme.textDim, fontWeight: 600 }}>
-              {" "}
-              — {FACTIONS[unit.owner].name}
-              {yours ? " (yours)" : ""}
-            </span>
-          </div>
-          <div style={{ display: "flex", gap: 26 }}>
-            <Field label="Strength">
-              <Big>{eff.strength}</Big>
-            </Field>
-            <Field label="Movement">
-              <Big>{eff.movement}</Big>
-            </Field>
-            <Field label="Status">
-              <span
-                style={{
-                  fontFamily: theme.fontDisplay,
-                  fontSize: 14,
-                  fontWeight: 700,
-                  color: unit.immobilized ? theme.accent2 : theme.good,
-                }}
-              >
-                {unit.immobilized ? "Immobilized" : "Ready"}
-              </span>
-            </Field>
-          </div>
-          {yours && isYourTurn && !unit.immobilized && (
-            <Btn
-              variant={isSelected ? "ghost" : "primary"}
-              full
-              disabled={isSelected}
-              onClick={() => onSelectUnit?.(unit.id)}
-            >
-              {isSelected ? "Selected — click a green hex to move" : "Select for action"}
-            </Btn>
-          )}
-        </div>
-      ),
-    });
-  }
+  // Unit details live in the floating UnitPanel (click the unit
+  // token on the board) — the Inspector stays focused on the hex.
 
   if (contestable) {
     tabs.push({
@@ -280,50 +231,38 @@ function locationModel(state, hex, actions) {
 function encounterModel(state, hex, actions) {
   const { isYourTurn, selectedUnitId, onSelectUnit } = actions;
   const unit = hex.unitId ? state.units[hex.unitId] : null;
+  const cooldownUntil = state.engineState?.world?.encounterHexCooldowns?.[hex.id] || 0;
+  const onCooldown = cooldownUntil > state.engineState.round;
   const tabs = [
     {
       id: "encounter",
       label: "Encounter",
       render: () => (
         <div className="pc-prose" style={PROSE}>
-          A unit that ends its Move here draws the top card of the encounter
-          deck and resolves it — a challenge, a buff, or a setback. The tile is
-          then spent.
+          {onCooldown ? (
+            <>
+              This encounter site is in cooldown — already drawn this run. It
+              will refresh and deliver a new card starting on round{" "}
+              <strong style={{ color: theme.accent }}>{cooldownUntil}</strong>.
+            </>
+          ) : (
+            <>
+              A unit that ends its Move here draws the top card of the
+              encounter deck and resolves it — a challenge, a buff, or a
+              setback. The site then enters a short cooldown before another
+              card can be drawn.
+            </>
+          )}
         </div>
       ),
     },
   ];
-  if (unit) {
-    const yours = unit.owner === state.youId;
-    const isSelected = yours && unit.id === selectedUnitId;
-    tabs.push({
-      id: "unit",
-      label: "Unit",
-      render: () => (
-        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-          <div style={{ fontFamily: theme.fontDisplay, fontSize: 17, fontWeight: 700, color: ownerColor(unit.owner) }}>
-            {unit.name}
-            <span style={{ fontSize: 11, color: theme.textDim, fontWeight: 600 }}>
-              {" "}
-              — {FACTIONS[unit.owner].name}
-              {yours ? " (yours)" : ""}
-            </span>
-          </div>
-          {yours && isYourTurn && !unit.immobilized && (
-            <Btn
-              variant={isSelected ? "ghost" : "primary"}
-              full
-              disabled={isSelected}
-              onClick={() => onSelectUnit?.(unit.id)}
-            >
-              {isSelected ? "Selected — click a green hex to move" : "Select for action"}
-            </Btn>
-          )}
-        </div>
-      ),
-    });
-  }
-  return { title: "Encounter", subtitle: "Unresolved", tabs };
+  // Unit details live in the floating UnitPanel.
+  return {
+    title: "Encounter",
+    subtitle: onCooldown ? `Cooldown — refreshes round ${cooldownUntil}` : "Unresolved",
+    tabs,
+  };
 }
 
 function terrainModel() {

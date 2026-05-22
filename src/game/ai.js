@@ -107,7 +107,7 @@ function pickMoveTarget(state, pid, unit) {
     if (loc && loc.controller !== pid) {
       // Direct landing — favour higher-VP / higher-value targets
       const def = LOCATIONS[loc.locationId];
-      score += 1000 + (def?.vpPerRound || 0) * 100 + (loc.production || 0) * 10;
+      score += 1000 + (def?.vpReward || 0) * 100 + (loc.production || 0) * 10;
     } else {
       // Indirect — pick the hex nearest a goal
       let nearest = Infinity;

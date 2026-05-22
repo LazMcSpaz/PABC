@@ -15,11 +15,16 @@ const FILLS = {
   location: "linear-gradient(165deg, #3f3526 0%, #221c13 100%)",
 };
 
-function UnitToken({ unit, selected }) {
+function UnitToken({ unit, selected, onClick }) {
   const faction = FACTIONS[unit.owner];
   return (
     <div
       title={`${unit.name} — ${faction.name}`}
+      onClick={(e) => {
+        if (!onClick) return;
+        e.stopPropagation();
+        onClick(unit);
+      }}
       style={{
         position: "absolute",
         top: "50%",
@@ -37,6 +42,7 @@ function UnitToken({ unit, selected }) {
         alignItems: "center",
         justifyContent: "center",
         zIndex: 3,
+        cursor: onClick ? "pointer" : undefined,
       }}
     >
       <span style={{ fontFamily: theme.fontDisplay, fontSize: 13, fontWeight: 700, color: "#fff" }}>
@@ -67,7 +73,7 @@ function Plaque({ children }) {
   );
 }
 
-export default function Hex({ hex, unit, selected, reachable, unitSelected, onClick }) {
+export default function Hex({ hex, unit, selected, reachable, unitSelected, onClick, onUnitClick }) {
   const isLocation = hex.type === "location";
   const loc = isLocation ? LOCATIONS[hex.locationId] : null;
   const ctrl = isLocation ? fullController(hex.control?.sections) : null;
@@ -173,7 +179,7 @@ export default function Hex({ hex, unit, selected, reachable, unitSelected, onCl
           </div>
         )}
       </div>
-      {unit && <UnitToken unit={unit} selected={unitSelected} />}
+      {unit && <UnitToken unit={unit} selected={unitSelected} onClick={onUnitClick} />}
     </div>
   );
 }

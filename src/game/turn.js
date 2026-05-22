@@ -7,8 +7,7 @@ import { activePlayerId } from "./targeting.js";
 import { sweepDeferred } from "./deferred.js";
 import { evaluateTriggers } from "./triggers.js";
 import { evaluateConditionalBeats } from "./quests.js";
-import { LOCATIONS } from "./content.js";
-import { CONFIG } from "./config.js";
+import { churnMarket } from "./market.js";
 
 function expireModifiers(state, pid) {
   const own = new Set(
@@ -57,30 +56,22 @@ function tickFootholds(state, pid) {
   if (lostControl) recomputeTech(state);
 }
 
-// Fully-held locations yield their scrap and VP production to the
-// controller (§6.3.1). VP comes from each LOCATIONS def's vpPerRound.
+// Fully-held locations yield their scrap production to the controller
+// (§6.3.1). VP is banked one-shot on capture (see contest.js), not
+// per Upkeep — the per-round drip lived briefly in an earlier demo
+// pass and would have forced the win to land on round-12 regardless
+// of play.
 function collectProduction(state, pid) {
   let gained = 0;
-  let vpGained = 0;
   for (const loc of Object.values(state.locations)) {
     if (loc.controller !== pid) continue;
     gained += loc.production;
-    vpGained += LOCATIONS[loc.locationId]?.vpPerRound || 0;
   }
   if (gained > 0) {
     state.players[pid].resource += gained;
     emit(state, "resource_gained", {
       player: pid, resource: "Resource", amount: gained, source: "production",
     });
-  }
-  if (vpGained > 0) {
-    state.players[pid].vp += vpGained;
-    emit(state, "resource_gained", {
-      player: pid, resource: "VP", amount: vpGained, source: "control",
-    });
-    if (state.players[pid].vp >= CONFIG.vpThreshold && !state.winnerId) {
-      state.winnerId = pid;
-    }
   }
 }
 
@@ -105,6 +96,7 @@ export function startTurn(state) {
   recomputeStats(state);
   tickFootholds(state, pid);
   collectProduction(state, pid);
+  churnMarket(state);
 
   // Preparation (the optional stat-buy step) is folded in once Layer 3
   // gives it something to do; for now the turn opens straight into Main.

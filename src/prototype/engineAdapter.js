@@ -60,7 +60,7 @@ export function ensureUiConstantsSynced() {
     if (!uiDef) continue;
     uiDef.garrison = CONFIG.garrisonByValue[def.strategicValue] ?? uiDef.garrison;
     uiDef.chipSlots = CONFIG.chipSlotsByValue[def.strategicValue] ?? uiDef.chipSlots;
-    uiDef.vp = def.vpPerRound ?? uiDef.vp;
+    uiDef.vp = def.vpReward ?? uiDef.vp;
     // engine production is a range [min,max] — show the midpoint
     if (Array.isArray(def.production)) {
       uiDef.production = Math.round((def.production[0] + def.production[1]) / 2);
@@ -161,6 +161,11 @@ export function adaptState(state) {
         footholdCap: loc.footholdCap,
         chips: adaptChips(state, loc.chips),
         chipUids: [...loc.chips],
+        // Engine-derived: the ability eats one base slot, so this is
+        // lower than the UI's static LOCATIONS[id].chipSlots whenever
+        // a Location carries an ability (§6.3).
+        chipSlots: loc.chipSlots,
+        abilityId: loc.abilityId,
       };
       hex.garrison = loc.garrison; // engine's live garrison (incl. capital bonus)
       hex.production = loc.production;

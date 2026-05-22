@@ -10,6 +10,7 @@ export default function HexBoard({
   selectedUnitId,
   reachable,
   onSelect,
+  onUnitClick,
 }) {
   return (
     <div
@@ -41,6 +42,7 @@ export default function HexBoard({
                 reachable={reachable?.has(hexId) || false}
                 unitSelected={unit && unit.uid === selectedUnitId}
                 onClick={() => onSelect(hexId)}
+                onUnitClick={onUnitClick}
               />
             );
           })}

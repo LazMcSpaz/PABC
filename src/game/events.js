@@ -22,6 +22,7 @@ export const EVENT_NAMES = new Set([
   "encounter_delivered", "trigger_fired",
   "quest_started", "quest_advanced", "quest_completed",
   "standing_changed", "track_changed", "deferred_resolved",
+  "market_churned",
 ]);
 
 // Resolve a chip / card instance uid to its content def. Covers Market
