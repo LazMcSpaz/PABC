@@ -4,7 +4,7 @@
 // covers the framework plus Move and Recruit.
 import { emit } from "./events.js";
 import { activePlayerId } from "./targeting.js";
-import { bfsDistances } from "./board.js";
+import { bfsDistances, reinforcementRoute } from "./board.js";
 import { CONFIG } from "./config.js";
 import { FACTIONS, CHIPS, ABILITIES, chipDefOf } from "./content.js";
 import { validateContest, runContest } from "./contest.js";
@@ -105,6 +105,74 @@ function runRecruit(state, { pid, player, params }) {
   state.units[u] = makeUnit(u, pid, loc.hexId, FACTIONS[pid].name);
   emit(state, "unit_recruited", { unit: u, player: pid, hex: loc.hexId });
   return { unit: u };
+}
+
+// --- Reinforce -------------------------------------------------------
+// v0.2 §16.5 — mend a unit's eroded base Strength for 2 scrap each.
+// `mode:"instant"` restores a unit on a friendly Location to cap now;
+// `mode:"field"` dispatches a convoy that arrives in N round-ends, where
+// N is the supply distance through friendly/neutral hexes (re-targets a
+// moving unit, §16.5). Both cost 1 Action.
+function unitStrengthCap(unit) {
+  return unit.veteran ? CONFIG.unit.veteranStrengthCap : CONFIG.unit.baseStrengthCap;
+}
+
+function validateReinforce(state, { pid, player, params }) {
+  const unit = state.units[params.unit];
+  if (!unit) return fail("no such unit");
+  if (unit.owner !== pid) return fail("not your unit");
+  const cap = unitStrengthCap(unit);
+  const deficit = cap - unit.baseStrength;
+  if (deficit <= 0) return fail("unit is already at full Strength");
+  const cost = CONFIG.heal.scrapPerStrength * deficit;
+  if (player.resource < cost) return fail("not enough scrap");
+
+  const mode = params.mode || "instant";
+  if (mode === "instant") {
+    const loc = state.locations[unit.node];
+    if (!loc || loc.controller !== pid)
+      return fail("instant top-up needs the unit on a Location you fully control");
+    return { ok: true };
+  }
+  if (mode === "field") {
+    const route = reinforcementRoute(state, pid, unit.node);
+    if (!route) return fail("no supply route — the unit is walled off by enemy territory");
+    return { ok: true };
+  }
+  return fail(`unknown reinforce mode "${mode}"`);
+}
+
+function runReinforce(state, { pid, player, params }) {
+  const unit = state.units[params.unit];
+  const cap = unitStrengthCap(unit);
+  const deficit = cap - unit.baseStrength;
+  const cost = CONFIG.heal.scrapPerStrength * deficit;
+  player.resource -= cost;
+  emit(state, "resource_spent", { player: pid, resource: "Resource", amount: -cost });
+
+  const mode = params.mode || "instant";
+  if (mode === "instant") {
+    unit.baseStrength = cap;
+    recomputeStats(state);
+    emit(state, "unit_reinforced", { unit: unit.uid, amount: deficit });
+    return { mode, amount: deficit };
+  }
+
+  // field — scrap charged up front; the convoy arrives via the round-end
+  // sweep (turn.js sweepReinforcements).
+  const route = reinforcementRoute(state, pid, unit.node);
+  state.reinforcements.push({
+    owner: pid,
+    targetUnit: unit.uid,
+    amount: deficit,
+    traveled: 0,
+    originHex: route.originHex,
+    requestedRound: state.round,
+  });
+  emit(state, "reinforcement_requested", {
+    player: pid, unit: unit.uid, eta: route.dist, originHex: route.originHex,
+  });
+  return { mode, eta: route.dist, originHex: route.originHex };
 }
 
 // --- Acquire ---------------------------------------------------------
@@ -234,6 +302,7 @@ function runActivate(state, { pid, player, params, ctx }) {
 const ACTIONS = {
   move: { cost: 0, validate: validateMove, run: runMove }, // §16.2 — free of Actions
   recruit: { cost: 1, validate: validateRecruit, run: runRecruit },
+  reinforce: { cost: 1, validate: validateReinforce, run: runReinforce },
   contest: { cost: 1, validate: validateContest, run: runContest },
   acquire: { cost: 1, validate: validateAcquire, run: runAcquire },
   activate: { cost: activateActionCost, validate: validateActivate, run: runActivate },

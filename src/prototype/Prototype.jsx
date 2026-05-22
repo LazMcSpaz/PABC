@@ -21,7 +21,7 @@ import { CONFIG } from "../game/config.js";
 import { NEUTRAL } from "./data.js";
 import { getEncounter } from "../game/encounters.js";
 import { evalCond } from "../game/dsl.js";
-import { adaptState } from "./engineAdapter.js";
+import { adaptState, reinforcePreview } from "./engineAdapter.js";
 import EncounterModal from "./EncounterModal.jsx";
 import EventFeed from "./EventFeed.jsx";
 import UnitPanel from "./UnitPanel.jsx";
@@ -271,6 +271,10 @@ export default function Prototype({ config, onNewGame }) {
   function onRecruit(hexId) {
     return runAction("recruit", { at: hexId }, null, "Unit recruited.");
   }
+  function onReinforce(unitUid, mode) {
+    const msg = mode === "instant" ? "Unit reinforced." : "Reinforcements dispatched.";
+    return runAction("reinforce", { unit: unitUid, mode }, null, msg);
+  }
   function onAcquire(uiChip) {
     // uiChip is { uid, chipId, engineChipId }. Pick an install target:
     // unit chip → strongest of your units with bay slots; location chip
@@ -413,6 +417,10 @@ export default function Prototype({ config, onNewGame }) {
           <UnitPanel
             unit={state.units[selectedUnitId]}
             hex={state.hexes[state.units[selectedUnitId].node]}
+            canAct={isYourTurn && state.units[selectedUnitId].owner === state.youId}
+            reinforce={reinforcePreview(gameRef.current, selectedUnitId)}
+            scrap={you.scrap}
+            onReinforce={onReinforce}
             onClose={() => setSelectedUnitId(null)}
           />
         )}

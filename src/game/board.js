@@ -49,6 +49,40 @@ export function bfsDistances(adjacency, start) {
   return dist;
 }
 
+// v0.2 §16.5 — shortest supply route to `targetNode` from the nearest
+// Location player `pid` fully controls, travelling only through
+// friendly / neutral hexes (an enemy-controlled Location is a wall; the
+// target hex itself is always reachable if a path leads to it). Returns
+// `{ dist, originHex }` or null if walled off entirely.
+export function reinforcementRoute(state, pid, targetNode) {
+  const sources = Object.values(state.locations)
+    .filter((l) => l.controller === pid)
+    .map((l) => l.hexId);
+  if (!sources.length) return null;
+
+  const isWall = (hex) => {
+    const loc = state.locations[hex];
+    return !!(loc && loc.controller && loc.controller !== pid);
+  };
+
+  const dist = {};
+  const origin = {};
+  const queue = [];
+  for (const s of sources) { dist[s] = 0; origin[s] = s; queue.push(s); }
+  while (queue.length) {
+    const cur = queue.shift();
+    for (const nb of state.board.adjacency[cur] || []) {
+      if (dist[nb] !== undefined) continue;
+      if (isWall(nb) && nb !== targetNode) continue;
+      dist[nb] = dist[cur] + 1;
+      origin[nb] = origin[cur];
+      queue.push(nb);
+    }
+  }
+  if (dist[targetNode] === undefined) return null;
+  return { dist: dist[targetNode], originHex: origin[targetNode] };
+}
+
 // Constrained-random layout: place the 10 Locations, then fill the rest
 // with encounter / terrain tiles. Each faction's two affiliated Locations
 // land within 2 hexes of each other; the four start areas are spread.

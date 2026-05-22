@@ -115,7 +115,7 @@ const victim = Object.values(game.units).find((u) => u.owner !== me);
 victim.node = prize.hexId;
 const raid = performAction(game, "contest", { unit: champ.uid, target: victim.uid });
 line(`  raid ${victim.uid} (owner ${victim.owner}): roll ${raid.initiatorTotal} vs ${raid.defenderTotal} -> ${raid.won ? "won" : "lost"}`);
-line(`   ${victim.uid} retreated to ${victim.node}, immobilizedUntil ${victim.immobilizedUntil}`);
+line(`   ${victim.uid} now at ${victim.node}, base STR ${game.units[victim.uid]?.baseStrength ?? "destroyed"} (attrition + optional retreat)`);
 
 // --- Layer 3.3 — Acquire + Activate + tech progression ---
 line("\nMARKET / ACQUIRE  (Layer 3.3)");
@@ -141,14 +141,14 @@ const ensureInRow = (tier, chipId) => {
 const findChip = (tier, chipId) =>
   game.market.tiers[tier].row.find((c) => game.chips[c]?.chipId === chipId);
 
-ensureInRow(1, "new-recruits");
+ensureInRow(1, "drilled-troops");
 ensureInRow(1, "labs");
 ensureInRow(2, "sharpened-blades");
 
 line(`  tier 1 row: ${game.market.tiers[1].row.map((c) => game.chips[c].chipId).join(", ")}`);
 line(`  champ STR ${champ.strength}; scrap ${game.players[me].resource}`);
-const acq1 = performAction(game, "acquire", { chip: findChip(1, "new-recruits"), into: { unit: champ.uid } });
-line(`  acquire new-recruits -> ${acq1.ok ? `ok (chip ${acq1.chip})` : "blocked — " + acq1.reason}`);
+const acq1 = performAction(game, "acquire", { chip: findChip(1, "drilled-troops"), into: { unit: champ.uid } });
+line(`  acquire drilled-troops -> ${acq1.ok ? `ok (chip ${acq1.chip})` : "blocked — " + acq1.reason}`);
 line(`  champ STR ${champ.strength}; scrap ${game.players[me].resource}`);
 
 line(`\nTECH  versari tech ${game.players[me].tech}`);
@@ -522,7 +522,7 @@ line("\n  [Phase 3] attrition, death, salvage");
     r.won && r.margin >= 4 && vic.baseStrength === 3 && vic2.baseStrength === 3);
 
   stage(); setStr(atk, 9);
-  const chip = g.nextId("chip"); g.chips[chip] = { uid: chip, chipId: "new-recruits" };
+  const chip = g.nextId("chip"); g.chips[chip] = { uid: chip, chipId: "drilled-troops" };
   vic.chips = [chip]; setStr(vic, 1);
   r = performAction(g, "contest", { unit: atk.uid, target: vic.uid });
   check("a unit at 0 base Strength is destroyed", !g.units[vic.uid] && r.killed.includes(vic.uid));
@@ -540,6 +540,90 @@ line("\n  [Phase 3] ADJUST_BASE_STRENGTH effect");
   check("heal clamps to base cap (4)", u.baseStrength === CONFIG.unit.baseStrengthCap);
   applyEffect(g, { type: "ADJUST_BASE_STRENGTH", amount: -10, target: u.uid }, {});
   check("wound to 0 destroys the unit", !g.units[u.uid]);
+}
+
+// --- Phase 4: reinforcement & healing ---
+line("\n  [Phase 4] passive heal + instant / field reinforcement");
+{
+  const nonEnemyAdj = (g, hex, pid) =>
+    (g.board.adjacency[hex] || []).find((h) => {
+      const loc = g.locations[h];
+      return !(loc && loc.controller && loc.controller !== pid);
+    });
+
+  // passive heal on a fully-held Location
+  {
+    const g = createGame({ seed }); startTurn(g);
+    const me = g.turnOrder[0];
+    const home = Object.values(g.locations).find((l) => l.controller === me);
+    const u = Object.values(g.units).find((x) => x.owner === me);
+    u.node = home.hexId; u.baseStrength = 2; recomputeStats(g);
+    for (let i = 0; i < g.turnOrder.length; i++) endTurn(g); // round-trip to me
+    check("passive heal +1 on a fully-held Location", u.baseStrength === 3);
+  }
+
+  // instant top-up
+  {
+    const g = createGame({ seed }); startTurn(g);
+    const me = g.turnOrder[0];
+    const home = Object.values(g.locations).find((l) => l.controller === me);
+    const u = Object.values(g.units).find((x) => x.owner === me);
+    u.node = home.hexId; u.baseStrength = 1; recomputeStats(g);
+    g.players[me].resource += 100;
+    const before = g.players[me].resource;
+    const r = performAction(g, "reinforce", { unit: u.uid, mode: "instant" });
+    check("instant top-up restores to cap", r.ok && u.baseStrength === 4);
+    check("instant top-up charges 2 scrap / Strength", before - g.players[me].resource === 2 * 3);
+  }
+
+  // field reinforcement arrives after N round-ends
+  {
+    const g = createGame({ seed }); startTurn(g);
+    const me = g.turnOrder[0];
+    const home = Object.values(g.locations).find((l) => l.controller === me);
+    const u = Object.values(g.units).find((x) => x.owner === me);
+    const adj = nonEnemyAdj(g, home.hexId, me);
+    u.node = adj; u.baseStrength = 1; recomputeStats(g);
+    g.players[me].resource += 100;
+    const r = performAction(g, "reinforce", { unit: u.uid, mode: "field" });
+    check("field reinforcement queues with an ETA", r.ok && r.eta >= 1 && g.reinforcements.length === 1);
+    let guard = 12;
+    while (g.reinforcements.length && guard-- > 0) {
+      for (let i = 0; i < g.turnOrder.length; i++) endTurn(g);
+    }
+    check("field reinforcement arrives and restores Strength",
+      g.reinforcements.length === 0 && u.baseStrength > 1);
+  }
+
+  // severed supply — capturing the origin strands the convoy as a unit
+  {
+    const g = createGame({ seed }); startTurn(g);
+    const me = g.turnOrder[0];
+    const foe = g.turnOrder[1];
+    const home = Object.values(g.locations).find((l) => l.controller === me);
+    const u = Object.values(g.units).find((x) => x.owner === me);
+    const adj = nonEnemyAdj(g, home.hexId, me);
+    u.node = adj; u.baseStrength = 1; recomputeStats(g);
+    g.players[me].resource += 100;
+    performAction(g, "reinforce", { unit: u.uid, mode: "field" });
+    const originHex = g.reinforcements[0].originHex;
+    const meUnitsBefore = Object.values(g.units).filter((x) => x.owner === me).length;
+
+    // Drive a foe capture of the origin Location.
+    g.activeIndex = g.turnOrder.indexOf(foe);
+    g.phase = "Main";
+    g.players[foe].actions.remaining = 9;
+    g.rng.roll = () => 1;
+    const fu = Object.values(g.units).find((x) => x.owner === foe);
+    fu.node = originHex; fu.baseStrength = 60; recomputeStats(g);
+    let guard = 6;
+    while (g.locations[originHex].controller !== foe && guard-- > 0) {
+      performAction(g, "contest", { unit: fu.uid });
+    }
+    check("severed supply strands the convoy as a new unit",
+      g.reinforcements.length === 0 &&
+      Object.values(g.units).filter((x) => x.owner === me).length === meUnitsBefore + 1);
+  }
 }
 
 line(`\n  v0.2 verification: ${v2pass} passed, ${v2fail} failed`);

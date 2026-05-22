@@ -5,6 +5,7 @@
 // shape-agnostic.
 
 import { CONFIG } from "../game/config.js";
+import { reinforcementRoute } from "../game/board.js";
 import {
   LOCATIONS as ENGINE_LOCATIONS,
   CHIPS as ENGINE_CHIPS,
@@ -25,7 +26,7 @@ const ENGINE_TO_UI_LOC = {
 };
 const ENGINE_TO_UI_CHIP = {
   "sharpened-blades": "sharpenedBlades",
-  "new-recruits": "newRecruits",
+  "drilled-troops": "drilledTroops",
   "training-grounds": "trainingGrounds",
   "defense-turrets": "defenseTurrets",
   "logistics-hub": "logisticsHub",
@@ -278,9 +279,32 @@ export function adaptState(state) {
     market,
     marketChips,
     winnerId: state.winnerId,
+    // v0.2 §16.5 — in-transit field reinforcements, for board overlay /
+    // unit panel ETA display.
+    reinforcements: (state.reinforcements || []).map((r) => ({ ...r })),
     // Surface the raw engine state so Phase-4 action handlers can reach
     // engine APIs without re-deriving everything.
     engineState: state,
+  };
+}
+
+// v0.2 §16.5 — what a Reinforce action would cost/look like for `unitUid`
+// right now: the scrap to top it up, whether an instant top-up is legal
+// (unit on a fully-held Location), and the field-supply ETA in turns.
+export function reinforcePreview(state, unitUid) {
+  const unit = state.units[unitUid];
+  if (!unit) return null;
+  const cap = unit.veteran ? CONFIG.unit.veteranStrengthCap : CONFIG.unit.baseStrengthCap;
+  const deficit = cap - unit.baseStrength;
+  const loc = state.locations[unit.node];
+  const onFriendlyLoc = !!(loc && loc.controller === unit.owner);
+  const route = deficit > 0 ? reinforcementRoute(state, unit.owner, unit.node) : null;
+  return {
+    deficit,
+    cost: CONFIG.heal.scrapPerStrength * deficit,
+    onFriendlyLoc,
+    eta: route ? route.dist : null,
+    canField: !!route,
   };
 }
 

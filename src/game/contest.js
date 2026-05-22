@@ -7,9 +7,10 @@
 import { emit } from "./events.js";
 import { openReactionWindow } from "./reactions.js";
 import { CONFIG } from "./config.js";
-import { CHIPS, LOCATIONS } from "./content.js";
+import { CHIPS, LOCATIONS, FACTIONS } from "./content.js";
 import { recomputeStats, recomputeTech } from "./stats.js";
 import { onLocationCaptured, onRaidWon } from "./standing.js";
+import { makeUnit } from "./setup.js";
 
 const fail = (reason) => ({ ok: false, reason });
 
@@ -121,6 +122,11 @@ function captureLocation(state, loc, victor) {
   loc.foothold = 0; // §6.3.2 — F activates at full control, starting at 0
   emit(state, "location_captured", { hex: loc.hexId, controller: victor, from });
 
+  // §16.5 severed supply — any in-transit reinforcement whose origin was
+  // this Location is stranded: it becomes a fresh, chip-less unit (cap 4)
+  // at the reinforced unit's position (allowed past unit cap).
+  strandReinforcementsFrom(state, loc.hexId);
+
   // VP is banked once per Location, on the FIRST capture only —
   // subsequent recaptures don't re-pay (loc.vpAwarded gates it). The
   // value comes from LOCATIONS[id].vpReward (1/2/3 by strategic
@@ -146,6 +152,24 @@ function captureLocation(state, loc, victor) {
   // §15.3 — the affiliated faction (if any) loses standing toward
   // the new controller.
   onLocationCaptured(state, loc.hexId, victor, from);
+}
+
+// §16.5 — strand in-transit reinforcements whose origin Location was just
+// captured, converting each to a new chip-less unit at the reinforced
+// unit's node (cap 4).
+function strandReinforcementsFrom(state, capturedHex) {
+  if (!state.reinforcements?.length) return;
+  state.reinforcements = state.reinforcements.filter((r) => {
+    if (r.originHex !== capturedHex) return true;
+    const target = state.units[r.targetUnit];
+    const node = target ? target.node : capturedHex;
+    const u = state.nextId("unit");
+    state.units[u] = makeUnit(u, r.owner, node, FACTIONS[r.owner].name);
+    state.units[u].baseStrength = Math.min(CONFIG.unit.baseStrengthCap, r.amount);
+    recomputeStats(state);
+    emit(state, "reinforcement_arrived", { player: r.owner, unit: u, stranded: true });
+    return false;
+  });
 }
 
 function resolveLocationWin(state, pid, loc, params) {

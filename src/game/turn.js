@@ -3,6 +3,8 @@
 // production) and Cleanup.
 import { emit } from "./events.js";
 import { recomputeStats, recomputeTech } from "./stats.js";
+import { reinforcementRoute } from "./board.js";
+import { CONFIG } from "./config.js";
 import { activePlayerId } from "./targeting.js";
 import { sweepDeferred } from "./deferred.js";
 import { evaluateTriggers } from "./triggers.js";
@@ -88,6 +90,23 @@ function refreshMoveBudget(state, pid) {
   }
 }
 
+// v0.2 §16.5 — at Upkeep, each unit on a Location its owner fully holds
+// mends +1 base Strength, up to its cap. The supply-line "fall back to
+// re-secure and heal" half of the loop.
+function passiveHeal(state, pid) {
+  for (const u of Object.values(state.units)) {
+    if (u.owner !== pid) continue;
+    const loc = state.locations[u.node];
+    if (!loc || loc.controller !== pid) continue;
+    const cap = u.veteran ? CONFIG.unit.veteranStrengthCap : CONFIG.unit.baseStrengthCap;
+    if (u.baseStrength >= cap) continue;
+    const before = u.baseStrength;
+    u.baseStrength = Math.min(cap, u.baseStrength + CONFIG.heal.passivePerTurn);
+    recomputeStats(state);
+    emit(state, "unit_reinforced", { unit: u.uid, amount: u.baseStrength - before });
+  }
+}
+
 // Run a player's Upkeep and open their turn at the Main phase.
 export function startTurn(state) {
   if (state.winnerId) return state;
@@ -109,6 +128,7 @@ export function startTurn(state) {
   recomputeStats(state);
   refreshMoveBudget(state, pid);
   tickFootholds(state, pid);
+  passiveHeal(state, pid);
   collectProduction(state, pid);
   churnMarket(state);
 
@@ -142,10 +162,39 @@ export function endTurn(state) {
 // queued consequence can update the state that triggers then read.
 function runRoundEnd(state) {
   sweepDeferred(state);
+  sweepReinforcements(state);
   evaluateTriggers(state);
   evaluateConditionalBeats(state);
   expirePlacementMarkers(state);
   decayWorldCounters(state);
+}
+
+// v0.2 §16.5 — advance in-transit field reinforcements. Each round the
+// convoy covers one more hex; it re-targets a moving unit by recomputing
+// the supply route from its owner's nearest Location to the unit's
+// *current* node, and delivers when it has travelled far enough. A packet
+// whose target died is dropped.
+function sweepReinforcements(state) {
+  if (!state.reinforcements?.length) return;
+  const keep = [];
+  for (const r of state.reinforcements) {
+    const unit = state.units[r.targetUnit];
+    if (!unit) continue; // target destroyed — convoy disbands
+    r.traveled = (r.traveled || 0) + 1;
+    const route = reinforcementRoute(state, r.owner, unit.node);
+    if (route && r.traveled >= route.dist) {
+      const cap = unit.veteran ? CONFIG.unit.veteranStrengthCap : CONFIG.unit.baseStrengthCap;
+      const before = unit.baseStrength;
+      unit.baseStrength = Math.min(cap, unit.baseStrength + r.amount);
+      recomputeStats(state);
+      emit(state, "reinforcement_arrived", {
+        player: r.owner, unit: unit.uid, amount: unit.baseStrength - before,
+      });
+    } else {
+      keep.push(r); // still en route (or momentarily walled off)
+    }
+  }
+  state.reinforcements = keep;
 }
 
 function expirePlacementMarkers(state) {

@@ -37,7 +37,8 @@ export const LOCATIONS = {
 // Layer 2 (the effect library); `desc` carries the plain-text effect.
 export const CHIPS = {
   // --- unit chips --- (strength / movement = structured stat bonuses)
-  "new-recruits": { id: "new-recruits", name: "New Recruits", kind: "unit", slots: 1, techLevel: 1, cost: 2, copies: 3, strength: 1, desc: "+1 Strength" },
+  // §16.5 — recruitment is now an action; this stays a +1 Strength gear chip.
+  "drilled-troops": { id: "drilled-troops", name: "Drilled Troops", kind: "unit", slots: 1, techLevel: 1, cost: 2, copies: 3, strength: 1, desc: "+1 Strength" },
   navigator: { id: "navigator", name: "Navigator", kind: "unit", slots: 1, techLevel: 1, cost: 2, copies: 3, movement: 1, desc: "+1 Movement" },
   "sharpened-blades": { id: "sharpened-blades", name: "Sharpened Blades", kind: "unit", slots: 1, techLevel: 2, cost: 4, copies: 3, strength: 2, desc: "+2 Strength" },
   cannons: { id: "cannons", name: "Cannons", kind: "unit", slots: 1, techLevel: 3, cost: 6, copies: 2, strength: 3, desc: "+3 Strength" },
