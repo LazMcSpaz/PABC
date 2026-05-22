@@ -139,3 +139,21 @@
 .pc-pop {
   animation: pc-pop-in 0.16s ease-out;
 }
+
+/* Quick swell then slow settle — used to punctuate a die / total
+ * locking in during the contest overlay. */
+@keyframes pc-emph {
+  0% {
+    transform: scale(1);
+  }
+  18% {
+    transform: scale(1.45);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+.pc-emph {
+  animation: pc-emph 0.6s ease-out;
+  display: inline-block;
+}

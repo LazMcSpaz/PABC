@@ -158,9 +158,19 @@ function isImmobilized(state, unit) {
 export function adaptState(state) {
   ensureUiConstantsSynced();
 
-  // hex → unit reverse pointer
+  // hex → unit reverse pointer. Only one token renders per hex, so when
+  // units stack, prefer the human's own unit — otherwise a shared hex
+  // would hide the player's unit (and the Inspector's Contest tab keys
+  // off the rendered unit, so the player couldn't act on it).
   const unitAt = {};
-  for (const u of Object.values(state.units)) unitAt[u.node] = u.uid;
+  for (const u of Object.values(state.units)) {
+    const curUid = unitAt[u.node];
+    if (!curUid) { unitAt[u.node] = u.uid; continue; }
+    const cur = state.units[curUid];
+    if (u.owner === state.humanFactionId && cur.owner !== state.humanFactionId) {
+      unitAt[u.node] = u.uid;
+    }
+  }
 
   const units = {};
   for (const u of Object.values(state.units)) {

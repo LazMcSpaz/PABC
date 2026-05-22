@@ -94,6 +94,7 @@ export default function Hex({ hex, unit, selected, reachable, unitSelected, onCl
   return (
     <div
       className="pc-hex-cell"
+      data-hex={hex.id}
       onClick={onClick}
       style={{ width: HEX_W, height: HEX_H, position: "relative", filter, cursor }}
     >
