@@ -32,15 +32,15 @@ export default function HexBoard({
         >
           {row.map((hexId) => {
             const hex = state.hexes[hexId];
-            const unit = hex.unitId ? state.units[hex.unitId] : null;
+            const units = (hex.unitIds || []).map((id) => state.units[id]).filter(Boolean);
             return (
               <Hex
                 key={hexId}
                 hex={hex}
-                unit={unit}
+                units={units}
                 selected={hexId === selectedHexId}
                 reachable={reachable?.has(hexId) || false}
-                unitSelected={unit && unit.uid === selectedUnitId}
+                selectedUnitId={selectedUnitId}
                 onClick={() => onSelect(hexId)}
                 onUnitClick={onUnitClick}
               />

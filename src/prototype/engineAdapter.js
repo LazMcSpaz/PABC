@@ -158,18 +158,25 @@ function isImmobilized(state, unit) {
 export function adaptState(state) {
   ensureUiConstantsSynced();
 
-  // hex → unit reverse pointer. Only one token renders per hex, so when
-  // units stack, prefer the human's own unit — otherwise a shared hex
-  // would hide the player's unit (and the Inspector's Contest tab keys
-  // off the rendered unit, so the player couldn't act on it).
-  const unitAt = {};
+  // hex → ordered list of unit uids. Multiple tokens render per hex (in
+  // arc slots), so we keep the full list. The human's units come first
+  // so the player's own unit takes the prime slot and is what the
+  // Inspector's single-unit Contest path keys off.
+  const unitsByHex = {};
   for (const u of Object.values(state.units)) {
-    const curUid = unitAt[u.node];
-    if (!curUid) { unitAt[u.node] = u.uid; continue; }
-    const cur = state.units[curUid];
-    if (u.owner === state.humanFactionId && cur.owner !== state.humanFactionId) {
-      unitAt[u.node] = u.uid;
-    }
+    (unitsByHex[u.node] ||= []).push(u);
+  }
+  const unitIdsAt = {};
+  const unitAt = {};
+  for (const [node, list] of Object.entries(unitsByHex)) {
+    const ordered = [...list].sort((a, b) => {
+      const am = a.owner === state.humanFactionId ? 0 : 1;
+      const bm = b.owner === state.humanFactionId ? 0 : 1;
+      if (am !== bm) return am - bm;
+      return a.uid < b.uid ? -1 : 1; // stable
+    });
+    unitIdsAt[node] = ordered.map((u) => u.uid);
+    unitAt[node] = ordered[0].uid;
   }
 
   const units = {};
@@ -201,6 +208,7 @@ export function adaptState(state) {
       col: h.col,
     };
     if (unitAt[h.id]) hex.unitId = unitAt[h.id];
+    if (unitIdsAt[h.id]) hex.unitIds = unitIdsAt[h.id];
     if (h.type === "location") {
       const loc = state.locations[h.id];
       hex.locationId = engineLocationIdToUi(loc.locationId);

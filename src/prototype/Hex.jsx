@@ -15,8 +15,21 @@ const FILLS = {
   location: "linear-gradient(165deg, #3f3526 0%, #221c13 100%)",
 };
 
-function UnitToken({ unit, selected, onClick }) {
+// Token slots around the upper arc of the hex, filled right → top →
+// left with two in-between positions (1:30 and 10:30) so several units
+// on one hex don't stack. Percentages are the token centre within the
+// hex cell; translate(-50%,-50%) anchors on the point.
+const TOKEN_SLOTS = [
+  { left: "84%", top: "50%" }, // 3:00  (right)
+  { left: "74%", top: "29%" }, // 1:30
+  { left: "50%", top: "20%" }, // 12:00 (top)
+  { left: "26%", top: "29%" }, // 10:30
+  { left: "16%", top: "50%" }, // 9:00  (left)
+];
+
+function UnitToken({ unit, selected, slot = 0, onClick }) {
   const faction = FACTIONS[unit.owner];
+  const pos = TOKEN_SLOTS[Math.min(slot, TOKEN_SLOTS.length - 1)];
   return (
     <div
       title={`${unit.name} — ${faction.name}`}
@@ -27,9 +40,9 @@ function UnitToken({ unit, selected, onClick }) {
       }}
       style={{
         position: "absolute",
-        top: "50%",
-        right: "7%",
-        transform: "translateY(-50%)",
+        top: pos.top,
+        left: pos.left,
+        transform: "translate(-50%, -50%)",
         width: selected ? 34 : 30,
         height: selected ? 34 : 30,
         borderRadius: "50%",
@@ -41,7 +54,7 @@ function UnitToken({ unit, selected, onClick }) {
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        zIndex: 3,
+        zIndex: selected ? 4 : 3,
         cursor: onClick ? "pointer" : undefined,
       }}
     >
@@ -73,7 +86,7 @@ function Plaque({ children }) {
   );
 }
 
-export default function Hex({ hex, unit, selected, reachable, unitSelected, onClick, onUnitClick }) {
+export default function Hex({ hex, units, selected, reachable, selectedUnitId, onClick, onUnitClick }) {
   const isLocation = hex.type === "location";
   const loc = isLocation ? LOCATIONS[hex.locationId] : null;
   const ctrl = isLocation ? fullController(hex.control?.sections) : null;
@@ -180,7 +193,15 @@ export default function Hex({ hex, unit, selected, reachable, unitSelected, onCl
           </div>
         )}
       </div>
-      {unit && <UnitToken unit={unit} selected={unitSelected} onClick={onUnitClick} />}
+      {(units || []).map((u, i) => (
+        <UnitToken
+          key={u.uid}
+          unit={u}
+          slot={i}
+          selected={u.uid === selectedUnitId}
+          onClick={onUnitClick}
+        />
+      ))}
     </div>
   );
 }
