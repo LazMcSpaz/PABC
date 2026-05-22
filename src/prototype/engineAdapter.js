@@ -247,7 +247,7 @@ export function adaptState(state) {
       vp: p.vp,
       tech: p.tech,
       actions: { ...p.actions },
-      unitCap: 1 + countTrainingGrounds(state, pid),
+      unitCap: CONFIG.baseUnitCap + countTrainingGrounds(state, pid),
       isAI: !!p.isAI,
       hand: [...p.hand],
       handChips: adaptChipsWithUids(state, p.hand),

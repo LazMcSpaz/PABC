@@ -90,7 +90,7 @@ function validateRecruit(state, { pid, player, params }) {
   const tg = trainingGroundsCount(state, pid);
   if (tg < 1) return fail("requires a Training Grounds");
   if (player.resource < CONFIG.unitRecruitCost) return fail("not enough scrap");
-  if (ownedUnitCount(state, pid) >= 1 + tg) return fail("unit cap reached");
+  if (ownedUnitCount(state, pid) >= CONFIG.baseUnitCap + tg) return fail("unit cap reached");
   return { ok: true };
 }
 

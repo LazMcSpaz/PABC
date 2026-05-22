@@ -460,5 +460,28 @@ line("\n  [Phase 1] movement budget");
   }
 }
 
+// --- Phase 2: two units, cap 3, cheaper recruit ---
+line("\n  [Phase 2] two-unit start, cap 3, cheaper recruit");
+{
+  const g = createGame({ seed });
+  const me = g.turnOrder[0];
+  const owned = Object.values(g.units).filter((u) => u.owner === me).length;
+  check("each faction starts with 2 units", owned === CONFIG.startingUnits && owned === 2);
+  check("recruit cost is 6", CONFIG.unitRecruitCost === 6);
+  startTurn(g);
+  const home = Object.values(g.locations).find((l) => l.controller === me);
+  // Add a Training Grounds + scrap; cap is baseUnitCap(3)+1 TG = 4.
+  const tg = g.nextId("chip");
+  g.chips[tg] = { uid: tg, chipId: "training-grounds" };
+  home.chips.push(tg);
+  g.players[me].resource += 100;
+  // Already at 2; recruit to 3 then 4 should work, 5th blocked.
+  const r3 = performAction(g, "recruit", { at: home.hexId });
+  const r4 = performAction(g, "recruit", { at: home.hexId });
+  const r5 = performAction(g, "recruit", { at: home.hexId });
+  check("recruit allowed up to baseUnitCap + Training Grounds (4)", r3.ok && r4.ok);
+  check("recruit blocked past cap", !r5.ok && r5.reason === "unit cap reached");
+}
+
 line(`\n  v0.2 verification: ${v2pass} passed, ${v2fail} failed`);
 line("");

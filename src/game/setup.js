@@ -128,11 +128,24 @@ export function createGame({
     };
   }
 
-  // --- units: one per faction at its start Location (Phase 2 adds more) ---
+  // --- units: CONFIG.startingUnits per faction (§16.3), on/near start ---
   const units = {};
   for (const fid of playing) {
-    const u = uid("unit");
-    units[u] = makeUnit(u, fid, layout.factionStart[fid], FACTIONS[fid].name);
+    const start = layout.factionStart[fid];
+    for (let i = 0; i < (CONFIG.startingUnits || 1); i++) {
+      // First unit on the start Location; extras on an adjacent
+      // friendly/empty hex, else stacked on start (multi-token render).
+      let node = start;
+      if (i > 0) {
+        const adj = (grid.adjacency[start] || []).find((h) => {
+          const loc = locations[h];
+          return !(loc && loc.controller && loc.controller !== fid);
+        });
+        node = adj || start;
+      }
+      const u = uid("unit");
+      units[u] = makeUnit(u, fid, node, FACTIONS[fid].name);
+    }
   }
 
   // --- Market: three tech tiers, each a face-up row + a draw deck ---
