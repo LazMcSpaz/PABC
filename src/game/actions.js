@@ -210,6 +210,12 @@ function validateActivate(state, { pid, player, params }) {
   if (!got) return fail("no activatable ability at that location");
   if (got.loc.controller !== pid) return fail("you do not fully control that location");
   if (!got.opt) return fail("no such activated option");
+  // Activated abilities are once per turn (spec §12.7). Without this an
+  // ability whose net effect is positive at zero Action cost — e.g.
+  // Staging Ground (+1 Action) or Rail Corridor (+3 scrap) — could be
+  // spammed for unlimited resources / actions.
+  if (got.loc.abilityActivatedTurn === turnOrdinal(state))
+    return fail("this ability was already activated this turn");
   const cost = got.opt.cost || {};
   if (cost.resource && player.resource < cost.resource) return fail("not enough scrap");
   return { ok: true };
@@ -224,6 +230,7 @@ function runActivate(state, { pid, player, params, ctx }) {
       player: pid, resource: "Resource", amount: -cost.resource,
     });
   }
+  loc.abilityActivatedTurn = turnOrdinal(state); // once-per-turn lock
   applyEffects(state, opt.effects || [], { ...ctx, sourcePlayer: pid, source: loc });
   return { location: loc.hexId, ability: ability.id };
 }

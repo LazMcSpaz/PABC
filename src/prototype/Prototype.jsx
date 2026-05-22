@@ -16,14 +16,16 @@ import { performAction } from "../game/actions.js";
 import { takeAITurn } from "../game/ai.js";
 import { activePlayerId } from "../game/targeting.js";
 import { bfsDistances } from "../game/board.js";
-import { CHIPS as ENGINE_CHIPS } from "../game/content.js";
+import { CHIPS as ENGINE_CHIPS, LOCATIONS as ENGINE_LOCATIONS } from "../game/content.js";
 import { CONFIG } from "../game/config.js";
+import { NEUTRAL } from "./data.js";
 import { getEncounter } from "../game/encounters.js";
 import { evalCond } from "../game/dsl.js";
 import { adaptState } from "./engineAdapter.js";
 import EncounterModal from "./EncounterModal.jsx";
 import EventFeed from "./EventFeed.jsx";
 import UnitPanel from "./UnitPanel.jsx";
+import ContestOverlay from "./ContestOverlay.jsx";
 
 const TOP_H = 56;
 const TAB_H = 44;
@@ -70,6 +72,7 @@ export default function Prototype({ config, onNewGame }) {
   const [selectedUnitId, setSelectedUnitId] = useState(null);
   const [toast, setToast] = useState(null); // { kind: "error"|"info", text }
   const [encounterPrompt, setEncounterPrompt] = useState(null); // pending move + encounter pick
+  const [contestViz, setContestViz] = useState(null); // contest replay overlay
   const you = state.players[state.youId];
   const isYourTurn = state.activeId === state.youId && !state.winnerId;
 
@@ -130,6 +133,17 @@ export default function Prototype({ config, onNewGame }) {
       .map((c) => c.id);
   }
 
+  // Terrain (wasteland) hexes carry no info worth a dialogue, so they
+  // never open the Inspector — landing on or clicking one just leaves
+  // the inspector closed.
+  function inspectHex(hexId) {
+    if (state.hexes[hexId]?.type === "terrain") {
+      setSelectedHexId(null);
+      return;
+    }
+    setSelectedHexId(hexId);
+  }
+
   function doMoveWithEncounterChoice(unitUid, dest, choiceId) {
     const ctx = {
       interact: (req) => {
@@ -138,7 +152,7 @@ export default function Prototype({ config, onNewGame }) {
       },
     };
     const r = runAction("move", { unit: unitUid, to: dest }, ctx);
-    if (r.ok) setSelectedHexId(dest);
+    if (r.ok) inspectHex(dest);
     setEncounterPrompt(null);
   }
 
@@ -165,13 +179,17 @@ export default function Prototype({ config, onNewGame }) {
         return;
       }
       const r = runAction("move", { unit: selectedUnitId, to: hexId });
-      if (r.ok) setSelectedHexId(hexId);
+      if (r.ok) inspectHex(hexId);
       return;
     }
 
-    // Otherwise toggle the inspector. Hex selection no longer touches
-    // unit selection — those are independent now (unit tokens have
-    // their own click handler).
+    // Otherwise toggle the inspector (terrain never opens it). Hex
+    // selection no longer touches unit selection — those are
+    // independent now (unit tokens have their own click handler).
+    if (state.hexes[hexId]?.type === "terrain") {
+      setSelectedHexId(null);
+      return;
+    }
     setSelectedHexId((cur) => (cur === hexId ? null : hexId));
   }
 
@@ -186,7 +204,60 @@ export default function Prototype({ config, onNewGame }) {
   }
 
   function onContest(params) {
-    return runAction("contest", params);
+    const game = gameRef.current;
+    const attacker = game.units[params.unit];
+    if (!attacker) return runAction("contest", params);
+
+    // Capture the contestant descriptors BEFORE resolving (names, base
+    // values, owner colours) — the contest mutates state and clears
+    // this-contest modifiers afterwards.
+    const loc = game.locations[attacker.node];
+    let defName, defBase, defColor, defLabel;
+    if (params.target && game.units[params.target]) {
+      const du = game.units[params.target];
+      defName = du.name;
+      defBase = du.baseStrength;
+      defColor = UI_FACTIONS[du.owner]?.color;
+      defLabel = "Strength";
+    } else if (loc) {
+      defName = ENGINE_LOCATIONS[loc.locationId]?.name || loc.locationId;
+      defBase = CONFIG.garrisonByValue[loc.strategicValue] ?? loc.garrison;
+      defColor = loc.controller ? UI_FACTIONS[loc.controller]?.color : NEUTRAL;
+      defLabel = "Garrison";
+    }
+
+    const r = performAction(game, "contest", params, {});
+    if (!r.ok) {
+      setToast({ kind: "error", text: r.reason });
+      return r;
+    }
+    bumpTick();
+
+    setContestViz({
+      attacker: {
+        name: attacker.name,
+        label: "Strength",
+        base: attacker.baseStrength,
+        calculated: r.cancelled ? null : r.initiatorTotal - r.initiatorRoll,
+        roll: r.initiatorRoll,
+        total: r.initiatorTotal,
+        color: UI_FACTIONS[attacker.owner]?.color,
+      },
+      defender: {
+        name: defName,
+        label: defLabel,
+        base: defBase,
+        calculated: r.cancelled ? null : r.defenderValue,
+        roll: r.defenderRoll,
+        total: r.defenderTotal,
+        rollsDie: r.defenderRolled,
+        color: defColor,
+      },
+      won: r.won,
+      cancelled: r.cancelled,
+      kind: r.kind,
+    });
+    return r;
   }
   function onActivate(hexId) {
     return runAction("activate", { location: hexId }, null, "Ability activated.");
@@ -406,7 +477,11 @@ export default function Prototype({ config, onNewGame }) {
         />
       )}
 
-      {state.winnerId && (
+      {contestViz && (
+        <ContestOverlay viz={contestViz} onClose={() => setContestViz(null)} />
+      )}
+
+      {state.winnerId && !contestViz && (
         <EndOverlay state={state} onNewGame={onNewGame} />
       )}
     </div>

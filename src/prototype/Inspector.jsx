@@ -15,6 +15,7 @@ import {
 import { Label, IconBtn, Btn } from "./kit.jsx";
 import LocationCard from "./LocationCard.jsx";
 import ControlMeter from "./ControlMeter.jsx";
+import { previewLocationContest } from "./engineAdapter.js";
 
 const WIN_W = 430;
 const BODY_H = 430;
@@ -129,6 +130,13 @@ function locationModel(state, hex, actions) {
   // token on the board) — the Inspector stays focused on the hex.
 
   if (contestable) {
+    const preview = previewLocationContest(state.engineState, hex.id);
+    const atkStr = unit.effectiveStrength ?? unitEffective(unit).strength;
+    const defVal = preview ? preview.value : garrisonStrength(hex.locationId, control);
+    const defenderRolls = preview ? preview.defenderRollsDie : true;
+    const enemyUnitHere = Object.values(state.units).find(
+      (u) => u.node === hex.id && u.owner !== state.youId,
+    );
     tabs.push({
       id: "contest",
       label: "Contest",
@@ -136,7 +144,7 @@ function locationModel(state, hex, actions) {
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           <div className="pc-prose" style={PROSE}>
             {hasNeutral
-              ? "Neutral sections still stand — the contest is forced onto the garrison."
+              ? "Neutral sections still stand — the contest is forced onto the garrison. You must reduce it before you can raid any enemy unit here."
               : "Beat the holder to flip one of their sections to your control."}
           </div>
           <div style={{
@@ -149,20 +157,32 @@ function locationModel(state, hex, actions) {
             alignItems: "center",
           }}>
             <div>
-              <Label>Attacker</Label>
+              <Label>You (attacker)</Label>
               <div style={{ fontFamily: theme.fontDisplay, fontWeight: 700, fontSize: 14 }}>{unit.name}</div>
-              <div style={{ fontSize: 11, color: theme.textDim }}>Strength {unitEffective(unit).strength}</div>
+              <div style={{ fontSize: 11, color: theme.textDim }}>{atkStr} + 1d6</div>
             </div>
             <span style={{ fontFamily: theme.fontDisplay, fontWeight: 700, color: theme.textFaint }}>VS</span>
             <div style={{ textAlign: "right" }}>
               <Label>Defender</Label>
               <div style={{ fontFamily: theme.fontDisplay, fontWeight: 700, fontSize: 14 }}>
-                {hasNeutral ? "Garrison" : FACTIONS[ctrl]?.name || "Holder"}
+                {preview && preview.defendingUnit
+                  ? `${FACTIONS[ctrl]?.name || "Holder"} garrison + unit`
+                  : "Garrison"}
               </div>
               <div style={{ fontSize: 11, color: theme.textDim }}>
-                Value {garrisonStrength(hex.locationId, control)}
+                {defVal}{defenderRolls ? " + 1d6" : " (no roll)"}
               </div>
             </div>
+          </div>
+          <div className="pc-prose" style={{ ...PROSE, fontSize: 10.5 }}>
+            {defenderRolls
+              ? "Both sides add 1d6. Defender wins ties."
+              : "A garrison with no defending unit adds no die — its total is fixed. Defender wins ties."}{" "}
+            Clicking Contest rolls your d6 automatically and resolves at once.
+            {hasNeutral && enemyUnitHere && (
+              <> An enemy unit is also stationed here, but it only joins
+              the defence once its faction fully controls the location.</>
+            )}
           </div>
           {isYourTurn && (
             <Btn
@@ -170,7 +190,7 @@ function locationModel(state, hex, actions) {
               full
               onClick={() => onContest?.({ unit: unit.id })}
             >
-              Contest (1 Action, +1d6)
+              Contest (1 Action)
             </Btn>
           )}
         </div>
@@ -186,17 +206,17 @@ function locationModel(state, hex, actions) {
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
           {hex.abilityId && (
             <div>
-              <Label>Activate ability</Label>
+              <Label>{control?.ability?.name || "Activate ability"}</Label>
               <div className="pc-prose" style={{ ...PROSE, marginBottom: 7 }}>
-                Spend the listed cost to invoke {loc.name}'s ability.
+                {control?.ability?.text || `Invoke ${loc.name}'s ability.`}
               </div>
               <Btn
                 variant="primary"
                 full
-                disabled={!isYourTurn}
+                disabled={!isYourTurn || control?.abilityUsedThisTurn}
                 onClick={() => onActivate?.(hex.id)}
               >
-                Activate
+                {control?.abilityUsedThisTurn ? "Used this turn" : "Activate"}
               </Btn>
             </div>
           )}
