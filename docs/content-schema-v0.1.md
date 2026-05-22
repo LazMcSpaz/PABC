@@ -124,7 +124,7 @@ new row here).
 
 | Type | Params shape |
 |---|---|
-| `ADJUST_RESOURCE` | `{ resource: 'Resource'\|'VP'\|'Tech', amount: int, target: <token> }` |
+| `ADJUST_RESOURCE` | `{ resource: 'Resource'\|'VP'\|'Tech', amount: int, target: <token> }` — `Tech` becomes `Research` with the engine tech wheel (tech-wheel-plan.md §1); not yet. |
 | `MODIFY_STAT` | `{ stat: 'Strength'\|'Movement', amount: int, target: <token>, duration: 'permanent'\|'until_your_next_turn'\|'this_turn'\|'this_contest' }` |
 | `GRANT_ACTIONS` | `{ amount: int, target: <token>, when: 'this_turn'\|'next_turn' }` |
 | `MOVE_CARD` | `{ from: <zone>, to: <zone>, selector: 'top'\|'chosen'\|'random'\|'by_id'\|'all_matching', count: int, id?: string, filter?: object }` |
@@ -259,7 +259,7 @@ Dot-syntax strings evaluated against the engine state:
 | `players.<pid>.tracks.alignment` | int |
 | `players.<pid>.resource` | int |
 | `players.<pid>.vp` | int |
-| `players.<pid>.tech` | int |
+| `players.<pid>.tech` | int — splits into `research` (raw 0–8+) and `techLevel` (banded 1–5) with the engine tech wheel. Until then this is the live field. |
 | `factionStanding.<fid>.<pid>` | int |
 | `state.round` | int |
 | `state.activeQuests.<questId>.beatIndex` | int |

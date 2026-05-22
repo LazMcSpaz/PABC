@@ -107,6 +107,7 @@ export function HexFilterBuilder({ value, onChange, allowNull = true }) {
         </select>
       </Row>
 
+
       <Row label="hasAbility">
         <input
           type="text"
