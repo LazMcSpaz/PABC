@@ -175,6 +175,11 @@ export function validateEffect(effect, ctx, errors = [], path = "effect") {
       if (p.recipient != null && p.recipient !== "")
         requireRecipient(p.recipient, errors, `${path}.recipient`);
       break;
+    case "ADJUST_BASE_STRENGTH":
+      if (!Number.isFinite(Number(p.amount)))
+        errors.push(`${path}.amount must be a number`);
+      requireRecipient(p.target, errors, `${path}.target`);
+      break;
     default:
       errors.push(`${path}.type: unknown effect type ${effect.type}`);
   }

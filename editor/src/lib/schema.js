@@ -26,6 +26,8 @@ export const EFFECT_TYPES = [
   "COMPLETE_QUEST",
   "PLACE_ENCOUNTER",
   "DELIVER_ENCOUNTER",
+  // attrition model (base Strength = HP)
+  "ADJUST_BASE_STRENGTH",
 ];
 
 export const SIMPLE_RECIPIENT_TOKENS = [
@@ -130,6 +132,10 @@ export const DSL_PATHS = [
   "state.round",
 ];
 
+// NOTE: stays `Tech` to match the live engine (POOL_KEY maps Tech →
+// player.tech in effects.js). The rename to `Research` lands with the
+// engine tech wheel (tech-wheel-plan.md §1 / spec §17.7), not before —
+// a Research pool the engine can't resolve would break content.
 export const RESOURCE_KINDS = ["Resource", "VP", "Tech"];
 export const STAT_KINDS = ["Strength", "Movement"];
 export const STAT_DURATIONS = [
@@ -139,13 +145,10 @@ export const STAT_DURATIONS = [
   "this_contest",
 ];
 export const GRANT_WHEN = ["this_turn", "next_turn"];
-export const ENTITY_FLAGS = [
-  "disabled",
-  "exhausted",
-  "shielded",
-  "marked",
-  "immobilized",
-];
+// `immobilized` removed: it was only ever produced as a raid outcome,
+// which combat v0.2 replaced with attrition + chip salvage. The engine's
+// SET_FLAG still accepts arbitrary flags, so this is a picker cleanup.
+export const ENTITY_FLAGS = ["disabled", "exhausted", "shielded", "marked"];
 export const TRACKS = ["trust", "reputation", "alignment"];
 export const ENCOUNTER_MODES = ["private", "public", "placement"];
 export const QUEST_MODES = ["single-player", "global"];
@@ -191,4 +194,5 @@ export const DEFAULT_PARAMS_BY_TYPE = {
   COMPLETE_QUEST: { questId: "" },
   PLACE_ENCOUNTER: { encounterId: "" },
   DELIVER_ENCOUNTER: { encounterId: "" },
+  ADJUST_BASE_STRENGTH: { amount: 0, target: "active" },
 };
