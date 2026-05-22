@@ -3,14 +3,15 @@
 import { CONFIG } from "./config.js";
 import { emit } from "./events.js";
 import { resolveTargets } from "./targeting.js";
-import { recomputeStats } from "./stats.js";
+import { recomputeStats, recomputeResearch } from "./stats.js";
+import { destroyUnit } from "./contest.js";
 
 // Headless default for interactive effects — pick the first option.
 export function autoInteract(request) {
   return request?.options ? request.options[0] : null;
 }
 
-const POOL_KEY = { Resource: "resource", VP: "vp", Tech: "tech" };
+const POOL_KEY = { Resource: "resource", VP: "vp" };
 
 function findEntity(state, id) {
   return (
@@ -41,12 +42,22 @@ const EFFECTS = {
     for (const pid of resolveTargets(state, e.target, ctx)) {
       const p = state.players[pid];
       if (!p) continue;
+      // §17.2 — "Research" (and legacy "Tech") grants are PERMANENT: they
+      // raise the research floor (encounter/quest research can't be raided
+      // away), then the level/wheel are re-derived.
+      if (e.resource === "Research" || e.resource === "Tech") {
+        p.permanentResearch = Math.max(0, (p.permanentResearch || 0) + e.amount);
+        recomputeResearch(state);
+        emit(state, e.amount >= 0 ? "resource_gained" : "resource_spent", {
+          player: pid, resource: "Research", amount: e.amount,
+        });
+        continue;
+      }
       const key = POOL_KEY[e.resource] || "resource";
       p[key] = Math.max(0, p[key] + e.amount);
       emit(state, e.amount >= 0 ? "resource_gained" : "resource_spent", {
         player: pid, resource: e.resource, amount: e.amount,
       });
-      if (e.resource === "Tech") emit(state, "tech_changed", { player: pid, tech: p.tech });
       if (e.resource === "VP" && p.vp >= CONFIG.vpThreshold && !state.winnerId) {
         state.winnerId = pid;
       }
@@ -63,6 +74,23 @@ const EFFECTS = {
       emit(state, "stat_modified", { target: t, stat: e.stat, amount: e.amount });
     }
     recomputeStats(state);
+  },
+
+  // v0.2 §16.4 — wound or heal a unit's base Strength (its HP). Clamps to
+  // [0, cap] (veteran cap if promoted); a unit driven to 0 is destroyed.
+  // Lets encounters and content top up or chip away at a unit.
+  ADJUST_BASE_STRENGTH(state, e, ctx) {
+    for (const t of resolveTargets(state, e.target, ctx)) {
+      const unit = state.units[t];
+      if (!unit) continue;
+      const cap = unit.veteran ? CONFIG.unit.veteranStrengthCap : CONFIG.unit.baseStrengthCap;
+      unit.baseStrength = Math.max(0, Math.min(cap, unit.baseStrength + (e.amount || 0)));
+      recomputeStats(state);
+      emit(state, "base_strength_changed", {
+        unit: t, amount: e.amount, baseStrength: unit.baseStrength,
+      });
+      if (unit.baseStrength <= 0) destroyUnit(state, t, null, ctx);
+    }
   },
 
   GRANT_ACTIONS(state, e, ctx) {

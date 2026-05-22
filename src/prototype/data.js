@@ -70,7 +70,7 @@ export const CHIP_COLOR = {
 export const UNIT_UPGRADES = {
   landship: { id: "landship", name: "Landship", kind: "unit", cost: 5, rare: true, str: 0, mov: 2, effect: "+2 Movement" },
   sharpenedBlades: { id: "sharpenedBlades", name: "Sharpened Blades", kind: "unit", cost: 3, str: 2, mov: 0, effect: "+2 Strength" },
-  newRecruits: { id: "newRecruits", name: "New Recruits", kind: "unit", cost: 2, str: 1, mov: 0, effect: "+1 Strength" },
+  drilledTroops: { id: "drilledTroops", name: "Drilled Troops", kind: "unit", cost: 2, str: 1, mov: 0, effect: "+1 Strength" },
   navigator: { id: "navigator", name: "Navigator", kind: "unit", cost: 2, str: 0, mov: 1, effect: "+1 Movement" },
   cannons: { id: "cannons", name: "Cannons", kind: "unit", cost: 5, str: 3, mov: 0, effect: "+3 Strength" },
 };

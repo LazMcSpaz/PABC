@@ -8,7 +8,9 @@ import { evalCond as dslEvalCond } from "./dsl.js";
 
 export const EVENT_NAMES = new Set([
   "turn_started", "turn_ended", "round_ended",
-  "resource_gained", "resource_spent", "tech_changed",
+  "resource_gained", "resource_spent",
+  // §17 Tech Wheel
+  "research_changed", "tech_level_changed", "tech_node_assigned", "tech_node_lost",
   "stat_modified",
   "card_acquired", "card_played", "card_revealed",
   "card_entered_zone", "card_left_zone",
@@ -18,6 +20,11 @@ export const EVENT_NAMES = new Set([
   "obstacle_claimed", "encounter_resolved",
   "location_spawned", "section_flipped", "location_captured", "location_decayed",
   "reward_granted",
+  // v0.2 §16 — attrition, salvage, reinforcement, veterancy
+  "unit_destroyed", "unit_salvaged", "base_strength_changed",
+  "unit_reinforced", "reinforcement_requested", "reinforcement_arrived",
+  "veteran_promoted",
+  "loot_dropped", "loot_claimed",
   // Layer 5 — encounter & quest system (spec §15.13)
   "encounter_delivered", "trigger_fired",
   "quest_started", "quest_advanced", "quest_completed",

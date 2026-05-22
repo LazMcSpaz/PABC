@@ -1086,3 +1086,268 @@ harnesses continue to pass.
 - **§14.2** open items for encounter / quest *architecture* are now
   resolved here; specific record content remains an open authoring
   task.
+
+## 16. v0.2 Gameplay Revision — Movement, Attrition & Combat
+
+This section supersedes the parts of §6.2, §7, §8, and §9 it touches.
+It is the design of record for the demo's gameplay overhaul. Where it
+conflicts with earlier sections, §16 wins; the earlier text is kept for
+history. Items marked *(deferred)* are designed but not in the first
+build slice.
+
+### 16.1 Design intent
+
+Turns were thin and slow — a lone unit spent both Actions walking.
+This revision makes each turn a real decision by (1) freeing movement
+from the Action budget, (2) putting more, more-expendable units on the
+board with real attrition, and (3) giving combat deterministic levers
+so a fight is something you set up rather than gamble on.
+
+### 16.2 Movement is its own budget (supersedes §8 "Move")
+
+- Every unit has a per-turn **move budget** = its `Movement` stat,
+  refreshed at the owner's Upkeep (`moveRemaining = Movement`).
+- **Move costs no Action.** It spends move budget equal to the path
+  distance walked. A unit may take several Moves per turn until its
+  budget is exhausted.
+- The **2 Actions** are reserved for Recruit, Contest, Acquire,
+  Activate, and Reinforce (§16.5).
+- **Declaring a Contest ends that unit's movement** for the turn
+  (`moveRemaining = 0`) — no move-attack-move.
+- Base `Movement` rises **1 → 2** so units actually traverse.
+- Ending a Move on an encounter node still triggers §6.5/§15.8.
+
+### 16.3 Units, expanded (supersedes §6.2)
+
+- Each player begins with **two** units on/near their starting Location.
+- **Base unit cap is 3**, +1 per Training Grounds controlled.
+- **Recruit** cost lowered to **6 `Resource`** (still requires a
+  Training Grounds and below cap).
+- **Base `Strength` doubles as hit points.** It starts at 4 and is the
+  unit's life total; chips are gear that raise *effective* Strength but
+  are not life. A unit's effective Strength = (current, possibly
+  eroded) base + chips + modifiers, as today.
+
+### 16.4 Attrition, death, and salvage (supersedes §9 step 3 "Raid" and step 4)
+
+After a contest resolves:
+
+- **Loser:** −1 base `Strength`.
+- **Pyrrhic win:** if the winning margin is a **tie (0)** (only the
+  defender can win a tie) **or exactly 1**, the **winner** also loses
+  1 base Strength — *if the winner is a unit* (a bare garrison has no
+  Strength to lose).
+- **Rout (massing downside):** if the margin is **≥ 4**, a **second
+  friendly unit stacked on the loser's hex** (if any) also loses 1 base
+  Strength — the casualty spills into the stack. *(Interpretation of
+  "an overwhelming loss costs both units a strength"; confirm.)*
+- **Death:** a unit at **base Strength 0 is destroyed** (a unit never
+  rests at 0). Chips are not life — a unit with eroded base + chips
+  still dies at base 0.
+- **Salvage:** when a contest **kills** the loser, the winner gets a
+  `FORCE_CHOICE`: take up to its free Bay space worth of the dead
+  unit's chips; the rest are removed.
+- **Raid retreat:** a surviving raid loser **may** retreat 1 hex (the
+  loser chooses whether and where). The attacker may pursue next turn.
+- **Removed:** the old immobilize / destroy-a-chip raid outcomes are
+  gone — attrition + salvage replace them.
+
+### 16.5 Reinforcement & healing (new; pairs with foothold §6.3.2)
+
+The supply-line loop: sortie, bleed, fall back to mend and re-secure.
+
+- **Passive heal:** at Upkeep, each unit on a **friendly fully-held
+  Location** regains **+1 base Strength**, up to its cap.
+- **Instant top-up (action):** a unit on a friendly Location may spend
+  **1 Action + 2 `Resource` per Strength** to restore up to its cap in
+  one go (range 1→4 normally).
+- **Field reinforcement (action):** from a unit anywhere, spend **1
+  Action + 2 `Resource` per Strength**; the reinforcement **arrives in
+  N turns**, where N = shortest path **through friendly/neutral hexes
+  only** from the nearest friendly Location to the unit. It **re-targets
+  a moving unit** (ETA recomputes). If enemy territory walls the unit
+  off entirely, no reinforcement can be sent.
+  - **Severed supply:** if the origin Location is captured while
+    reinforcements are in transit, they **become a new unit** where
+    they currently stand, at the Strength they were carrying (capped at
+    4), with **no chips**. (Allowed even if it exceeds unit cap — it
+    only arises from a loss elsewhere.)
+- The **"New Recruits" chip is renamed** (recruitment is now an action);
+  it stays a permanent +1 effective-Strength gear chip under a
+  gear-flavored name (TBD, e.g. "Drilled Troops").
+
+### 16.6 Combat levers (partial supersede of §9 defender value)
+
+A contest total is computed as:
+
+```
+attackerTotal = attackerEffectiveStrength
+              + concentration(attacker)
+              + (attacker is Veteran ? 1 : 0)
+              + 1d6
+
+defenderTotal = defenderValue                       (§9: garrison + chips + defending unit)
+              + concentration(defending units)
+              + (Mountain terrain ? 1 : 0)
+              + (defending unit Fortified ? 1 : 0)
+              + (defender is Veteran ? 1 : 0)
+              + (defending unit present ? 1d6 : 0)   (garrison-only adds no die — house rule)
+```
+
+- **Concentration:** **+1 per *additional* friendly unit on the
+  contesting unit's hex**, capped at **+3**. Applies symmetrically to
+  defending units stacked on a held Location.
+- **Mountain terrain:** defenders get **+1** to the roll. *(Terrain
+  types are deferred; the rule is fixed now.)*
+- **Fortify:** a unit that **did not move on its previous turn** gets
+  **+1 when defending** ("dug in").
+- **Veterancy:** a unit becomes a **Veteran** (permanent **+1** to its
+  contest rolls) once it has **won 3 contests OR survived 5 contests,
+  whichever comes first**. ("Survived" = participated in a contest and
+  was not destroyed.) Losing a Veteran therefore stings — by design.
+
+### 16.7 Combining units *(deferred — designed, not in first slice)*
+
+Merge two of your units sharing a hex into one:
+- new base-Strength **cap 8** (sum of the two, then capped);
+- **3 Bay slots** (so merging two 2-chip units sacrifices one chip —
+  salvaged back to you);
+- a **base `Movement` penalty** (−1, large groups coordinate poorly).
+Because Concentration and board presence usually favor keeping units
+separate, combining is mainly a **unit-cap relief valve**: consolidate
+to free a slot for a fresh recruit. Niche by intent.
+
+### 16.8 Tuning watch-list
+
+- Faster movement + more units + Concentration ⇒ much more combat;
+  re-tune garrison values and the 12-VP pace.
+- Concentration cap (+3) and the rout spillover are the checks on
+  doomstacks; the deeper check is opportunity cost (massed units aren't
+  holding territory, so footholds decay).
+- Attrition can snowball a losing player; passive/field reinforcement is
+  the comeback valve, but a player stripped of territory has none — by
+  design, accept decisive endings.
+
+## 17. Tech Wheel (v0.2)
+
+Supersedes the Tech parts of §3, §4.1, and §16 where they conflict. Tech
+is no longer a single number that only unlocks a stronger Market row; it
+is a radial **ability wheel** fed by a renewable progress resource.
+
+### 17.1 Two distinct quantities (name them differently in the UI)
+
+- **Research** — the progress resource. Generated by **Labs** chips and by
+  **some encounters**. This is the bar you fill.
+- **Tech Level** — a band (1–5) derived from Research by fixed thresholds.
+- **Ability Points** — what you *spend* on the wheel. You gain **+1 each
+  time you reach a new Tech Level**. This is "tied to Tech Level."
+
+Keep "Research" (the bar) and "Ability Points" (the spend) visually
+separate so players never conflate them.
+
+### 17.2 Research → Tech Level
+
+| Tech Level | Research required | On reaching it |
+|---|---|---|
+| 1 | 0 (start) | — |
+| 2 | 2 | +1 Ability Point |
+| 3 | 4 | +1 Ability Point · **Market layer 2 revealed** |
+| 4 | 6 | +1 Ability Point |
+| 5 (cap) | 8 | +1 Ability Point · **Market layer 3 revealed** |
+
+- **Max 4 Ability Points** (one each at L2–L5). Level 5 is the ceiling.
+- **Research sources:**
+  - **Labs** chip: **+1 Research** while controlled.
+  - **Advanced Lab** chip (Market tier 2): **+2 Research** while controlled —
+    the faster climb. No Lab tier sits at L5 (it's the cap).
+  - **Encounters / quests:** may grant Research. Encounter/quest Research is
+    **permanent** (a floor); Lab Research is **conditional** on holding the Lab.
+- **Market gating moves to Tech *Level*:** tier 2 at L3, tier 3 at L5
+  (replaces the old `CONFIG.tech.tier2 = 3` / `tier3 = 6` raw-score gates).
+
+### 17.3 Losing Research (Labs destroyed/captured) and re-spec
+
+- Labs sustain their Research. Lose a Lab (destroyed, or its Location
+  captured) → Research falls → if it drops below a threshold, **Tech Level
+  drops**, you **lose an Ability Point**, and the **deepest / most-recently
+  assigned node is peeled** (LIFO). A branch node is never left orphaned —
+  peeling always removes leaves first.
+- Permanent (encounter/quest) Research is a floor that can't be raided away.
+- **Re-spec only happens on the destroy-then-rebuild cycle:** when you lose a
+  level and later regain it, you re-assign the regained point freely.
+  Otherwise assignments are sticky.
+- Because the engine already recomputes tech on any control change,
+  **capturing a Lab-heavy Location lifts your Research and drops the former
+  owner's** for free — tech denial is emergent. (Feel risk: tech swinging
+  mid-game is punishing, so deep-node strength + the peel rule want a balance
+  pass.)
+
+### 17.4 The wheel
+
+Four paths radiate from the centre: **Military, Economy, Intelligence,
+Logistics**. Each path is **5 nodes over 3 layers**:
+
+```
+              entry
+             /     \
+           A1       B1          (layer 2 — the two branches)
+           |        |
+           A2       B2          (layer 3 — each branch's deeper node)
+```
+
+- **Prerequisites:** entry → A1 → A2, and entry → B1 → B2.
+- **Deeper = stronger.** Effects deeper in a branch are better than the entry.
+- **Nothing forbids spreading** across paths, but Ability Points are scarce:
+  4 points cannot complete even one 5-node path (a full path is 5), so every
+  build is a real set of trade-offs — go deep in one branch, split a path's
+  two branches, or dabble across paths.
+- **Stacking vs. replacement** within a branch (does A2 add to A1 or upgrade
+  it?) is **deferred** until the branch abilities are written — it may not
+  apply to every node.
+
+### 17.5 Entry node abilities (defined)
+
+| Path | Entry node | Effect |
+|---|---|---|
+| **Military** | Doctrine | **+1 to any contest roll** (yours, attacking *or* defending). |
+| **Logistics** | Supply Lines | **+1 Movement** to your units. |
+| **Economy** | Industry | **+1 scrap per turn** from each Location you fully hold. |
+| **Intelligence** | Recon | **When an encounter would be drawn for you, you may discard it and take the next draw instead.** |
+
+- **Intelligence + Recon Team chip stack.** The Recon Team chip stays in the
+  game; each source grants **one** discard, so a player on the Intelligence
+  path *and* holding Recon Team may discard up to **two** encounters before
+  committing to a draw. (Engine note: the discard reshuffles the card at least
+  3 cards down and fires only on that player's own draws.)
+
+The two branch nodes (A1/A2, B1/B2) of every path are **placeholders** for
+now — to be designed in a later pass.
+
+### 17.6 Victory interaction
+
+- **No tech victory.** Reaching L5 / filling the wheel is a power curve, not a
+  win condition.
+- **Conquest remains the win condition.**
+- **Diplomacy victory is a candidate** for later: the engine already tracks
+  `trust / reputation / alignment` per player and per-faction standing (§15.2,
+  §15.3), so a diplomacy path (e.g. hold maximal standing with N factions, or
+  all tracks past a threshold) is feasible without new core systems. The
+  Economy and Intelligence branches are likely feeders. Revisit as the wheel
+  fills in.
+
+### 17.7 Engine mapping (for implementers)
+
+- Rename/replace the raw `player.tech` concept: store **`player.research`**
+  (Labs + encounter grants) and derive **`player.techLevel`** via the §17.2
+  thresholds; `recomputeTech` becomes `recomputeResearch` (sum Lab values over
+  controlled Locations, add permanent encounter Research, re-band the level,
+  emit on change).
+- Track the wheel allocation per player (e.g. `player.techWheel = { military:
+  [...nodeIds], ... }`) and the spent/available Ability Points; enforce
+  prerequisites and the LIFO peel when level drops.
+- `Advanced Lab` is new tier-2 content (`research: 2`); the basic `labs` chip
+  becomes `research: 1`.
+- Market tier unlock reads `techLevel >= 3 / 5` instead of the raw-score gates.
+- The four entry effects reuse existing levers (contest roll bonus, movement,
+  per-location scrap, the field-encounter draw hook), so each is a small,
+  one-sentence addition.

@@ -2,7 +2,10 @@
 // Upkeep work (action reset, modifier expiry, foothold tick, scrap
 // production) and Cleanup.
 import { emit } from "./events.js";
-import { recomputeStats, recomputeTech } from "./stats.js";
+import { recomputeStats, recomputeResearch } from "./stats.js";
+import { reinforcementRoute } from "./board.js";
+import { TECH_NODES, hasTechNode } from "./tech.js";
+import { CONFIG } from "./config.js";
 import { activePlayerId } from "./targeting.js";
 import { sweepDeferred } from "./deferred.js";
 import { evaluateTriggers } from "./triggers.js";
@@ -52,8 +55,8 @@ function tickFootholds(state, pid) {
       }
     }
   }
-  // A decay-driven control loss may have stripped a Labs from `pid` — sync.
-  if (lostControl) recomputeTech(state);
+  // A decay-driven control loss may have stripped a Lab from `pid` — sync.
+  if (lostControl) recomputeResearch(state);
 }
 
 // Fully-held locations yield their scrap production to the controller
@@ -62,16 +65,50 @@ function tickFootholds(state, pid) {
 // pass and would have forced the win to land on round-12 regardless
 // of play.
 function collectProduction(state, pid) {
+  // §17.5 Economy entry (Industry): +1 scrap per fully-held Location.
+  const econBonus = hasTechNode(state, pid, "eco-entry")
+    ? TECH_NODES["eco-entry"].effect.amount
+    : 0;
   let gained = 0;
   for (const loc of Object.values(state.locations)) {
     if (loc.controller !== pid) continue;
-    gained += loc.production;
+    gained += loc.production + econBonus;
   }
   if (gained > 0) {
     state.players[pid].resource += gained;
     emit(state, "resource_gained", {
       player: pid, resource: "Resource", amount: gained, source: "production",
     });
+  }
+}
+
+// v0.2 §16.2 — refresh each owned unit's move budget from its effective
+// Movement, and roll the §16.6 fortify flag (a unit that didn't move on
+// its previous turn is "dug in"). Must run after recomputeStats so
+// `unit.movement` reflects chips / modifiers.
+function refreshMoveBudget(state, pid) {
+  for (const u of Object.values(state.units)) {
+    if (u.owner !== pid) continue;
+    u.moveRemaining = u.movement;
+    u.fortified = !u.movedSinceUpkeep;
+    u.movedSinceUpkeep = false;
+  }
+}
+
+// v0.2 §16.5 — at Upkeep, each unit on a Location its owner fully holds
+// mends +1 base Strength, up to its cap. The supply-line "fall back to
+// re-secure and heal" half of the loop.
+function passiveHeal(state, pid) {
+  for (const u of Object.values(state.units)) {
+    if (u.owner !== pid) continue;
+    const loc = state.locations[u.node];
+    if (!loc || loc.controller !== pid) continue;
+    const cap = u.veteran ? CONFIG.unit.veteranStrengthCap : CONFIG.unit.baseStrengthCap;
+    if (u.baseStrength >= cap) continue;
+    const before = u.baseStrength;
+    u.baseStrength = Math.min(cap, u.baseStrength + CONFIG.heal.passivePerTurn);
+    recomputeStats(state);
+    emit(state, "unit_reinforced", { unit: u.uid, amount: u.baseStrength - before });
   }
 }
 
@@ -94,7 +131,9 @@ export function startTurn(state) {
 
   expireModifiers(state, pid);
   recomputeStats(state);
+  refreshMoveBudget(state, pid);
   tickFootholds(state, pid);
+  passiveHeal(state, pid);
   collectProduction(state, pid);
   churnMarket(state);
 
@@ -128,10 +167,39 @@ export function endTurn(state) {
 // queued consequence can update the state that triggers then read.
 function runRoundEnd(state) {
   sweepDeferred(state);
+  sweepReinforcements(state);
   evaluateTriggers(state);
   evaluateConditionalBeats(state);
   expirePlacementMarkers(state);
   decayWorldCounters(state);
+}
+
+// v0.2 §16.5 — advance in-transit field reinforcements. Each round the
+// convoy covers one more hex; it re-targets a moving unit by recomputing
+// the supply route from its owner's nearest Location to the unit's
+// *current* node, and delivers when it has travelled far enough. A packet
+// whose target died is dropped.
+function sweepReinforcements(state) {
+  if (!state.reinforcements?.length) return;
+  const keep = [];
+  for (const r of state.reinforcements) {
+    const unit = state.units[r.targetUnit];
+    if (!unit) continue; // target destroyed — convoy disbands
+    r.traveled = (r.traveled || 0) + 1;
+    const route = reinforcementRoute(state, r.owner, unit.node);
+    if (route && r.traveled >= route.dist) {
+      const cap = unit.veteran ? CONFIG.unit.veteranStrengthCap : CONFIG.unit.baseStrengthCap;
+      const before = unit.baseStrength;
+      unit.baseStrength = Math.min(cap, unit.baseStrength + r.amount);
+      recomputeStats(state);
+      emit(state, "reinforcement_arrived", {
+        player: r.owner, unit: unit.uid, amount: unit.baseStrength - before,
+      });
+    } else {
+      keep.push(r); // still en route (or momentarily walled off)
+    }
+  }
+  state.reinforcements = keep;
 }
 
 function expirePlacementMarkers(state) {

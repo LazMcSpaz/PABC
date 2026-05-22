@@ -7,6 +7,29 @@ import { makeRng } from "./rng.js";
 import { createIdGen } from "./ids.js";
 import { buildHexGrid, generateLayout } from "./board.js";
 
+// A fresh unit with the full v0.2 field set (§16.3 / plan). `moveRemaining`
+// seeds to base Movement; the owner's Upkeep refreshes it from effective.
+export function makeUnit(uid, owner, node, factionName) {
+  return {
+    uid,
+    owner,
+    name: `${factionName} unit`, // flavor names arrive with content
+    node,
+    baseStrength: CONFIG.unit.baseStrength,
+    baseMovement: CONFIG.unit.baseMovement,
+    strength: CONFIG.unit.baseStrength,
+    movement: CONFIG.unit.baseMovement,
+    moveRemaining: CONFIG.unit.baseMovement,
+    movedSinceUpkeep: false,
+    fortified: false,
+    contestsWon: 0,
+    contestsSurvived: 0,
+    veteran: false,
+    chips: [],
+    immobilizedUntil: null,
+  };
+}
+
 export function createGame({
   seed = Date.now() & 0xffffffff,
   factionIds,
@@ -30,7 +53,9 @@ export function createGame({
   // --- board ---
   const hexes = {};
   for (const [id, hex] of Object.entries(grid.hexes)) {
-    hexes[id] = { id, row: hex.row, col: hex.col, type: layout.type[id] };
+    // v0.2 §16.6 — `terrain` is null for now; "mountain" gives defenders
+    // +1. Full terrain generation is deferred; harness/tests may set it.
+    hexes[id] = { id, row: hex.row, col: hex.col, type: layout.type[id], terrain: null };
   }
 
   // --- players ---
@@ -44,6 +69,13 @@ export function createGame({
       vp: 0,
       tech: CONFIG.tech.start,
       actions: { remaining: CONFIG.baseActions, max: CONFIG.baseActions },
+      // §17 Tech Wheel. `research` = permanent + Lab-derived (recomputed);
+      // `techLevel` = derived band; `techWheel` = assigned node ids in
+      // assignment order (LIFO peel on a level drop).
+      research: 0,
+      permanentResearch: 0,
+      techLevel: 1,
+      techWheel: [],
       unitCap: 1,
       hand: [],
       // Layer 5 (encounter & quest system) per spec §15.11
@@ -105,22 +137,24 @@ export function createGame({
     };
   }
 
-  // --- units: one per playing faction, on its starting Location ---
+  // --- units: CONFIG.startingUnits per faction (§16.3), on/near start ---
   const units = {};
   for (const fid of playing) {
-    const u = uid("unit");
-    units[u] = {
-      uid: u,
-      owner: fid,
-      name: `${FACTIONS[fid].name} unit`, // flavor names arrive with content
-      node: layout.factionStart[fid],
-      baseStrength: CONFIG.unit.baseStrength,
-      baseMovement: CONFIG.unit.baseMovement,
-      strength: CONFIG.unit.baseStrength,
-      movement: CONFIG.unit.baseMovement,
-      chips: [],
-      immobilizedUntil: null,
-    };
+    const start = layout.factionStart[fid];
+    for (let i = 0; i < (CONFIG.startingUnits || 1); i++) {
+      // First unit on the start Location; extras on an adjacent
+      // friendly/empty hex, else stacked on start (multi-token render).
+      let node = start;
+      if (i > 0) {
+        const adj = (grid.adjacency[start] || []).find((h) => {
+          const loc = locations[h];
+          return !(loc && loc.controller && loc.controller !== fid);
+        });
+        node = adj || start;
+      }
+      const u = uid("unit");
+      units[u] = makeUnit(u, fid, node, FACTIONS[fid].name);
+    }
   }
 
   // --- Market: three tech tiers, each a face-up row + a draw deck ---
@@ -203,6 +237,10 @@ export function createGame({
     pendingActionGrants: [],
     surcharges: [],
     winnerId: null,
+    reinforcements: [], // v0.2 §16.5 — pending field-reinforcement packets
+    pendingSalvage: [], // interactive salvage queue (UI resolves via resolveSalvage)
+    resaleRow: [],      // resold chips, 4-slot FIFO, acquirable at full cost
+    hexLoot: {},        // hexId -> [chipUid] dropped when no unit could claim them
     log: [],
     // Layer 5 (encounter & quest system) per spec §15.11
     world: {

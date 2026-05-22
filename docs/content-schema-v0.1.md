@@ -128,7 +128,7 @@ new row here).
 | `MODIFY_STAT` | `{ stat: 'Strength'\|'Movement', amount: int, target: <token>, duration: 'permanent'\|'until_your_next_turn'\|'this_turn'\|'this_contest' }` |
 | `GRANT_ACTIONS` | `{ amount: int, target: <token>, when: 'this_turn'\|'next_turn' }` |
 | `MOVE_CARD` | `{ from: <zone>, to: <zone>, selector: 'top'\|'chosen'\|'random'\|'by_id'\|'all_matching', count: int, id?: string, filter?: object }` |
-| `SET_FLAG` | `{ flag: 'disabled'\|'exhausted'\|'shielded'\|'marked'\|'immobilized', value: bool, target: <token>, duration: string }` |
+| `SET_FLAG` | `{ flag: 'disabled'\|'exhausted'\|'shielded'\|'marked', value: bool, target: <token>, duration: string }` — `immobilized` removed in combat v0.2 (was a raid outcome; replaced by attrition + chip salvage). |
 | `TRANSFER` | `{ what: 'resource'\|'card', resource?: string, amount?: int\|'all'\|'half', from: <token>, to: <token> }` |
 | `CONVERT` | `{ from: <pool>, to: <pool>, rate: { cost: int, gain: int }, max?: int, target: <token> }` |
 | `SPAWN` | `{ source: string, zone: <zone>, initialState?: object }` |
@@ -152,11 +152,11 @@ new row here).
 | `PLACE_ENCOUNTER` | `{ encounterId: string, hex?: <hexId>, hexFilter?: <HexFilter>, expiresIn?: int }` |
 | `DELIVER_ENCOUNTER` | `{ encounterId: string, mode?: 'private'\|'public', recipient?: <token> }` |
 
-### Attrition model
+### From spec §16 (v0.2 — implemented)
 
 | Type | Params shape |
 |---|---|
-| `ADJUST_BASE_STRENGTH` | `{ amount: int, target: <token> }` — wounds (−) / heals (+) a unit's base Strength (= HP). Clamps to `[0, cap]`; destroys at 0. For a *temporary* combat buff use `MODIFY_STAT` on Strength with a duration instead. |
+| `ADJUST_BASE_STRENGTH` | `{ amount: int, target: <token> }` — wound/heal a unit's base Strength (its HP); clamps to `[0, cap]`, destroys at 0 |
 
 ---
 

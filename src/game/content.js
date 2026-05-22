@@ -37,7 +37,8 @@ export const LOCATIONS = {
 // Layer 2 (the effect library); `desc` carries the plain-text effect.
 export const CHIPS = {
   // --- unit chips --- (strength / movement = structured stat bonuses)
-  "new-recruits": { id: "new-recruits", name: "New Recruits", kind: "unit", slots: 1, techLevel: 1, cost: 2, copies: 3, strength: 1, desc: "+1 Strength" },
+  // §16.5 — recruitment is now an action; this stays a +1 Strength gear chip.
+  "drilled-troops": { id: "drilled-troops", name: "Drilled Troops", kind: "unit", slots: 1, techLevel: 1, cost: 2, copies: 3, strength: 1, desc: "+1 Strength" },
   navigator: { id: "navigator", name: "Navigator", kind: "unit", slots: 1, techLevel: 1, cost: 2, copies: 3, movement: 1, desc: "+1 Movement" },
   "sharpened-blades": { id: "sharpened-blades", name: "Sharpened Blades", kind: "unit", slots: 1, techLevel: 2, cost: 4, copies: 3, strength: 2, desc: "+2 Strength" },
   cannons: { id: "cannons", name: "Cannons", kind: "unit", slots: 1, techLevel: 3, cost: 6, copies: 2, strength: 3, desc: "+3 Strength" },
@@ -47,7 +48,8 @@ export const CHIPS = {
   "town-hall": { id: "town-hall", name: "Town Hall", kind: "location", slots: 1, techLevel: 1, cost: 3, copies: 3, desc: "+1 to this location's foothold cap" },
   "recon-team": { id: "recon-team", name: "Recon Team", kind: "location", slots: 1, techLevel: 1, cost: 3, copies: 2, desc: "Discard a drawn encounter and draw again" },
   "training-grounds": { id: "training-grounds", name: "Training Grounds", kind: "location", slots: 1, techLevel: 1, cost: 4, copies: 3, desc: "Enables recruiting units; +1 unit cap" },
-  labs: { id: "labs", name: "Labs", kind: "location", slots: 1, techLevel: 1, cost: 3, copies: 3, desc: "+1 Tech score" },
+  labs: { id: "labs", name: "Labs", kind: "location", slots: 1, techLevel: 1, cost: 3, copies: 3, research: 1, desc: "+1 Research while controlled" },
+  "advanced-lab": { id: "advanced-lab", name: "Advanced Lab", kind: "location", slots: 1, techLevel: 2, cost: 5, copies: 2, research: 2, desc: "+2 Research while controlled" },
   "defense-turrets": { id: "defense-turrets", name: "Defense Turrets", kind: "location", slots: 1, techLevel: 2, cost: 4, copies: 3, desc: "+2 garrison Strength" },
   factory: { id: "factory", name: "Factory", kind: "location", slots: 1, techLevel: 2, cost: 5, copies: 2, desc: "+2 scrap production" },
   "logistics-hub": { id: "logistics-hub", name: "Logistics Hub", kind: "location", slots: 2, techLevel: 3, cost: 6, copies: 2, desc: "+1 Action each turn (rare, 2-slot)" },

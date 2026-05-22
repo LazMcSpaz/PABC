@@ -4,13 +4,14 @@
 // covers the framework plus Move and Recruit.
 import { emit } from "./events.js";
 import { activePlayerId } from "./targeting.js";
-import { bfsDistances } from "./board.js";
+import { bfsDistances, reinforcementRoute } from "./board.js";
 import { CONFIG } from "./config.js";
 import { FACTIONS, CHIPS, ABILITIES, chipDefOf } from "./content.js";
 import { validateContest, runContest } from "./contest.js";
-import { recomputeStats, recomputeTech } from "./stats.js";
+import { recomputeStats, recomputeResearch } from "./stats.js";
 import { applyEffects } from "./effects.js";
 import { drawFieldEncounter, resolveMarkerOnHex } from "./encounters.js";
+import { makeUnit } from "./setup.js";
 
 const fail = (reason) => ({ ok: false, reason });
 
@@ -36,14 +37,19 @@ function validateMove(state, { pid, params }) {
   if (params.to === unit.node) return fail("unit is already on that hex");
   const dist = bfsDistances(state.board.adjacency, unit.node)[params.to];
   if (dist === undefined) return fail("hex is unreachable");
-  if (dist > unit.movement) return fail(`out of range (${dist} > Movement ${unit.movement})`);
+  // v0.2 §16.2 — Move spends the per-turn move budget, not Actions.
+  if (dist > unit.moveRemaining)
+    return fail(`out of range (${dist} > moves left ${unit.moveRemaining})`);
   return { ok: true };
 }
 
 function runMove(state, { params, ctx }) {
   const unit = state.units[params.unit];
   const from = unit.node;
+  const dist = bfsDistances(state.board.adjacency, from)[params.to];
   unit.node = params.to;
+  unit.moveRemaining = Math.max(0, unit.moveRemaining - dist);
+  unit.movedSinceUpkeep = true; // §16.6 fortify — moving voids "dug in"
   emit(state, "unit_moved", { unit: unit.uid, from, to: params.to });
 
   // §15.5 placement markers take precedence — they're authored to land
@@ -57,7 +63,38 @@ function runMove(state, { params, ctx }) {
       drawFieldEncounter(state, unit, ctx);
     }
   }
+
+  tryPickupLoot(state, unit, params.to, ctx);
   return {};
+}
+
+// A unit that ends its move on a hex carrying a loot pile (chips dropped
+// when a unit died with no claimant) may take it. Interactive players get
+// the salvage modal (and can close it to leave the loot); headless / AI
+// grab what fits into the free bay and leave the rest on the hex.
+function tryPickupLoot(state, unit, hex, ctx) {
+  const loot = state.hexLoot?.[hex];
+  if (!loot || !loot.length) return;
+  if (ctx.interactiveLoot) {
+    state.pendingSalvage = state.pendingSalvage || [];
+    state.pendingSalvage.push({ kind: "loot", killerUid: unit.uid, hex, chips: [...loot] });
+    return;
+  }
+  const used = (uids) => uids.reduce((n, c) => n + (chipDefOf(state, c)?.slots ?? 1), 0);
+  let free = CONFIG.unit.baySlots - used(unit.chips);
+  const taken = [];
+  const rest = [];
+  for (const c of loot) {
+    const sl = chipDefOf(state, c)?.slots ?? 1;
+    if (sl <= free) { unit.chips.push(c); taken.push(c); free -= sl; }
+    else rest.push(c);
+  }
+  if (rest.length) state.hexLoot[hex] = rest;
+  else delete state.hexLoot[hex];
+  if (taken.length) {
+    recomputeStats(state);
+    emit(state, "loot_claimed", { killer: unit.uid, hex, chips: taken });
+  }
 }
 
 // --- Recruit ---------------------------------------------------------
@@ -84,7 +121,7 @@ function validateRecruit(state, { pid, player, params }) {
   const tg = trainingGroundsCount(state, pid);
   if (tg < 1) return fail("requires a Training Grounds");
   if (player.resource < CONFIG.unitRecruitCost) return fail("not enough scrap");
-  if (ownedUnitCount(state, pid) >= 1 + tg) return fail("unit cap reached");
+  if (ownedUnitCount(state, pid) >= CONFIG.baseUnitCap + tg) return fail("unit cap reached");
   return { ok: true };
 }
 
@@ -96,20 +133,77 @@ function runRecruit(state, { pid, player, params }) {
 
   const loc = state.locations[params.at];
   const u = state.nextId("unit");
-  state.units[u] = {
-    uid: u,
-    owner: pid,
-    name: `${FACTIONS[pid].name} unit`,
-    node: loc.hexId,
-    baseStrength: CONFIG.unit.baseStrength,
-    baseMovement: CONFIG.unit.baseMovement,
-    strength: CONFIG.unit.baseStrength,
-    movement: CONFIG.unit.baseMovement,
-    chips: [],
-    immobilizedUntil: null,
-  };
+  state.units[u] = makeUnit(u, pid, loc.hexId, FACTIONS[pid].name);
   emit(state, "unit_recruited", { unit: u, player: pid, hex: loc.hexId });
   return { unit: u };
+}
+
+// --- Reinforce -------------------------------------------------------
+// v0.2 §16.5 — mend a unit's eroded base Strength for 2 scrap each.
+// `mode:"instant"` restores a unit on a friendly Location to cap now;
+// `mode:"field"` dispatches a convoy that arrives in N round-ends, where
+// N is the supply distance through friendly/neutral hexes (re-targets a
+// moving unit, §16.5). Both cost 1 Action.
+function unitStrengthCap(unit) {
+  return unit.veteran ? CONFIG.unit.veteranStrengthCap : CONFIG.unit.baseStrengthCap;
+}
+
+function validateReinforce(state, { pid, player, params }) {
+  const unit = state.units[params.unit];
+  if (!unit) return fail("no such unit");
+  if (unit.owner !== pid) return fail("not your unit");
+  const cap = unitStrengthCap(unit);
+  const deficit = cap - unit.baseStrength;
+  if (deficit <= 0) return fail("unit is already at full Strength");
+  const cost = CONFIG.heal.scrapPerStrength * deficit;
+  if (player.resource < cost) return fail("not enough scrap");
+
+  const mode = params.mode || "instant";
+  if (mode === "instant") {
+    const loc = state.locations[unit.node];
+    if (!loc || loc.controller !== pid)
+      return fail("instant top-up needs the unit on a Location you fully control");
+    return { ok: true };
+  }
+  if (mode === "field") {
+    const route = reinforcementRoute(state, pid, unit.node);
+    if (!route) return fail("no supply route — the unit is walled off by enemy territory");
+    return { ok: true };
+  }
+  return fail(`unknown reinforce mode "${mode}"`);
+}
+
+function runReinforce(state, { pid, player, params }) {
+  const unit = state.units[params.unit];
+  const cap = unitStrengthCap(unit);
+  const deficit = cap - unit.baseStrength;
+  const cost = CONFIG.heal.scrapPerStrength * deficit;
+  player.resource -= cost;
+  emit(state, "resource_spent", { player: pid, resource: "Resource", amount: -cost });
+
+  const mode = params.mode || "instant";
+  if (mode === "instant") {
+    unit.baseStrength = cap;
+    recomputeStats(state);
+    emit(state, "unit_reinforced", { unit: unit.uid, amount: deficit });
+    return { mode, amount: deficit };
+  }
+
+  // field — scrap charged up front; the convoy arrives via the round-end
+  // sweep (turn.js sweepReinforcements).
+  const route = reinforcementRoute(state, pid, unit.node);
+  state.reinforcements.push({
+    owner: pid,
+    targetUnit: unit.uid,
+    amount: deficit,
+    traveled: 0,
+    originHex: route.originHex,
+    requestedRound: state.round,
+  });
+  emit(state, "reinforcement_requested", {
+    player: pid, unit: unit.uid, eta: route.dist, originHex: route.originHex,
+  });
+  return { mode, eta: route.dist, originHex: route.originHex };
 }
 
 // --- Acquire ---------------------------------------------------------
@@ -117,9 +211,13 @@ function runRecruit(state, { pid, player, params }) {
 // `unit`) or a location you fully control (kind `location`). The chip's
 // `techLevel` must be at or below the player's unlocked Market tier
 // (§4.1). The vacated row refills from the tier deck.
-function unlockedTier(tech) {
-  if (tech >= CONFIG.tech.tier3) return 3;
-  if (tech >= CONFIG.tech.tier2) return 2;
+// §17.2 — Market tier unlock keys off Tech *Level* now (tier 2 @ L3,
+// tier 3 @ L5), not a raw research score.
+function unlockedTier(player) {
+  const lvl = player.techLevel || 1;
+  const m = CONFIG.tech.marketTierByLevel;
+  if (lvl >= m[3]) return 3;
+  if (lvl >= m[2]) return 2;
   return 1;
 }
 
@@ -138,10 +236,12 @@ function slotsUsed(state, chipUids) {
 
 function validateAcquire(state, { pid, player, params }) {
   if (!params.chip) return fail("specify which chip to acquire (params.chip)");
-  const found = findInMarket(state, params.chip);
-  if (!found) return fail("that chip is not in any market row");
-  if (found.tier > unlockedTier(player.tech))
-    return fail(`tier ${found.tier} requires more Tech`);
+  const inResale = state.resaleRow?.includes(params.chip);
+  const found = inResale ? null : findInMarket(state, params.chip);
+  if (!inResale && !found) return fail("that chip is not in any market row");
+  // Resale chips ignore tech tier — they're used goods.
+  if (found && found.tier > unlockedTier(player))
+    return fail(`tier ${found.tier} requires a higher Tech Level`);
 
   const def = CHIPS[state.chips[params.chip]?.chipId];
   if (!def) return fail("unknown chip");
@@ -165,9 +265,17 @@ function validateAcquire(state, { pid, player, params }) {
 }
 
 function runAcquire(state, { pid, player, params }) {
-  const found = findInMarket(state, params.chip);
-  const chipUid = found.row.splice(found.row.indexOf(params.chip), 1)[0];
-  if (found.deck.length) found.row.push(found.deck.shift());
+  const inResale = state.resaleRow?.includes(params.chip);
+  let chipUid, tier;
+  if (inResale) {
+    chipUid = state.resaleRow.splice(state.resaleRow.indexOf(params.chip), 1)[0];
+    tier = CHIPS[state.chips[chipUid]?.chipId]?.techLevel ?? null;
+  } else {
+    const found = findInMarket(state, params.chip);
+    chipUid = found.row.splice(found.row.indexOf(params.chip), 1)[0];
+    if (found.deck.length) found.row.push(found.deck.shift());
+    tier = found.tier;
+  }
 
   const def = CHIPS[state.chips[chipUid].chipId];
   player.resource -= def.cost || 0;
@@ -183,10 +291,10 @@ function runAcquire(state, { pid, player, params }) {
   }
 
   emit(state, "card_acquired", {
-    player: pid, chip: chipUid, chipId: def.id, tier: found.tier,
+    player: pid, chip: chipUid, chipId: def.id, tier,
   });
-  recomputeTech(state); // a fresh Labs may have moved the player's Tech
-  return { chip: chipUid, chipId: def.id, tier: found.tier };
+  recomputeResearch(state); // a fresh Lab may have moved the player's Research
+  return { chip: chipUid, chipId: def.id, tier };
 }
 
 // --- Activate --------------------------------------------------------
@@ -210,6 +318,12 @@ function validateActivate(state, { pid, player, params }) {
   if (!got) return fail("no activatable ability at that location");
   if (got.loc.controller !== pid) return fail("you do not fully control that location");
   if (!got.opt) return fail("no such activated option");
+  // Activated abilities are once per turn (spec §12.7). Without this an
+  // ability whose net effect is positive at zero Action cost — e.g.
+  // Staging Ground (+1 Action) or Rail Corridor (+3 scrap) — could be
+  // spammed for unlimited resources / actions.
+  if (got.loc.abilityActivatedTurn === turnOrdinal(state))
+    return fail("this ability was already activated this turn");
   const cost = got.opt.cost || {};
   if (cost.resource && player.resource < cost.resource) return fail("not enough scrap");
   return { ok: true };
@@ -224,14 +338,16 @@ function runActivate(state, { pid, player, params, ctx }) {
       player: pid, resource: "Resource", amount: -cost.resource,
     });
   }
+  loc.abilityActivatedTurn = turnOrdinal(state); // once-per-turn lock
   applyEffects(state, opt.effects || [], { ...ctx, sourcePlayer: pid, source: loc });
   return { location: loc.hexId, ability: ability.id };
 }
 
 // --- dispatch --------------------------------------------------------
 const ACTIONS = {
-  move: { cost: 1, validate: validateMove, run: runMove },
+  move: { cost: 0, validate: validateMove, run: runMove }, // §16.2 — free of Actions
   recruit: { cost: 1, validate: validateRecruit, run: runRecruit },
+  reinforce: { cost: 1, validate: validateReinforce, run: runReinforce },
   contest: { cost: 1, validate: validateContest, run: runContest },
   acquire: { cost: 1, validate: validateAcquire, run: runAcquire },
   activate: { cost: activateActionCost, validate: validateActivate, run: runActivate },

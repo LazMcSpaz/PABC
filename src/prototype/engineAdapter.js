@@ -5,7 +5,12 @@
 // shape-agnostic.
 
 import { CONFIG } from "../game/config.js";
-import { LOCATIONS as ENGINE_LOCATIONS, CHIPS as ENGINE_CHIPS } from "../game/content.js";
+import { reinforcementRoute } from "../game/board.js";
+import {
+  LOCATIONS as ENGINE_LOCATIONS,
+  CHIPS as ENGINE_CHIPS,
+  ABILITIES as ENGINE_ABILITIES,
+} from "../game/content.js";
 import {
   LOCATIONS as UI_LOCATIONS,
   UNIT_UPGRADES,
@@ -21,7 +26,7 @@ const ENGINE_TO_UI_LOC = {
 };
 const ENGINE_TO_UI_CHIP = {
   "sharpened-blades": "sharpenedBlades",
-  "new-recruits": "newRecruits",
+  "drilled-troops": "drilledTroops",
   "training-grounds": "trainingGrounds",
   "defense-turrets": "defenseTurrets",
   "logistics-hub": "logisticsHub",
@@ -99,6 +104,42 @@ function adaptChips(state, chipUids) {
   return (chipUids || []).map((uid) => engineChipIdToUi(state.chips[uid]?.chipId));
 }
 
+// Build a human-readable description of an engine ability from its
+// actual cost + effects, so the UI shows what the Location really does
+// (the look-pass data.js carried unrelated placeholder flavour).
+function describeEffectShort(e) {
+  switch (e.type) {
+    case "GRANT_ACTIONS":
+      return `gain ${e.amount} Action${Math.abs(e.amount) === 1 ? "" : "s"}${
+        e.when === "next_turn" ? " next turn" : ""
+      }`;
+    case "ADJUST_RESOURCE": {
+      const res = e.resource === "Resource" ? "scrap" : e.resource;
+      return `${e.amount >= 0 ? "gain" : "lose"} ${Math.abs(e.amount)} ${res}`;
+    }
+    case "ADJUST_TRACK":
+      return `${e.amount >= 0 ? "+" : ""}${e.amount} ${e.track}`;
+    default:
+      return e.type;
+  }
+}
+
+export function describeAbility(abilityId) {
+  const ability = ENGINE_ABILITIES[abilityId];
+  if (!ability) return null;
+  const opt = ability.activated?.[0];
+  if (!opt) return { name: ability.name, text: "Passive ability." };
+  const costParts = [];
+  if (opt.cost?.action) costParts.push(`${opt.cost.action} Action`);
+  if (opt.cost?.resource) costParts.push(`${opt.cost.resource} scrap`);
+  const costPhrase = costParts.length ? `Spend ${costParts.join(" + ")} to ` : "";
+  const effPhrase = (opt.effects || []).map(describeEffectShort).join(", ") || "act";
+  const sentence = costPhrase
+    ? `${costPhrase}${effPhrase}.`
+    : `${effPhrase.charAt(0).toUpperCase()}${effPhrase.slice(1)}.`;
+  return { name: ability.name, text: `${sentence} Once per turn.` };
+}
+
 function adaptChipsWithUids(state, chipUids) {
   return (chipUids || []).map((uid) => ({
     uid,
@@ -118,9 +159,26 @@ function isImmobilized(state, unit) {
 export function adaptState(state) {
   ensureUiConstantsSynced();
 
-  // hex → unit reverse pointer
+  // hex → ordered list of unit uids. Multiple tokens render per hex (in
+  // arc slots), so we keep the full list. The human's units come first
+  // so the player's own unit takes the prime slot and is what the
+  // Inspector's single-unit Contest path keys off.
+  const unitsByHex = {};
+  for (const u of Object.values(state.units)) {
+    (unitsByHex[u.node] ||= []).push(u);
+  }
+  const unitIdsAt = {};
   const unitAt = {};
-  for (const u of Object.values(state.units)) unitAt[u.node] = u.uid;
+  for (const [node, list] of Object.entries(unitsByHex)) {
+    const ordered = [...list].sort((a, b) => {
+      const am = a.owner === state.humanFactionId ? 0 : 1;
+      const bm = b.owner === state.humanFactionId ? 0 : 1;
+      if (am !== bm) return am - bm;
+      return a.uid < b.uid ? -1 : 1; // stable
+    });
+    unitIdsAt[node] = ordered.map((u) => u.uid);
+    unitAt[node] = ordered[0].uid;
+  }
 
   const units = {};
   for (const u of Object.values(state.units)) {
@@ -135,6 +193,9 @@ export function adaptState(state) {
       movement: u.baseMovement,
       effectiveStrength: u.strength,
       effectiveMovement: u.movement,
+      moveRemaining: u.moveRemaining ?? u.movement,
+      fortified: !!u.fortified,
+      veteran: !!u.veteran,
       chips: adaptChips(state, u.chips),
       chipUids: [...u.chips],
       immobilized: isImmobilized(state, u),
@@ -151,6 +212,12 @@ export function adaptState(state) {
       col: h.col,
     };
     if (unitAt[h.id]) hex.unitId = unitAt[h.id];
+    if (unitIdsAt[h.id]) hex.unitIds = unitIdsAt[h.id];
+    const loot = state.hexLoot?.[h.id];
+    if (loot?.length) {
+      hex.loot = loot.length;
+      hex.lootChips = loot.map((uid) => engineChipIdToUi(state.chips[uid]?.chipId));
+    }
     if (h.type === "location") {
       const loc = state.locations[h.id];
       hex.locationId = engineLocationIdToUi(loc.locationId);
@@ -166,6 +233,9 @@ export function adaptState(state) {
         // a Location carries an ability (§6.3).
         chipSlots: loc.chipSlots,
         abilityId: loc.abilityId,
+        ability: loc.abilityId ? describeAbility(loc.abilityId) : null,
+        abilityUsedThisTurn:
+          loc.abilityActivatedTurn === state.round * state.turnOrder.length + state.activeIndex,
       };
       hex.garrison = loc.garrison; // engine's live garrison (incl. capital bonus)
       hex.production = loc.production;
@@ -181,9 +251,13 @@ export function adaptState(state) {
       id: pid,
       scrap: p.resource,
       vp: p.vp,
-      tech: p.tech,
+      // §17 Tech Wheel
+      research: p.research || 0,
+      techLevel: p.techLevel || 1,
+      techWheel: [...(p.techWheel || [])],
+      abilityPointsAvailable: (p.techLevel || 1) - 1 - (p.techWheel?.length || 0),
       actions: { ...p.actions },
-      unitCap: 1 + countTrainingGrounds(state, pid),
+      unitCap: CONFIG.baseUnitCap + countTrainingGrounds(state, pid),
       isAI: !!p.isAI,
       hand: [...p.hand],
       handChips: adaptChipsWithUids(state, p.hand),
@@ -200,6 +274,13 @@ export function adaptState(state) {
     chipId: engineChipIdToUi(state.chips[uid]?.chipId),
     engineChipId: state.chips[uid]?.chipId,
   }));
+  // v0.2 §16.4 — resold chips share the Market display but acquire at full
+  // cost ignoring tech tier (handled in actions.validateAcquire).
+  for (const uid of state.resaleRow || []) {
+    const eng = state.chips[uid]?.chipId;
+    market.push(engineChipIdToUi(eng));
+    marketChips.push({ uid, chipId: engineChipIdToUi(eng), engineChipId: eng, isResale: true });
+  }
 
   return {
     round: state.round,
@@ -207,6 +288,8 @@ export function adaptState(state) {
     youId: state.humanFactionId,
     activeId: state.turnOrder[state.activeIndex],
     vpGoal: CONFIG.vpThreshold,
+    techThresholds: [...CONFIG.tech.researchThresholds],
+    maxTechLevel: CONFIG.tech.maxLevel,
     players,
     units,
     hexes,
@@ -214,9 +297,32 @@ export function adaptState(state) {
     market,
     marketChips,
     winnerId: state.winnerId,
+    // v0.2 §16.5 — in-transit field reinforcements, for board overlay /
+    // unit panel ETA display.
+    reinforcements: (state.reinforcements || []).map((r) => ({ ...r })),
     // Surface the raw engine state so Phase-4 action handlers can reach
     // engine APIs without re-deriving everything.
     engineState: state,
+  };
+}
+
+// v0.2 §16.5 — what a Reinforce action would cost/look like for `unitUid`
+// right now: the scrap to top it up, whether an instant top-up is legal
+// (unit on a fully-held Location), and the field-supply ETA in turns.
+export function reinforcePreview(state, unitUid) {
+  const unit = state.units[unitUid];
+  if (!unit) return null;
+  const cap = unit.veteran ? CONFIG.unit.veteranStrengthCap : CONFIG.unit.baseStrengthCap;
+  const deficit = cap - unit.baseStrength;
+  const loc = state.locations[unit.node];
+  const onFriendlyLoc = !!(loc && loc.controller === unit.owner);
+  const route = deficit > 0 ? reinforcementRoute(state, unit.owner, unit.node) : null;
+  return {
+    deficit,
+    cost: CONFIG.heal.scrapPerStrength * deficit,
+    onFriendlyLoc,
+    eta: route ? route.dist : null,
+    canField: !!route,
   };
 }
 
@@ -229,4 +335,83 @@ function countTrainingGrounds(state, pid) {
     }
   }
   return n;
+}
+
+// Attacker-side preview: the combined Strength of `ownerId`'s stack on
+// `hexId` plus its Concentration bonus — what the attacker brings before
+// the d6. Mirrors contest.js (stackStrength + concentration).
+export function previewAttackerStrength(state, hexId, ownerId) {
+  let strength = 0;
+  let n = 0;
+  for (const u of Object.values(state.units)) {
+    if (u.owner !== ownerId || u.node !== hexId) continue;
+    strength += u.strength;
+    n += 1;
+  }
+  const concentration =
+    Math.min(n - 1, CONFIG.combat.concentrationCap) * CONFIG.combat.concentrationPerUnit;
+  return { strength, concentration, units: n, total: strength + concentration };
+}
+
+// Preview a Location contest's defender side exactly as contest.js would
+// resolve it, so the UI shows the true number the attacker must beat —
+// not just the bare garrison. Mirrors defenderValue() + the
+// garrison-only no-die house rule.
+export function previewLocationContest(state, hexId) {
+  const loc = state.locations[hexId];
+  if (!loc) return null;
+  const hasNeutral = loc.sections.includes("neutral");
+  let chipGarrison = 0;
+  for (const c of loc.chips) {
+    chipGarrison += ENGINE_CHIPS[state.chips[c]?.chipId]?.garrison || 0;
+  }
+  let value = loc.garrison + chipGarrison;
+
+  // A defending unit only counts when the Location is fully held by its
+  // controller (no neutral sections) and that controller has a unit on
+  // the hex — same gate as contest.js defendingUnit().
+  // Stacked defenders fight together: sum the controller's units on the
+  // hex (the strongest is the "lead" for display / attrition).
+  let defendingUnit = null;
+  let defenderStack = 0;
+  if (!hasNeutral && loc.controller) {
+    for (const u of Object.values(state.units)) {
+      if (u.owner !== loc.controller || u.node !== loc.hexId) continue;
+      defenderStack += u.strength;
+      if (!defendingUnit || u.strength > defendingUnit.strength) defendingUnit = u;
+    }
+    value += defenderStack;
+  }
+
+  // §16.6 combat levers on the defender side.
+  const mountain =
+    state.board.hexes[hexId]?.terrain === "mountain" ? CONFIG.combat.mountainDefenseBonus : 0;
+  let concentration = 0, fortify = 0, veteran = 0;
+  if (defendingUnit) {
+    let n = 0;
+    for (const u of Object.values(state.units)) {
+      if (u.owner === loc.controller && u.node === hexId && u.uid !== defendingUnit.uid) n++;
+    }
+    concentration = Math.min(n, CONFIG.combat.concentrationCap) * CONFIG.combat.concentrationPerUnit;
+    if (defendingUnit.fortified) fortify = CONFIG.combat.fortifyBonus;
+    if (defendingUnit.veteran) veteran = CONFIG.combat.veteranBonus;
+  }
+  value += mountain + concentration + fortify + veteran;
+
+  // House rule: a garrison-only defence (no defending unit) does NOT
+  // roll a d6 — its total is the static value.
+  const defenderRollsDie = !!defendingUnit;
+  return {
+    value,
+    garrison: loc.garrison + chipGarrison,
+    defendingUnit: defendingUnit
+      ? { uid: defendingUnit.uid, owner: defendingUnit.owner, strength: defendingUnit.strength }
+      : null,
+    modifiers: {
+      mountain, concentration, fortify, veteran,
+      allies: defendingUnit ? defenderStack - defendingUnit.strength : 0,
+    },
+    hasNeutral,
+    defenderRollsDie,
+  };
 }

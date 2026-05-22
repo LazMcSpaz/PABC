@@ -16,17 +16,39 @@ import { performAction } from "../game/actions.js";
 import { takeAITurn } from "../game/ai.js";
 import { activePlayerId } from "../game/targeting.js";
 import { bfsDistances } from "../game/board.js";
-import { CHIPS as ENGINE_CHIPS } from "../game/content.js";
+import { CHIPS as ENGINE_CHIPS, LOCATIONS as ENGINE_LOCATIONS } from "../game/content.js";
 import { CONFIG } from "../game/config.js";
+import { NEUTRAL } from "./data.js";
 import { getEncounter } from "../game/encounters.js";
+import { hasTechNode } from "../game/tech.js";
 import { evalCond } from "../game/dsl.js";
-import { adaptState } from "./engineAdapter.js";
+import { adaptState, reinforcePreview, engineChipIdToUi } from "./engineAdapter.js";
+import { resolveSalvage } from "../game/contest.js";
+import { assignTechNode } from "../game/stats.js";
 import EncounterModal from "./EncounterModal.jsx";
+import TechWheel from "./TechWheel.jsx";
 import EventFeed from "./EventFeed.jsx";
 import UnitPanel from "./UnitPanel.jsx";
+import ContestOverlay from "./ContestOverlay.jsx";
+import SalvageModal from "./SalvageModal.jsx";
 
 const TOP_H = 56;
 const TAB_H = 44;
+
+// v0.2 §16.6 — human-readable list of the combat-lever modifiers a
+// contest applied, for the resolution overlay.
+function contestMods(r) {
+  const out = [];
+  if (r.attackerAllies) out.push(`+${r.attackerAllies} atk allied units`);
+  if (r.attackerConcentration) out.push(`+${r.attackerConcentration} atk concentration`);
+  if (r.attackerVeteran) out.push(`+${r.attackerVeteran} atk veteran`);
+  if (r.defenderAllies) out.push(`+${r.defenderAllies} def allied units`);
+  if (r.defenderConcentration) out.push(`+${r.defenderConcentration} def concentration`);
+  if (r.defenderMountain) out.push(`+${r.defenderMountain} mountain`);
+  if (r.defenderFortify) out.push(`+${r.defenderFortify} fortify`);
+  if (r.defenderVeteran) out.push(`+${r.defenderVeteran} def veteran`);
+  return out;
+}
 
 function bootGame(seed, humanFactionId) {
   const game = createGame({ seed, humanFactionId });
@@ -70,6 +92,9 @@ export default function Prototype({ config, onNewGame }) {
   const [selectedUnitId, setSelectedUnitId] = useState(null);
   const [toast, setToast] = useState(null); // { kind: "error"|"info", text }
   const [encounterPrompt, setEncounterPrompt] = useState(null); // pending move + encounter pick
+  const [contestViz, setContestViz] = useState(null); // contest replay overlay
+  const [salvagePrompt, setSalvagePrompt] = useState(null); // interactive salvage
+  const [showTechWheel, setShowTechWheel] = useState(false); // §17 wheel overlay
   const you = state.players[state.youId];
   const isYourTurn = state.activeId === state.youId && !state.winnerId;
 
@@ -92,11 +117,12 @@ export default function Prototype({ config, onNewGame }) {
   const reachable = useMemo(() => {
     if (!isYourTurn || !selectedUnitId) return null;
     const unit = state.units[selectedUnitId];
-    if (!unit || unit.immobilized || unit.effectiveMovement <= 0) return null;
+    const budget = unit?.moveRemaining ?? unit?.effectiveMovement ?? 0;
+    if (!unit || unit.immobilized || budget <= 0) return null;
     const dists = bfsDistances(gameRef.current.board.adjacency, unit.node);
     const out = new Set();
     for (const [hex, d] of Object.entries(dists)) {
-      if (d > 0 && d <= unit.effectiveMovement) out.add(hex);
+      if (d > 0 && d <= budget) out.add(hex);
     }
     return out;
   }, [tick, isYourTurn, selectedUnitId, state]);
@@ -130,16 +156,69 @@ export default function Prototype({ config, onNewGame }) {
       .map((c) => c.id);
   }
 
-  function doMoveWithEncounterChoice(unitUid, dest, choiceId) {
+  // §17.5 Intelligence (Recon) + Recon Team chips each grant one
+  // encounter discard for the drawing player.
+  function redrawBudget(game, pid) {
+    let recon = 0;
+    for (const loc of Object.values(game.locations)) {
+      if (loc.controller !== pid) continue;
+      for (const c of loc.chips) if (game.chips[c]?.chipId === "recon-team") recon += 1;
+    }
+    return (hasTechNode(game, pid, "int-entry") ? 1 : 0) + recon;
+  }
+
+  // Build the encounter pre-flight prompt for the card at deck index `idx`
+  // (the engine discards to the bottom, so after `idx` discards it draws
+  // exactly deck[idx]). `redrawsLeft` drives the "discard & redraw" button.
+  function buildEncounterPrompt(game, unitUid, dest, idx) {
+    const id = game.encounterDeck?.[idx];
+    if (!id) return null;
+    const enc = getEncounter(id);
+    if (!enc || !(enc.choices || []).length) return null;
+    const elig = eligibleChoiceIds(game, enc, state.youId);
+    const remaining = Math.max(0, redrawBudget(game, state.youId) - idx);
+    const canRedraw = remaining > 0 && game.encounterDeck.length > idx + 1;
+    return {
+      encounter: enc,
+      choices: enc.choices,
+      eligibleIds: elig.length ? elig : enc.choices.map((c) => c.id),
+      unitUid, dest, idx,
+      redrawsLeft: canRedraw ? remaining : 0,
+    };
+  }
+
+  // Terrain (wasteland) hexes carry no info worth a dialogue, so they
+  // never open the Inspector — landing on or clicking one just leaves
+  // the inspector closed.
+  function inspectHex(hexId) {
+    if (state.hexes[hexId]?.type === "terrain") {
+      setSelectedHexId(null);
+      return;
+    }
+    setSelectedHexId(hexId);
+  }
+
+  function doMoveWithEncounterChoice(unitUid, dest, choiceId, discards = 0) {
+    let redrawsDone = 0;
     const ctx = {
+      interactiveLoot: true,
       interact: (req) => {
+        // Replay the player's discards (engine sends them to the bottom),
+        // then answer the choice for the card finally drawn.
+        if (req.kind === "encounterRedraw") return redrawsDone++ < discards;
         if (req.kind === "encounterChoice") return choiceId;
         return req?.options ? req.options[0] : null; // fallback to first
       },
     };
     const r = runAction("move", { unit: unitUid, to: dest }, ctx);
-    if (r.ok) setSelectedHexId(dest);
+    if (r.ok) { inspectHex(dest); maybeOpenLoot(); }
     setEncounterPrompt(null);
+  }
+
+  // Open the salvage modal if a Move just landed on a loot pile (§ hex loot).
+  function maybeOpenLoot() {
+    const p = buildSalvagePrompt(gameRef.current);
+    if (p) setSalvagePrompt(p);
   }
 
   function onHexClick(hexId) {
@@ -154,24 +233,21 @@ export default function Prototype({ config, onNewGame }) {
       // the choice modal first and stash the pending move on it.
       const enc = peekFieldEncounter(gameRef.current, hexId);
       if (enc && (enc.choices || []).length > 0) {
-        const elig = eligibleChoiceIds(gameRef.current, enc, state.youId);
-        setEncounterPrompt({
-          encounter: enc,
-          choices: enc.choices,
-          eligibleIds: elig.length ? elig : enc.choices.map((c) => c.id),
-          unitUid: selectedUnitId,
-          dest: hexId,
-        });
+        setEncounterPrompt(buildEncounterPrompt(gameRef.current, selectedUnitId, hexId, 0));
         return;
       }
-      const r = runAction("move", { unit: selectedUnitId, to: hexId });
-      if (r.ok) setSelectedHexId(hexId);
+      const r = runAction("move", { unit: selectedUnitId, to: hexId }, { interactiveLoot: true });
+      if (r.ok) { inspectHex(hexId); maybeOpenLoot(); }
       return;
     }
 
-    // Otherwise toggle the inspector. Hex selection no longer touches
-    // unit selection — those are independent now (unit tokens have
-    // their own click handler).
+    // Otherwise toggle the inspector (terrain never opens it). Hex
+    // selection no longer touches unit selection — those are
+    // independent now (unit tokens have their own click handler).
+    if (state.hexes[hexId]?.type === "terrain") {
+      setSelectedHexId(null);
+      return;
+    }
     setSelectedHexId((cur) => (cur === hexId ? null : hexId));
   }
 
@@ -186,13 +262,118 @@ export default function Prototype({ config, onNewGame }) {
   }
 
   function onContest(params) {
-    return runAction("contest", params);
+    const game = gameRef.current;
+    const attacker = game.units[params.unit];
+    if (!attacker) return runAction("contest", params);
+
+    // Capture the contestant descriptors BEFORE resolving (names, base
+    // values, owner colours) — the contest mutates state and clears
+    // this-contest modifiers afterwards.
+    const loc = game.locations[attacker.node];
+    let defName, defBase, defColor, defLabel;
+    if (params.target && game.units[params.target]) {
+      const du = game.units[params.target];
+      defName = du.name;
+      defBase = du.baseStrength;
+      defColor = UI_FACTIONS[du.owner]?.color;
+      defLabel = "Strength";
+    } else if (loc) {
+      defName = ENGINE_LOCATIONS[loc.locationId]?.name || loc.locationId;
+      defBase = CONFIG.garrisonByValue[loc.strategicValue] ?? loc.garrison;
+      defColor = loc.controller ? UI_FACTIONS[loc.controller]?.color : NEUTRAL;
+      defLabel = "Garrison";
+    }
+
+    // deferSalvage routes any kill's chip distribution to the interactive
+    // SalvageModal (opened when the contest overlay closes) instead of the
+    // headless auto-salvage.
+    const r = performAction(game, "contest", params, { deferSalvage: true });
+    if (!r.ok) {
+      setToast({ kind: "error", text: r.reason });
+      return r;
+    }
+    bumpTick();
+
+    setContestViz({
+      attacker: {
+        name: attacker.name,
+        label: "Strength",
+        base: attacker.baseStrength,
+        calculated: r.cancelled ? null : r.initiatorTotal - r.initiatorRoll,
+        roll: r.initiatorRoll,
+        total: r.initiatorTotal,
+        color: UI_FACTIONS[attacker.owner]?.color,
+      },
+      defender: {
+        name: defName,
+        label: defLabel,
+        base: defBase,
+        // pre-die value, now incl. §16.6 modifiers
+        calculated: r.cancelled ? null : r.defenderTotal - r.defenderRoll,
+        roll: r.defenderRoll,
+        total: r.defenderTotal,
+        rollsDie: r.defenderRolled,
+        color: defColor,
+      },
+      won: r.won,
+      cancelled: r.cancelled,
+      kind: r.kind,
+      // v0.2 §16.4 — attrition / death / salvage summary
+      attackerStrLost: r.attackerStrLost || 0,
+      defenderStrLost: r.defenderStrLost || 0,
+      killed: r.killed || [],
+      salvage: r.salvage || null,
+      // v0.2 §16.6 — combat-lever breakdown
+      mods: contestMods(r),
+    });
+    return r;
   }
+  // Build the descriptor the SalvageModal needs from the head of the
+  // engine's pending-salvage queue (null when empty).
+  function buildSalvagePrompt(game) {
+    const e = game.pendingSalvage?.[0];
+    if (!e) return null;
+    const killer = game.units[e.killerUid];
+    const info = (uid) => {
+      const id = game.chips[uid]?.chipId;
+      const def = ENGINE_CHIPS[id] || {};
+      return {
+        uid, uiChipId: engineChipIdToUi(id), name: def.name || id,
+        cost: def.cost || 0, slots: def.slots || 1,
+        resale: Math.ceil((def.cost || 0) / 2),
+      };
+    };
+    return {
+      kind: e.kind === "loot" ? "loot" : "death",
+      killerName: killer?.name || "Victor",
+      killerColor: UI_FACTIONS[killer?.owner]?.color,
+      baySlots: CONFIG.unit.baySlots,
+      unitChips: (killer?.chips || []).map(info),
+      salvagedChips: e.chips.map(info),
+    };
+  }
+
+  function onSalvageConfirm(assignments) {
+    resolveSalvage(gameRef.current, assignments);
+    bumpTick();
+    setSalvagePrompt(buildSalvagePrompt(gameRef.current)); // next in queue, or null
+  }
+
+  function onAssignTech(nodeId) {
+    const r = assignTechNode(gameRef.current, state.youId, nodeId);
+    if (!r.ok) setToast({ kind: "error", text: r.reason });
+    else bumpTick();
+  }
+
   function onActivate(hexId) {
     return runAction("activate", { location: hexId }, null, "Ability activated.");
   }
   function onRecruit(hexId) {
     return runAction("recruit", { at: hexId }, null, "Unit recruited.");
+  }
+  function onReinforce(unitUid, mode) {
+    const msg = mode === "instant" ? "Unit reinforced." : "Reinforcements dispatched.";
+    return runAction("reinforce", { unit: unitUid, mode }, null, msg);
   }
   function onAcquire(uiChip) {
     // uiChip is { uid, chipId, engineChipId }. Pick an install target:
@@ -201,7 +382,8 @@ export default function Prototype({ config, onNewGame }) {
     const def = gameRef.current.chips[uiChip.uid];
     const engineId = def?.chipId;
     const enginePool = gameRef.current.market.tiers[1]?.row || [];
-    if (!enginePool.includes(uiChip.uid)) {
+    const inResale = (gameRef.current.resaleRow || []).includes(uiChip.uid);
+    if (!enginePool.includes(uiChip.uid) && !inResale) {
       setToast({ kind: "error", text: "Chip is no longer in the market." });
       return;
     }
@@ -285,6 +467,7 @@ export default function Prototype({ config, onNewGame }) {
             justifyContent: "flex-end",
           }}
         >
+          <TechReadout you={you} state={state} onOpen={() => setShowTechWheel(true)} />
           <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", lineHeight: 1.1 }}>
             <span
               style={{
@@ -336,6 +519,10 @@ export default function Prototype({ config, onNewGame }) {
           <UnitPanel
             unit={state.units[selectedUnitId]}
             hex={state.hexes[state.units[selectedUnitId].node]}
+            canAct={isYourTurn && state.units[selectedUnitId].owner === state.youId}
+            reinforce={reinforcePreview(gameRef.current, selectedUnitId)}
+            scrap={you.scrap}
+            onReinforce={onReinforce}
             onClose={() => setSelectedUnitId(null)}
           />
         )}
@@ -395,18 +582,53 @@ export default function Prototype({ config, onNewGame }) {
           encounter={encounterPrompt.encounter}
           choices={encounterPrompt.choices}
           eligibleIds={encounterPrompt.eligibleIds}
+          redrawsLeft={encounterPrompt.redrawsLeft}
+          onRedraw={() =>
+            setEncounterPrompt(
+              buildEncounterPrompt(
+                gameRef.current,
+                encounterPrompt.unitUid,
+                encounterPrompt.dest,
+                encounterPrompt.idx + 1,
+              ),
+            )
+          }
           onPick={(choiceId) =>
             doMoveWithEncounterChoice(
               encounterPrompt.unitUid,
               encounterPrompt.dest,
               choiceId,
+              encounterPrompt.idx,
             )
           }
           onCancel={() => setEncounterPrompt(null)}
         />
       )}
 
-      {state.winnerId && (
+      {contestViz && (
+        <ContestOverlay
+          viz={contestViz}
+          onClose={() => {
+            setContestViz(null);
+            setSalvagePrompt(buildSalvagePrompt(gameRef.current));
+          }}
+        />
+      )}
+
+      {salvagePrompt && (
+        <SalvageModal prompt={salvagePrompt} onConfirm={onSalvageConfirm} />
+      )}
+
+      {showTechWheel && (
+        <TechWheelOverlay
+          you={you}
+          state={state}
+          onAssign={onAssignTech}
+          onClose={() => setShowTechWheel(false)}
+        />
+      )}
+
+      {state.winnerId && !contestViz && !salvagePrompt && (
         <EndOverlay state={state} onNewGame={onNewGame} />
       )}
     </div>
@@ -503,6 +725,76 @@ function EndOverlay({ state, onNewGame }) {
             New Game
           </Btn>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// §17 — compact header readout: Tech Level + a Research progress bar +
+// an Ability-Point badge. Clicking opens the wheel.
+function TechReadout({ you, state, onOpen }) {
+  const research = you.research || 0;
+  const thresholds = state.techThresholds || [];
+  const next = thresholds.find((t) => t > research);
+  const prev = [0, ...thresholds].filter((t) => t <= research).pop() || 0;
+  const pct = next ? Math.min(1, (research - prev) / (next - prev)) : 1;
+  const ap = you.abilityPointsAvailable || 0;
+  return (
+    <button
+      className="pc-int"
+      onClick={onOpen}
+      title="Open the Tech Wheel"
+      style={{
+        display: "flex", flexDirection: "column", gap: 2, alignItems: "flex-end",
+        background: "transparent", border: "none", cursor: "pointer", padding: 0,
+      }}
+    >
+      <span style={{ fontSize: 9, letterSpacing: 1.4, textTransform: "uppercase", color: theme.textFaint, fontWeight: 600 }}>
+        Tech L{you.techLevel}
+        {ap > 0 && (
+          <span style={{
+            marginLeft: 5, color: "#14110c", background: theme.accent,
+            borderRadius: 8, padding: "0 5px", fontWeight: 800,
+          }}>{ap} AP</span>
+        )}
+      </span>
+      <div style={{ width: 92, height: 7, background: "rgba(0,0,0,0.4)", borderRadius: 4, border: `1px solid ${theme.border}`, overflow: "hidden" }}>
+        <div style={{ width: `${pct * 100}%`, height: "100%", background: "#5a8fc0" }} />
+      </div>
+      <span style={{ fontSize: 8.5, color: theme.textFaint }}>
+        {next ? `${research}/${next} research` : `research ${research} · max`}
+      </span>
+    </button>
+  );
+}
+
+function TechWheelOverlay({ you, state, onAssign, onClose }) {
+  return (
+    <div
+      style={{
+        position: "fixed", inset: 0, zIndex: 72, background: "rgba(0,0,0,0.8)",
+        display: "flex", alignItems: "center", justifyContent: "center",
+      }}
+      onClick={onClose}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          background: theme.plate, border: `1px solid ${theme.borderLit}`, borderRadius: 12,
+          boxShadow: theme.shadowDeep, padding: "18px 22px 20px", maxWidth: "96vw",
+        }}
+      >
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+          <span style={{ fontFamily: theme.fontDisplay, fontSize: 14, fontWeight: 700, letterSpacing: 1.5, textTransform: "uppercase", color: theme.text }}>
+            Tech Wheel
+          </span>
+          <span style={{ fontSize: 11, color: theme.textDim }}>
+            Level {you.techLevel}/{state.maxTechLevel} · Research {you.research} ·{" "}
+            <span style={{ color: theme.accent, fontWeight: 700 }}>{you.abilityPointsAvailable} Ability Points</span>
+          </span>
+          <Btn onClick={onClose}>Close</Btn>
+        </div>
+        <TechWheel player={you} onAssign={onAssign} />
       </div>
     </div>
   );

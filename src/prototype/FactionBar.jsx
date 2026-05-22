@@ -64,6 +64,9 @@ function Popover({ state, pid }) {
       <Row label="Actions">
         {player.actions.remaining} / {player.actions.max}
       </Row>
+      <Row label="Tech Level">
+        {player.techLevel} · {player.research} research
+      </Row>
       <Row label="Locations held">{held.length}</Row>
       <Row label="Units">
         {units} / {player.unitCap}
