@@ -34,6 +34,17 @@ function defendingUnit(state, loc) {
   return best;
 }
 
+// Combined effective Strength of every unit `owner` has stacked on `hex`.
+// Stacked units fight as one: their strengths sum (the Concentration
+// bonus is added on top of this, separately).
+function stackStrength(state, owner, hex) {
+  let s = 0;
+  for (const u of Object.values(state.units)) {
+    if (u.owner === owner && u.node === hex) s += u.strength;
+  }
+  return s;
+}
+
 // §16.6 Concentration — +1 (capped at +3) per *additional* friendly unit
 // stacked on `hex`, excluding `excludeUid` (the contesting / defending
 // unit itself).
@@ -94,14 +105,14 @@ function resolveTarget(state, pid, unit, params) {
   return fail("nothing to contest on this hex");
 }
 
-// The defender's value before its die roll (§9).
+// The defender's value before its die roll (§9). Stacked defending units
+// fight together — their Strengths sum (§ combined-stack rule).
 function defenderValue(state, t) {
-  if (t.kind === "raid") return t.unit.strength; // already includes chips
+  if (t.kind === "raid") return stackStrength(state, t.unit.owner, t.unit.node);
   const loc = t.loc;
   let v = loc.garrison + chipGarrison(state, loc);
-  if (!loc.sections.includes("neutral")) {
-    const du = defendingUnit(state, loc);
-    if (du) v += du.strength;
+  if (!loc.sections.includes("neutral") && loc.controller) {
+    v += stackStrength(state, loc.controller, loc.hexId);
   }
   return v;
 }
@@ -474,6 +485,14 @@ export function runContest(state, { pid, params, ctx = {} }) {
   const defenderUnit = t.kind === "raid" ? t.unit : locDefUnit;
   const defHex = t.kind === "raid" ? t.unit.node : t.loc.hexId;
 
+  // Combined stack Strength: every friendly unit on the contesting hex
+  // fights together, so their Strengths sum (Concentration is added on top).
+  const atkStrength = stackStrength(state, pid, unit.node);
+  const atkAllies = atkStrength - unit.strength; // contribution from stacked allies
+  const defAllies = defenderUnit
+    ? stackStrength(state, defenderUnit.owner, defHex) - defenderUnit.strength
+    : 0;
+
   // §16.6 combat levers — additive modifiers computed before the roll.
   const atkConcentration = concentration(state, pid, unit.node, unit.uid);
   const atkVeteran = unit.veteran ? CONFIG.combat.veteranBonus : 0;
@@ -491,7 +510,7 @@ export function runContest(state, { pid, params, ctx = {} }) {
   const defenderRollsDie = t.kind === "raid" || (t.kind === "location" && !!defenderUnit);
   const initiatorRoll = state.rng.roll(CONFIG.contestDieSides);
   const defenderRoll = defenderRollsDie ? state.rng.roll(CONFIG.contestDieSides) : 0;
-  const initiatorTotal = unit.strength + atkConcentration + atkVeteran + initiatorRoll;
+  const initiatorTotal = atkStrength + atkConcentration + atkVeteran + initiatorRoll;
   const defenderTotal =
     defValue + defConcentration + defMountain + defFortify + defVeteran + defenderRoll;
   const won = initiatorTotal > defenderTotal;
@@ -502,8 +521,10 @@ export function runContest(state, { pid, params, ctx = {} }) {
     defenderRolled: defenderRollsDie,
     // §16.6 breakdown for the UI
     attackerConcentration: atkConcentration, attackerVeteran: atkVeteran,
+    attackerAllies: atkAllies,
     defenderConcentration: defConcentration, defenderMountain: defMountain,
     defenderFortify: defFortify, defenderVeteran: defVeteran,
+    defenderAllies: defAllies,
   };
   const winnerUnit = won ? attackerUnit : defenderUnit;
   const loserUnit = won ? defenderUnit : attackerUnit;

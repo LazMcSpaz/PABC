@@ -517,7 +517,9 @@ line("\n  [Phase 3] attrition, death, salvage");
   check("pyrrhic win (margin 1) costs the winner 1",
     r.won && r.margin === 1 && r.attackerStrLost === 1 && atk.baseStrength === atkBefore - 1);
 
-  stage(); setStr(atk, 9); setStr(vic, 4);
+  // Two foe units now defend as a combined stack (4+4=8), so the attacker
+  // needs to clear that by the rout margin.
+  stage(); setStr(atk, 13); setStr(vic, 4);
   const vic2 = foeUnits[1]; vic2.node = terrain.id; setStr(vic2, 4);
   r = performAction(g, "contest", { unit: atk.uid, target: vic.uid });
   check("rout (margin >=4) spills a casualty to a 2nd stacked unit",
@@ -626,6 +628,31 @@ line("\n  [Phase 4] passive heal + instant / field reinforcement");
       g.reinforcements.length === 0 &&
       Object.values(g.units).filter((x) => x.owner === me).length === meUnitsBefore + 1);
   }
+}
+
+// --- Combined stack strength (stacked units fight as one) ---
+line("\n  [Stacks] combined Strength + concentration");
+{
+  const g = createGame({ seed }); startTurn(g);
+  const me = g.turnOrder[0];
+  const foe = g.turnOrder[1];
+  const terrain = Object.values(g.board.hexes).find((h) => h.type === "terrain");
+  g.rng.roll = () => 0; // no dice — totals are pure value
+  const myUnits = Object.values(g.units).filter((u) => u.owner === me);
+  const foeUnits = Object.values(g.units).filter((u) => u.owner === foe);
+  const lead = myUnits[0];
+  const ally = myUnits[1];
+  const vic = foeUnits[0];
+  // A 4-str unit and a 3-str unit on the same hex contest a lone enemy.
+  lead.node = terrain.id; lead.moveRemaining = lead.movement; lead.chips = []; lead.baseStrength = 4;
+  ally.node = terrain.id; ally.chips = []; ally.baseStrength = 3;
+  vic.node = terrain.id; vic.chips = []; vic.baseStrength = 1;
+  recomputeStats(g);
+  g.players[me].actions.remaining = 5;
+  const r = performAction(g, "contest", { unit: lead.uid, target: vic.uid });
+  // 4 (lead) + 3 (ally) + 1 (concentration for 1 extra unit) = 8 attacker total.
+  check("stacked attacker = combined Strength + concentration (4+3+1=8)",
+    r.attackerAllies === 3 && r.attackerConcentration === 1 && r.initiatorTotal === 8);
 }
 
 // --- Phase 5: combat levers (concentration, terrain, fortify, veterancy) ---

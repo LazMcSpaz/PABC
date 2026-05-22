@@ -36,8 +36,10 @@ const TAB_H = 44;
 // contest applied, for the resolution overlay.
 function contestMods(r) {
   const out = [];
+  if (r.attackerAllies) out.push(`+${r.attackerAllies} atk allied units`);
   if (r.attackerConcentration) out.push(`+${r.attackerConcentration} atk concentration`);
   if (r.attackerVeteran) out.push(`+${r.attackerVeteran} atk veteran`);
+  if (r.defenderAllies) out.push(`+${r.defenderAllies} def allied units`);
   if (r.defenderConcentration) out.push(`+${r.defenderConcentration} def concentration`);
   if (r.defenderMountain) out.push(`+${r.defenderMountain} mountain`);
   if (r.defenderFortify) out.push(`+${r.defenderFortify} fortify`);
