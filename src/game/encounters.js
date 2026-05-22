@@ -80,7 +80,7 @@ function presentToPlayer(state, enc, pid, ctx) {
     const picked = ctx.interact({
       kind: "encounterChoice",
       encounter: enc.id, player: pid,
-      art: enc.art, imagePath: enc.imagePath, text: enc.text,
+      title: enc.title, art: enc.art, imagePath: enc.imagePath, text: enc.text,
       choices: eligible.map((c) => ({ id: c.id, label: c.label, outcomeText: c.outcomeText })),
     });
     const idx =
