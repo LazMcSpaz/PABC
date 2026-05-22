@@ -114,9 +114,9 @@ owner; no recipient/mode columns needed.
 
 ---
 
-## 2. Effect type names — **locked, 22 total**
+## 2. Effect type names — **locked, 23 total**
 
-The editor's dropdown is exactly these 22 entries. Adding a new type
+The editor's dropdown is exactly these 23 entries. Adding a new type
 requires a coding-agent change (a new handler in `effects.js` AND a
 new row here).
 
@@ -124,7 +124,7 @@ new row here).
 
 | Type | Params shape |
 |---|---|
-| `ADJUST_RESOURCE` | `{ resource: 'Resource'\|'VP'\|'Tech', amount: int, target: <token> }` |
+| `ADJUST_RESOURCE` | `{ resource: 'Resource'\|'VP'\|'Research', amount: int, target: <token> }` |
 | `MODIFY_STAT` | `{ stat: 'Strength'\|'Movement', amount: int, target: <token>, duration: 'permanent'\|'until_your_next_turn'\|'this_turn'\|'this_contest' }` |
 | `GRANT_ACTIONS` | `{ amount: int, target: <token>, when: 'this_turn'\|'next_turn' }` |
 | `MOVE_CARD` | `{ from: <zone>, to: <zone>, selector: 'top'\|'chosen'\|'random'\|'by_id'\|'all_matching', count: int, id?: string, filter?: object }` |
@@ -151,6 +151,12 @@ new row here).
 | `COMPLETE_QUEST` | `{ questId: string }` |
 | `PLACE_ENCOUNTER` | `{ encounterId: string, hex?: <hexId>, hexFilter?: <HexFilter>, expiresIn?: int }` |
 | `DELIVER_ENCOUNTER` | `{ encounterId: string, mode?: 'private'\|'public', recipient?: <token> }` |
+
+### Attrition model
+
+| Type | Params shape |
+|---|---|
+| `ADJUST_BASE_STRENGTH` | `{ amount: int, target: <token> }` — wounds (−) / heals (+) a unit's base Strength (= HP). Clamps to `[0, cap]`; destroys at 0. For a *temporary* combat buff use `MODIFY_STAT` on Strength with a duration instead. |
 
 ---
 
@@ -199,6 +205,7 @@ revision.
 | `factionAffiliation` | no | fid \| `'unaffiliated'` \| `'any'` |
 | `strategicValue` | no | `'low'` \| `'medium'` \| `'high'` \| `'veryHigh'` |
 | `hasAbility` | no | abilityId \| `'any'` \| `'none'` |
+| `terrain` | no | `'mountain'` \| `'any'` — hex terrain. `mountain` grants +1 defender; default terrain is null. |
 
 Example — "an encounter hex within 2 of versari's capital, not
 controlled by anyone":
@@ -253,7 +260,8 @@ Dot-syntax strings evaluated against the engine state:
 | `players.<pid>.tracks.alignment` | int |
 | `players.<pid>.resource` | int |
 | `players.<pid>.vp` | int |
-| `players.<pid>.tech` | int |
+| `players.<pid>.research` | int — the progress resource pool |
+| `players.<pid>.techLevel` | int — derived from research, not authored |
 | `factionStanding.<fid>.<pid>` | int |
 | `state.round` | int |
 | `state.activeQuests.<questId>.beatIndex` | int |

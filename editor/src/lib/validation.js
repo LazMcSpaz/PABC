@@ -6,6 +6,7 @@ import {
   HEX_FILTER_KEYS,
   HEX_TYPE_OPTIONS,
   STRATEGIC_VALUE_OPTIONS,
+  TERRAIN_OPTIONS,
   FACTION_IDS,
 } from "./schema.js";
 import { validateCond, validateStrength } from "./dsl.js";
@@ -31,6 +32,11 @@ export function validateHexFilter(filter, errors = [], path = "hexFilter") {
   ) {
     errors.push(
       `${path}.strategicValue: must be one of ${STRATEGIC_VALUE_OPTIONS.join(", ")}`,
+    );
+  }
+  if (filter.terrain != null && !TERRAIN_OPTIONS.includes(filter.terrain)) {
+    errors.push(
+      `${path}.terrain: must be one of ${TERRAIN_OPTIONS.join(", ")}`,
     );
   }
   for (const k of ["withinHexesOf", "outsideHexesOf"]) {
@@ -174,6 +180,11 @@ export function validateEffect(effect, ctx, errors = [], path = "effect") {
       }
       if (p.recipient != null && p.recipient !== "")
         requireRecipient(p.recipient, errors, `${path}.recipient`);
+      break;
+    case "ADJUST_BASE_STRENGTH":
+      if (!Number.isFinite(Number(p.amount)))
+        errors.push(`${path}.amount must be a number`);
+      requireRecipient(p.target, errors, `${path}.target`);
       break;
     default:
       errors.push(`${path}.type: unknown effect type ${effect.type}`);

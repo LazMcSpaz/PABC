@@ -26,6 +26,8 @@ export const EFFECT_TYPES = [
   "COMPLETE_QUEST",
   "PLACE_ENCOUNTER",
   "DELIVER_ENCOUNTER",
+  // attrition model (base Strength = HP)
+  "ADJUST_BASE_STRENGTH",
 ];
 
 export const SIMPLE_RECIPIENT_TOKENS = [
@@ -58,10 +60,14 @@ export const HEX_FILTER_KEYS = [
   "factionAffiliation",
   "strategicValue",
   "hasAbility",
+  "terrain",
 ];
 
 export const HEX_TYPE_OPTIONS = ["location", "encounter", "terrain", "any"];
 export const STRATEGIC_VALUE_OPTIONS = ["low", "medium", "high", "veryHigh"];
+// Hex terrain predicate. Only `mountain` is special today (+1 defender);
+// default terrain is null. `any` matches regardless.
+export const TERRAIN_OPTIONS = ["mountain", "any"];
 
 export const DSL_OPS = ["eq", "ne", "gt", "gte", "lt", "lte"];
 
@@ -92,25 +98,29 @@ export const DSL_PATHS = [
   "players.versari.tracks.alignment",
   "players.versari.resource",
   "players.versari.vp",
-  "players.versari.tech",
+  "players.versari.research",
+  "players.versari.techLevel",
   "players.goldgrass.tracks.trust",
   "players.goldgrass.tracks.reputation",
   "players.goldgrass.tracks.alignment",
   "players.goldgrass.resource",
   "players.goldgrass.vp",
-  "players.goldgrass.tech",
+  "players.goldgrass.research",
+  "players.goldgrass.techLevel",
   "players.lakers.tracks.trust",
   "players.lakers.tracks.reputation",
   "players.lakers.tracks.alignment",
   "players.lakers.resource",
   "players.lakers.vp",
-  "players.lakers.tech",
+  "players.lakers.research",
+  "players.lakers.techLevel",
   "players.plainers.tracks.trust",
   "players.plainers.tracks.reputation",
   "players.plainers.tracks.alignment",
   "players.plainers.resource",
   "players.plainers.vp",
-  "players.plainers.tech",
+  "players.plainers.research",
+  "players.plainers.techLevel",
   "factionStanding.versari.versari",
   "factionStanding.versari.goldgrass",
   "factionStanding.versari.lakers",
@@ -130,7 +140,7 @@ export const DSL_PATHS = [
   "state.round",
 ];
 
-export const RESOURCE_KINDS = ["Resource", "VP", "Tech"];
+export const RESOURCE_KINDS = ["Resource", "VP", "Research"];
 export const STAT_KINDS = ["Strength", "Movement"];
 export const STAT_DURATIONS = [
   "permanent",
@@ -191,4 +201,5 @@ export const DEFAULT_PARAMS_BY_TYPE = {
   COMPLETE_QUEST: { questId: "" },
   PLACE_ENCOUNTER: { encounterId: "" },
   DELIVER_ENCOUNTER: { encounterId: "" },
+  ADJUST_BASE_STRENGTH: { amount: 0, target: "active" },
 };
