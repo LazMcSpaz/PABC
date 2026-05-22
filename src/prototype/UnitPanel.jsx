@@ -3,15 +3,17 @@
 // bottom-left so it stays out of the way of the inspector and the
 // event feed. X dismisses, which deselects the unit.
 import { FACTIONS as UI_FACTIONS, theme } from "./data.js";
-import { IconBtn, Label } from "./kit.jsx";
+import { IconBtn, Label, Btn, Pill } from "./kit.jsx";
 
-export default function UnitPanel({ unit, hex, onClose }) {
+export default function UnitPanel({ unit, hex, canAct, reinforce, scrap, onReinforce, onClose }) {
   if (!unit) return null;
   const f = UI_FACTIONS[unit.owner];
   const eff = {
     strength: unit.effectiveStrength ?? unit.strength,
     movement: unit.effectiveMovement ?? unit.movement,
   };
+  const canReinforce = canAct && reinforce && reinforce.deficit > 0;
+  const affordable = reinforce && scrap >= reinforce.cost;
 
   return (
     <div
@@ -92,7 +94,13 @@ export default function UnitPanel({ unit, hex, onClose }) {
       <div style={{ padding: "8px 11px", display: "flex", flexDirection: "column", gap: 8 }}>
         <div style={{ display: "flex", gap: 16 }}>
           <Stat label="Strength" base={unit.strength} total={eff.strength} color={theme.accent2} />
-          <Stat label="Movement" base={unit.movement} total={eff.movement} color={theme.accent} />
+          <Stat
+            label="Moves L/R"
+            base={null}
+            total={`${unit.moveRemaining ?? eff.movement}/${eff.movement}`}
+            color={theme.accent}
+            small
+          />
           <Stat
             label="Status"
             base={null}
@@ -101,11 +109,39 @@ export default function UnitPanel({ unit, hex, onClose }) {
             small
           />
         </div>
+        {(unit.veteran || unit.fortified) && (
+          <div style={{ display: "flex", gap: 6 }}>
+            {unit.veteran && <Pill color={theme.accent} filled>Veteran</Pill>}
+            {unit.fortified && <Pill color={theme.good} filled>Fortified</Pill>}
+          </div>
+        )}
         {hex && (
           <div style={{ fontSize: 10, color: theme.textFaint }}>
             On {hex.locationId
               ? hex.locationId.replace(/[A-Z]/g, (c) => " " + c).trim()
               : hex.type} ({hex.id})
+          </div>
+        )}
+        {canReinforce && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+            {reinforce.onFriendlyLoc ? (
+              <Btn
+                variant="primary"
+                disabled={!affordable}
+                onClick={() => onReinforce(unit.uid, "instant")}
+              >
+                Reinforce (here) · {reinforce.cost} scrap
+              </Btn>
+            ) : (
+              <Btn
+                disabled={!affordable || !reinforce.canField}
+                onClick={() => onReinforce(unit.uid, "field")}
+              >
+                {reinforce.canField
+                  ? `Send reinforcements · ${reinforce.cost} scrap · ETA ${reinforce.eta}`
+                  : "No supply route"}
+              </Btn>
+            )}
           </div>
         )}
         <div style={{ fontSize: 10, color: theme.textDim, lineHeight: 1.4 }}>

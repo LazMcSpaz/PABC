@@ -87,8 +87,9 @@ function isImmobilized(state, unit) {
 
 function pickMoveTarget(state, pid, unit) {
   const dists = bfsDistances(state.board.adjacency, unit.node);
+  const budget = unit.moveRemaining ?? unit.movement;
   const reachable = Object.entries(dists)
-    .filter(([hex, d]) => d > 0 && d <= unit.movement && hex !== unit.node);
+    .filter(([hex, d]) => d > 0 && d <= budget && hex !== unit.node);
   if (!reachable.length) return null;
 
   // Score each hex: prefer landing directly on a contestable Location.

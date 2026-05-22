@@ -21,14 +21,29 @@ import { CONFIG } from "../game/config.js";
 import { NEUTRAL } from "./data.js";
 import { getEncounter } from "../game/encounters.js";
 import { evalCond } from "../game/dsl.js";
-import { adaptState } from "./engineAdapter.js";
+import { adaptState, reinforcePreview, engineChipIdToUi } from "./engineAdapter.js";
+import { resolveSalvage } from "../game/contest.js";
 import EncounterModal from "./EncounterModal.jsx";
 import EventFeed from "./EventFeed.jsx";
 import UnitPanel from "./UnitPanel.jsx";
 import ContestOverlay from "./ContestOverlay.jsx";
+import SalvageModal from "./SalvageModal.jsx";
 
 const TOP_H = 56;
 const TAB_H = 44;
+
+// v0.2 §16.6 — human-readable list of the combat-lever modifiers a
+// contest applied, for the resolution overlay.
+function contestMods(r) {
+  const out = [];
+  if (r.attackerConcentration) out.push(`+${r.attackerConcentration} atk concentration`);
+  if (r.attackerVeteran) out.push(`+${r.attackerVeteran} atk veteran`);
+  if (r.defenderConcentration) out.push(`+${r.defenderConcentration} def concentration`);
+  if (r.defenderMountain) out.push(`+${r.defenderMountain} mountain`);
+  if (r.defenderFortify) out.push(`+${r.defenderFortify} fortify`);
+  if (r.defenderVeteran) out.push(`+${r.defenderVeteran} def veteran`);
+  return out;
+}
 
 function bootGame(seed, humanFactionId) {
   const game = createGame({ seed, humanFactionId });
@@ -73,6 +88,7 @@ export default function Prototype({ config, onNewGame }) {
   const [toast, setToast] = useState(null); // { kind: "error"|"info", text }
   const [encounterPrompt, setEncounterPrompt] = useState(null); // pending move + encounter pick
   const [contestViz, setContestViz] = useState(null); // contest replay overlay
+  const [salvagePrompt, setSalvagePrompt] = useState(null); // interactive salvage
   const you = state.players[state.youId];
   const isYourTurn = state.activeId === state.youId && !state.winnerId;
 
@@ -95,11 +111,12 @@ export default function Prototype({ config, onNewGame }) {
   const reachable = useMemo(() => {
     if (!isYourTurn || !selectedUnitId) return null;
     const unit = state.units[selectedUnitId];
-    if (!unit || unit.immobilized || unit.effectiveMovement <= 0) return null;
+    const budget = unit?.moveRemaining ?? unit?.effectiveMovement ?? 0;
+    if (!unit || unit.immobilized || budget <= 0) return null;
     const dists = bfsDistances(gameRef.current.board.adjacency, unit.node);
     const out = new Set();
     for (const [hex, d] of Object.entries(dists)) {
-      if (d > 0 && d <= unit.effectiveMovement) out.add(hex);
+      if (d > 0 && d <= budget) out.add(hex);
     }
     return out;
   }, [tick, isYourTurn, selectedUnitId, state]);
@@ -146,14 +163,21 @@ export default function Prototype({ config, onNewGame }) {
 
   function doMoveWithEncounterChoice(unitUid, dest, choiceId) {
     const ctx = {
+      interactiveLoot: true,
       interact: (req) => {
         if (req.kind === "encounterChoice") return choiceId;
         return req?.options ? req.options[0] : null; // fallback to first
       },
     };
     const r = runAction("move", { unit: unitUid, to: dest }, ctx);
-    if (r.ok) inspectHex(dest);
+    if (r.ok) { inspectHex(dest); maybeOpenLoot(); }
     setEncounterPrompt(null);
+  }
+
+  // Open the salvage modal if a Move just landed on a loot pile (§ hex loot).
+  function maybeOpenLoot() {
+    const p = buildSalvagePrompt(gameRef.current);
+    if (p) setSalvagePrompt(p);
   }
 
   function onHexClick(hexId) {
@@ -178,8 +202,8 @@ export default function Prototype({ config, onNewGame }) {
         });
         return;
       }
-      const r = runAction("move", { unit: selectedUnitId, to: hexId });
-      if (r.ok) inspectHex(hexId);
+      const r = runAction("move", { unit: selectedUnitId, to: hexId }, { interactiveLoot: true });
+      if (r.ok) { inspectHex(hexId); maybeOpenLoot(); }
       return;
     }
 
@@ -226,7 +250,10 @@ export default function Prototype({ config, onNewGame }) {
       defLabel = "Garrison";
     }
 
-    const r = performAction(game, "contest", params, {});
+    // deferSalvage routes any kill's chip distribution to the interactive
+    // SalvageModal (opened when the contest overlay closes) instead of the
+    // headless auto-salvage.
+    const r = performAction(game, "contest", params, { deferSalvage: true });
     if (!r.ok) {
       setToast({ kind: "error", text: r.reason });
       return r;
@@ -247,7 +274,8 @@ export default function Prototype({ config, onNewGame }) {
         name: defName,
         label: defLabel,
         base: defBase,
-        calculated: r.cancelled ? null : r.defenderValue,
+        // pre-die value, now incl. §16.6 modifiers
+        calculated: r.cancelled ? null : r.defenderTotal - r.defenderRoll,
         roll: r.defenderRoll,
         total: r.defenderTotal,
         rollsDie: r.defenderRolled,
@@ -256,14 +284,56 @@ export default function Prototype({ config, onNewGame }) {
       won: r.won,
       cancelled: r.cancelled,
       kind: r.kind,
+      // v0.2 §16.4 — attrition / death / salvage summary
+      attackerStrLost: r.attackerStrLost || 0,
+      defenderStrLost: r.defenderStrLost || 0,
+      killed: r.killed || [],
+      salvage: r.salvage || null,
+      // v0.2 §16.6 — combat-lever breakdown
+      mods: contestMods(r),
     });
     return r;
   }
+  // Build the descriptor the SalvageModal needs from the head of the
+  // engine's pending-salvage queue (null when empty).
+  function buildSalvagePrompt(game) {
+    const e = game.pendingSalvage?.[0];
+    if (!e) return null;
+    const killer = game.units[e.killerUid];
+    const info = (uid) => {
+      const id = game.chips[uid]?.chipId;
+      const def = ENGINE_CHIPS[id] || {};
+      return {
+        uid, uiChipId: engineChipIdToUi(id), name: def.name || id,
+        cost: def.cost || 0, slots: def.slots || 1,
+        resale: Math.ceil((def.cost || 0) / 2),
+      };
+    };
+    return {
+      kind: e.kind === "loot" ? "loot" : "death",
+      killerName: killer?.name || "Victor",
+      killerColor: UI_FACTIONS[killer?.owner]?.color,
+      baySlots: CONFIG.unit.baySlots,
+      unitChips: (killer?.chips || []).map(info),
+      salvagedChips: e.chips.map(info),
+    };
+  }
+
+  function onSalvageConfirm(assignments) {
+    resolveSalvage(gameRef.current, assignments);
+    bumpTick();
+    setSalvagePrompt(buildSalvagePrompt(gameRef.current)); // next in queue, or null
+  }
+
   function onActivate(hexId) {
     return runAction("activate", { location: hexId }, null, "Ability activated.");
   }
   function onRecruit(hexId) {
     return runAction("recruit", { at: hexId }, null, "Unit recruited.");
+  }
+  function onReinforce(unitUid, mode) {
+    const msg = mode === "instant" ? "Unit reinforced." : "Reinforcements dispatched.";
+    return runAction("reinforce", { unit: unitUid, mode }, null, msg);
   }
   function onAcquire(uiChip) {
     // uiChip is { uid, chipId, engineChipId }. Pick an install target:
@@ -272,7 +342,8 @@ export default function Prototype({ config, onNewGame }) {
     const def = gameRef.current.chips[uiChip.uid];
     const engineId = def?.chipId;
     const enginePool = gameRef.current.market.tiers[1]?.row || [];
-    if (!enginePool.includes(uiChip.uid)) {
+    const inResale = (gameRef.current.resaleRow || []).includes(uiChip.uid);
+    if (!enginePool.includes(uiChip.uid) && !inResale) {
       setToast({ kind: "error", text: "Chip is no longer in the market." });
       return;
     }
@@ -407,6 +478,10 @@ export default function Prototype({ config, onNewGame }) {
           <UnitPanel
             unit={state.units[selectedUnitId]}
             hex={state.hexes[state.units[selectedUnitId].node]}
+            canAct={isYourTurn && state.units[selectedUnitId].owner === state.youId}
+            reinforce={reinforcePreview(gameRef.current, selectedUnitId)}
+            scrap={you.scrap}
+            onReinforce={onReinforce}
             onClose={() => setSelectedUnitId(null)}
           />
         )}
@@ -478,10 +553,20 @@ export default function Prototype({ config, onNewGame }) {
       )}
 
       {contestViz && (
-        <ContestOverlay viz={contestViz} onClose={() => setContestViz(null)} />
+        <ContestOverlay
+          viz={contestViz}
+          onClose={() => {
+            setContestViz(null);
+            setSalvagePrompt(buildSalvagePrompt(gameRef.current));
+          }}
+        />
       )}
 
-      {state.winnerId && !contestViz && (
+      {salvagePrompt && (
+        <SalvageModal prompt={salvagePrompt} onConfirm={onSalvageConfirm} />
+      )}
+
+      {state.winnerId && !contestViz && !salvagePrompt && (
         <EndOverlay state={state} onNewGame={onNewGame} />
       )}
     </div>

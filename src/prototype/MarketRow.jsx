@@ -23,6 +23,17 @@ export default function MarketRow({ state, isYourTurn, onAcquire }) {
           return (
             <div key={i} style={{ display: "flex", flexDirection: "column", gap: 7, alignItems: "center" }}>
               <Chip chipId={item.chipId} width={92} dim={!affordable} />
+              {item.isResale && (
+                <span
+                  style={{
+                    fontSize: 8.5, fontWeight: 700, letterSpacing: 0.6,
+                    textTransform: "uppercase", color: theme.accent,
+                    border: `1px solid ${theme.accent}66`, borderRadius: 3, padding: "0 5px",
+                  }}
+                >
+                  Resale
+                </span>
+              )}
               <Btn
                 variant={affordable ? "primary" : "ghost"}
                 size="sm"

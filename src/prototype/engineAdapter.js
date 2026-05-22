@@ -5,6 +5,7 @@
 // shape-agnostic.
 
 import { CONFIG } from "../game/config.js";
+import { reinforcementRoute } from "../game/board.js";
 import {
   LOCATIONS as ENGINE_LOCATIONS,
   CHIPS as ENGINE_CHIPS,
@@ -25,7 +26,7 @@ const ENGINE_TO_UI_LOC = {
 };
 const ENGINE_TO_UI_CHIP = {
   "sharpened-blades": "sharpenedBlades",
-  "new-recruits": "newRecruits",
+  "drilled-troops": "drilledTroops",
   "training-grounds": "trainingGrounds",
   "defense-turrets": "defenseTurrets",
   "logistics-hub": "logisticsHub",
@@ -192,6 +193,9 @@ export function adaptState(state) {
       movement: u.baseMovement,
       effectiveStrength: u.strength,
       effectiveMovement: u.movement,
+      moveRemaining: u.moveRemaining ?? u.movement,
+      fortified: !!u.fortified,
+      veteran: !!u.veteran,
       chips: adaptChips(state, u.chips),
       chipUids: [...u.chips],
       immobilized: isImmobilized(state, u),
@@ -209,6 +213,11 @@ export function adaptState(state) {
     };
     if (unitAt[h.id]) hex.unitId = unitAt[h.id];
     if (unitIdsAt[h.id]) hex.unitIds = unitIdsAt[h.id];
+    const loot = state.hexLoot?.[h.id];
+    if (loot?.length) {
+      hex.loot = loot.length;
+      hex.lootChips = loot.map((uid) => engineChipIdToUi(state.chips[uid]?.chipId));
+    }
     if (h.type === "location") {
       const loc = state.locations[h.id];
       hex.locationId = engineLocationIdToUi(loc.locationId);
@@ -244,7 +253,7 @@ export function adaptState(state) {
       vp: p.vp,
       tech: p.tech,
       actions: { ...p.actions },
-      unitCap: 1 + countTrainingGrounds(state, pid),
+      unitCap: CONFIG.baseUnitCap + countTrainingGrounds(state, pid),
       isAI: !!p.isAI,
       hand: [...p.hand],
       handChips: adaptChipsWithUids(state, p.hand),
@@ -261,6 +270,13 @@ export function adaptState(state) {
     chipId: engineChipIdToUi(state.chips[uid]?.chipId),
     engineChipId: state.chips[uid]?.chipId,
   }));
+  // v0.2 §16.4 — resold chips share the Market display but acquire at full
+  // cost ignoring tech tier (handled in actions.validateAcquire).
+  for (const uid of state.resaleRow || []) {
+    const eng = state.chips[uid]?.chipId;
+    market.push(engineChipIdToUi(eng));
+    marketChips.push({ uid, chipId: engineChipIdToUi(eng), engineChipId: eng, isResale: true });
+  }
 
   return {
     round: state.round,
@@ -275,9 +291,32 @@ export function adaptState(state) {
     market,
     marketChips,
     winnerId: state.winnerId,
+    // v0.2 §16.5 — in-transit field reinforcements, for board overlay /
+    // unit panel ETA display.
+    reinforcements: (state.reinforcements || []).map((r) => ({ ...r })),
     // Surface the raw engine state so Phase-4 action handlers can reach
     // engine APIs without re-deriving everything.
     engineState: state,
+  };
+}
+
+// v0.2 §16.5 — what a Reinforce action would cost/look like for `unitUid`
+// right now: the scrap to top it up, whether an instant top-up is legal
+// (unit on a fully-held Location), and the field-supply ETA in turns.
+export function reinforcePreview(state, unitUid) {
+  const unit = state.units[unitUid];
+  if (!unit) return null;
+  const cap = unit.veteran ? CONFIG.unit.veteranStrengthCap : CONFIG.unit.baseStrengthCap;
+  const deficit = cap - unit.baseStrength;
+  const loc = state.locations[unit.node];
+  const onFriendlyLoc = !!(loc && loc.controller === unit.owner);
+  const route = deficit > 0 ? reinforcementRoute(state, unit.owner, unit.node) : null;
+  return {
+    deficit,
+    cost: CONFIG.heal.scrapPerStrength * deficit,
+    onFriendlyLoc,
+    eta: route ? route.dist : null,
+    canField: !!route,
   };
 }
 
@@ -318,6 +357,21 @@ export function previewLocationContest(state, hexId) {
     if (defendingUnit) value += defendingUnit.strength;
   }
 
+  // §16.6 combat levers on the defender side.
+  const mountain =
+    state.board.hexes[hexId]?.terrain === "mountain" ? CONFIG.combat.mountainDefenseBonus : 0;
+  let concentration = 0, fortify = 0, veteran = 0;
+  if (defendingUnit) {
+    let n = 0;
+    for (const u of Object.values(state.units)) {
+      if (u.owner === loc.controller && u.node === hexId && u.uid !== defendingUnit.uid) n++;
+    }
+    concentration = Math.min(n, CONFIG.combat.concentrationCap) * CONFIG.combat.concentrationPerUnit;
+    if (defendingUnit.fortified) fortify = CONFIG.combat.fortifyBonus;
+    if (defendingUnit.veteran) veteran = CONFIG.combat.veteranBonus;
+  }
+  value += mountain + concentration + fortify + veteran;
+
   // House rule: a garrison-only defence (no defending unit) does NOT
   // roll a d6 — its total is the static value.
   const defenderRollsDie = !!defendingUnit;
@@ -327,6 +381,7 @@ export function previewLocationContest(state, hexId) {
     defendingUnit: defendingUnit
       ? { uid: defendingUnit.uid, owner: defendingUnit.owner, strength: defendingUnit.strength }
       : null,
+    modifiers: { mountain, concentration, fortify, veteran },
     hasNeutral,
     defenderRollsDie,
   };

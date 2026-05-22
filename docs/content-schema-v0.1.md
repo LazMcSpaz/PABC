@@ -114,9 +114,9 @@ owner; no recipient/mode columns needed.
 
 ---
 
-## 2. Effect type names — **locked, 22 total**
+## 2. Effect type names — **locked, 23 total**
 
-The editor's dropdown is exactly these 22 entries. Adding a new type
+The editor's dropdown is exactly these 23 entries. Adding a new type
 requires a coding-agent change (a new handler in `effects.js` AND a
 new row here).
 
@@ -151,6 +151,12 @@ new row here).
 | `COMPLETE_QUEST` | `{ questId: string }` |
 | `PLACE_ENCOUNTER` | `{ encounterId: string, hex?: <hexId>, hexFilter?: <HexFilter>, expiresIn?: int }` |
 | `DELIVER_ENCOUNTER` | `{ encounterId: string, mode?: 'private'\|'public', recipient?: <token> }` |
+
+### From spec §16 (v0.2 — implemented)
+
+| Type | Params shape |
+|---|---|
+| `ADJUST_BASE_STRENGTH` | `{ amount: int, target: <token> }` — wound/heal a unit's base Strength (its HP); clamps to `[0, cap]`, destroys at 0 |
 
 ---
 
