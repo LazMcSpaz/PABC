@@ -265,6 +265,13 @@ export function adaptState(state) {
     chipId: engineChipIdToUi(state.chips[uid]?.chipId),
     engineChipId: state.chips[uid]?.chipId,
   }));
+  // v0.2 §16.4 — resold chips share the Market display but acquire at full
+  // cost ignoring tech tier (handled in actions.validateAcquire).
+  for (const uid of state.resaleRow || []) {
+    const eng = state.chips[uid]?.chipId;
+    market.push(engineChipIdToUi(eng));
+    marketChips.push({ uid, chipId: engineChipIdToUi(eng), engineChipId: eng, isResale: true });
+  }
 
   return {
     round: state.round,

@@ -242,25 +242,90 @@ export function destroyUnit(state, unitUid, killerUid, ctx = {}) {
   emit(state, "unit_destroyed", { unit: unitUid, owner: dead.owner, killer: killerUid || null });
 
   const killer = killerUid ? state.units[killerUid] : null;
-  if (killer && chips.length) {
-    const bayFree = CONFIG.unit.baySlots - slotsUsedOf(state, killer.chips);
-    let taken = autoSalvage(state, chips, bayFree);
-    if (ctx.interact) {
-      const picked = ctx.interact({ kind: "salvage", chips: [...chips], bayFree, killer: killerUid });
-      if (Array.isArray(picked)) {
-        // Honour the choice but never exceed bay space.
-        taken = autoSalvage(state, picked.filter((c) => chips.includes(c)), bayFree);
-      }
-    }
-    for (const c of chips) {
-      if (taken.includes(c)) killer.chips.push(c);
-      else state.removed.push(c);
-    }
-    if (taken.length) emit(state, "unit_salvaged", { killer: killerUid, from: unitUid, chips: taken });
-    recomputeStats(state);
-  } else {
-    for (const c of chips) state.removed.push(c);
+  if (!killer || !chips.length) {
+    for (const c of chips) state.removed.push(c); // garrison / null killer scraps all
+    return;
   }
+
+  // Interactive UI path: defer the decision. Stash the recovered chips on
+  // the queue (held off any unit) and let the UI distribute them via
+  // resolveSalvage. Headless / AI paths fall through to the auto default.
+  if (ctx.deferSalvage) {
+    state.pendingSalvage = state.pendingSalvage || [];
+    state.pendingSalvage.push({
+      killerUid, deadUid: unitUid, deadOwner: dead.owner, chips: [...chips],
+    });
+    recomputeStats(state);
+    return;
+  }
+
+  const bayFree = CONFIG.unit.baySlots - slotsUsedOf(state, killer.chips);
+  let taken = autoSalvage(state, chips, bayFree);
+  if (ctx.interact) {
+    const picked = ctx.interact({ kind: "salvage", chips: [...chips], bayFree, killer: killerUid });
+    if (Array.isArray(picked)) {
+      taken = autoSalvage(state, picked.filter((c) => chips.includes(c)), bayFree);
+    }
+  }
+  for (const c of chips) {
+    if (taken.includes(c)) killer.chips.push(c);
+    else state.removed.push(c);
+  }
+  if (taken.length) emit(state, "unit_salvaged", { killer: killerUid, from: unitUid, chips: taken });
+  recomputeStats(state);
+}
+
+// Resolve the head of the interactive salvage queue. `assignments` sorts
+// every chip in play (the killer's current bay + the recovered chips) into
+// three terminal buckets; anything omitted is treated as scrapped (the
+// "Salvaged" staging tray is lossy by design).
+//   { unitSlots: [uid], resell: [uid], destroy: [uid] }
+// - unitSlots becomes the killer's exact bay (must fit baySlots).
+// - resell pays the killer's owner ceil(cost/2) and lands the chip on the
+//   4-slot resale row (FIFO; the oldest falls off when full).
+// - destroy / omitted chips are removed from the game.
+export function resolveSalvage(state, assignments = {}) {
+  const entry = state.pendingSalvage?.[0];
+  if (!entry) return { ok: false, reason: "no pending salvage" };
+  const killer = state.units[entry.killerUid];
+  const unitSlots = (assignments.unitSlots || []).filter((c) => state.chips[c]);
+  const resell = (assignments.resell || []).filter((c) => state.chips[c]);
+
+  // The full universe of chips this decision governs.
+  const universe = new Set([...(killer ? killer.chips : []), ...entry.chips]);
+
+  if (killer) {
+    if (slotsUsedOf(state, unitSlots) > CONFIG.unit.baySlots)
+      return { ok: false, reason: "too many chips for the unit's bay" };
+    killer.chips = unitSlots.filter((c) => universe.has(c));
+  }
+
+  for (const c of resell) {
+    if (!universe.has(c)) continue;
+    const def = CHIPS[state.chips[c]?.chipId];
+    const value = Math.ceil((def?.cost || 0) / 2);
+    if (killer && value > 0) {
+      state.players[killer.owner].resource += value;
+      emit(state, "resource_gained", {
+        player: killer.owner, resource: "Resource", amount: value, source: "resale",
+      });
+    }
+    state.resaleRow.push(c);
+    while (state.resaleRow.length > 4) state.removed.push(state.resaleRow.shift());
+  }
+
+  // Everything else in the universe (destroy bucket, leftover tray) is scrapped.
+  const kept = new Set([...(killer ? killer.chips : []), ...resell]);
+  for (const c of universe) if (!kept.has(c)) state.removed.push(c);
+
+  const salvagedFromDead = (killer ? killer.chips : []).filter((c) => entry.chips.includes(c));
+  emit(state, "unit_salvaged", {
+    killer: entry.killerUid, from: entry.deadUid, chips: salvagedFromDead, resold: resell,
+  });
+
+  state.pendingSalvage.shift();
+  recomputeStats(state);
+  return { ok: true, remaining: state.pendingSalvage.length };
 }
 
 // §16.4 — drop `n` from a unit's base Strength (its HP), recompute derived

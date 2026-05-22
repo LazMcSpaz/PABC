@@ -201,9 +201,11 @@ function slotsUsed(state, chipUids) {
 
 function validateAcquire(state, { pid, player, params }) {
   if (!params.chip) return fail("specify which chip to acquire (params.chip)");
-  const found = findInMarket(state, params.chip);
-  if (!found) return fail("that chip is not in any market row");
-  if (found.tier > unlockedTier(player.tech))
+  const inResale = state.resaleRow?.includes(params.chip);
+  const found = inResale ? null : findInMarket(state, params.chip);
+  if (!inResale && !found) return fail("that chip is not in any market row");
+  // Resale chips ignore tech tier — they're used goods.
+  if (found && found.tier > unlockedTier(player.tech))
     return fail(`tier ${found.tier} requires more Tech`);
 
   const def = CHIPS[state.chips[params.chip]?.chipId];
@@ -228,9 +230,17 @@ function validateAcquire(state, { pid, player, params }) {
 }
 
 function runAcquire(state, { pid, player, params }) {
-  const found = findInMarket(state, params.chip);
-  const chipUid = found.row.splice(found.row.indexOf(params.chip), 1)[0];
-  if (found.deck.length) found.row.push(found.deck.shift());
+  const inResale = state.resaleRow?.includes(params.chip);
+  let chipUid, tier;
+  if (inResale) {
+    chipUid = state.resaleRow.splice(state.resaleRow.indexOf(params.chip), 1)[0];
+    tier = CHIPS[state.chips[chipUid]?.chipId]?.techLevel ?? null;
+  } else {
+    const found = findInMarket(state, params.chip);
+    chipUid = found.row.splice(found.row.indexOf(params.chip), 1)[0];
+    if (found.deck.length) found.row.push(found.deck.shift());
+    tier = found.tier;
+  }
 
   const def = CHIPS[state.chips[chipUid].chipId];
   player.resource -= def.cost || 0;
@@ -246,10 +256,10 @@ function runAcquire(state, { pid, player, params }) {
   }
 
   emit(state, "card_acquired", {
-    player: pid, chip: chipUid, chipId: def.id, tier: found.tier,
+    player: pid, chip: chipUid, chipId: def.id, tier,
   });
   recomputeTech(state); // a fresh Labs may have moved the player's Tech
-  return { chip: chipUid, chipId: def.id, tier: found.tier };
+  return { chip: chipUid, chipId: def.id, tier };
 }
 
 // --- Activate --------------------------------------------------------

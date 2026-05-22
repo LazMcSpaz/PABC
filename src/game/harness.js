@@ -7,7 +7,8 @@ import { performAction } from "./actions.js";
 import { applyEffect } from "./effects.js";
 import { recomputeStats } from "./stats.js";
 import { activePlayerId } from "./targeting.js";
-import { FACTIONS, LOCATIONS, ABILITIES, REACTIVES } from "./content.js";
+import { FACTIONS, LOCATIONS, ABILITIES, REACTIVES, CHIPS } from "./content.js";
+import { resolveSalvage } from "./contest.js";
 import { loadFieldEncounters, findUnsupportedTypes, choiceIsRunnable, WORLD_ENCOUNTERS } from "./content-loader.js";
 import { evalCond, evalStrength } from "./dsl.js";
 import { registerQuest } from "./quests.js";
@@ -721,6 +722,42 @@ line("\n  [Phase 5] concentration, mountain, fortify, veterancy");
     performAction(g5, "contest", { unit: a.uid, target: e.uid });
     check("a unit promotes to Veteran after 3 wins", a.veteran === true);
   }
+}
+
+// --- Interactive salvage + resale row ---
+line("\n  [Salvage] deferred interactive salvage + resale row");
+{
+  const g = createGame({ seed }); startTurn(g);
+  const me = g.turnOrder[0];
+  const foe = g.turnOrder[1];
+  const terrain = Object.values(g.board.hexes).find((h) => h.type === "terrain");
+  g.rng.roll = () => 1;
+  const atk = Object.values(g.units).find((u) => u.owner === me);
+  const vic = Object.values(g.units).find((u) => u.owner === foe);
+  atk.node = terrain.id; atk.moveRemaining = atk.movement; atk.chips = [];
+  vic.node = terrain.id;
+  const c1 = g.nextId("chip"); g.chips[c1] = { uid: c1, chipId: "drilled-troops" };
+  const c2 = g.nextId("chip"); g.chips[c2] = { uid: c2, chipId: "sharpened-blades" };
+  vic.chips = [c1, c2];
+  vic.baseStrength = 1; atk.baseStrength = 9; recomputeStats(g);
+  g.players[me].actions.remaining = 5;
+
+  const r = performAction(g, "contest", { unit: atk.uid, target: vic.uid }, { deferSalvage: true });
+  check("deferred salvage queues a pending decision",
+    g.pendingSalvage.length === 1 && r.killed.includes(vic.uid));
+
+  const scrapBefore = g.players[me].resource;
+  const res = resolveSalvage(g, { unitSlots: [c1], resell: [c2] });
+  check("salvage installs the kept chip on the killer", res.ok && atk.chips.includes(c1));
+  check("resold chip pays ceil(cost/2) and lands on the resale row",
+    g.resaleRow.includes(c2) &&
+    g.players[me].resource === scrapBefore + Math.ceil(CHIPS["sharpened-blades"].cost / 2));
+  check("pending salvage cleared", g.pendingSalvage.length === 0);
+
+  g.players[me].resource += 100;
+  const acq = performAction(g, "acquire", { chip: c2, into: { unit: atk.uid } });
+  check("resale chips are acquirable at full cost",
+    acq.ok && atk.chips.includes(c2) && !g.resaleRow.includes(c2));
 }
 
 line(`\n  v0.2 verification: ${v2pass} passed, ${v2fail} failed`);
