@@ -146,11 +146,13 @@ export async function loadStory(kind, id) {
 function kindHeadMeta(kind, head) {
   if (kind === "field") {
     return {
+      title: head.title ?? "",
       copies: head.copies ?? 1,
     };
   }
   if (kind === "world") {
     return {
+      title: head.title ?? "",
       mode: head.mode,
       recipient: head.recipient,
       expiresIn: head.expiresIn,
@@ -250,12 +252,14 @@ export async function saveStory(story) {
     if (kind === "field") {
       row = {
         ...baseRow,
+        title: isHead ? story.title ?? null : null,
         copies: isHead ? story.copies ?? 1 : 0,
       };
     } else {
       // world
       row = {
         ...baseRow,
+        title: isHead ? story.title ?? null : null,
         mode: isHead ? story.mode ?? "private" : "private",
         recipient: isHead ? story.recipient ?? null : null,
         expiresIn: isHead ? story.expiresIn ?? null : null,

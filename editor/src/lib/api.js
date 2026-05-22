@@ -23,9 +23,9 @@ export async function listAll() {
   const [worlds, fields, quests] = await Promise.all([
     sb()
       .from("world_encounters")
-      .select("id, mode, triggerCondition")
+      .select("id, title, mode, triggerCondition")
       .order("id"),
-    sb().from("field_encounters").select("id, copies").order("id"),
+    sb().from("field_encounters").select("id, title, copies").order("id"),
     sb().from("quests").select("id, title, mode").order("id"),
   ]);
   if (worlds.error) throw worlds.error;

@@ -320,6 +320,7 @@ function blankForKind(kind, id) {
     return {
       kind: "world",
       id,
+      title: "",
       mode: "private",
       recipient: "active",
       expiresIn: null,
@@ -335,6 +336,7 @@ function blankForKind(kind, id) {
     return {
       kind: "field",
       id,
+      title: "",
       copies: 1,
       beats: [blankBeat(id, true)],
     };

@@ -25,6 +25,7 @@ a build step exports the DB to engine-consumable JS.
 | `id` | TEXT PK | |
 | `mode` | TEXT | `'private' \| 'public' \| 'placement'` |
 | `recipient` | TEXT | recipient token (§3); nullable for `placement` |
+| `title` | TEXT | nullable; story display title. Blank falls back to a prettified id at export. Stored on the head; sub-beats inherit it. |
 | `expiresIn` | INT | nullable; `placement` mode only |
 | `publicGroupChoice` | INT | 0/1; `public` mode only |
 | `art` | TEXT | nullable; free-text art-direction notes |
@@ -43,6 +44,7 @@ editor does not author triggers separately.
 | Column | Type | Notes |
 |---|---|---|
 | `id` | TEXT PK | |
+| `title` | TEXT | nullable; story display title. Blank falls back to a prettified id at export. Stored on the head; sub-beats inherit it. |
 | `copies` | INT | how many seed the deck |
 | `art` | TEXT | nullable; free-text art-direction notes |
 | `imagePath` | TEXT | nullable; relative repo path to a JPEG (3:2). Engine fades the rightmost third on display. |

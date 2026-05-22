@@ -64,8 +64,14 @@ export async function loadSnapshot() {
     });
   }
 
+  // Title resolution: a blank title falls back to a prettified id.
+  // Sub-beats (id contains "__b") inherit their head's title.
+  const worldTitleByHead = titleByHead(we.data ?? []);
+  const fieldTitleByHead = titleByHead(fe.data ?? []);
+
   const worldEncounters = (we.data ?? []).map((row) => ({
     id: row.id,
+    title: resolveTitle(row.id, worldTitleByHead),
     mode: row.mode,
     recipient: row.recipient,
     expiresIn: row.expiresIn,
@@ -82,6 +88,7 @@ export async function loadSnapshot() {
 
   const fieldEncounters = (fe.data ?? []).map((row) => ({
     id: row.id,
+    title: resolveTitle(row.id, fieldTitleByHead),
     copies: row.copies,
     art: row.art,
     imagePath: row.imagePath ?? null,
@@ -118,7 +125,7 @@ export async function loadSnapshot() {
 
   const quests = (q.data ?? []).map((row) => ({
     id: row.id,
-    title: row.title,
+    title: row.title || prettifyId(row.id),
     mode: row.mode,
     beats: beatsByQuest.get(row.id) ?? [],
     completion: {
@@ -128,4 +135,37 @@ export async function loadSnapshot() {
   }));
 
   return { worldEncounters, fieldEncounters, quests };
+}
+
+// Strip the "__b<n>" sub-beat suffix to find the head id.
+function headIdOf(id) {
+  const idx = id.indexOf("__b");
+  return idx >= 0 ? id.slice(0, idx) : id;
+}
+
+// Build a map of head id → stored title (only head rows carry one).
+function titleByHead(rows) {
+  const map = new Map();
+  for (const row of rows) {
+    if (headIdOf(row.id) === row.id && row.title) {
+      map.set(row.id, row.title);
+    }
+  }
+  return map;
+}
+
+// Resolve the display title for any encounter row: the head's stored
+// title, else a prettified id.
+function resolveTitle(id, titleMap) {
+  const head = headIdOf(id);
+  return titleMap.get(head) || prettifyId(head);
+}
+
+// fe_grain_silo → "Grain Silo". Strips a leading type prefix
+// (fe_/we_/q_/quest_/beat_/qb_) then title-cases the remaining words.
+function prettifyId(id) {
+  let s = String(id || "");
+  s = s.replace(/^(fe|we|q|qb|quest|beat)_/i, "");
+  s = s.replace(/[_-]+/g, " ").trim();
+  return s.replace(/\b\w/g, (c) => c.toUpperCase());
 }

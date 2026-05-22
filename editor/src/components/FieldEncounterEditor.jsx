@@ -66,6 +66,13 @@ export function FieldEncounterEditor({ value, onChange, context }) {
           <Field label="id">
             <TextInput value={value.id} onChange={(v) => set("id", v)} />
           </Field>
+          <Field label="title (player-facing; blank = prettified id)">
+            <TextInput
+              value={value.title}
+              onChange={(v) => set("title", v)}
+              placeholder="e.g. The Grain Silo"
+            />
+          </Field>
           <Field label="copies (deck count)">
             <NumberInput
               value={value.copies}

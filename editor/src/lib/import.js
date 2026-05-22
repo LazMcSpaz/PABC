@@ -50,6 +50,7 @@ const BOOL_INT_COLUMNS = {
 const ALLOWED_COLUMNS = {
   world_encounters: new Set([
     "id",
+    "title",
     "mode",
     "recipient",
     "expiresIn",
@@ -62,7 +63,14 @@ const ALLOWED_COLUMNS = {
     "triggerCooldown",
     "placementFilter",
   ]),
-  field_encounters: new Set(["id", "copies", "art", "imagePath", "text"]),
+  field_encounters: new Set([
+    "id",
+    "title",
+    "copies",
+    "art",
+    "imagePath",
+    "text",
+  ]),
   quests: new Set(["id", "mode", "title"]),
   quest_beats: new Set([
     "id",

@@ -43,7 +43,7 @@ export function Header({
         <optgroup label="World Encounters">
           {(index?.worldEncounters ?? []).map((e) => (
             <option key={`world:${e.id}`} value={`world:${e.id}`}>
-              {e.id} · {e.mode}
+              {e.title ? `${e.title} (${e.id})` : e.id} · {e.mode}
             </option>
           ))}
         </optgroup>
@@ -51,7 +51,7 @@ export function Header({
         <optgroup label="Field Encounters">
           {(index?.fieldEncounters ?? []).map((e) => (
             <option key={`field:${e.id}`} value={`field:${e.id}`}>
-              {e.id}
+              {e.title ? `${e.title} (${e.id})` : e.id}
             </option>
           ))}
         </optgroup>
