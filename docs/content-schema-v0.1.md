@@ -128,7 +128,7 @@ new row here).
 | `MODIFY_STAT` | `{ stat: 'Strength'\|'Movement', amount: int, target: <token>, duration: 'permanent'\|'until_your_next_turn'\|'this_turn'\|'this_contest' }` |
 | `GRANT_ACTIONS` | `{ amount: int, target: <token>, when: 'this_turn'\|'next_turn' }` |
 | `MOVE_CARD` | `{ from: <zone>, to: <zone>, selector: 'top'\|'chosen'\|'random'\|'by_id'\|'all_matching', count: int, id?: string, filter?: object }` |
-| `SET_FLAG` | `{ flag: 'disabled'\|'exhausted'\|'shielded'\|'marked'\|'immobilized', value: bool, target: <token>, duration: string }` |
+| `SET_FLAG` | `{ flag: 'disabled'\|'exhausted'\|'shielded'\|'marked', value: bool, target: <token>, duration: string }` — `immobilized` removed in combat v0.2 (was a raid outcome; replaced by attrition + chip salvage). |
 | `TRANSFER` | `{ what: 'resource'\|'card', resource?: string, amount?: int\|'all'\|'half', from: <token>, to: <token> }` |
 | `CONVERT` | `{ from: <pool>, to: <pool>, rate: { cost: int, gain: int }, max?: int, target: <token> }` |
 | `SPAWN` | `{ source: string, zone: <zone>, initialState?: object }` |

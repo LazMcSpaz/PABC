@@ -625,6 +625,24 @@ function EffectParams({ type, params, onChange, context }) {
         </div>
       );
 
+    case "ADJUST_BASE_STRENGTH":
+      return (
+        <div className="flex flex-col gap-2">
+          <div className="text-xs text-slate-500">
+            Permanently wounds (−) or heals (+) a unit's base Strength = HP
+            (clamped to [0, cap]; destroyed at 0). For a temporary combat
+            buff instead, use <code>MODIFY_STAT</code> on Strength with a
+            duration.
+          </div>
+          <ParamRow label="amount">
+            <NumberField value={params.amount} onChange={(v) => set("amount", v)} />
+          </ParamRow>
+          <ParamRow label="target">
+            <RecipientPicker value={params.target} onChange={(v) => set("target", v)} />
+          </ParamRow>
+        </div>
+      );
+
     default:
       return <div className="text-xs text-rose-400">unknown effect type</div>;
   }
