@@ -6,7 +6,6 @@ import {
   HEX_FILTER_KEYS,
   HEX_TYPE_OPTIONS,
   STRATEGIC_VALUE_OPTIONS,
-  TERRAIN_OPTIONS,
   FACTION_IDS,
 } from "./schema.js";
 import { validateCond, validateStrength } from "./dsl.js";
@@ -32,11 +31,6 @@ export function validateHexFilter(filter, errors = [], path = "hexFilter") {
   ) {
     errors.push(
       `${path}.strategicValue: must be one of ${STRATEGIC_VALUE_OPTIONS.join(", ")}`,
-    );
-  }
-  if (filter.terrain != null && !TERRAIN_OPTIONS.includes(filter.terrain)) {
-    errors.push(
-      `${path}.terrain: must be one of ${TERRAIN_OPTIONS.join(", ")}`,
     );
   }
   for (const k of ["withinHexesOf", "outsideHexesOf"]) {

@@ -60,14 +60,10 @@ export const HEX_FILTER_KEYS = [
   "factionAffiliation",
   "strategicValue",
   "hasAbility",
-  "terrain",
 ];
 
 export const HEX_TYPE_OPTIONS = ["location", "encounter", "terrain", "any"];
 export const STRATEGIC_VALUE_OPTIONS = ["low", "medium", "high", "veryHigh"];
-// Hex terrain predicate. Only `mountain` is special today (+1 defender);
-// default terrain is null. `any` matches regardless.
-export const TERRAIN_OPTIONS = ["mountain", "any"];
 
 export const DSL_OPS = ["eq", "ne", "gt", "gte", "lt", "lte"];
 
@@ -98,29 +94,25 @@ export const DSL_PATHS = [
   "players.versari.tracks.alignment",
   "players.versari.resource",
   "players.versari.vp",
-  "players.versari.research",
-  "players.versari.techLevel",
+  "players.versari.tech",
   "players.goldgrass.tracks.trust",
   "players.goldgrass.tracks.reputation",
   "players.goldgrass.tracks.alignment",
   "players.goldgrass.resource",
   "players.goldgrass.vp",
-  "players.goldgrass.research",
-  "players.goldgrass.techLevel",
+  "players.goldgrass.tech",
   "players.lakers.tracks.trust",
   "players.lakers.tracks.reputation",
   "players.lakers.tracks.alignment",
   "players.lakers.resource",
   "players.lakers.vp",
-  "players.lakers.research",
-  "players.lakers.techLevel",
+  "players.lakers.tech",
   "players.plainers.tracks.trust",
   "players.plainers.tracks.reputation",
   "players.plainers.tracks.alignment",
   "players.plainers.resource",
   "players.plainers.vp",
-  "players.plainers.research",
-  "players.plainers.techLevel",
+  "players.plainers.tech",
   "factionStanding.versari.versari",
   "factionStanding.versari.goldgrass",
   "factionStanding.versari.lakers",
@@ -140,7 +132,11 @@ export const DSL_PATHS = [
   "state.round",
 ];
 
-export const RESOURCE_KINDS = ["Resource", "VP", "Research"];
+// NOTE: stays `Tech` to match the live engine (POOL_KEY maps Tech →
+// player.tech in effects.js). The rename to `Research` lands with the
+// engine tech wheel (tech-wheel-plan.md §1 / spec §17.7), not before —
+// a Research pool the engine can't resolve would break content.
+export const RESOURCE_KINDS = ["Resource", "VP", "Tech"];
 export const STAT_KINDS = ["Strength", "Movement"];
 export const STAT_DURATIONS = [
   "permanent",
@@ -149,13 +145,10 @@ export const STAT_DURATIONS = [
   "this_contest",
 ];
 export const GRANT_WHEN = ["this_turn", "next_turn"];
-export const ENTITY_FLAGS = [
-  "disabled",
-  "exhausted",
-  "shielded",
-  "marked",
-  "immobilized",
-];
+// `immobilized` removed: it was only ever produced as a raid outcome,
+// which combat v0.2 replaced with attrition + chip salvage. The engine's
+// SET_FLAG still accepts arbitrary flags, so this is a picker cleanup.
+export const ENTITY_FLAGS = ["disabled", "exhausted", "shielded", "marked"];
 export const TRACKS = ["trust", "reputation", "alignment"];
 export const ENCOUNTER_MODES = ["private", "public", "placement"];
 export const QUEST_MODES = ["single-player", "global"];

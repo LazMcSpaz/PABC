@@ -1,7 +1,6 @@
 import {
   HEX_TYPE_OPTIONS,
   STRATEGIC_VALUE_OPTIONS,
-  TERRAIN_OPTIONS,
   FACTION_IDS,
 } from "../lib/schema.js";
 
@@ -108,19 +107,6 @@ export function HexFilterBuilder({ value, onChange, allowNull = true }) {
         </select>
       </Row>
 
-      <Row label="terrain">
-        <select
-          value={filter.terrain ?? ""}
-          onChange={(e) => set("terrain", e.target.value || null)}
-        >
-          <option value="">(any)</option>
-          {TERRAIN_OPTIONS.map((o) => (
-            <option key={o} value={o}>
-              {o}
-            </option>
-          ))}
-        </select>
-      </Row>
 
       <Row label="hasAbility">
         <input
