@@ -95,11 +95,12 @@ export default function Prototype({ config, onNewGame }) {
   const reachable = useMemo(() => {
     if (!isYourTurn || !selectedUnitId) return null;
     const unit = state.units[selectedUnitId];
-    if (!unit || unit.immobilized || unit.effectiveMovement <= 0) return null;
+    const budget = unit?.moveRemaining ?? unit?.effectiveMovement ?? 0;
+    if (!unit || unit.immobilized || budget <= 0) return null;
     const dists = bfsDistances(gameRef.current.board.adjacency, unit.node);
     const out = new Set();
     for (const [hex, d] of Object.entries(dists)) {
-      if (d > 0 && d <= unit.effectiveMovement) out.add(hex);
+      if (d > 0 && d <= budget) out.add(hex);
     }
     return out;
   }, [tick, isYourTurn, selectedUnitId, state]);

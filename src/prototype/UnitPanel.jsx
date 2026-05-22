@@ -92,7 +92,13 @@ export default function UnitPanel({ unit, hex, onClose }) {
       <div style={{ padding: "8px 11px", display: "flex", flexDirection: "column", gap: 8 }}>
         <div style={{ display: "flex", gap: 16 }}>
           <Stat label="Strength" base={unit.strength} total={eff.strength} color={theme.accent2} />
-          <Stat label="Movement" base={unit.movement} total={eff.movement} color={theme.accent} />
+          <Stat
+            label="Moves L/R"
+            base={null}
+            total={`${unit.moveRemaining ?? eff.movement}/${eff.movement}`}
+            color={theme.accent}
+            small
+          />
           <Stat
             label="Status"
             base={null}

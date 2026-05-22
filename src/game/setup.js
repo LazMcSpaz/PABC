@@ -7,6 +7,29 @@ import { makeRng } from "./rng.js";
 import { createIdGen } from "./ids.js";
 import { buildHexGrid, generateLayout } from "./board.js";
 
+// A fresh unit with the full v0.2 field set (§16.3 / plan). `moveRemaining`
+// seeds to base Movement; the owner's Upkeep refreshes it from effective.
+export function makeUnit(uid, owner, node, factionName) {
+  return {
+    uid,
+    owner,
+    name: `${factionName} unit`, // flavor names arrive with content
+    node,
+    baseStrength: CONFIG.unit.baseStrength,
+    baseMovement: CONFIG.unit.baseMovement,
+    strength: CONFIG.unit.baseStrength,
+    movement: CONFIG.unit.baseMovement,
+    moveRemaining: CONFIG.unit.baseMovement,
+    movedSinceUpkeep: false,
+    fortified: false,
+    contestsWon: 0,
+    contestsSurvived: 0,
+    veteran: false,
+    chips: [],
+    immobilizedUntil: null,
+  };
+}
+
 export function createGame({
   seed = Date.now() & 0xffffffff,
   factionIds,
@@ -105,22 +128,11 @@ export function createGame({
     };
   }
 
-  // --- units: one per playing faction, on its starting Location ---
+  // --- units: one per faction at its start Location (Phase 2 adds more) ---
   const units = {};
   for (const fid of playing) {
     const u = uid("unit");
-    units[u] = {
-      uid: u,
-      owner: fid,
-      name: `${FACTIONS[fid].name} unit`, // flavor names arrive with content
-      node: layout.factionStart[fid],
-      baseStrength: CONFIG.unit.baseStrength,
-      baseMovement: CONFIG.unit.baseMovement,
-      strength: CONFIG.unit.baseStrength,
-      movement: CONFIG.unit.baseMovement,
-      chips: [],
-      immobilizedUntil: null,
-    };
+    units[u] = makeUnit(u, fid, layout.factionStart[fid], FACTIONS[fid].name);
   }
 
   // --- Market: three tech tiers, each a face-up row + a draw deck ---
@@ -203,6 +215,7 @@ export function createGame({
     pendingActionGrants: [],
     surcharges: [],
     winnerId: null,
+    reinforcements: [], // v0.2 §16.5 — pending field-reinforcement packets
     log: [],
     // Layer 5 (encounter & quest system) per spec §15.11
     world: {

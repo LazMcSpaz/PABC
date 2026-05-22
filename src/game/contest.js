@@ -232,6 +232,10 @@ export function runContest(state, { pid, params, ctx = {} }) {
   const unit = state.units[params.unit];
   const t = resolveTarget(state, pid, unit, params);
 
+  // §16.2 — declaring a contest ends this unit's movement for the turn
+  // (no move-attack-move), whatever the outcome.
+  unit.moveRemaining = 0;
+
   // §9 step 1 — declare. Open the reaction window so replace-mode
   // Reactives may cancel the contest; on-mode subscribers fire when
   // emit lands and can modify stats before the roll (e.g. a defender

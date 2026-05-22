@@ -75,6 +75,19 @@ function collectProduction(state, pid) {
   }
 }
 
+// v0.2 §16.2 — refresh each owned unit's move budget from its effective
+// Movement, and roll the §16.6 fortify flag (a unit that didn't move on
+// its previous turn is "dug in"). Must run after recomputeStats so
+// `unit.movement` reflects chips / modifiers.
+function refreshMoveBudget(state, pid) {
+  for (const u of Object.values(state.units)) {
+    if (u.owner !== pid) continue;
+    u.moveRemaining = u.movement;
+    u.fortified = !u.movedSinceUpkeep;
+    u.movedSinceUpkeep = false;
+  }
+}
+
 // Run a player's Upkeep and open their turn at the Main phase.
 export function startTurn(state) {
   if (state.winnerId) return state;
@@ -94,6 +107,7 @@ export function startTurn(state) {
 
   expireModifiers(state, pid);
   recomputeStats(state);
+  refreshMoveBudget(state, pid);
   tickFootholds(state, pid);
   collectProduction(state, pid);
   churnMarket(state);

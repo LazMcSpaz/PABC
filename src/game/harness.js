@@ -284,6 +284,9 @@ const stagingHex = game.board.adjacency[encounterHex.id][0];
 champ.node = stagingHex;
 applyEffect(game, { type: "GRANT_ACTIONS", amount: 5, target: "active_player" }, ctx);
 applyEffect(game, { type: "MODIFY_STAT", stat: "Movement", amount: 5, target: champ.uid, duration: "this_turn" }, ctx);
+// v0.2 §16.2 — Move now spends a per-turn budget that earlier contests
+// zeroed; top it back up so the staged field-encounter Move can fire.
+champ.moveRemaining = champ.movement;
 const deckBefore = game.encounterDeck.length;
 const scrapPre = game.players[me].resource;
 const techPre = game.players[me].tech;
@@ -417,4 +420,45 @@ const locStanding = Object.values(aiGame.locations)
   .map((l) => `${l.locationId}[${l.controller || "—"}:${l.sections.map((s) => s.slice(0, 3)).join(",")}]`)
   .join(" ");
 line(`  location standing: ${locStanding}`);
+line("");
+
+// =====================================================================
+// v0.2 GAMEPLAY VERIFICATION (movement budget, attrition, reinforcement,
+// combat levers). Each block builds a fresh deterministic game so it
+// doesn't depend on the long demo above. `check` asserts and tallies.
+// =====================================================================
+line("v0.2 VERIFICATION  (movement / attrition / reinforcement / combat)");
+let v2pass = 0, v2fail = 0;
+const check = (label, cond) => {
+  if (cond) { v2pass++; line(`  ✓ ${label}`); }
+  else { v2fail++; line(`  ✗ FAIL — ${label}`); }
+};
+
+// --- Phase 1: movement is its own budget ---
+line("\n  [Phase 1] movement budget");
+{
+  const g = createGame({ seed });
+  startTurn(g);
+  const me = activePlayerId(g);
+  const u = Object.values(g.units).find((x) => x.owner === me);
+  check("base Movement is 2", u.movement === 2 && u.moveRemaining === 2);
+  const actionsBefore = g.players[me].actions.remaining;
+  const a = g.board.adjacency[u.node][0];
+  const m1 = performAction(g, "move", { unit: u.uid, to: a });
+  const b = g.board.adjacency[u.node].find((h) => h !== a);
+  const m2 = b ? performAction(g, "move", { unit: u.uid, to: b }) : { ok: false };
+  check("two moves consume the budget", m1.ok && m2.ok && u.moveRemaining === 0);
+  check("moves cost no Actions", g.players[me].actions.remaining === actionsBefore);
+  // After a contest the unit can't move.
+  const u2 = Object.values(g.units).find((x) => x.owner === me && x.uid !== u.uid) || u;
+  const prize = Object.values(g.locations).find((l) => l.controller === null);
+  if (prize) {
+    u2.node = prize.hexId;
+    u2.moveRemaining = u2.movement;
+    performAction(g, "contest", { unit: u2.uid });
+    check("declaring a contest ends movement", u2.moveRemaining === 0);
+  }
+}
+
+line(`\n  v0.2 verification: ${v2pass} passed, ${v2fail} failed`);
 line("");

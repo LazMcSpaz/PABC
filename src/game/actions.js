@@ -11,6 +11,7 @@ import { validateContest, runContest } from "./contest.js";
 import { recomputeStats, recomputeTech } from "./stats.js";
 import { applyEffects } from "./effects.js";
 import { drawFieldEncounter, resolveMarkerOnHex } from "./encounters.js";
+import { makeUnit } from "./setup.js";
 
 const fail = (reason) => ({ ok: false, reason });
 
@@ -36,14 +37,19 @@ function validateMove(state, { pid, params }) {
   if (params.to === unit.node) return fail("unit is already on that hex");
   const dist = bfsDistances(state.board.adjacency, unit.node)[params.to];
   if (dist === undefined) return fail("hex is unreachable");
-  if (dist > unit.movement) return fail(`out of range (${dist} > Movement ${unit.movement})`);
+  // v0.2 §16.2 — Move spends the per-turn move budget, not Actions.
+  if (dist > unit.moveRemaining)
+    return fail(`out of range (${dist} > moves left ${unit.moveRemaining})`);
   return { ok: true };
 }
 
 function runMove(state, { params, ctx }) {
   const unit = state.units[params.unit];
   const from = unit.node;
+  const dist = bfsDistances(state.board.adjacency, from)[params.to];
   unit.node = params.to;
+  unit.moveRemaining = Math.max(0, unit.moveRemaining - dist);
+  unit.movedSinceUpkeep = true; // §16.6 fortify — moving voids "dug in"
   emit(state, "unit_moved", { unit: unit.uid, from, to: params.to });
 
   // §15.5 placement markers take precedence — they're authored to land
@@ -96,18 +102,7 @@ function runRecruit(state, { pid, player, params }) {
 
   const loc = state.locations[params.at];
   const u = state.nextId("unit");
-  state.units[u] = {
-    uid: u,
-    owner: pid,
-    name: `${FACTIONS[pid].name} unit`,
-    node: loc.hexId,
-    baseStrength: CONFIG.unit.baseStrength,
-    baseMovement: CONFIG.unit.baseMovement,
-    strength: CONFIG.unit.baseStrength,
-    movement: CONFIG.unit.baseMovement,
-    chips: [],
-    immobilizedUntil: null,
-  };
+  state.units[u] = makeUnit(u, pid, loc.hexId, FACTIONS[pid].name);
   emit(state, "unit_recruited", { unit: u, player: pid, hex: loc.hexId });
   return { unit: u };
 }
@@ -237,7 +232,7 @@ function runActivate(state, { pid, player, params, ctx }) {
 
 // --- dispatch --------------------------------------------------------
 const ACTIONS = {
-  move: { cost: 1, validate: validateMove, run: runMove },
+  move: { cost: 0, validate: validateMove, run: runMove }, // §16.2 — free of Actions
   recruit: { cost: 1, validate: validateRecruit, run: runRecruit },
   contest: { cost: 1, validate: validateContest, run: runContest },
   acquire: { cost: 1, validate: validateAcquire, run: runAcquire },

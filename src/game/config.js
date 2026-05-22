@@ -6,10 +6,32 @@ export const CONFIG = {
   baseActions: 2,
   footholdCap: 3,
 
-  unit: { baseStrength: 4, baseMovement: 1, baySlots: 2 },
-  unitRecruitCost: 10,
+  unit: {
+    baseStrength: 4,
+    baseMovement: 2, // v0.2 §16.2 — was 1; movement is now its own budget
+    baySlots: 2,
+    baseStrengthCap: 4, // v0.2 §16.3 — base Strength doubles as HP, capped here
+    veteranStrengthCap: 8, // §16.7 combining (deferred)
+  },
+  baseUnitCap: 3, // v0.2 §16.3 — cap = baseUnitCap + Training Grounds
+  startingUnits: 2, // v0.2 §16.3
+  unitRecruitCost: 6, // v0.2 §16.3 — was 10
 
   contestDieSides: 6, // 1d6 per side, defender wins ties
+
+  // v0.2 §16.4 attrition
+  attrition: { routMargin: 4 }, // margin >= this spills a casualty to a 2nd stacked unit
+  // v0.2 §16.5 healing / reinforcement
+  heal: { passivePerTurn: 1, scrapPerStrength: 2 },
+  // v0.2 §16.6 combat levers
+  combat: {
+    concentrationPerUnit: 1,
+    concentrationCap: 3,
+    mountainDefenseBonus: 1,
+    fortifyBonus: 1,
+    veteranBonus: 1,
+  },
+  veteran: { winsToPromote: 3, survivedToPromote: 5 },
 
   tech: { start: 1, tier2: 3, tier3: 6 },
   marketRowSizes: { 1: 5, 2: 4, 3: 3 },
