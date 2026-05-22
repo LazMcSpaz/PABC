@@ -185,12 +185,20 @@ export default function LocationCard({ locationId, control, width = 210 }) {
                 className="pc-prose"
                 style={{
                   fontSize: 10.5,
-                  color: loc.ability ? theme.textDim : theme.textFaint,
+                  color: control?.ability || loc.ability ? theme.textDim : theme.textFaint,
                   lineHeight: 1.4,
                   marginTop: 3,
                 }}
               >
-                {loc.ability || "No innate ability."}
+                {control?.ability ? (
+                  <>
+                    <strong style={{ color: theme.text }}>{control.ability.name}</strong>
+                    {" — "}
+                    {control.ability.text}
+                  </>
+                ) : (
+                  loc.ability || "No innate ability."
+                )}
               </div>
             </div>
             <div style={{ marginTop: "auto" }}>

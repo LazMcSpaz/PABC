@@ -5,7 +5,11 @@
 // shape-agnostic.
 
 import { CONFIG } from "../game/config.js";
-import { LOCATIONS as ENGINE_LOCATIONS, CHIPS as ENGINE_CHIPS } from "../game/content.js";
+import {
+  LOCATIONS as ENGINE_LOCATIONS,
+  CHIPS as ENGINE_CHIPS,
+  ABILITIES as ENGINE_ABILITIES,
+} from "../game/content.js";
 import {
   LOCATIONS as UI_LOCATIONS,
   UNIT_UPGRADES,
@@ -99,6 +103,42 @@ function adaptChips(state, chipUids) {
   return (chipUids || []).map((uid) => engineChipIdToUi(state.chips[uid]?.chipId));
 }
 
+// Build a human-readable description of an engine ability from its
+// actual cost + effects, so the UI shows what the Location really does
+// (the look-pass data.js carried unrelated placeholder flavour).
+function describeEffectShort(e) {
+  switch (e.type) {
+    case "GRANT_ACTIONS":
+      return `gain ${e.amount} Action${Math.abs(e.amount) === 1 ? "" : "s"}${
+        e.when === "next_turn" ? " next turn" : ""
+      }`;
+    case "ADJUST_RESOURCE": {
+      const res = e.resource === "Resource" ? "scrap" : e.resource;
+      return `${e.amount >= 0 ? "gain" : "lose"} ${Math.abs(e.amount)} ${res}`;
+    }
+    case "ADJUST_TRACK":
+      return `${e.amount >= 0 ? "+" : ""}${e.amount} ${e.track}`;
+    default:
+      return e.type;
+  }
+}
+
+export function describeAbility(abilityId) {
+  const ability = ENGINE_ABILITIES[abilityId];
+  if (!ability) return null;
+  const opt = ability.activated?.[0];
+  if (!opt) return { name: ability.name, text: "Passive ability." };
+  const costParts = [];
+  if (opt.cost?.action) costParts.push(`${opt.cost.action} Action`);
+  if (opt.cost?.resource) costParts.push(`${opt.cost.resource} scrap`);
+  const costPhrase = costParts.length ? `Spend ${costParts.join(" + ")} to ` : "";
+  const effPhrase = (opt.effects || []).map(describeEffectShort).join(", ") || "act";
+  const sentence = costPhrase
+    ? `${costPhrase}${effPhrase}.`
+    : `${effPhrase.charAt(0).toUpperCase()}${effPhrase.slice(1)}.`;
+  return { name: ability.name, text: `${sentence} Once per turn.` };
+}
+
 function adaptChipsWithUids(state, chipUids) {
   return (chipUids || []).map((uid) => ({
     uid,
@@ -166,6 +206,9 @@ export function adaptState(state) {
         // a Location carries an ability (§6.3).
         chipSlots: loc.chipSlots,
         abilityId: loc.abilityId,
+        ability: loc.abilityId ? describeAbility(loc.abilityId) : null,
+        abilityUsedThisTurn:
+          loc.abilityActivatedTurn === state.round * state.turnOrder.length + state.activeIndex,
       };
       hex.garrison = loc.garrison; // engine's live garrison (incl. capital bonus)
       hex.production = loc.production;

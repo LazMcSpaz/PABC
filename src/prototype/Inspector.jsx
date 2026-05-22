@@ -206,17 +206,17 @@ function locationModel(state, hex, actions) {
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
           {hex.abilityId && (
             <div>
-              <Label>Activate ability</Label>
+              <Label>{control?.ability?.name || "Activate ability"}</Label>
               <div className="pc-prose" style={{ ...PROSE, marginBottom: 7 }}>
-                Spend the listed cost to invoke {loc.name}'s ability.
+                {control?.ability?.text || `Invoke ${loc.name}'s ability.`}
               </div>
               <Btn
                 variant="primary"
                 full
-                disabled={!isYourTurn}
+                disabled={!isYourTurn || control?.abilityUsedThisTurn}
                 onClick={() => onActivate?.(hex.id)}
               >
-                Activate
+                {control?.abilityUsedThisTurn ? "Used this turn" : "Activate"}
               </Btn>
             </div>
           )}
