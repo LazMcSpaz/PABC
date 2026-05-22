@@ -5,15 +5,17 @@
 import { FACTIONS as UI_FACTIONS, theme } from "./data.js";
 import { IconBtn, Label, Btn, Pill } from "./kit.jsx";
 
-export default function UnitPanel({ unit, hex, canAct, reinforce, scrap, onReinforce, onClose }) {
+export default function UnitPanel({ unit, hex, canAct, reinforce, scrap, raid, onReinforce, onRaid, onClose }) {
   if (!unit) return null;
   const f = UI_FACTIONS[unit.owner];
   const eff = {
     strength: unit.effectiveStrength ?? unit.strength,
     movement: unit.effectiveMovement ?? unit.movement,
   };
-  const canReinforce = canAct && reinforce && reinforce.deficit > 0;
+  const inTransit = canAct && reinforce && reinforce.inTransit;
+  const canReinforce = canAct && reinforce && reinforce.deficit > 0 && !inTransit;
   const affordable = reinforce && scrap >= reinforce.cost;
+  const showRaid = canAct && raid && raid.target;
 
   return (
     <div
@@ -122,6 +124,21 @@ export default function UnitPanel({ unit, hex, canAct, reinforce, scrap, onReinf
               : hex.type} ({hex.id})
           </div>
         )}
+        {showRaid && (
+          <Btn
+            variant="primary"
+            disabled={!raid.canRaid}
+            onClick={() => onRaid?.(unit.uid, raid.target)}
+            title={raid.canRaid ? undefined : raid.reason}
+          >
+            {raid.canRaid ? `Raid ${raid.targetName} (1 Action)` : raid.reason}
+          </Btn>
+        )}
+        {inTransit && (
+          <Btn variant="ghost" full disabled>
+            Reinforcements on the way…
+          </Btn>
+        )}
         {canReinforce && (
           <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
             {reinforce.onFriendlyLoc ? (
@@ -146,7 +163,7 @@ export default function UnitPanel({ unit, hex, canAct, reinforce, scrap, onReinf
         )}
         <div style={{ fontSize: 10, color: theme.textDim, lineHeight: 1.4 }}>
           Click a <span style={{ color: theme.good, fontWeight: 700 }}>green</span> hex to move.
-          Open the location to Contest / Activate / Recruit.
+          {showRaid ? " Raid the enemy on this hex, or open" : " Open"} the location to Contest / Activate / Recruit.
         </div>
       </div>
     </div>

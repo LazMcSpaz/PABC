@@ -58,18 +58,19 @@ function concentration(state, owner, hex, excludeUid) {
 }
 
 // §16.6 Veterancy — after a contest, every surviving participant banks a
-// "survived"; the winner's unit banks a "win". A unit promotes to Veteran
-// (permanent +1 to its rolls) at 3 wins or 5 survivals, whichever first.
+// contest (regardless of result); the winner's unit also banks a win. A
+// unit promotes to Veteran (permanent +1 to its contest rolls) at 5 wins
+// or 9 contests, whichever comes first.
 function tickVeterancy(state, participants, winnerUid) {
   for (const p of participants) {
     const u = p && state.units[p.uid]; // only units still alive
     if (!u) continue;
-    u.contestsSurvived = (u.contestsSurvived || 0) + 1;
+    u.contestsSurvived = (u.contestsSurvived || 0) + 1; // contests participated in
     if (u.uid === winnerUid) u.contestsWon = (u.contestsWon || 0) + 1;
     if (
       !u.veteran &&
       (u.contestsWon >= CONFIG.veteran.winsToPromote ||
-        u.contestsSurvived >= CONFIG.veteran.survivedToPromote)
+        u.contestsSurvived >= CONFIG.veteran.contestsToPromote)
     ) {
       u.veteran = true;
       emit(state, "veteran_promoted", { unit: u.uid, owner: u.owner });

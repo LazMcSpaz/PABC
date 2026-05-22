@@ -312,17 +312,19 @@ export function adaptState(state) {
 export function reinforcePreview(state, unitUid) {
   const unit = state.units[unitUid];
   if (!unit) return null;
-  const cap = unit.veteran ? CONFIG.unit.veteranStrengthCap : CONFIG.unit.baseStrengthCap;
+  const cap = CONFIG.unit.baseStrengthCap;
   const deficit = cap - unit.baseStrength;
   const loc = state.locations[unit.node];
   const onFriendlyLoc = !!(loc && loc.controller === unit.owner);
   const route = deficit > 0 ? reinforcementRoute(state, unit.owner, unit.node) : null;
+  const pending = (state.reinforcements || []).find((r) => r.targetUnit === unitUid) || null;
   return {
     deficit,
     cost: CONFIG.heal.scrapPerStrength * deficit,
     onFriendlyLoc,
     eta: route ? route.dist : null,
     canField: !!route,
+    inTransit: !!pending, // a field convoy is already en route to this unit
   };
 }
 

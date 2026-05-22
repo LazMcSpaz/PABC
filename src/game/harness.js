@@ -448,13 +448,14 @@ line("\n  [Phase 1] movement budget");
   startTurn(g);
   const me = activePlayerId(g);
   const u = Object.values(g.units).find((x) => x.owner === me);
-  check("base Movement is 2", u.movement === 2 && u.moveRemaining === 2);
+  check("base Movement is 1", u.movement === 1 && u.moveRemaining === 1);
   const actionsBefore = g.players[me].actions.remaining;
   const a = g.board.adjacency[u.node][0];
   const m1 = performAction(g, "move", { unit: u.uid, to: a });
+  check("a move spends the move budget", m1.ok && u.moveRemaining === 0);
   const b = g.board.adjacency[u.node].find((h) => h !== a);
   const m2 = b ? performAction(g, "move", { unit: u.uid, to: b }) : { ok: false };
-  check("two moves consume the budget", m1.ok && m2.ok && u.moveRemaining === 0);
+  check("movement is exhausted after the budget is spent", !m2.ok);
   check("moves cost no Actions", g.players[me].actions.remaining === actionsBefore);
   // After a contest the unit can't move.
   const u2 = Object.values(g.units).find((x) => x.owner === me && x.uid !== u.uid) || u;
@@ -739,19 +740,33 @@ line("\n  [Phase 5] concentration, mountain, fortify, veterancy");
     check("a fortified defending unit adds +1", rf.defenderFortify === CONFIG.combat.fortifyBonus);
   }
 
-  // Veterancy: 3 wins promotes.
+  // Veterancy: 5 wins promotes.
   {
     const g5 = createGame({ seed }); startTurn(g5);
     const me5 = g5.turnOrder[0];
     const a = Object.values(g5.units).find((u) => u.owner === me5);
-    a.contestsWon = 2; // one more win promotes
+    a.contestsWon = 4; // one more win promotes (winsToPromote 5)
     a.node = terrain.id; a.moveRemaining = a.movement;
     const e = Object.values(g5.units).find((u) => u.owner !== me5);
     e.node = terrain.id; g5.rng.roll = () => 1;
     g5.players[me5].actions.remaining = 5;
     a.baseStrength = 9; e.baseStrength = 4; recomputeStats(g5);
     performAction(g5, "contest", { unit: a.uid, target: e.uid });
-    check("a unit promotes to Veteran after 3 wins", a.veteran === true);
+    check("a unit promotes to Veteran after 5 wins", a.veteran === true);
+  }
+
+  // Veteran HP cap is the normal base cap (4), not 8 — reinforce/heal a
+  // veteran only fills to 4 (veterancy's reward is the +1 roll, not HP).
+  {
+    const g6 = createGame({ seed }); startTurn(g6);
+    const me6 = g6.turnOrder[0];
+    const home = Object.values(g6.locations).find((l) => l.controller === me6);
+    const v = Object.values(g6.units).find((u) => u.owner === me6);
+    v.veteran = true; v.node = home.hexId; v.baseStrength = 4; recomputeStats(g6);
+    g6.players[me6].resource += 100;
+    const rp = performAction(g6, "reinforce", { unit: v.uid, mode: "instant" });
+    check("a full veteran cannot be reinforced (cap is 4, not 8)",
+      !rp.ok && v.baseStrength === 4);
   }
 }
 

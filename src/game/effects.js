@@ -77,13 +77,13 @@ const EFFECTS = {
   },
 
   // v0.2 §16.4 — wound or heal a unit's base Strength (its HP). Clamps to
-  // [0, cap] (veteran cap if promoted); a unit driven to 0 is destroyed.
-  // Lets encounters and content top up or chip away at a unit.
+  // [0, baseStrengthCap]; a unit driven to 0 is destroyed. Lets encounters
+  // and content top up or chip away at a unit.
   ADJUST_BASE_STRENGTH(state, e, ctx) {
     for (const t of resolveTargets(state, e.target, ctx)) {
       const unit = state.units[t];
       if (!unit) continue;
-      const cap = unit.veteran ? CONFIG.unit.veteranStrengthCap : CONFIG.unit.baseStrengthCap;
+      const cap = CONFIG.unit.baseStrengthCap;
       unit.baseStrength = Math.max(0, Math.min(cap, unit.baseStrength + (e.amount || 0)));
       recomputeStats(state);
       emit(state, "base_strength_changed", {

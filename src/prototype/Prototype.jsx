@@ -375,6 +375,31 @@ export default function Prototype({ config, onNewGame }) {
     const msg = mode === "instant" ? "Unit reinforced." : "Reinforcements dispatched.";
     return runAction("reinforce", { unit: unitUid, mode }, null, msg);
   }
+  function onRaid(unitUid, targetUid) {
+    return onContest({ unit: unitUid, target: targetUid });
+  }
+
+  // A raid is contesting an enemy unit that shares your unit's hex. Blocked
+  // on a Location whose garrison (neutral sections) hasn't been reduced.
+  function raidInfoFor(unitUid) {
+    const u = state.units[unitUid];
+    if (!u) return null;
+    const enemies = Object.values(state.units)
+      .filter((x) => x.node === u.node && x.owner !== u.owner)
+      .sort((a, b) => (b.effectiveStrength ?? 0) - (a.effectiveStrength ?? 0));
+    if (!enemies.length) return null;
+    const target = enemies[0];
+    const sections = state.hexes[u.node]?.control?.sections;
+    const blockedByGarrison = !!sections?.includes("neutral");
+    return {
+      target: target.id,
+      targetName: target.name,
+      canRaid: !blockedByGarrison && !u.immobilized,
+      reason: blockedByGarrison
+        ? "Reduce the garrison first"
+        : u.immobilized ? "Unit is immobilized" : "Raid",
+    };
+  }
   function onAcquire(uiChip) {
     // uiChip is { uid, chipId, engineChipId }. Pick an install target:
     // unit chip → strongest of your units with bay slots; location chip
@@ -522,7 +547,9 @@ export default function Prototype({ config, onNewGame }) {
             canAct={isYourTurn && state.units[selectedUnitId].owner === state.youId}
             reinforce={reinforcePreview(gameRef.current, selectedUnitId)}
             scrap={you.scrap}
+            raid={raidInfoFor(selectedUnitId)}
             onReinforce={onReinforce}
+            onRaid={onRaid}
             onClose={() => setSelectedUnitId(null)}
           />
         )}

@@ -8,10 +8,10 @@ export const CONFIG = {
 
   unit: {
     baseStrength: 4,
-    baseMovement: 2, // v0.2 §16.2 — was 1; movement is now its own budget
+    baseMovement: 1, // base 1; upgrade chips / Logistics add to it
     baySlots: 2,
     baseStrengthCap: 4, // v0.2 §16.3 — base Strength doubles as HP, capped here
-    veteranStrengthCap: 8, // §16.7 combining (deferred)
+    veteranStrengthCap: 8, // reserved for §16.7 combining (deferred) — NOT veterancy
   },
   baseUnitCap: 3, // v0.2 §16.3 — cap = baseUnitCap + Training Grounds
   startingUnits: 2, // v0.2 §16.3
@@ -31,7 +31,8 @@ export const CONFIG = {
     fortifyBonus: 1,
     veteranBonus: 1,
   },
-  veteran: { winsToPromote: 3, survivedToPromote: 5 },
+  // Veteran at 5 wins, or 9 contests regardless of result — whichever first.
+  veteran: { winsToPromote: 5, contestsToPromote: 9 },
 
   // §17 Tech Wheel. Research fills a bar; Tech Level is a derived band
   // (1–5); each new level grants one Ability Point to spend on the wheel.

@@ -50,6 +50,7 @@ function runMove(state, { params, ctx }) {
   unit.node = params.to;
   unit.moveRemaining = Math.max(0, unit.moveRemaining - dist);
   unit.movedSinceUpkeep = true; // §16.6 fortify — moving voids "dug in"
+  unit.fortified = false; // moving this turn drops the dug-in bonus immediately
   emit(state, "unit_moved", { unit: unit.uid, from, to: params.to });
 
   // §15.5 placement markers take precedence — they're authored to land
@@ -144,8 +145,11 @@ function runRecruit(state, { pid, player, params }) {
 // `mode:"field"` dispatches a convoy that arrives in N round-ends, where
 // N is the supply distance through friendly/neutral hexes (re-targets a
 // moving unit, §16.5). Both cost 1 Action.
+// A unit's base-Strength (HP) cap. Veterancy does NOT raise this — its
+// reward is the +1 contest roll. The higher veteranStrengthCap is
+// reserved for the deferred combining feature.
 function unitStrengthCap(unit) {
-  return unit.veteran ? CONFIG.unit.veteranStrengthCap : CONFIG.unit.baseStrengthCap;
+  return CONFIG.unit.baseStrengthCap;
 }
 
 function validateReinforce(state, { pid, player, params }) {
