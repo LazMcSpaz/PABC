@@ -53,7 +53,9 @@ export function createGame({
   // --- board ---
   const hexes = {};
   for (const [id, hex] of Object.entries(grid.hexes)) {
-    hexes[id] = { id, row: hex.row, col: hex.col, type: layout.type[id] };
+    // v0.2 §16.6 — `terrain` is null for now; "mountain" gives defenders
+    // +1. Full terrain generation is deferred; harness/tests may set it.
+    hexes[id] = { id, row: hex.row, col: hex.col, type: layout.type[id], terrain: null };
   }
 
   // --- players ---

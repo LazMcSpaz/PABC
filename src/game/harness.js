@@ -434,6 +434,7 @@ const check = (label, cond) => {
   if (cond) { v2pass++; line(`  ✓ ${label}`); }
   else { v2fail++; line(`  ✗ FAIL — ${label}`); }
 };
+const setStrOn = (g, u, n) => { u.baseStrength = n; recomputeStats(g); };
 
 // --- Phase 1: movement is its own budget ---
 line("\n  [Phase 1] movement budget");
@@ -623,6 +624,102 @@ line("\n  [Phase 4] passive heal + instant / field reinforcement");
     check("severed supply strands the convoy as a new unit",
       g.reinforcements.length === 0 &&
       Object.values(g.units).filter((x) => x.owner === me).length === meUnitsBefore + 1);
+  }
+}
+
+// --- Phase 5: combat levers (concentration, terrain, fortify, veterancy) ---
+line("\n  [Phase 5] concentration, mountain, fortify, veterancy");
+{
+  const g = createGame({ seed });
+  startTurn(g);
+  const me = g.turnOrder[0];
+  const foe = g.turnOrder[1];
+  const terrain = Object.values(g.board.hexes).find((h) => h.type === "terrain");
+  g.rng.roll = () => 1;
+  const myUnits = Object.values(g.units).filter((u) => u.owner === me);
+  const foeUnits = Object.values(g.units).filter((u) => u.owner === foe);
+  const atk = myUnits[0];
+  const vic = foeUnits[0];
+  const setStr = (u, n) => { u.baseStrength = n; recomputeStats(g); };
+
+  // Concentration: a 2nd friendly unit on the attacker's hex raises the total.
+  atk.node = terrain.id; atk.moveRemaining = atk.movement; setStr(atk, 4);
+  vic.node = terrain.id; setStr(vic, 4);
+  g.players[me].actions.remaining = 9;
+  let r = performAction(g, "contest", { unit: atk.uid, target: vic.uid });
+  const baseTotal = r.initiatorTotal;
+  check("no concentration with a lone attacker", r.attackerConcentration === 0);
+  // add a 2nd friendly unit on the hex
+  myUnits[1].node = terrain.id;
+  vic.node = terrain.id; setStr(vic, 4); atk.moveRemaining = atk.movement;
+  r = performAction(g, "contest", { unit: atk.uid, target: vic.uid });
+  check("a stacked friendly unit grants +1 concentration", r.attackerConcentration === 1);
+
+  // Concentration cap at +3.
+  {
+    const g2 = createGame({ seed }); startTurn(g2);
+    const me2 = g2.turnOrder[0];
+    const a = Object.values(g2.units).find((u) => u.owner === me2);
+    const e = Object.values(g2.units).find((u) => u.owner !== me2);
+    g2.rng.roll = () => 1;
+    a.node = terrain.id; a.moveRemaining = a.movement; e.node = terrain.id;
+    g2.players[me2].actions.remaining = 9;
+    // spawn 5 extra friendlies on the hex (well over the cap)
+    for (let i = 0; i < 5; i++) {
+      const u = g2.nextId("unit");
+      g2.units[u] = { ...a, uid: u, chips: [], node: terrain.id };
+    }
+    recomputeStats(g2);
+    const rr = performAction(g2, "contest", { unit: a.uid, target: e.uid });
+    check("concentration caps at +3", rr.attackerConcentration === CONFIG.combat.concentrationCap);
+  }
+
+  // Mountain: a mountain hex grants the defender +1 (even garrison-only).
+  {
+    const g3 = createGame({ seed }); startTurn(g3);
+    const me3 = g3.turnOrder[0];
+    const foe3 = g3.turnOrder[1];
+    const home = Object.values(g3.locations).find((l) => l.controller === me3);
+    g3.board.hexes[home.hexId].terrain = "mountain";
+    g3.activeIndex = g3.turnOrder.indexOf(foe3);
+    g3.phase = "Main";
+    g3.players[foe3].actions.remaining = 5;
+    g3.rng.roll = () => 1;
+    const fu = Object.values(g3.units).find((u) => u.owner === foe3);
+    fu.node = home.hexId; setStrOn(g3, fu, 4);
+    const rm = performAction(g3, "contest", { unit: fu.uid });
+    check("mountain terrain grants the defender +1", rm.defenderMountain === CONFIG.combat.mountainDefenseBonus);
+  }
+
+  // Fortify: a defending unit that didn't move last turn is "dug in" (+1).
+  {
+    const g4 = createGame({ seed }); startTurn(g4);
+    const me4 = g4.turnOrder[0];
+    const foe4 = g4.turnOrder[1];
+    const home = Object.values(g4.locations).find((l) => l.controller === me4);
+    const du = Object.values(g4.units).find((u) => u.owner === me4);
+    du.node = home.hexId; du.fortified = true; recomputeStats(g4);
+    g4.activeIndex = g4.turnOrder.indexOf(foe4); g4.phase = "Main";
+    g4.players[foe4].actions.remaining = 5; g4.rng.roll = () => 1;
+    const fu = Object.values(g4.units).find((u) => u.owner === foe4);
+    fu.node = home.hexId; setStrOn(g4, fu, 4);
+    const rf = performAction(g4, "contest", { unit: fu.uid });
+    check("a fortified defending unit adds +1", rf.defenderFortify === CONFIG.combat.fortifyBonus);
+  }
+
+  // Veterancy: 3 wins promotes.
+  {
+    const g5 = createGame({ seed }); startTurn(g5);
+    const me5 = g5.turnOrder[0];
+    const a = Object.values(g5.units).find((u) => u.owner === me5);
+    a.contestsWon = 2; // one more win promotes
+    a.node = terrain.id; a.moveRemaining = a.movement;
+    const e = Object.values(g5.units).find((u) => u.owner !== me5);
+    e.node = terrain.id; g5.rng.roll = () => 1;
+    g5.players[me5].actions.remaining = 5;
+    a.baseStrength = 9; e.baseStrength = 4; recomputeStats(g5);
+    performAction(g5, "contest", { unit: a.uid, target: e.uid });
+    check("a unit promotes to Veteran after 3 wins", a.veteran === true);
   }
 }
 

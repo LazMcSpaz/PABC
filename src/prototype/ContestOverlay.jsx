@@ -307,6 +307,11 @@ export default function ContestOverlay({ viz, onClose }) {
               >
                 {winnerText}
               </div>
+              {(viz.mods || []).length > 0 && (
+                <div style={{ marginTop: 6, fontSize: 10, color: theme.textFaint, letterSpacing: 0.3 }}>
+                  {viz.mods.join(" · ")}
+                </div>
+              )}
               <AttritionLine viz={viz} />
               <div style={{ marginTop: 12 }}>
                 <Btn variant="primary" onClick={onClose}>

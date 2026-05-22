@@ -30,6 +30,19 @@ import ContestOverlay from "./ContestOverlay.jsx";
 const TOP_H = 56;
 const TAB_H = 44;
 
+// v0.2 §16.6 — human-readable list of the combat-lever modifiers a
+// contest applied, for the resolution overlay.
+function contestMods(r) {
+  const out = [];
+  if (r.attackerConcentration) out.push(`+${r.attackerConcentration} atk concentration`);
+  if (r.attackerVeteran) out.push(`+${r.attackerVeteran} atk veteran`);
+  if (r.defenderConcentration) out.push(`+${r.defenderConcentration} def concentration`);
+  if (r.defenderMountain) out.push(`+${r.defenderMountain} mountain`);
+  if (r.defenderFortify) out.push(`+${r.defenderFortify} fortify`);
+  if (r.defenderVeteran) out.push(`+${r.defenderVeteran} def veteran`);
+  return out;
+}
+
 function bootGame(seed, humanFactionId) {
   const game = createGame({ seed, humanFactionId });
   startTurn(game);
@@ -248,7 +261,8 @@ export default function Prototype({ config, onNewGame }) {
         name: defName,
         label: defLabel,
         base: defBase,
-        calculated: r.cancelled ? null : r.defenderValue,
+        // pre-die value, now incl. §16.6 modifiers
+        calculated: r.cancelled ? null : r.defenderTotal - r.defenderRoll,
         roll: r.defenderRoll,
         total: r.defenderTotal,
         rollsDie: r.defenderRolled,
@@ -262,6 +276,8 @@ export default function Prototype({ config, onNewGame }) {
       defenderStrLost: r.defenderStrLost || 0,
       killed: r.killed || [],
       salvage: r.salvage || null,
+      // v0.2 §16.6 — combat-lever breakdown
+      mods: contestMods(r),
     });
     return r;
   }

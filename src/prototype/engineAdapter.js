@@ -345,6 +345,21 @@ export function previewLocationContest(state, hexId) {
     if (defendingUnit) value += defendingUnit.strength;
   }
 
+  // §16.6 combat levers on the defender side.
+  const mountain =
+    state.board.hexes[hexId]?.terrain === "mountain" ? CONFIG.combat.mountainDefenseBonus : 0;
+  let concentration = 0, fortify = 0, veteran = 0;
+  if (defendingUnit) {
+    let n = 0;
+    for (const u of Object.values(state.units)) {
+      if (u.owner === loc.controller && u.node === hexId && u.uid !== defendingUnit.uid) n++;
+    }
+    concentration = Math.min(n, CONFIG.combat.concentrationCap) * CONFIG.combat.concentrationPerUnit;
+    if (defendingUnit.fortified) fortify = CONFIG.combat.fortifyBonus;
+    if (defendingUnit.veteran) veteran = CONFIG.combat.veteranBonus;
+  }
+  value += mountain + concentration + fortify + veteran;
+
   // House rule: a garrison-only defence (no defending unit) does NOT
   // roll a d6 — its total is the static value.
   const defenderRollsDie = !!defendingUnit;
@@ -354,6 +369,7 @@ export function previewLocationContest(state, hexId) {
     defendingUnit: defendingUnit
       ? { uid: defendingUnit.uid, owner: defendingUnit.owner, strength: defendingUnit.strength }
       : null,
+    modifiers: { mountain, concentration, fortify, veteran },
     hasNeutral,
     defenderRollsDie,
   };

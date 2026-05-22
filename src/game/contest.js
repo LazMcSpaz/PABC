@@ -34,6 +34,37 @@ function defendingUnit(state, loc) {
   return best;
 }
 
+// §16.6 Concentration — +1 (capped at +3) per *additional* friendly unit
+// stacked on `hex`, excluding `excludeUid` (the contesting / defending
+// unit itself).
+function concentration(state, owner, hex, excludeUid) {
+  let n = 0;
+  for (const u of Object.values(state.units)) {
+    if (u.owner === owner && u.node === hex && u.uid !== excludeUid) n++;
+  }
+  return Math.min(n, CONFIG.combat.concentrationCap) * CONFIG.combat.concentrationPerUnit;
+}
+
+// §16.6 Veterancy — after a contest, every surviving participant banks a
+// "survived"; the winner's unit banks a "win". A unit promotes to Veteran
+// (permanent +1 to its rolls) at 3 wins or 5 survivals, whichever first.
+function tickVeterancy(state, participants, winnerUid) {
+  for (const p of participants) {
+    const u = p && state.units[p.uid]; // only units still alive
+    if (!u) continue;
+    u.contestsSurvived = (u.contestsSurvived || 0) + 1;
+    if (u.uid === winnerUid) u.contestsWon = (u.contestsWon || 0) + 1;
+    if (
+      !u.veteran &&
+      (u.contestsWon >= CONFIG.veteran.winsToPromote ||
+        u.contestsSurvived >= CONFIG.veteran.survivedToPromote)
+    ) {
+      u.veteran = true;
+      emit(state, "veteran_promoted", { unit: u.uid, owner: u.owner });
+    }
+  }
+}
+
 // Classify what the unit is contesting on its node (§9): an enemy unit
 // (raid) or the Location. Enforces the §9 restriction that a Location
 // with neutral sections forces the contest onto its garrison.
@@ -332,30 +363,48 @@ export function runContest(state, { pid, params, ctx = {} }) {
   // d6. Its total is the static garrison value (incl. chip bonuses).
   // Raids and unit-backed Location defences still roll on both sides.
   const defValue = defenderValue(state, t);
-  const defenderRollsDie =
-    t.kind === "raid" ||
-    (t.kind === "location" && !!defendingUnit(state, t.loc));
-  const initiatorRoll = state.rng.roll(CONFIG.contestDieSides);
-  const defenderRoll = defenderRollsDie ? state.rng.roll(CONFIG.contestDieSides) : 0;
-  const initiatorTotal = unit.strength + initiatorRoll;
-  const defenderTotal = defValue + defenderRoll;
-  const won = initiatorTotal > defenderTotal;
 
-  const detail = {
-    kind: t.kind, defenderValue: defValue,
-    initiatorRoll, defenderRoll, initiatorTotal, defenderTotal,
-    defenderRolled: defenderRollsDie,
-  };
-
-  // §16.4 attrition cast. The defending *unit* only exists when a held
-  // Location has no neutral sections and a unit stands on it (a bare
-  // garrison has no Strength to lose); raids always pit two units.
+  // §16.4 / §16.6 — identify the defending *unit* (a held Location with no
+  // neutral sections and a unit on it; raids always pit two units).
   const attackerUnit = unit;
   const locDefUnit =
     t.kind === "location" && !t.loc.sections.includes("neutral")
       ? defendingUnit(state, t.loc)
       : null;
   const defenderUnit = t.kind === "raid" ? t.unit : locDefUnit;
+  const defHex = t.kind === "raid" ? t.unit.node : t.loc.hexId;
+
+  // §16.6 combat levers — additive modifiers computed before the roll.
+  const atkConcentration = concentration(state, pid, unit.node, unit.uid);
+  const atkVeteran = unit.veteran ? CONFIG.combat.veteranBonus : 0;
+  const defMountain =
+    state.board.hexes[defHex]?.terrain === "mountain" ? CONFIG.combat.mountainDefenseBonus : 0;
+  let defConcentration = 0, defFortify = 0, defVeteran = 0;
+  if (defenderUnit) {
+    defConcentration = concentration(state, defenderUnit.owner, defHex, defenderUnit.uid);
+    if (defenderUnit.fortified) defFortify = CONFIG.combat.fortifyBonus;
+    if (defenderUnit.veteran) defVeteran = CONFIG.combat.veteranBonus;
+  }
+
+  // House rule (departs from spec §9): a Location defended purely by its
+  // garrison — no defending unit — does NOT roll a d6.
+  const defenderRollsDie = t.kind === "raid" || (t.kind === "location" && !!defenderUnit);
+  const initiatorRoll = state.rng.roll(CONFIG.contestDieSides);
+  const defenderRoll = defenderRollsDie ? state.rng.roll(CONFIG.contestDieSides) : 0;
+  const initiatorTotal = unit.strength + atkConcentration + atkVeteran + initiatorRoll;
+  const defenderTotal =
+    defValue + defConcentration + defMountain + defFortify + defVeteran + defenderRoll;
+  const won = initiatorTotal > defenderTotal;
+
+  const detail = {
+    kind: t.kind, defenderValue: defValue,
+    initiatorRoll, defenderRoll, initiatorTotal, defenderTotal,
+    defenderRolled: defenderRollsDie,
+    // §16.6 breakdown for the UI
+    attackerConcentration: atkConcentration, attackerVeteran: atkVeteran,
+    defenderConcentration: defConcentration, defenderMountain: defMountain,
+    defenderFortify: defFortify, defenderVeteran: defVeteran,
+  };
   const winnerUnit = won ? attackerUnit : defenderUnit;
   const loserUnit = won ? defenderUnit : attackerUnit;
   const margin = won ? initiatorTotal - defenderTotal : defenderTotal - initiatorTotal;
@@ -403,6 +452,9 @@ export function runContest(state, { pid, params, ctx = {} }) {
   if (won && t.kind === "raid" && loserUid && state.units[loserUid]) {
     offerRetreat(state, state.units[loserUid], ctx, params.retreatTo);
   }
+
+  // §16.6 veterancy — credit survivors and the winning unit, then promote.
+  tickVeterancy(state, [attackerUnit, defenderUnit], winnerUnit?.uid ?? null);
 
   const killed = state.log.slice(logStart).filter((e) => e.name === "unit_destroyed").map((e) => e.payload.unit);
   const salvageEv = state.log.slice(logStart).find((e) => e.name === "unit_salvaged");
