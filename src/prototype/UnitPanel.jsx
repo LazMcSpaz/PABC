@@ -18,9 +18,11 @@ export default function UnitPanel({ unit, hex, onClose }) {
       style={{
         position: "absolute",
         left: 14,
-        bottom: 14,
+        // Sit clear of the bottom dock tab bar (44px tall, fixed) and
+        // above its z-index so it never hides behind the dock.
+        bottom: 58,
         width: 230,
-        zIndex: 6,
+        zIndex: 45,
         background: "rgba(20, 17, 13, 0.96)",
         border: `1px solid ${f?.color || theme.borderLit}`,
         borderRadius: 8,

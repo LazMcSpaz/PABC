@@ -230,3 +230,43 @@ function countTrainingGrounds(state, pid) {
   }
   return n;
 }
+
+// Preview a Location contest's defender side exactly as contest.js would
+// resolve it, so the UI shows the true number the attacker must beat —
+// not just the bare garrison. Mirrors defenderValue() + the
+// garrison-only no-die house rule.
+export function previewLocationContest(state, hexId) {
+  const loc = state.locations[hexId];
+  if (!loc) return null;
+  const hasNeutral = loc.sections.includes("neutral");
+  let chipGarrison = 0;
+  for (const c of loc.chips) {
+    chipGarrison += ENGINE_CHIPS[state.chips[c]?.chipId]?.garrison || 0;
+  }
+  let value = loc.garrison + chipGarrison;
+
+  // A defending unit only counts when the Location is fully held by its
+  // controller (no neutral sections) and that controller has a unit on
+  // the hex — same gate as contest.js defendingUnit().
+  let defendingUnit = null;
+  if (!hasNeutral && loc.controller) {
+    for (const u of Object.values(state.units)) {
+      if (u.owner !== loc.controller || u.node !== loc.hexId) continue;
+      if (!defendingUnit || u.strength > defendingUnit.strength) defendingUnit = u;
+    }
+    if (defendingUnit) value += defendingUnit.strength;
+  }
+
+  // House rule: a garrison-only defence (no defending unit) does NOT
+  // roll a d6 — its total is the static value.
+  const defenderRollsDie = !!defendingUnit;
+  return {
+    value,
+    garrison: loc.garrison + chipGarrison,
+    defendingUnit: defendingUnit
+      ? { uid: defendingUnit.uid, owner: defendingUnit.owner, strength: defendingUnit.strength }
+      : null,
+    hasNeutral,
+    defenderRollsDie,
+  };
+}

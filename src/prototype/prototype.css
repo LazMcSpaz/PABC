@@ -7,6 +7,10 @@
   font-family: "Oswald", "Arial Narrow", "Roboto Condensed", system-ui, sans-serif;
   color: #ece3d2;
   background: #14110d;
+  /* This is a game surface, not a document — dragging the board to pan
+   * should never start a text selection. */
+  user-select: none;
+  -webkit-user-select: none;
 }
 .pc-root *,
 .pc-root *::before,
