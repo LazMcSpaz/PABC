@@ -125,7 +125,7 @@ function pickMoveTarget(state, pid, unit) {
 
 function tryAcquire(state, pid) {
   const player = state.players[pid];
-  const tiers = unlockedTiers(player.tech);
+  const tiers = unlockedTiers(player);
   const candidates = [];
   for (const tier of tiers) {
     for (const chipUid of state.market.tiers[tier]?.row || []) {
@@ -181,9 +181,11 @@ function slotsUsed(state, chipUids) {
   return n;
 }
 
-function unlockedTiers(tech) {
-  if (tech >= CONFIG.tech.tier3) return [1, 2, 3];
-  if (tech >= CONFIG.tech.tier2) return [1, 2];
+function unlockedTiers(player) {
+  const lvl = player.techLevel || 1;
+  const m = CONFIG.tech.marketTierByLevel;
+  if (lvl >= m[3]) return [1, 2, 3];
+  if (lvl >= m[2]) return [1, 2];
   return [1];
 }
 

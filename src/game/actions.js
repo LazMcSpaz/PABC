@@ -8,7 +8,7 @@ import { bfsDistances, reinforcementRoute } from "./board.js";
 import { CONFIG } from "./config.js";
 import { FACTIONS, CHIPS, ABILITIES, chipDefOf } from "./content.js";
 import { validateContest, runContest } from "./contest.js";
-import { recomputeStats, recomputeTech } from "./stats.js";
+import { recomputeStats, recomputeResearch } from "./stats.js";
 import { applyEffects } from "./effects.js";
 import { drawFieldEncounter, resolveMarkerOnHex } from "./encounters.js";
 import { makeUnit } from "./setup.js";
@@ -211,9 +211,13 @@ function runReinforce(state, { pid, player, params }) {
 // `unit`) or a location you fully control (kind `location`). The chip's
 // `techLevel` must be at or below the player's unlocked Market tier
 // (§4.1). The vacated row refills from the tier deck.
-function unlockedTier(tech) {
-  if (tech >= CONFIG.tech.tier3) return 3;
-  if (tech >= CONFIG.tech.tier2) return 2;
+// §17.2 — Market tier unlock keys off Tech *Level* now (tier 2 @ L3,
+// tier 3 @ L5), not a raw research score.
+function unlockedTier(player) {
+  const lvl = player.techLevel || 1;
+  const m = CONFIG.tech.marketTierByLevel;
+  if (lvl >= m[3]) return 3;
+  if (lvl >= m[2]) return 2;
   return 1;
 }
 
@@ -236,8 +240,8 @@ function validateAcquire(state, { pid, player, params }) {
   const found = inResale ? null : findInMarket(state, params.chip);
   if (!inResale && !found) return fail("that chip is not in any market row");
   // Resale chips ignore tech tier — they're used goods.
-  if (found && found.tier > unlockedTier(player.tech))
-    return fail(`tier ${found.tier} requires more Tech`);
+  if (found && found.tier > unlockedTier(player))
+    return fail(`tier ${found.tier} requires a higher Tech Level`);
 
   const def = CHIPS[state.chips[params.chip]?.chipId];
   if (!def) return fail("unknown chip");
@@ -289,7 +293,7 @@ function runAcquire(state, { pid, player, params }) {
   emit(state, "card_acquired", {
     player: pid, chip: chipUid, chipId: def.id, tier,
   });
-  recomputeTech(state); // a fresh Labs may have moved the player's Tech
+  recomputeResearch(state); // a fresh Lab may have moved the player's Research
   return { chip: chipUid, chipId: def.id, tier };
 }
 

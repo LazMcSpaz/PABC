@@ -8,7 +8,9 @@ import { evalCond as dslEvalCond } from "./dsl.js";
 
 export const EVENT_NAMES = new Set([
   "turn_started", "turn_ended", "round_ended",
-  "resource_gained", "resource_spent", "tech_changed",
+  "resource_gained", "resource_spent",
+  // §17 Tech Wheel
+  "research_changed", "tech_level_changed", "tech_node_assigned", "tech_node_lost",
   "stat_modified",
   "card_acquired", "card_played", "card_revealed",
   "card_entered_zone", "card_left_zone",

@@ -113,8 +113,14 @@ function formatEvent(ev, engineState) {
       return null;
     case "resource_spent":
       return null;
-    case "tech_changed":
-      return { color: theme.textDim, text: `${who(p.player)} tech → ${p.tech}` };
+    case "tech_level_changed":
+      return { color: theme.accent, text: `${who(p.player)} reached Tech Level ${p.techLevel}` };
+    case "tech_node_assigned":
+      return { color: theme.good, text: `${who(p.player)} unlocked ${p.node}` };
+    case "tech_node_lost":
+      return { color: theme.accent2, text: `${who(p.player)} lost tech node ${p.node}` };
+    case "research_changed":
+      return null; // too granular for the feed; the bar shows it
     case "standing_changed":
       return {
         color: theme.textDim,

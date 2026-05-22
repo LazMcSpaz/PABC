@@ -33,7 +33,13 @@ export const CONFIG = {
   },
   veteran: { winsToPromote: 3, survivedToPromote: 5 },
 
-  tech: { start: 1, tier2: 3, tier3: 6 },
+  // §17 Tech Wheel. Research fills a bar; Tech Level is a derived band
+  // (1–5); each new level grants one Ability Point to spend on the wheel.
+  tech: {
+    researchThresholds: [2, 4, 6, 8], // research needed for L2, L3, L4, L5
+    maxLevel: 5,
+    marketTierByLevel: { 2: 3, 3: 5 }, // Market tier 2 @ L3, tier 3 @ L5
+  },
   marketRowSizes: { 1: 5, 2: 4, 3: 3 },
 
   // Derived per the spec — garrison Strength and base chip slots by a

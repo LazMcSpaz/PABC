@@ -5,7 +5,7 @@ import { createGame } from "./setup.js";
 import { startTurn, endTurn } from "./turn.js";
 import { performAction } from "./actions.js";
 import { applyEffect } from "./effects.js";
-import { recomputeStats } from "./stats.js";
+import { recomputeStats, recomputeResearch, assignTechNode } from "./stats.js";
 import { activePlayerId } from "./targeting.js";
 import { FACTIONS, LOCATIONS, ABILITIES, REACTIVES, CHIPS } from "./content.js";
 import { resolveSalvage } from "./contest.js";
@@ -152,11 +152,15 @@ const acq1 = performAction(game, "acquire", { chip: findChip(1, "drilled-troops"
 line(`  acquire drilled-troops -> ${acq1.ok ? `ok (chip ${acq1.chip})` : "blocked — " + acq1.reason}`);
 line(`  champ STR ${champ.strength}; scrap ${game.players[me].resource}`);
 
-line(`\nTECH  versari tech ${game.players[me].tech}`);
+line(`\nTECH WHEEL (§17)  versari research ${game.players[me].research} · level ${game.players[me].techLevel}`);
 performAction(game, "acquire", { chip: findChip(1, "labs"), into: { location: prize.hexId } });
 ensureInRow(1, "labs"); // bring a second copy face-up
 performAction(game, "acquire", { chip: findChip(1, "labs"), into: { location: prize.hexId } });
-line(`  installed 2 Labs at ${LOCATIONS[prize.locationId].name} -> tech ${game.players[me].tech}`);
+line(`  installed 2 Labs at ${LOCATIONS[prize.locationId].name} -> research ${game.players[me].research}, level ${game.players[me].techLevel}`);
+// A permanent (encounter) Research grant pushes versari to Level 3 so the
+// tier-2 Market row unlocks.
+applyEffect(game, { type: "ADJUST_RESOURCE", resource: "Research", amount: 2, target: "active_player" }, ctx);
+line(`  +2 permanent Research -> research ${game.players[me].research}, level ${game.players[me].techLevel} (tier-2 Market unlocks at L3)`);
 
 const acq2 = performAction(game, "acquire", { chip: findChip(2, "sharpened-blades"), into: { unit: champ.uid } });
 line(`  acquire sharpened-blades (tier 2) -> ${acq2.ok ? "ok" : "blocked — " + acq2.reason}; champ STR ${champ.strength}`);
@@ -231,10 +235,10 @@ if (runnable.length) {
   line(`  demo: "${pickId}" → choice "${choice.label}"`);
   const scrapBefore = game.players[me].resource;
   const vpBefore = game.players[me].vp;
-  const techBefore = game.players[me].tech;
+  const techBefore = game.players[me].research;
   for (const eff of choice.effects) applyEffect(game, eff, ctx);
   const dr = (a, b) => `${a}->${b}`;
-  line(`   active player ${me}: scrap ${dr(scrapBefore, game.players[me].resource)}, vp ${dr(vpBefore, game.players[me].vp)}, tech ${dr(techBefore, game.players[me].tech)}`);
+  line(`   active player ${me}: scrap ${dr(scrapBefore, game.players[me].resource)}, vp ${dr(vpBefore, game.players[me].vp)}, research ${dr(techBefore, game.players[me].research)}`);
 }
 
 // --- Layer 5.1 effect handlers (track, standing, player flag, deferred) ---
@@ -256,8 +260,8 @@ line(`  deferred queue: ${game.deferred.length} packet(s), next due round ${game
 
 // --- DSL evaluator ---
 line("\nDSL EVALUATOR  (Layer 5.1 — content-schema §5 grammar)");
-const c1 = { op: "gte", left: "players.versari.tech", right: 1 };
-line(`  versari.tech >= 1: ${evalCond(game, c1)}`);
+const c1 = { op: "gte", left: "players.versari.techLevel", right: 1 };
+line(`  versari.techLevel >= 1: ${evalCond(game, c1)}`);
 const c2 = { all: [
   { op: "gt", left: "players.versari.resource", right: 0 },
   { has_flag: { player: "active", flag: "met-the-fixer" } },
@@ -268,11 +272,11 @@ line(`  controls_count(active): ${evalCond(game, c3)}`);
 const c4 = { op: "lt", left: "factionStanding.lakers.versari", right: 0 };
 line(`  factionStanding.lakers.versari < 0: ${evalCond(game, c4)}`);
 const s1 = { if: [
-  { op: "gt", left: "players.versari.tech", right: 5 }, 5,
-  { op: "gt", left: "players.versari.tech", right: 2 }, 3,
+  { op: "gt", left: "players.versari.research", right: 5 }, 5,
+  { op: "gt", left: "players.versari.research", right: 2 }, 3,
   1,
 ] };
-line(`  strength cascade by tech: ${evalStrength(game, s1)}`);
+line(`  strength cascade by research: ${evalStrength(game, s1)}`);
 
 // --- Layer 5.3 encounter delivery (field draw on Move-end) ---
 line("\nFIELD ENCOUNTER  (Layer 5.3 — Move-end draws from the deck)");
@@ -291,7 +295,7 @@ applyEffect(game, { type: "MODIFY_STAT", stat: "Movement", amount: 5, target: ch
 champ.moveRemaining = champ.movement;
 const deckBefore = game.encounterDeck.length;
 const scrapPre = game.players[me].resource;
-const techPre = game.players[me].tech;
+const techPre = game.players[me].research;
 const tracksPre = { ...game.players[me].tracks };
 line(`  deck size before: ${deckBefore}; champ ${champ.uid} on ${stagingHex} → moves to encounter hex ${encounterHex.id}`);
 const fe = performAction(game, "move", { unit: champ.uid, to: encounterHex.id });
@@ -301,7 +305,7 @@ const lastDelivered = [...game.log].reverse().find((e) => e.name === "encounter_
 const lastResolved = [...game.log].reverse().find((e) => e.name === "encounter_resolved");
 if (lastDelivered) line(`  delivered: ${lastDelivered.payload.encounter} → "${lastDelivered.payload.choiceLabel}"`);
 if (lastResolved) line(`  resolved:  ${lastResolved.payload.encounter}`);
-line(`  ${me} deltas: scrap ${scrapPre}→${game.players[me].resource}, tech ${techPre}→${game.players[me].tech}, tracks {trust ${tracksPre.trust}→${game.players[me].tracks.trust}, reputation ${tracksPre.reputation}→${game.players[me].tracks.reputation}, alignment ${tracksPre.alignment}→${game.players[me].tracks.alignment}}`);
+line(`  ${me} deltas: scrap ${scrapPre}→${game.players[me].resource}, research ${techPre}→${game.players[me].research}, tracks {trust ${tracksPre.trust}→${game.players[me].tracks.trust}, reputation ${tracksPre.reputation}→${game.players[me].tracks.reputation}, alignment ${tracksPre.alignment}→${game.players[me].tracks.alignment}}`);
 
 // --- Layer 5.4 quest engine (auto-delivered multi-beat quest) ---
 line("\nQUEST  (Layer 5.4 — 2-beat single-player quest)");
@@ -849,6 +853,134 @@ line("\n  [Loot] interactive pickup can leave chips behind");
   check("taken chip installs; the rest stays on the hex",
     u.chips.includes(c1) && (g.hexLoot[terrain.id] || []).length === 1 &&
     g.hexLoot[terrain.id].includes(c2));
+}
+
+// --- Tech Wheel (§17): research, levels, ability points, peel ---
+line("\n  [Tech Wheel] research → levels → ability points → wheel + peel");
+{
+  const g = createGame({ seed }); startTurn(g);
+  const me = g.turnOrder[0];
+  const home = Object.values(g.locations).find((l) => l.controller === me);
+  const install = (chipId) => {
+    const c = g.nextId("chip"); g.chips[c] = { uid: c, chipId };
+    home.chips.push(c); recomputeResearch(g); return c;
+  };
+
+  install("labs");
+  check("one Lab → research 1, Tech Level 1",
+    g.players[me].research === 1 && g.players[me].techLevel === 1);
+  install("labs");
+  check("two Labs → research 2, Tech Level 2 (1 Ability Point)",
+    g.players[me].research === 2 && g.players[me].techLevel === 2);
+
+  const a1 = assignTechNode(g, me, "mil-entry");
+  check("assigning an entry node spends the Ability Point",
+    a1.ok && g.players[me].techWheel.includes("mil-entry"));
+  check("no Ability Points left blocks a 2nd assignment",
+    !assignTechNode(g, me, "mil-a1").ok);
+
+  install("advanced-lab"); // +2 → research 4 → L3
+  check("Advanced Lab pushes to L3 (research 4) — tier-2 Market unlocks",
+    g.players[me].research === 4 && g.players[me].techLevel === 3);
+  applyEffect(g, { type: "ADJUST_RESOURCE", resource: "Research", amount: 4, target: me }, {});
+  check("permanent Research reaches L5 (research 8) — tier-3 Market unlocks",
+    g.players[me].research === 8 && g.players[me].techLevel === 5);
+
+  // 4 points now: assign a prereq chain + one more.
+  assignTechNode(g, me, "mil-a1");
+  const deep = assignTechNode(g, me, "mil-a2");
+  const log = assignTechNode(g, me, "log-entry");
+  check("prereq chain + 4th point assign (4 points spent)",
+    deep.ok && log.ok && g.players[me].techWheel.length === 4);
+  check("a node needs its prerequisite", !assignTechNode(g, me, "eco-a1").ok);
+
+  // Strip all Labs — permanent Research (4) is a floor → L3 → 2 points →
+  // peel the 2 most-recently assigned (log-entry, then mil-a2). LIFO.
+  home.chips = home.chips.filter(
+    (c) => !["labs", "advanced-lab"].includes(g.chips[c]?.chipId),
+  );
+  recomputeResearch(g);
+  check("permanent Research is a floor (research 4 after Labs gone)",
+    g.players[me].research === 4 && g.players[me].techLevel === 3);
+  check("a level drop peels the most-recently-assigned nodes (LIFO)",
+    g.players[me].techWheel.length === 2 &&
+    !g.players[me].techWheel.includes("log-entry") &&
+    !g.players[me].techWheel.includes("mil-a2") &&
+    g.players[me].techWheel.includes("mil-entry") &&
+    g.players[me].techWheel.includes("mil-a1"));
+}
+
+// --- Tech Wheel entry effects ---
+line("\n  [Tech Wheel] entry-node effects");
+{
+  const terrain = Object.values(createGame({ seed }).board.hexes).find((h) => h.type === "terrain").id;
+
+  // Military: +1 to the owner's contest roll (attacker side here).
+  {
+    const g = createGame({ seed }); startTurn(g);
+    const me = g.turnOrder[0], foe = g.turnOrder[1];
+    g.players[me].techLevel = 2; g.players[me].techWheel = ["mil-entry"];
+    g.rng.roll = () => 1;
+    const atk = Object.values(g.units).find((u) => u.owner === me);
+    const vic = Object.values(g.units).find((u) => u.owner === foe);
+    atk.node = terrain; atk.moveRemaining = atk.movement;
+    vic.node = terrain; recomputeStats(g);
+    g.players[me].actions.remaining = 5;
+    const r = performAction(g, "contest", { unit: atk.uid, target: vic.uid });
+    check("Military (Doctrine): +1 to the contest roll", r.attackerMilitary === 1);
+  }
+
+  // Logistics: +1 Movement to the owner's units.
+  {
+    const g = createGame({ seed }); startTurn(g);
+    const me = g.turnOrder[0];
+    const u = Object.values(g.units).find((x) => x.owner === me);
+    const before = u.movement;
+    g.players[me].techLevel = 2; g.players[me].techWheel = ["log-entry"];
+    recomputeStats(g);
+    check("Logistics (Supply Lines): +1 Movement", u.movement === before + 1);
+  }
+
+  // Economy: +1 scrap per fully-held Location at Upkeep.
+  {
+    const g = createGame({ seed }); startTurn(g);
+    const me = g.turnOrder[0];
+    g.players[me].techLevel = 2; g.players[me].techWheel = ["eco-entry"];
+    const locs = Object.values(g.locations).filter((l) => l.controller === me);
+    const expected = locs.reduce((n, l) => n + l.production, 0) + locs.length;
+    const before = g.players[me].resource;
+    for (let i = 0; i < g.turnOrder.length; i++) endTurn(g); // back to me's Upkeep
+    check("Economy (Industry): +1 scrap per held Location",
+      g.players[me].resource - before === expected);
+  }
+
+  // Intelligence: the redraw stacks with the Recon Team chip (budget 2).
+  {
+    const g = createGame({ seed }); startTurn(g);
+    const me = g.turnOrder[0];
+    const home = Object.values(g.locations).find((l) => l.controller === me);
+    g.players[me].techLevel = 2; g.players[me].techWheel = ["int-entry"];
+    const rc = g.nextId("chip"); g.chips[rc] = { uid: rc, chipId: "recon-team" };
+    home.chips.push(rc); // +1 discard; with int-entry = 2 total
+    const encHex = Object.values(g.board.hexes).find(
+      (h) => h.type === "encounter" && g.board.adjacency[h.id]?.length,
+    );
+    const staging = g.board.adjacency[encHex.id][0];
+    const u = Object.values(g.units).find((x) => x.owner === me);
+    u.node = staging; u.moveRemaining = 9; recomputeStats(g);
+    g.players[me].actions.remaining = 5;
+    const original = [...g.encounterDeck];
+    let discards = 0;
+    const ctx = { interactiveLoot: false, interact: (req) => {
+      if (req.kind === "encounterRedraw") return discards++ < 2; // discard twice
+      if (req.kind === "encounterChoice") return 0;
+      return req?.options ? req.options[0] : null;
+    } };
+    performAction(g, "move", { unit: u.uid, to: encHex.id }, ctx);
+    const delivered = [...g.log].reverse().find((e) => e.name === "encounter_delivered");
+    check("Intelligence + Recon Team grant 2 discards (3rd card drawn)",
+      discards === 2 && delivered && delivered.payload.encounter === original[2]);
+  }
 }
 
 line(`\n  v0.2 verification: ${v2pass} passed, ${v2fail} failed`);
