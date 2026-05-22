@@ -202,6 +202,37 @@ export default function Hex({ hex, units, selected, reachable, selectedUnitId, o
           onClick={onUnitClick}
         />
       ))}
+      {hex.loot > 0 && <LootMarker count={hex.loot} />}
+    </div>
+  );
+}
+
+// Dropped-chip pile sitting on a hex (v0.2). A unit ending its move here
+// may claim it. Pinned to the lower arc so it clears the unit tokens.
+function LootMarker({ count }) {
+  return (
+    <div
+      title={`${count} salvageable chip${count === 1 ? "" : "s"} dropped here`}
+      style={{
+        position: "absolute",
+        top: "78%",
+        left: "50%",
+        transform: "translate(-50%, -50%)",
+        display: "flex",
+        alignItems: "center",
+        gap: 3,
+        padding: "1px 6px",
+        borderRadius: 9,
+        background: "rgba(20,17,13,0.92)",
+        border: `1.5px solid ${theme.accent}`,
+        boxShadow: `0 0 10px ${theme.accent}99`,
+        zIndex: 5,
+      }}
+    >
+      <span style={{ fontSize: 12, lineHeight: 1 }}>⚙</span>
+      <span style={{ fontFamily: theme.fontDisplay, fontSize: 11, fontWeight: 700, color: theme.accent }}>
+        {count}
+      </span>
     </div>
   );
 }

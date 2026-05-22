@@ -10,14 +10,21 @@ import { theme } from "./data.js";
 import { Btn, Coin } from "./kit.jsx";
 import Chip from "./Chip.jsx";
 
-const ZONES = [
-  { id: "salvaged", title: "Salvaged", hint: "Recovered chips · left here = scrapped", color: theme.borderLit },
-  { id: "unitSlots", title: "Unit Slots", hint: "Install on the victor", color: theme.accent2 },
+const zonesFor = (isLoot) => [
+  {
+    id: "salvaged",
+    title: isLoot ? "On the Hex" : "Salvaged",
+    hint: isLoot ? "Chips left here stay on the hex" : "Recovered chips · left here = scrapped",
+    color: theme.borderLit,
+  },
+  { id: "unitSlots", title: "Unit Slots", hint: "Install on the unit", color: theme.accent2 },
   { id: "resell", title: "Resell", hint: "½ value → resale row", color: theme.accent },
   { id: "destroy", title: "Destroy", hint: "Removed from the game", color: theme.bad || "#a33" },
 ];
 
 export default function SalvageModal({ prompt, onConfirm }) {
+  const isLoot = prompt.kind === "loot";
+  const ZONES = useMemo(() => zonesFor(isLoot), [isLoot]);
   const byUid = useMemo(() => {
     const m = {};
     for (const c of [...prompt.unitChips, ...prompt.salvagedChips]) m[c.uid] = c;
@@ -76,15 +83,16 @@ export default function SalvageModal({ prompt, onConfirm }) {
               textTransform: "uppercase", color: theme.textFaint, fontWeight: 700,
             }}
           >
-            Salvage
+            {isLoot ? "Salvage Pile" : "Salvage"}
           </span>
         </div>
         <div style={{ textAlign: "center", fontSize: 12, color: theme.textDim, marginBottom: 16 }}>
           <span style={{ color: prompt.killerColor || theme.text, fontWeight: 700 }}>
             {prompt.killerName}
           </span>{" "}
-          recovered {prompt.salvagedChips.length} chip
-          {prompt.salvagedChips.length === 1 ? "" : "s"}. Drag to assign.
+          {isLoot ? "found" : "recovered"} {prompt.salvagedChips.length} chip
+          {prompt.salvagedChips.length === 1 ? "" : "s"}
+          {isLoot ? " on this hex" : ""}. Drag to assign.
         </div>
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
@@ -154,6 +162,19 @@ export default function SalvageModal({ prompt, onConfirm }) {
           <Btn variant="primary" onClick={confirm}>
             Confirm{resaleTotal > 0 ? ` · +${resaleTotal} scrap` : ""}
           </Btn>
+          {isLoot && (
+            <Btn
+              onClick={() =>
+                onConfirm({
+                  unitSlots: prompt.unitChips.map((c) => c.uid),
+                  resell: [],
+                  destroy: [],
+                })
+              }
+            >
+              Leave it
+            </Btn>
+          )}
         </div>
       </div>
     </div>

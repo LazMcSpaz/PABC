@@ -213,6 +213,11 @@ export function adaptState(state) {
     };
     if (unitAt[h.id]) hex.unitId = unitAt[h.id];
     if (unitIdsAt[h.id]) hex.unitIds = unitIdsAt[h.id];
+    const loot = state.hexLoot?.[h.id];
+    if (loot?.length) {
+      hex.loot = loot.length;
+      hex.lootChips = loot.map((uid) => engineChipIdToUi(state.chips[uid]?.chipId));
+    }
     if (h.type === "location") {
       const loc = state.locations[h.id];
       hex.locationId = engineLocationIdToUi(loc.locationId);

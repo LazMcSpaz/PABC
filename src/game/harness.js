@@ -760,5 +760,69 @@ line("\n  [Salvage] deferred interactive salvage + resale row");
     acq.ok && atk.chips.includes(c2) && !g.resaleRow.includes(c2));
 }
 
+// --- Hex loot: chips drop on the hex when no unit can claim them ---
+line("\n  [Loot] mutual kill drops chips; next unit claims them");
+{
+  const g = createGame({ seed }); startTurn(g);
+  const me = g.turnOrder[0];
+  const foe = g.turnOrder[1];
+  const terrain = Object.values(g.board.hexes).find((h) => h.type === "terrain");
+  g.rng.roll = () => 1;
+  const myUnits = Object.values(g.units).filter((u) => u.owner === me);
+  const foeUnits = Object.values(g.units).filter((u) => u.owner === foe);
+  const atk = myUnits[0];
+  const vic = foeUnits[0];
+  // Both at 1 HP, both carry a chip → attacker wins by margin 1 (pyrrhic),
+  // so loser dies and the winner dies to its own pyrrhic loss.
+  const ac = g.nextId("chip"); g.chips[ac] = { uid: ac, chipId: "sharpened-blades" }; // +2
+  const vc = g.nextId("chip"); g.chips[vc] = { uid: vc, chipId: "drilled-troops" };   // +1
+  atk.node = terrain.id; atk.moveRemaining = atk.movement; atk.chips = [ac]; atk.baseStrength = 1;
+  vic.node = terrain.id; vic.chips = [vc]; vic.baseStrength = 1;
+  recomputeStats(g);
+  g.players[me].actions.remaining = 5;
+  performAction(g, "contest", { unit: atk.uid, target: vic.uid }); // auto-salvage path
+  check("both units destroyed in a pyrrhic mutual kill", !g.units[atk.uid] && !g.units[vic.uid]);
+  check("their chips fall to the hex as loot",
+    (g.hexLoot[terrain.id] || []).length === 2 &&
+    g.hexLoot[terrain.id].includes(ac) && g.hexLoot[terrain.id].includes(vc));
+
+  // Persists across a full round with no one standing on it.
+  for (let i = 0; i < g.turnOrder.length; i++) endTurn(g);
+  check("loot persists until claimed", (g.hexLoot[terrain.id] || []).length === 2);
+
+  // A fresh unit ending its move there auto-grabs what fits (any faction).
+  const claimer = myUnits[1];
+  const adj = g.board.adjacency[terrain.id][0];
+  claimer.node = adj; claimer.chips = []; claimer.moveRemaining = 9; recomputeStats(g);
+  g.activeIndex = g.turnOrder.indexOf(me); g.phase = "Main";
+  g.players[me].actions.remaining = 5;
+  performAction(g, "move", { unit: claimer.uid, to: terrain.id });
+  check("a unit landing on loot grabs what fits in its bay",
+    claimer.chips.includes(ac) && claimer.chips.includes(vc) && !g.hexLoot[terrain.id]);
+}
+
+// --- Interactive loot pickup leaves the rest on the hex ---
+line("\n  [Loot] interactive pickup can leave chips behind");
+{
+  const g = createGame({ seed }); startTurn(g);
+  const me = g.turnOrder[0];
+  const terrain = Object.values(g.board.hexes).find((h) => h.type === "terrain");
+  const c1 = g.nextId("chip"); g.chips[c1] = { uid: c1, chipId: "sharpened-blades" };
+  const c2 = g.nextId("chip"); g.chips[c2] = { uid: c2, chipId: "drilled-troops" };
+  g.hexLoot[terrain.id] = [c1, c2];
+  const u = Object.values(g.units).find((x) => x.owner === me);
+  const adj = g.board.adjacency[terrain.id][0];
+  u.node = adj; u.chips = []; u.moveRemaining = 9; recomputeStats(g);
+  g.players[me].actions.remaining = 5;
+  performAction(g, "move", { unit: u.uid, to: terrain.id }, { interactiveLoot: true });
+  check("interactive pickup queues a loot decision (loot untouched)",
+    g.pendingSalvage.length === 1 && g.pendingSalvage[0].kind === "loot" &&
+    (g.hexLoot[terrain.id] || []).length === 2);
+  resolveSalvage(g, { unitSlots: [c1] }); // take one, leave the other
+  check("taken chip installs; the rest stays on the hex",
+    u.chips.includes(c1) && (g.hexLoot[terrain.id] || []).length === 1 &&
+    g.hexLoot[terrain.id].includes(c2));
+}
+
 line(`\n  v0.2 verification: ${v2pass} passed, ${v2fail} failed`);
 line("");

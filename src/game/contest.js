@@ -231,19 +231,42 @@ function autoSalvage(state, chips, bayFree) {
   return taken;
 }
 
-// §16.4 — remove a unit from play. If a `killer` unit exists and the dead
-// unit carried chips, the killer salvages up to its free Bay space (the
-// rest are scrapped); a garrison / null killer scraps everything.
+// Drop chips onto a hex as a persistent loot pile (no surviving claimant).
+// The next unit to end its move there decides what to do with them.
+function dropLoot(state, hex, chips) {
+  if (!chips.length) return;
+  state.hexLoot = state.hexLoot || {};
+  (state.hexLoot[hex] = state.hexLoot[hex] || []).push(...chips);
+  emit(state, "loot_dropped", { hex, chips: [...chips] });
+}
+
+// §16.4 — remove a unit from play. A surviving `killer` unit salvages the
+// dead unit's chips (auto, or interactive via the queue); with no living
+// claimant the chips fall to the hex as a loot pile. Any pending-salvage
+// decision that named this unit as the claimant is also spilled to loot.
 export function destroyUnit(state, unitUid, killerUid, ctx = {}) {
   const dead = state.units[unitUid];
   if (!dead) return;
+  const deadHex = dead.node;
   const chips = dead.chips.filter((c) => state.chips[c]?.chipId !== "capital");
   delete state.units[unitUid];
   emit(state, "unit_destroyed", { unit: unitUid, owner: dead.owner, killer: killerUid || null });
 
+  // This unit may itself have been a pending salvage claimant (e.g. it won
+  // a contest then died to its own pyrrhic loss). Its unclaimed loot spills
+  // onto the hex rather than vanishing.
+  if (state.pendingSalvage?.length) {
+    state.pendingSalvage = state.pendingSalvage.filter((e) => {
+      if (e.killerUid !== unitUid || e.kind === "loot") return true;
+      dropLoot(state, deadHex, e.chips.filter((c) => state.chips[c]));
+      return false;
+    });
+  }
+
   const killer = killerUid ? state.units[killerUid] : null;
-  if (!killer || !chips.length) {
-    for (const c of chips) state.removed.push(c); // garrison / null killer scraps all
+  if (!chips.length) return;
+  if (!killer) {
+    dropLoot(state, deadHex, chips); // no claimant — chips become hex loot
     return;
   }
 
@@ -314,13 +337,25 @@ export function resolveSalvage(state, assignments = {}) {
     while (state.resaleRow.length > 4) state.removed.push(state.resaleRow.shift());
   }
 
-  // Everything else in the universe (destroy bucket, leftover tray) is scrapped.
+  // Sort the remainder. `destroy` is always scrapped. Leftovers (chips in
+  // no bucket) are scrapped for a death-salvage but, for a loot pickup,
+  // stay on the hex as a persistent pile — the claimant simply left them.
   const kept = new Set([...(killer ? killer.chips : []), ...resell]);
-  for (const c of universe) if (!kept.has(c)) state.removed.push(c);
+  const destroy = new Set((assignments.destroy || []).filter((c) => universe.has(c)));
+  const leftOnHex = [];
+  for (const c of universe) {
+    if (kept.has(c)) continue;
+    if (entry.kind === "loot" && !destroy.has(c)) leftOnHex.push(c);
+    else state.removed.push(c);
+  }
+  if (entry.kind === "loot") {
+    if (leftOnHex.length) state.hexLoot[entry.hex] = leftOnHex;
+    else delete state.hexLoot[entry.hex];
+  }
 
-  const salvagedFromDead = (killer ? killer.chips : []).filter((c) => entry.chips.includes(c));
-  emit(state, "unit_salvaged", {
-    killer: entry.killerUid, from: entry.deadUid, chips: salvagedFromDead, resold: resell,
+  const fromDead = (killer ? killer.chips : []).filter((c) => entry.chips.includes(c));
+  emit(state, entry.kind === "loot" ? "loot_claimed" : "unit_salvaged", {
+    killer: entry.killerUid, from: entry.deadUid, hex: entry.hex, chips: fromDead, resold: resell,
   });
 
   state.pendingSalvage.shift();

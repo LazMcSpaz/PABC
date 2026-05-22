@@ -163,14 +163,21 @@ export default function Prototype({ config, onNewGame }) {
 
   function doMoveWithEncounterChoice(unitUid, dest, choiceId) {
     const ctx = {
+      interactiveLoot: true,
       interact: (req) => {
         if (req.kind === "encounterChoice") return choiceId;
         return req?.options ? req.options[0] : null; // fallback to first
       },
     };
     const r = runAction("move", { unit: unitUid, to: dest }, ctx);
-    if (r.ok) inspectHex(dest);
+    if (r.ok) { inspectHex(dest); maybeOpenLoot(); }
     setEncounterPrompt(null);
+  }
+
+  // Open the salvage modal if a Move just landed on a loot pile (§ hex loot).
+  function maybeOpenLoot() {
+    const p = buildSalvagePrompt(gameRef.current);
+    if (p) setSalvagePrompt(p);
   }
 
   function onHexClick(hexId) {
@@ -195,8 +202,8 @@ export default function Prototype({ config, onNewGame }) {
         });
         return;
       }
-      const r = runAction("move", { unit: selectedUnitId, to: hexId });
-      if (r.ok) inspectHex(hexId);
+      const r = runAction("move", { unit: selectedUnitId, to: hexId }, { interactiveLoot: true });
+      if (r.ok) { inspectHex(hexId); maybeOpenLoot(); }
       return;
     }
 
@@ -303,6 +310,7 @@ export default function Prototype({ config, onNewGame }) {
       };
     };
     return {
+      kind: e.kind === "loot" ? "loot" : "death",
       killerName: killer?.name || "Victor",
       killerColor: UI_FACTIONS[killer?.owner]?.color,
       baySlots: CONFIG.unit.baySlots,

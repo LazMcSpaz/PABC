@@ -63,7 +63,38 @@ function runMove(state, { params, ctx }) {
       drawFieldEncounter(state, unit, ctx);
     }
   }
+
+  tryPickupLoot(state, unit, params.to, ctx);
   return {};
+}
+
+// A unit that ends its move on a hex carrying a loot pile (chips dropped
+// when a unit died with no claimant) may take it. Interactive players get
+// the salvage modal (and can close it to leave the loot); headless / AI
+// grab what fits into the free bay and leave the rest on the hex.
+function tryPickupLoot(state, unit, hex, ctx) {
+  const loot = state.hexLoot?.[hex];
+  if (!loot || !loot.length) return;
+  if (ctx.interactiveLoot) {
+    state.pendingSalvage = state.pendingSalvage || [];
+    state.pendingSalvage.push({ kind: "loot", killerUid: unit.uid, hex, chips: [...loot] });
+    return;
+  }
+  const used = (uids) => uids.reduce((n, c) => n + (chipDefOf(state, c)?.slots ?? 1), 0);
+  let free = CONFIG.unit.baySlots - used(unit.chips);
+  const taken = [];
+  const rest = [];
+  for (const c of loot) {
+    const sl = chipDefOf(state, c)?.slots ?? 1;
+    if (sl <= free) { unit.chips.push(c); taken.push(c); free -= sl; }
+    else rest.push(c);
+  }
+  if (rest.length) state.hexLoot[hex] = rest;
+  else delete state.hexLoot[hex];
+  if (taken.length) {
+    recomputeStats(state);
+    emit(state, "loot_claimed", { killer: unit.uid, hex, chips: taken });
+  }
 }
 
 // --- Recruit ---------------------------------------------------------

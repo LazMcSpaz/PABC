@@ -22,6 +22,7 @@ export const EVENT_NAMES = new Set([
   "unit_destroyed", "unit_salvaged", "base_strength_changed",
   "unit_reinforced", "reinforcement_requested", "reinforcement_arrived",
   "veteran_promoted",
+  "loot_dropped", "loot_claimed",
   // Layer 5 — encounter & quest system (spec §15.13)
   "encounter_delivered", "trigger_fired",
   "quest_started", "quest_advanced", "quest_completed",

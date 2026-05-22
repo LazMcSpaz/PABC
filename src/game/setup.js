@@ -233,6 +233,7 @@ export function createGame({
     reinforcements: [], // v0.2 §16.5 — pending field-reinforcement packets
     pendingSalvage: [], // interactive salvage queue (UI resolves via resolveSalvage)
     resaleRow: [],      // resold chips, 4-slot FIFO, acquirable at full cost
+    hexLoot: {},        // hexId -> [chipUid] dropped when no unit could claim them
     log: [],
     // Layer 5 (encounter & quest system) per spec §15.11
     world: {
