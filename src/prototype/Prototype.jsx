@@ -133,6 +133,17 @@ export default function Prototype({ config, onNewGame }) {
       .map((c) => c.id);
   }
 
+  // Terrain (wasteland) hexes carry no info worth a dialogue, so they
+  // never open the Inspector — landing on or clicking one just leaves
+  // the inspector closed.
+  function inspectHex(hexId) {
+    if (state.hexes[hexId]?.type === "terrain") {
+      setSelectedHexId(null);
+      return;
+    }
+    setSelectedHexId(hexId);
+  }
+
   function doMoveWithEncounterChoice(unitUid, dest, choiceId) {
     const ctx = {
       interact: (req) => {
@@ -141,7 +152,7 @@ export default function Prototype({ config, onNewGame }) {
       },
     };
     const r = runAction("move", { unit: unitUid, to: dest }, ctx);
-    if (r.ok) setSelectedHexId(dest);
+    if (r.ok) inspectHex(dest);
     setEncounterPrompt(null);
   }
 
@@ -168,13 +179,17 @@ export default function Prototype({ config, onNewGame }) {
         return;
       }
       const r = runAction("move", { unit: selectedUnitId, to: hexId });
-      if (r.ok) setSelectedHexId(hexId);
+      if (r.ok) inspectHex(hexId);
       return;
     }
 
-    // Otherwise toggle the inspector. Hex selection no longer touches
-    // unit selection — those are independent now (unit tokens have
-    // their own click handler).
+    // Otherwise toggle the inspector (terrain never opens it). Hex
+    // selection no longer touches unit selection — those are
+    // independent now (unit tokens have their own click handler).
+    if (state.hexes[hexId]?.type === "terrain") {
+      setSelectedHexId(null);
+      return;
+    }
     setSelectedHexId((cur) => (cur === hexId ? null : hexId));
   }
 
