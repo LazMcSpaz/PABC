@@ -77,14 +77,14 @@ export const UNIT_UPGRADES = {
 
 // Location upgrade chips. Costs are placeholders (scrap).
 export const LOCATION_UPGRADES = {
-  defenseTurrets: { id: "defenseTurrets", name: "Defense Turrets", kind: "location", cost: 4, effect: "+2 Strength to this location's garrison." },
-  townHall: { id: "townHall", name: "Town Hall", kind: "location", cost: 3, effect: "+1 to this location's decay limit (foothold cap)." },
-  recyclers: { id: "recyclers", name: "Recyclers", kind: "location", cost: 3, effect: "+1 scrap production each turn." },
-  factory: { id: "factory", name: "Factory", kind: "location", cost: 5, effect: "+2 scrap production each turn." },
-  reconTeam: { id: "reconTeam", name: "Recon Team", kind: "location", cost: 3, effect: "When you draw from the encounter deck, you may discard it and draw again." },
-  trainingGrounds: { id: "trainingGrounds", name: "Training Grounds", kind: "location", cost: 4, effect: "Prerequisite for creating units. Raises your unit cap by 1." },
-  logisticsHub: { id: "logisticsHub", name: "Logistics Hub", kind: "location", cost: 6, rare: true, effect: "+1 Action each of your turns." },
-  capital: { id: "capital", name: "Capital", kind: "capital", cost: 0, special: true, effect: "This location cannot decay. +1 garrison Strength and +1 scrap production. One per player; removed if the location is captured." },
+  defenseTurrets: { id: "defenseTurrets", name: "Defense Turrets", kind: "location", cost: 4, short: "+2 Garrison", effect: "+2 Strength to this location's garrison." },
+  townHall: { id: "townHall", name: "Town Hall", kind: "location", cost: 3, short: "+1 Decay Limit", effect: "+1 to this location's decay limit (foothold cap)." },
+  recyclers: { id: "recyclers", name: "Recyclers", kind: "location", cost: 3, short: "+1 Scrap / turn", effect: "+1 scrap production each turn." },
+  factory: { id: "factory", name: "Factory", kind: "location", cost: 5, short: "+2 Scrap / turn", effect: "+2 scrap production each turn." },
+  reconTeam: { id: "reconTeam", name: "Recon Team", kind: "location", cost: 3, short: "Encounter Redraw", effect: "When you draw from the encounter deck, you may discard it and draw again." },
+  trainingGrounds: { id: "trainingGrounds", name: "Training Grounds", kind: "location", cost: 4, short: "+1 Unit Cap", effect: "Prerequisite for creating units. Raises your unit cap by 1." },
+  logisticsHub: { id: "logisticsHub", name: "Logistics Hub", kind: "location", cost: 6, rare: true, short: "+1 Action / turn", effect: "+1 Action each of your turns." },
+  capital: { id: "capital", name: "Capital", kind: "capital", cost: 0, special: true, short: "Capital Seat", effect: "This location cannot decay. +1 garrison Strength and +1 scrap production. One per player; removed if the location is captured." },
 };
 
 export const ALL_UPGRADES = { ...UNIT_UPGRADES, ...LOCATION_UPGRADES };

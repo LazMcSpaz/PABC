@@ -422,6 +422,16 @@ export function TitledWindow({ title, icon, onClose, children, width }) {
 // top" as higher tiers unlock. Chips render on the uploaded chip-plate
 // artwork (orange = unit upgrade, teal = location upgrade).
 // =======================================================================
+// A terse one-line effect summary for a market chip ("+1 Decay Limit").
+// Prefers an authored `short`, else derives from unit str/mov deltas.
+function chipSummary(def) {
+  if (def.short) return def.short;
+  const p = [];
+  if (def.str) p.push(`${def.str > 0 ? "+" : ""}${def.str} Strength`);
+  if (def.mov) p.push(`${def.mov > 0 ? "+" : ""}${def.mov} Movement`);
+  return p.join(" · ") || def.effect || "";
+}
+
 function MarketChip({ item, def, affordable, size, onAcquire, onHover }) {
   const kind = def.kind === "location" ? "location" : "unit";
   const accent = kind === "location" ? "#5fd0c8" : "#e69a4a";
@@ -438,18 +448,27 @@ function MarketChip({ item, def, affordable, size, onAcquire, onHover }) {
         cursor: affordable ? "pointer" : "default",
         filter: affordable ? (hov ? `drop-shadow(0 0 13px ${accent})` : "drop-shadow(0 4px 8px rgba(0,0,0,0.6))") : "grayscale(0.6) brightness(0.66)",
         opacity: affordable ? 1 : 0.72,
-        transform: hov && affordable ? "scale(1.07)" : "scale(1)",
+        transform: hov && affordable ? "scale(1.06)" : "scale(1)",
         transition: "transform .12s ease, filter .12s ease",
       }}
     >
-      <div style={{ position: "absolute", left: "6%", width: "62%", top: "47%", transform: "translateY(-50%)", textAlign: "center", fontFamily: C.font, fontSize: CW < 132 ? 10 : 11.5, fontWeight: 700, lineHeight: 1.1, color: C.text, textShadow: "0 1px 3px #000" }}>
-        {def.name}
-      </div>
-      <div style={{ position: "absolute", right: "14%", top: "21%", transform: "translate(50%,-50%)", fontFamily: C.font, fontWeight: 800, fontSize: CW < 132 ? 13 : 15, color: "#fff", textShadow: "0 1px 3px #000, 0 0 6px rgba(0,0,0,0.9)" }}>
-        {def.cost > 0 ? def.cost : "—"}
+      {/* readout panel — kept in the dark screen, left of the dial */}
+      <div style={{ position: "absolute", left: "8%", top: "12%", width: "60%", height: "76%", display: "flex", flexDirection: "column" }}>
+        <div style={{ fontFamily: C.font, fontSize: 11, fontWeight: 800, lineHeight: 1.04, letterSpacing: 0.2, textTransform: "uppercase", color: C.text, textShadow: "0 1px 3px #000" }}>
+          {def.name}
+        </div>
+        <div style={{ marginTop: 3, fontFamily: C.font, fontSize: 9.5, fontWeight: 600, lineHeight: 1.12, color: accent, textShadow: "0 1px 2px #000" }}>
+          {chipSummary(def)}
+        </div>
+        <div style={{ marginTop: "auto", display: "flex", alignItems: "center" }}>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 4, background: "rgba(2,7,8,0.74)", border: `1px solid ${accent}66`, borderRadius: 9, padding: "1px 8px 1px 4px", boxShadow: "0 1px 3px rgba(0,0,0,0.6)" }}>
+            <img src={ICON.scrap} alt="" style={{ width: 15, height: 15, objectFit: "contain" }} />
+            <span style={{ fontFamily: C.font, fontWeight: 800, fontSize: 14, color: "#fff" }}>{def.cost > 0 ? def.cost : "—"}</span>
+          </span>
+        </div>
       </div>
       {item.isResale && (
-        <span style={{ position: "absolute", left: "6%", bottom: "9%", fontSize: 7, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", color: C.gold, border: `1px solid ${C.gold}`, borderRadius: 3, padding: "0 4px", background: "rgba(0,0,0,0.55)" }}>Resale</span>
+        <span style={{ position: "absolute", right: "6%", bottom: "10%", fontSize: 7, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", color: C.gold, border: `1px solid ${C.gold}`, borderRadius: 3, padding: "0 4px", background: "rgba(0,0,0,0.6)" }}>Resale</span>
       )}
       {affordable && hov && (
         <span style={{ position: "absolute", left: "50%", bottom: "-15px", transform: "translateX(-50%)", fontFamily: C.font, fontSize: 9, fontWeight: 700, letterSpacing: 1.5, textTransform: "uppercase", color: accent, whiteSpace: "nowrap", textShadow: "0 1px 3px #000" }}>Acquire</span>
@@ -483,7 +502,7 @@ export function MarketBand({ tiers = [], resale = [], scrap, actions = {}, isYou
     return () => window.removeEventListener("resize", r);
   }, []);
   const cx = size.w / 2, cy = size.h - 4;
-  const CW = 132, R0 = Math.max(264, Math.min(322, size.h * 0.36)), STEP = 120, halfSpan = 70, bandHalf = 48;
+  const CW = 148, R0 = Math.max(272, Math.min(330, size.h * 0.38)), STEP = 124, halfSpan = 74, bandHalf = 52;
 
   const tierData = tiers.map((t, idx) => ({
     ...t,

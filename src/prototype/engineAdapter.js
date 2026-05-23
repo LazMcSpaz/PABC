@@ -82,6 +82,7 @@ export function ensureUiConstantsSynced() {
   };
   ensureChip("labs", {
     name: "Labs", kind: "location", cost: ENGINE_CHIPS.labs?.cost ?? 3,
+    short: "+1 Tech / turn",
     effect: ENGINE_CHIPS.labs?.desc ?? "+1 Tech score",
   });
 }
