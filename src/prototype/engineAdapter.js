@@ -82,6 +82,7 @@ export function ensureUiConstantsSynced() {
   };
   ensureChip("labs", {
     name: "Labs", kind: "location", cost: ENGINE_CHIPS.labs?.cost ?? 3,
+    short: "+1 Tech / turn",
     effect: ENGINE_CHIPS.labs?.desc ?? "+1 Tech score",
   });
 }
@@ -282,6 +283,30 @@ export function adaptState(state) {
     marketChips.push({ uid, chipId: engineChipIdToUi(eng), engineChipId: eng, isResale: true });
   }
 
+  // All market tiers (for the radial Market band). Tier unlock mirrors
+  // actions.unlockedTier — tier 2 @ Tech L3, tier 3 @ L5.
+  const human = state.players[state.humanFactionId];
+  const tierByLevel = CONFIG.tech.marketTierByLevel;
+  const lvl = human?.techLevel || 1;
+  const unlockedMarketTier = lvl >= tierByLevel[3] ? 3 : lvl >= tierByLevel[2] ? 2 : 1;
+  const adaptMarketItem = (uid, extra) => ({
+    uid,
+    chipId: engineChipIdToUi(state.chips[uid]?.chipId),
+    engineChipId: state.chips[uid]?.chipId,
+    ...extra,
+  });
+  const marketTiers = Object.keys(state.market.tiers)
+    .map(Number)
+    .sort((a, b) => a - b)
+    .map((tier) => ({
+      tier,
+      unlocked: tier <= unlockedMarketTier,
+      // tech level that unlocks this tier (tier 1 is always open)
+      unlockLevel: tier === 1 ? 1 : tierByLevel[tier],
+      items: (state.market.tiers[tier]?.row || []).map((uid) => adaptMarketItem(uid)),
+    }));
+  const resaleItems = (state.resaleRow || []).map((uid) => adaptMarketItem(uid, { isResale: true }));
+
   return {
     round: state.round,
     phase: state.phase,
@@ -296,6 +321,9 @@ export function adaptState(state) {
     rows: buildRows(state),
     market,
     marketChips,
+    marketTiers,
+    resaleItems,
+    unlockedMarketTier,
     winnerId: state.winnerId,
     // v0.2 §16.5 — in-transit field reinforcements, for board overlay /
     // unit panel ETA display.

@@ -157,3 +157,93 @@
   animation: pc-emph 0.6s ease-out;
   display: inline-block;
 }
+
+/* ===========================================================================
+ * HUD look-pass showcase (radial-forward "beat-up tech" language).
+ * Self-contained classes prefixed `hud-`; reachable at /#hud via App.
+ * ======================================================================== */
+.hud-root {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  font-family: "Oswald", "Arial Narrow", "Roboto Condensed", system-ui, sans-serif;
+  color: #e7ddcb;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.hud-root *,
+.hud-root *::before,
+.hud-root *::after {
+  box-sizing: border-box;
+}
+
+/* The world behind the HUD — cool steel-lit haze, grain, deep vignette. */
+.hud-back {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(
+    ellipse 72% 62% at 50% 44%,
+    #2c3a3d 0%,
+    #18211f 54%,
+    #0a0e0d 100%
+  );
+}
+.hud-back::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='150'%20height='150'%3E%3Cfilter%20id='n'%3E%3CfeTurbulence%20type='fractalNoise'%20baseFrequency='0.82'%20numOctaves='2'%20stitchTiles='stitch'/%3E%3CfeColorMatrix%20type='saturate'%20values='0'/%3E%3C/filter%3E%3Crect%20width='100%25'%20height='100%25'%20filter='url(%23n)'/%3E%3C/svg%3E");
+  opacity: 0.26;
+  mix-blend-mode: overlay;
+  pointer-events: none;
+}
+.hud-back::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  box-shadow: inset 0 0 220px 34px rgba(0, 0, 0, 0.82);
+  pointer-events: none;
+}
+
+/* Worn-metal scratch grain laid over any plate (give the plate a radius). */
+.hud-scratch {
+  position: relative;
+}
+.hud-scratch::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background-image: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='150'%20height='150'%3E%3Cfilter%20id='n'%3E%3CfeTurbulence%20type='fractalNoise'%20baseFrequency='0.9'%20numOctaves='2'%20stitchTiles='stitch'/%3E%3CfeColorMatrix%20type='saturate'%20values='0'/%3E%3C/filter%3E%3Crect%20width='100%25'%20height='100%25'%20filter='url(%23n)'/%3E%3C/svg%3E");
+  opacity: 0.12;
+  mix-blend-mode: overlay;
+  pointer-events: none;
+}
+
+.hud-int {
+  transition: filter 0.12s ease, transform 0.07s ease, box-shadow 0.12s ease,
+    background 0.12s ease;
+  cursor: pointer;
+}
+.hud-int:hover {
+  filter: brightness(1.13);
+}
+.hud-int:active {
+  transform: translateY(1px);
+}
+
+/* Slow energy breathing for teal highlights / live gauges. */
+@keyframes hud-breathe {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+.hud-breathe {
+  animation: hud-breathe 2.8s ease-in-out infinite;
+}
+
+/* Vertical tab labels read bottom-to-top. */
+.hud-vtext {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  letter-spacing: 2.4px;
+}
