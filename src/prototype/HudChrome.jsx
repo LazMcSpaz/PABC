@@ -452,18 +452,19 @@ function MarketChip({ item, def, affordable, size, onAcquire, onHover }) {
         transition: "transform .12s ease, filter .12s ease",
       }}
     >
-      {/* readout panel — kept in the dark screen, left of the dial */}
-      <div style={{ position: "absolute", left: "8%", top: "12%", width: "60%", height: "76%", display: "flex", flexDirection: "column" }}>
-        <div style={{ fontFamily: C.font, fontSize: 11, fontWeight: 800, lineHeight: 1.04, letterSpacing: 0.2, textTransform: "uppercase", color: C.text, textShadow: "0 1px 3px #000" }}>
+      {/* readout panel — inset from the frame, spread top-to-bottom; the
+          title clears the dial in the top-right corner. */}
+      <div style={{ position: "absolute", left: "11%", top: "17%", width: "58%", bottom: "15%", display: "flex", flexDirection: "column" }}>
+        <div style={{ fontFamily: C.font, fontSize: 12, fontWeight: 800, lineHeight: 1.08, letterSpacing: 0.3, textTransform: "uppercase", color: C.text, textShadow: "0 1px 3px #000" }}>
           {def.name}
         </div>
-        <div style={{ marginTop: 3, fontFamily: C.font, fontSize: 9.5, fontWeight: 600, lineHeight: 1.12, color: accent, textShadow: "0 1px 2px #000" }}>
+        <div style={{ marginTop: 4, fontFamily: C.font, fontSize: 10, fontWeight: 600, lineHeight: 1.18, color: accent, textShadow: "0 1px 2px #000" }}>
           {chipSummary(def)}
         </div>
         <div style={{ marginTop: "auto", display: "flex", alignItems: "center" }}>
-          <span style={{ display: "inline-flex", alignItems: "center", gap: 4, background: "rgba(2,7,8,0.74)", border: `1px solid ${accent}66`, borderRadius: 9, padding: "1px 8px 1px 4px", boxShadow: "0 1px 3px rgba(0,0,0,0.6)" }}>
-            <img src={ICON.scrap} alt="" style={{ width: 15, height: 15, objectFit: "contain" }} />
-            <span style={{ fontFamily: C.font, fontWeight: 800, fontSize: 14, color: "#fff" }}>{def.cost > 0 ? def.cost : "—"}</span>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 5, background: "rgba(2,7,8,0.74)", border: `1px solid ${accent}66`, borderRadius: 10, padding: "2px 9px 2px 5px", boxShadow: "0 1px 3px rgba(0,0,0,0.6)" }}>
+            <img src={ICON.scrap} alt="" style={{ width: 16, height: 16, objectFit: "contain" }} />
+            <span style={{ fontFamily: C.font, fontWeight: 800, fontSize: 15, color: "#fff" }}>{def.cost > 0 ? def.cost : "—"}</span>
           </span>
         </div>
       </div>
