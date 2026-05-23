@@ -3,13 +3,17 @@
 // bottom tab dock — with a floating tabbed window for hex inspection.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "./prototype.css";
-import { FACTIONS as UI_FACTIONS, theme } from "./data.js";
+import { FACTIONS as UI_FACTIONS, LOCATIONS as UI_LOCATIONS, valueOf, fullController, theme } from "./data.js";
 import { Btn } from "./kit.jsx";
 import HexBoard from "./HexBoard.jsx";
 import BoardViewport from "./BoardViewport.jsx";
 import Inspector from "./Inspector.jsx";
-import FactionBar from "./FactionBar.jsx";
-import BottomDock from "./BottomDock.jsx";
+import UnitCard from "./UnitCard.jsx";
+import MarketRow from "./MarketRow.jsx";
+import ControlMeter from "./ControlMeter.jsx";
+import {
+  ResourceWheel, FactionReadout, MenuOrb, RadialMenu, LocationWindow, TitledWindow, ICON, C as HUD,
+} from "./HudChrome.jsx";
 import { createGame } from "../game/setup.js";
 import { startTurn, endTurn } from "../game/turn.js";
 import { performAction } from "../game/actions.js";
@@ -22,7 +26,7 @@ import { NEUTRAL } from "./data.js";
 import { getEncounter } from "../game/encounters.js";
 import { hasTechNode } from "../game/tech.js";
 import { evalCond } from "../game/dsl.js";
-import { adaptState, reinforcePreview, engineChipIdToUi } from "./engineAdapter.js";
+import { adaptState, reinforcePreview, engineChipIdToUi, previewLocationContest, previewAttackerStrength } from "./engineAdapter.js";
 import { resolveSalvage } from "../game/contest.js";
 import { assignTechNode } from "../game/stats.js";
 import EncounterModal from "./EncounterModal.jsx";
@@ -32,7 +36,6 @@ import UnitPanel from "./UnitPanel.jsx";
 import ContestOverlay from "./ContestOverlay.jsx";
 import SalvageModal from "./SalvageModal.jsx";
 
-const TOP_H = 56;
 const TAB_H = 44;
 
 // v0.2 §16.6 — human-readable list of the combat-lever modifiers a
@@ -48,6 +51,76 @@ function contestMods(r) {
   if (r.defenderFortify) out.push(`+${r.defenderFortify} fortify`);
   if (r.defenderVeteran) out.push(`+${r.defenderVeteran} def veteran`);
   return out;
+}
+
+const MENU_ITEMS = [
+  { key: "research", icon: ICON.research, label: "Research" },
+  { key: "units", icon: ICON.units, label: "Units" },
+  { key: "locations", icon: ICON.shield, label: "Locations" },
+  { key: "market", icon: ICON.scrap, label: "Market" },
+];
+
+// Collapse a selected location hex into the single-window view-model that
+// LocationWindow renders. Mirrors Inspector's old Card/Control/Contest/
+// Manage tabs, now on one screen.
+function buildLocView(state, hex, isYourTurn) {
+  const youId = state.youId;
+  const you = state.players[youId];
+  const control = hex.control;
+  const ctrl = fullController(control.sections);
+  const uiLoc = UI_LOCATIONS[hex.locationId] || {};
+  const val = valueOf(hex.locationId);
+  const unit = hex.unitId ? state.units[hex.unitId] : null;
+  const yourUnitHere = unit && unit.owner === youId;
+  const youControlHere = ctrl === youId;
+  const hasNeutral = control.sections.includes("neutral");
+  const claimed = control.sections.some((s) => s !== "neutral");
+  const hasTrainingGrounds = control.chips.includes("trainingGrounds");
+
+  let contest = null;
+  if (yourUnitHere && ctrl !== youId) {
+    const atk = previewAttackerStrength(state.engineState, hex.id, unit.owner);
+    const def = previewLocationContest(state.engineState, hex.id);
+    contest = {
+      attackerName: unit.name,
+      attackerTotal: atk.total,
+      defenderLabel: def && def.defendingUnit ? "Garrison + unit" : "Garrison",
+      defenderValue: def ? def.value : hex.garrison,
+      defenderRollsDie: def ? def.defenderRollsDie : true,
+      hasNeutral,
+      canContest: isYourTurn,
+      unitId: unit.id,
+    };
+  }
+
+  return {
+    hexId: hex.id,
+    name: (uiLoc.name || hex.locationId).toUpperCase(),
+    valueLabel: `${val.label} Value`,
+    valueColor: val.color,
+    vp: uiLoc.vp || 0,
+    statusLabel: ctrl ? `Held — ${UI_FACTIONS[ctrl]?.name}` : claimed ? "Contested" : "Uncontrolled",
+    sections: control.sections,
+    foothold: control.foothold,
+    footholdCap: control.footholdCap,
+    garrison: hex.garrison,
+    production: hex.production,
+    chipSlots: control.chipSlots,
+    ability:
+      hex.abilityId && control.ability
+        ? {
+            name: control.ability.name,
+            text: control.ability.text,
+            usedThisTurn: control.abilityUsedThisTurn,
+            canActivate: youControlHere && isYourTurn && !control.abilityUsedThisTurn,
+          }
+        : null,
+    recruit:
+      youControlHere && hasTrainingGrounds
+        ? { cost: 10, canAfford: isYourTurn && you.scrap >= 10 }
+        : null,
+    contest,
+  };
 }
 
 function bootGame(seed, humanFactionId) {
@@ -95,8 +168,22 @@ export default function Prototype({ config, onNewGame }) {
   const [contestViz, setContestViz] = useState(null); // contest replay overlay
   const [salvagePrompt, setSalvagePrompt] = useState(null); // interactive salvage
   const [showTechWheel, setShowTechWheel] = useState(false); // §17 wheel overlay
+  const [menuOpen, setMenuOpen] = useState(false); // radial menu visible
+  const [menuPanel, setMenuPanel] = useState(null); // "units"|"market"|"locations"|"settings"
   const you = state.players[state.youId];
   const isYourTurn = state.activeId === state.youId && !state.winnerId;
+  const yourUnits = Object.values(state.units).filter((u) => u.owner === state.youId);
+  const yourLocationHexes = Object.values(state.hexes).filter(
+    (h) => h.type === "location" && h.control?.sections?.some((s) => s === state.youId),
+  );
+  const techLabel = (() => {
+    const research = you.research || 0;
+    const thresholds = state.techThresholds || [];
+    const next = thresholds.find((t) => t > research);
+    if (!next) return "Tech Max";
+    const prev = [0, ...thresholds].filter((t) => t <= research).pop() || 0;
+    return `Tech ${Math.round((100 * (research - prev)) / (next - prev))}%`;
+  })();
 
   // Auto-dismiss toasts.
   useEffect(() => {
@@ -257,7 +344,7 @@ export default function Prototype({ config, onNewGame }) {
   }
 
   function onSelectUnit(unitUid) {
-    // Path used by BottomDock's Unit cards.
+    // Path used by the Units menu window's cards.
     setSelectedUnitId(unitUid);
   }
 
@@ -403,6 +490,15 @@ export default function Prototype({ config, onNewGame }) {
     bumpTick();
   }
 
+  function onMenuPick(key) {
+    setMenuOpen(false);
+    if (key === "research") {
+      setShowTechWheel(true);
+      return;
+    }
+    setMenuPanel(key);
+  }
+
   return (
     <div
       className="pc-root"
@@ -414,90 +510,9 @@ export default function Prototype({ config, onNewGame }) {
         position: "relative",
       }}
     >
-      {/* TOP BAR — title, faction standings, turn controls */}
-      <header
-        style={{
-          height: TOP_H,
-          flexShrink: 0,
-          display: "flex",
-          alignItems: "center",
-          gap: 16,
-          padding: "0 16px",
-          background: theme.plate,
-          borderBottom: `1px solid #000`,
-          boxShadow: "0 2px 0 rgba(232,169,63,0.18), 0 6px 16px rgba(0,0,0,0.5)",
-          position: "relative",
-          zIndex: 50,
-        }}
-      >
-        <div style={{ display: "flex", flexDirection: "column", lineHeight: 1.15, minWidth: 188 }}>
-          <span
-            style={{
-              fontFamily: theme.fontDisplay,
-              fontSize: 19,
-              fontWeight: 700,
-              letterSpacing: 3,
-              textTransform: "uppercase",
-            }}
-          >
-            <span style={{ color: theme.text }}>Ashland </span>
-            <span style={{ color: theme.accent }}>Conquest</span>
-          </span>
-          <span
-            style={{
-              fontSize: 9.5,
-              letterSpacing: 1.6,
-              textTransform: "uppercase",
-              color: theme.textFaint,
-            }}
-          >
-            Round {state.round} · {state.phase} Phase
-            {!isYourTurn && !state.winnerId ? ` · ${state.activeId} (AI)` : ""}
-          </span>
-        </div>
-
-        <FactionBar state={state} />
-
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 14,
-            minWidth: 188,
-            justifyContent: "flex-end",
-          }}
-        >
-          <TechReadout you={you} state={state} onOpen={() => setShowTechWheel(true)} />
-          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", lineHeight: 1.1 }}>
-            <span
-              style={{
-                fontSize: 9,
-                letterSpacing: 1.4,
-                textTransform: "uppercase",
-                color: theme.textFaint,
-                fontWeight: 600,
-              }}
-            >
-              Actions
-            </span>
-            <span
-              style={{
-                fontFamily: theme.fontDisplay,
-                fontSize: 16,
-                fontWeight: 700,
-                color: theme.text,
-              }}
-            >
-              {you.actions.remaining} / {you.actions.max}
-            </span>
-          </div>
-          <Btn variant="primary" onClick={onEndTurn} disabled={!isYourTurn}>
-            End Turn
-          </Btn>
-        </div>
-      </header>
-
-      {/* BOARD — the field of battle; drag to pan, wheel to zoom */}
+      {/* BOARD — the field of battle; drag to pan, wheel to zoom.
+          HUD chrome (resource wheel, faction readout, menu orb) floats
+          over it as absolute overlays — see below. */}
       <div style={{ position: "relative", flex: 1, display: "flex", minHeight: 0 }}>
         <BoardViewport>
           <div style={{ position: "relative", padding: 30 }}>
@@ -529,8 +544,21 @@ export default function Prototype({ config, onNewGame }) {
         <EventFeed engineState={gameRef.current} tick={tick} />
       </div>
 
-      {/* INSPECTOR — floating tabbed window, opens on hex selection */}
-      {selectedHexId && (
+      {/* HEX DETAIL — locations open the single-window Location view;
+          encounter / terrain hexes keep the tabbed Inspector. */}
+      {selectedHexId && state.hexes[selectedHexId]?.type === "location" && (
+        <LocationWindow
+          view={buildLocView(state, state.hexes[selectedHexId], isYourTurn)}
+          onClose={() => setSelectedHexId(null)}
+          onActivate={(h) => onActivate(h)}
+          onRecruit={(h) => onRecruit(h)}
+          onContest={(p) => {
+            onContest(p);
+            setSelectedHexId(null);
+          }}
+        />
+      )}
+      {selectedHexId && state.hexes[selectedHexId]?.type !== "location" && (
         <Inspector
           state={state}
           selectedHexId={selectedHexId}
@@ -544,15 +572,99 @@ export default function Prototype({ config, onNewGame }) {
         />
       )}
 
-      {/* BOTTOM — slide-up tabs for the player's own cards */}
-      <BottomDock
-        state={state}
-        tabHeight={TAB_H}
-        isYourTurn={isYourTurn}
-        selectedUnitId={selectedUnitId}
-        onSelectUnit={onSelectUnit}
-        onAcquire={onAcquire}
+      {/* HUD CHROME — radial / holographic overlays replacing the old
+          top bar and bottom dock. */}
+      <ResourceWheel
+        scrap={you.scrap}
+        units={{ n: yourUnits.length, cap: you.unitCap }}
+        tech={{ level: you.techLevel, label: techLabel }}
+        onSettings={() => setMenuPanel("settings")}
       />
+      <FactionReadout
+        name={UI_FACTIONS[state.youId]?.name}
+        color={UI_FACTIONS[state.youId]?.color}
+        vp={you.vp}
+        vpGoal={state.vpGoal}
+        actions={you.actions}
+        round={state.round}
+        onEndTurn={onEndTurn}
+        endDisabled={!isYourTurn}
+      />
+      <MenuOrb onOpen={() => setMenuOpen(true)} />
+
+      {menuOpen && (
+        <RadialMenu items={MENU_ITEMS} onPick={onMenuPick} onClose={() => setMenuOpen(false)} />
+      )}
+
+      {menuPanel === "units" && (
+        <TitledWindow title="Units" icon={ICON.units} onClose={() => setMenuPanel(null)}>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
+            {yourUnits.length === 0 && (
+              <span style={{ color: HUD.textDim, fontSize: 13 }}>No units in the field yet.</span>
+            )}
+            {yourUnits.map((u) => (
+              <div
+                key={u.id}
+                className="hud-int"
+                onClick={() => { onSelectUnit(u.id); setMenuPanel(null); }}
+                style={{ cursor: "pointer" }}
+              >
+                <UnitCard unit={u} />
+              </div>
+            ))}
+          </div>
+        </TitledWindow>
+      )}
+
+      {menuPanel === "market" && (
+        <TitledWindow title="Market" icon={ICON.scrap} onClose={() => setMenuPanel(null)} width={560}>
+          <MarketRow state={state} isYourTurn={isYourTurn} onAcquire={onAcquire} />
+        </TitledWindow>
+      )}
+
+      {menuPanel === "locations" && (
+        <TitledWindow title="Locations" icon={ICON.shield} onClose={() => setMenuPanel(null)}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {yourLocationHexes.length === 0 && (
+              <span style={{ color: HUD.textDim, fontSize: 13 }}>
+                You hold no sections yet. Move a unit onto a location and contest it.
+              </span>
+            )}
+            {yourLocationHexes.map((h) => {
+              const ctrl = fullController(h.control.sections);
+              return (
+                <button
+                  key={h.id}
+                  className="hud-int"
+                  onClick={() => { setMenuPanel(null); setSelectedHexId(h.id); }}
+                  style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 10px", borderRadius: 8, border: "1px solid rgba(192,124,56,0.3)", background: "rgba(0,0,0,0.25)", color: HUD.text, cursor: "pointer", textAlign: "left" }}
+                >
+                  <ControlMeter sections={h.control.sections} foothold={h.control.foothold} footholdCap={h.control.footholdCap} size={40} />
+                  <div style={{ display: "flex", flexDirection: "column" }}>
+                    <span style={{ fontFamily: HUD.font, fontSize: 16, fontWeight: 700 }}>
+                      {UI_LOCATIONS[h.locationId]?.name || h.locationId}
+                    </span>
+                    <span style={{ fontSize: 10, letterSpacing: 1, textTransform: "uppercase", color: HUD.textFaint }}>
+                      {ctrl === state.youId ? "Held" : ctrl ? `Held — ${UI_FACTIONS[ctrl]?.short}` : "Contested"}
+                    </span>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </TitledWindow>
+      )}
+
+      {menuPanel === "settings" && (
+        <TitledWindow title="Settings" onClose={() => setMenuPanel(null)}>
+          <p className="pc-prose" style={{ margin: 0, fontSize: 13, lineHeight: 1.6, color: HUD.textDim }}>
+            Game options will live here. For now:
+          </p>
+          <div style={{ marginTop: 14 }}>
+            <Btn variant="primary" onClick={onNewGame}>Abandon &amp; New Game</Btn>
+          </div>
+        </TitledWindow>
+      )}
 
       {toast && (
         <div
@@ -727,44 +839,6 @@ function EndOverlay({ state, onNewGame }) {
         </div>
       </div>
     </div>
-  );
-}
-
-// §17 — compact header readout: Tech Level + a Research progress bar +
-// an Ability-Point badge. Clicking opens the wheel.
-function TechReadout({ you, state, onOpen }) {
-  const research = you.research || 0;
-  const thresholds = state.techThresholds || [];
-  const next = thresholds.find((t) => t > research);
-  const prev = [0, ...thresholds].filter((t) => t <= research).pop() || 0;
-  const pct = next ? Math.min(1, (research - prev) / (next - prev)) : 1;
-  const ap = you.abilityPointsAvailable || 0;
-  return (
-    <button
-      className="pc-int"
-      onClick={onOpen}
-      title="Open the Tech Wheel"
-      style={{
-        display: "flex", flexDirection: "column", gap: 2, alignItems: "flex-end",
-        background: "transparent", border: "none", cursor: "pointer", padding: 0,
-      }}
-    >
-      <span style={{ fontSize: 9, letterSpacing: 1.4, textTransform: "uppercase", color: theme.textFaint, fontWeight: 600 }}>
-        Tech L{you.techLevel}
-        {ap > 0 && (
-          <span style={{
-            marginLeft: 5, color: "#14110c", background: theme.accent,
-            borderRadius: 8, padding: "0 5px", fontWeight: 800,
-          }}>{ap} AP</span>
-        )}
-      </span>
-      <div style={{ width: 92, height: 7, background: "rgba(0,0,0,0.4)", borderRadius: 4, border: `1px solid ${theme.border}`, overflow: "hidden" }}>
-        <div style={{ width: `${pct * 100}%`, height: "100%", background: "#5a8fc0" }} />
-      </div>
-      <span style={{ fontSize: 8.5, color: theme.textFaint }}>
-        {next ? `${research}/${next} research` : `research ${research} · max`}
-      </span>
-    </button>
   );
 }
 
