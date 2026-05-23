@@ -4,6 +4,7 @@
 // the static look-pass (HudShowcase.jsx).
 import { useEffect, useState } from "react";
 import ControlMeter from "./ControlMeter.jsx";
+import { ALL_UPGRADES } from "./data.js";
 
 // Close the active modal on Escape.
 function useEscClose(onClose) {
@@ -41,6 +42,10 @@ export const ICON = {
   shield: `${A}assets/ui/icons/stats/garrison_strength_icon.png`,
 };
 const FRAME = `${A}assets/ui/panels/frames/location_display_frame.webp`;
+const CHIPBG = {
+  unit: `${A}assets/ui/chips/unit/unit_chip_background.webp`,
+  location: `${A}assets/ui/chips/location/location_chip_background.webp`,
+};
 
 // --- geometry (angles from 12 o'clock, clockwise) ----------------------
 function pt(cx, cy, r, deg) {
@@ -407,5 +412,141 @@ export function TitledWindow({ title, icon, onClose, children, width }) {
         {children}
       </div>
     </FrameWindow>
+  );
+}
+
+// =======================================================================
+// MarketBand — the Market as a continuation of the radial language: a
+// holographic semicircle emanating from the bottom of the screen. Chips
+// ride concentric arcs (one per market tier); the band "gains a layer on
+// top" as higher tiers unlock. Chips render on the uploaded chip-plate
+// artwork (orange = unit upgrade, teal = location upgrade).
+// =======================================================================
+function MarketChip({ item, def, affordable, size, onAcquire, onHover }) {
+  const kind = def.kind === "location" ? "location" : "unit";
+  const accent = kind === "location" ? "#5fd0c8" : "#e69a4a";
+  const CW = size, CH = Math.round(size / 1.6);
+  const [hov, setHov] = useState(false);
+  return (
+    <div
+      onMouseEnter={() => { setHov(true); onHover?.(true); }}
+      onMouseLeave={() => { setHov(false); onHover?.(false); }}
+      onClick={affordable ? () => onAcquire?.(item) : undefined}
+      style={{
+        position: "relative", width: CW, height: CH,
+        backgroundImage: `url(${CHIPBG[kind]})`, backgroundSize: "100% 100%", backgroundRepeat: "no-repeat",
+        cursor: affordable ? "pointer" : "default",
+        filter: affordable ? (hov ? `drop-shadow(0 0 13px ${accent})` : "drop-shadow(0 4px 8px rgba(0,0,0,0.6))") : "grayscale(0.6) brightness(0.66)",
+        opacity: affordable ? 1 : 0.72,
+        transform: hov && affordable ? "scale(1.07)" : "scale(1)",
+        transition: "transform .12s ease, filter .12s ease",
+      }}
+    >
+      <div style={{ position: "absolute", left: "6%", width: "62%", top: "47%", transform: "translateY(-50%)", textAlign: "center", fontFamily: C.font, fontSize: CW < 132 ? 10 : 11.5, fontWeight: 700, lineHeight: 1.1, color: C.text, textShadow: "0 1px 3px #000" }}>
+        {def.name}
+      </div>
+      <div style={{ position: "absolute", right: "14%", top: "21%", transform: "translate(50%,-50%)", fontFamily: C.font, fontWeight: 800, fontSize: CW < 132 ? 13 : 15, color: "#fff", textShadow: "0 1px 3px #000, 0 0 6px rgba(0,0,0,0.9)" }}>
+        {def.cost > 0 ? def.cost : "—"}
+      </div>
+      {item.isResale && (
+        <span style={{ position: "absolute", left: "6%", bottom: "9%", fontSize: 7, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", color: C.gold, border: `1px solid ${C.gold}`, borderRadius: 3, padding: "0 4px", background: "rgba(0,0,0,0.55)" }}>Resale</span>
+      )}
+      {affordable && hov && (
+        <span style={{ position: "absolute", left: "50%", bottom: "-15px", transform: "translateX(-50%)", fontFamily: C.font, fontSize: 9, fontWeight: 700, letterSpacing: 1.5, textTransform: "uppercase", color: accent, whiteSpace: "nowrap", textShadow: "0 1px 3px #000" }}>Acquire</span>
+      )}
+    </div>
+  );
+}
+
+function MarketTip({ tip }) {
+  const W = 210;
+  const left = Math.min(Math.max(tip.x - W / 2, 8), window.innerWidth - W - 8);
+  return (
+    <div style={{ position: "fixed", left, top: tip.y - 62, transform: "translateY(-100%)", width: W, zIndex: 80, pointerEvents: "none", background: "rgba(8,16,16,0.96)", border: `1px solid ${C.holo}`, borderRadius: 8, padding: 10, boxShadow: `0 8px 24px rgba(0,0,0,0.6), 0 0 12px ${C.holo}44` }}>
+      <div style={{ fontFamily: C.font, fontSize: 13, fontWeight: 800, color: C.holoHi }}>{tip.def.name}</div>
+      <div style={{ fontSize: 8.5, fontWeight: 700, letterSpacing: 0.8, textTransform: "uppercase", color: C.textFaint, marginTop: 1, marginBottom: 6 }}>
+        {tip.def.kind === "capital" ? "Faction chip" : `${tip.def.kind} upgrade`}{tip.def.rare ? " · Rare" : ""}
+      </div>
+      <div style={{ fontSize: 11, color: C.text, lineHeight: 1.45 }}>{tip.def.effect}</div>
+      <div style={{ marginTop: 8, fontSize: 10.5, color: C.gold, fontWeight: 700 }}>Cost {tip.def.cost} scrap</div>
+    </div>
+  );
+}
+
+export function MarketBand({ tiers = [], resale = [], scrap, actions = {}, isYourTurn, onAcquire, onClose }) {
+  useEscClose(onClose);
+  const [size, setSize] = useState(() => ({ w: window.innerWidth, h: window.innerHeight }));
+  const [tip, setTip] = useState(null);
+  useEffect(() => {
+    const r = () => setSize({ w: window.innerWidth, h: window.innerHeight });
+    window.addEventListener("resize", r);
+    return () => window.removeEventListener("resize", r);
+  }, []);
+  const cx = size.w / 2, cy = size.h - 4;
+  const CW = 132, R0 = Math.max(264, Math.min(322, size.h * 0.36)), STEP = 120, halfSpan = 70, bandHalf = 48;
+
+  const tierData = tiers.map((t, idx) => ({
+    ...t,
+    R: R0 + idx * STEP,
+    items: idx === 0 ? [...t.items, ...resale] : t.items,
+  }));
+
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 58, background: "radial-gradient(ellipse at 50% 122%, rgba(8,18,18,0.8), rgba(2,5,6,0.92))", overflow: "hidden" }}>
+      <svg width={size.w} height={size.h} style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
+        <defs>
+          {tierData.map((t) => (
+            <radialGradient key={t.tier} id={`mb-${t.tier}`} gradientUnits="userSpaceOnUse" cx={cx} cy={cy} r={t.R + bandHalf} fx={cx} fy={cy}>
+              <stop offset="0%" stopColor={C.holo} stopOpacity="0.02" />
+              <stop offset="100%" stopColor={C.holo} stopOpacity={t.unlocked ? 0.15 : 0.05} />
+            </radialGradient>
+          ))}
+        </defs>
+        {tierData.map((t) => {
+          const col = t.unlocked ? C.holo : "#5b6b6b";
+          return (
+            <g key={t.tier}>
+              <path d={donut(cx, cy, t.R - bandHalf, t.R + bandHalf, -halfSpan - 6, halfSpan + 6)} fill={`url(#mb-${t.tier})`} stroke={col} strokeWidth={t.unlocked ? 1.4 : 1} opacity={t.unlocked ? 0.9 : 0.5} style={{ filter: t.unlocked ? `drop-shadow(0 0 9px ${C.holo}55)` : "none" }} />
+              <path d={arc(cx, cy, t.R + bandHalf, -halfSpan - 6, halfSpan + 6)} fill="none" stroke={col} strokeWidth="0.6" opacity="0.45" />
+              <path d={arc(cx, cy, t.R - bandHalf, -halfSpan - 6, halfSpan + 6)} fill="none" stroke={col} strokeWidth="0.6" opacity="0.45" />
+            </g>
+          );
+        })}
+      </svg>
+
+      <div onClick={(e) => e.stopPropagation()} style={{ position: "absolute", inset: 0 }}>
+        {tierData.map((t) => {
+          if (!t.unlocked) {
+            const [lx, ly] = pt(cx, cy, t.R, 0);
+            return (
+              <div key={t.tier} style={{ position: "absolute", left: lx, top: ly, transform: "translate(-50%,-50%)", textAlign: "center", color: "#7c8a8a", pointerEvents: "none" }}>
+                <div style={{ fontFamily: C.font, fontSize: 12, fontWeight: 700, letterSpacing: 2, textTransform: "uppercase" }}>Tier {t.tier} · Locked</div>
+                <div style={{ fontSize: 9.5, letterSpacing: 1, color: "#5f6d6d" }}>Reach Tech L{t.unlockLevel}</div>
+              </div>
+            );
+          }
+          const n = t.items.length;
+          return t.items.map((item, i) => {
+            const def = ALL_UPGRADES[item.chipId];
+            if (!def) return null;
+            const deg = n <= 1 ? 0 : -halfSpan + 2 * halfSpan * (i / (n - 1));
+            const [x, y] = pt(cx, cy, t.R, deg);
+            const affordable = isYourTurn && (scrap ?? 0) >= (def.cost || 0) && (actions.remaining ?? 0) >= 1;
+            return (
+              <div key={item.uid} style={{ position: "absolute", left: x, top: y, transform: "translate(-50%,-50%)" }}>
+                <MarketChip item={item} def={def} affordable={affordable} size={CW} onAcquire={onAcquire} onHover={(on) => setTip(on ? { x, y, def } : null)} />
+              </div>
+            );
+          });
+        })}
+      </div>
+
+      <div style={{ position: "absolute", top: 18, left: "50%", transform: "translateX(-50%)", textAlign: "center", color: C.holoHi, pointerEvents: "none" }}>
+        <div style={{ fontFamily: C.font, fontSize: 18, fontWeight: 700, letterSpacing: 4, textTransform: "uppercase" }}>Market</div>
+        <div style={{ fontSize: 9.5, letterSpacing: 1.5, color: C.textFaint }}>Acquire — 1 Action + scrap cost</div>
+      </div>
+      <CloseX onClose={onClose} style={{ position: "absolute", top: 16, right: 16 }} />
+      {tip && <MarketTip tip={tip} />}
+    </div>
   );
 }

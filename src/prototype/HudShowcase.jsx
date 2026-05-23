@@ -4,8 +4,20 @@
 import { useState } from "react";
 import ControlMeter from "./ControlMeter.jsx";
 import {
-  C, ICON, ResourceWheel, FactionReadout, MenuOrb, RadialMenu, LocationWindow, TitledWindow,
+  C, ICON, ResourceWheel, FactionReadout, MenuOrb, RadialMenu, LocationWindow, TitledWindow, MarketBand,
 } from "./HudChrome.jsx";
+
+const MOCK_MARKET = {
+  tiers: [
+    { tier: 1, unlocked: true, unlockLevel: 1, items: [
+      { uid: "m1", chipId: "drilledTroops" }, { uid: "m2", chipId: "recyclers" },
+      { uid: "m3", chipId: "townHall" }, { uid: "m4", chipId: "navigator" }, { uid: "m5", chipId: "sharpenedBlades" },
+    ] },
+    { tier: 2, unlocked: false, unlockLevel: 3, items: [] },
+    { tier: 3, unlocked: false, unlockLevel: 5, items: [] },
+  ],
+  resale: [{ uid: "r1", chipId: "cannons", isResale: true }],
+};
 
 const MENU_ITEMS = [
   { key: "research", icon: ICON.research, label: "Research" },
@@ -52,9 +64,17 @@ export default function HudShowcase({ onExit }) {
       {panel === "units" && <TitledWindow title="Units" icon={ICON.units} onClose={() => setPanel(null)}>
         <p className="pc-prose" style={{ margin: 0, fontSize: 13, lineHeight: 1.6, color: C.textDim }}>Your fielded units, their strength and movement, installed chips, and reinforcement options.</p>
       </TitledWindow>}
-      {panel === "market" && <TitledWindow title="Market" icon={ICON.scrap} onClose={() => setPanel(null)}>
-        <p className="pc-prose" style={{ margin: 0, fontSize: 13, lineHeight: 1.6, color: C.textDim }}>Acquire unit and location upgrade chips with scrap. The resale row offers salvaged chips at a discount.</p>
-      </TitledWindow>}
+      {panel === "market" && (
+        <MarketBand
+          tiers={MOCK_MARKET.tiers}
+          resale={MOCK_MARKET.resale}
+          scrap={18}
+          actions={{ remaining: 2, max: 2 }}
+          isYourTurn
+          onAcquire={() => {}}
+          onClose={() => setPanel(null)}
+        />
+      )}
 
       <div style={{ position: "absolute", bottom: 18, left: 24, color: C.textFaint, zIndex: 20 }}>
         <div style={{ fontFamily: C.font, fontSize: 11, letterSpacing: 3, textTransform: "uppercase" }}>HUD Look Pass · v2</div>

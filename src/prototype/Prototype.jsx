@@ -9,10 +9,9 @@ import HexBoard from "./HexBoard.jsx";
 import BoardViewport from "./BoardViewport.jsx";
 import Inspector from "./Inspector.jsx";
 import UnitCard from "./UnitCard.jsx";
-import MarketRow from "./MarketRow.jsx";
 import ControlMeter from "./ControlMeter.jsx";
 import {
-  ResourceWheel, FactionReadout, MenuOrb, RadialMenu, LocationWindow, TitledWindow, ICON, C as HUD,
+  ResourceWheel, FactionReadout, MenuOrb, RadialMenu, LocationWindow, TitledWindow, MarketBand, ICON, C as HUD,
 } from "./HudChrome.jsx";
 import { createGame } from "../game/setup.js";
 import { startTurn, endTurn } from "../game/turn.js";
@@ -617,9 +616,15 @@ export default function Prototype({ config, onNewGame }) {
       )}
 
       {menuPanel === "market" && (
-        <TitledWindow title="Market" icon={ICON.scrap} onClose={() => setMenuPanel(null)} width={560}>
-          <MarketRow state={state} isYourTurn={isYourTurn} onAcquire={onAcquire} chipWidth={76} />
-        </TitledWindow>
+        <MarketBand
+          tiers={state.marketTiers}
+          resale={state.resaleItems}
+          scrap={you.scrap}
+          actions={you.actions}
+          isYourTurn={isYourTurn}
+          onAcquire={(item) => onAcquire(item)}
+          onClose={() => setMenuPanel(null)}
+        />
       )}
 
       {menuPanel === "locations" && (
