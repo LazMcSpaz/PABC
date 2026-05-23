@@ -6,6 +6,7 @@
 
 import { CONFIG } from "../game/config.js";
 import { reinforcementRoute } from "../game/board.js";
+import { strengthCapOf, bayCapOf } from "../game/stats.js";
 import {
   LOCATIONS as ENGINE_LOCATIONS,
   CHIPS as ENGINE_CHIPS,
@@ -196,6 +197,8 @@ export function adaptState(state) {
       moveRemaining: u.moveRemaining ?? u.movement,
       fortified: !!u.fortified,
       veteran: !!u.veteran,
+      combined: !!u.combined,
+      baySlots: bayCapOf(u),
       chips: adaptChips(state, u.chips),
       chipUids: [...u.chips],
       immobilized: isImmobilized(state, u),
@@ -312,7 +315,7 @@ export function adaptState(state) {
 export function reinforcePreview(state, unitUid) {
   const unit = state.units[unitUid];
   if (!unit) return null;
-  const cap = CONFIG.unit.baseStrengthCap;
+  const cap = strengthCapOf(unit);
   const deficit = cap - unit.baseStrength;
   const loc = state.locations[unit.node];
   const onFriendlyLoc = !!(loc && loc.controller === unit.owner);

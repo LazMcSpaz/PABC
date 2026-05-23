@@ -8,7 +8,7 @@ import { bfsDistances, reinforcementRoute } from "./board.js";
 import { CONFIG } from "./config.js";
 import { FACTIONS, CHIPS, ABILITIES, chipDefOf } from "./content.js";
 import { validateContest, runContest } from "./contest.js";
-import { recomputeStats, recomputeResearch } from "./stats.js";
+import { recomputeStats, recomputeResearch, strengthCapOf, bayCapOf } from "./stats.js";
 import { applyEffects } from "./effects.js";
 import { drawFieldEncounter, resolveMarkerOnHex } from "./encounters.js";
 import { makeUnit } from "./setup.js";
@@ -82,7 +82,7 @@ function tryPickupLoot(state, unit, hex, ctx) {
     return;
   }
   const used = (uids) => uids.reduce((n, c) => n + (chipDefOf(state, c)?.slots ?? 1), 0);
-  let free = CONFIG.unit.baySlots - used(unit.chips);
+  let free = bayCapOf(unit) - used(unit.chips);
   const taken = [];
   const rest = [];
   for (const c of loot) {
@@ -145,12 +145,7 @@ function runRecruit(state, { pid, player, params }) {
 // `mode:"field"` dispatches a convoy that arrives in N round-ends, where
 // N is the supply distance through friendly/neutral hexes (re-targets a
 // moving unit, §16.5). Both cost 1 Action.
-// A unit's base-Strength (HP) cap. Veterancy does NOT raise this — its
-// reward is the +1 contest roll. The higher veteranStrengthCap is
-// reserved for the deferred combining feature.
-function unitStrengthCap(unit) {
-  return CONFIG.unit.baseStrengthCap;
-}
+const unitStrengthCap = strengthCapOf;
 
 function validateReinforce(state, { pid, player, params }) {
   const unit = state.units[params.unit];
@@ -210,6 +205,59 @@ function runReinforce(state, { pid, player, params }) {
   return { mode, eta: route.dist, originHex: route.originHex };
 }
 
+// --- Combine ---------------------------------------------------------
+// §16.7 — merge two of your units sharing a hex into one (cost 1 Action).
+// The survivor's base Strength is the sum capped at 8, it gains a 3-slot
+// Bay (overflow chips drop as recoverable hex loot), keeps the better
+// veteran/contest progress, and suffers the −1 Movement penalty (in
+// recomputeStats). A unit-cap relief valve: two units become one.
+function validateCombine(state, { pid, params }) {
+  const a = state.units[params.unit];
+  const b = state.units[params.with];
+  if (!a || !b) return fail("no such unit");
+  if (a.uid === b.uid) return fail("pick two different units");
+  if (a.owner !== pid || b.owner !== pid) return fail("both units must be yours");
+  if (a.node !== b.node) return fail("units must share a hex to combine");
+  return { ok: true };
+}
+
+function runCombine(state, { pid, params }) {
+  const a = state.units[params.unit]; // survivor
+  const b = state.units[params.with]; // consumed
+  a.baseStrength = Math.min(CONFIG.unit.veteranStrengthCap, a.baseStrength + b.baseStrength);
+  a.combined = true;
+  a.baySlots = CONFIG.unit.combinedBaySlots;
+  a.veteran = a.veteran || b.veteran;
+  a.contestsWon = Math.max(a.contestsWon || 0, b.contestsWon || 0);
+  a.contestsSurvived = Math.max(a.contestsSurvived || 0, b.contestsSurvived || 0);
+
+  // Merge chips, keeping as many as fit the 3-slot Bay (survivor's first);
+  // the overflow drops onto the hex as recoverable loot ("salvaged back").
+  const merged = [...a.chips, ...b.chips];
+  const kept = [];
+  const overflow = [];
+  let used = 0;
+  for (const c of merged) {
+    const sl = chipDefOf(state, c)?.slots ?? 1;
+    if (used + sl <= a.baySlots) { kept.push(c); used += sl; }
+    else overflow.push(c);
+  }
+  a.chips = kept;
+  if (overflow.length) {
+    state.hexLoot = state.hexLoot || {};
+    (state.hexLoot[a.node] = state.hexLoot[a.node] || []).push(...overflow);
+    emit(state, "loot_dropped", { hex: a.node, chips: [...overflow] });
+  }
+
+  // Movement budget: a combined unit isn't a fresh mover — keep the
+  // survivor's remaining budget but never above its (now reduced) max.
+  delete state.units[b.uid];
+  recomputeStats(state);
+  a.moveRemaining = Math.min(a.moveRemaining ?? a.movement, a.movement);
+  emit(state, "units_combined", { survivor: a.uid, consumed: b.uid, owner: pid });
+  return { survivor: a.uid, consumed: b.uid, salvaged: overflow };
+}
+
 // --- Acquire ---------------------------------------------------------
 // Buy a face-up Market chip and install it on one of your units (kind
 // `unit`) or a location you fully control (kind `location`). The chip's
@@ -256,7 +304,7 @@ function validateAcquire(state, { pid, player, params }) {
     const unit = state.units[into.unit];
     if (!unit) return fail("specify a unit to install into (params.into.unit)");
     if (unit.owner !== pid) return fail("not your unit");
-    if (slotsUsed(state, unit.chips) + def.slots > CONFIG.unit.baySlots)
+    if (slotsUsed(state, unit.chips) + def.slots > bayCapOf(unit))
       return fail("not enough Bay slots");
   } else {
     const loc = state.locations[into.location];
@@ -352,6 +400,7 @@ const ACTIONS = {
   move: { cost: 0, validate: validateMove, run: runMove }, // §16.2 — free of Actions
   recruit: { cost: 1, validate: validateRecruit, run: runRecruit },
   reinforce: { cost: 1, validate: validateReinforce, run: runReinforce },
+  combine: { cost: 1, validate: validateCombine, run: runCombine },
   contest: { cost: 1, validate: validateContest, run: runContest },
   acquire: { cost: 1, validate: validateAcquire, run: runAcquire },
   activate: { cost: activateActionCost, validate: validateActivate, run: runActivate },

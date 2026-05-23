@@ -3,7 +3,7 @@
 import { CONFIG } from "./config.js";
 import { emit } from "./events.js";
 import { resolveTargets } from "./targeting.js";
-import { recomputeStats, recomputeResearch } from "./stats.js";
+import { recomputeStats, recomputeResearch, strengthCapOf } from "./stats.js";
 import { destroyUnit } from "./contest.js";
 
 // Headless default for interactive effects — pick the first option.
@@ -83,7 +83,7 @@ const EFFECTS = {
     for (const t of resolveTargets(state, e.target, ctx)) {
       const unit = state.units[t];
       if (!unit) continue;
-      const cap = CONFIG.unit.baseStrengthCap;
+      const cap = strengthCapOf(unit);
       unit.baseStrength = Math.max(0, Math.min(cap, unit.baseStrength + (e.amount || 0)));
       recomputeStats(state);
       emit(state, "base_strength_changed", {

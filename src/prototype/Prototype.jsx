@@ -347,7 +347,7 @@ export default function Prototype({ config, onNewGame }) {
       kind: e.kind === "loot" ? "loot" : "death",
       killerName: killer?.name || "Victor",
       killerColor: UI_FACTIONS[killer?.owner]?.color,
-      baySlots: CONFIG.unit.baySlots,
+      baySlots: killer?.baySlots ?? CONFIG.unit.baySlots,
       unitChips: (killer?.chips || []).map(info),
       salvagedChips: e.chips.map(info),
     };
@@ -377,6 +377,20 @@ export default function Prototype({ config, onNewGame }) {
   }
   function onRaid(unitUid, targetUid) {
     return onContest({ unit: unitUid, target: targetUid });
+  }
+  function onCombine(unitUid, withUid) {
+    return runAction("combine", { unit: unitUid, with: withUid }, null, "Units combined.");
+  }
+
+  // §16.7 — a friendly unit sharing this unit's hex can be merged in.
+  function combineInfoFor(unitUid) {
+    const u = state.units[unitUid];
+    if (!u) return null;
+    const ally = Object.values(state.units).find(
+      (x) => x.node === u.node && x.owner === u.owner && x.uid !== unitUid,
+    );
+    if (!ally) return null;
+    return { with: ally.id, withName: ally.name, canCombine: true };
   }
 
   // A raid is contesting an enemy unit that shares your unit's hex. Blocked
@@ -548,8 +562,10 @@ export default function Prototype({ config, onNewGame }) {
             reinforce={reinforcePreview(gameRef.current, selectedUnitId)}
             scrap={you.scrap}
             raid={raidInfoFor(selectedUnitId)}
+            combine={combineInfoFor(selectedUnitId)}
             onReinforce={onReinforce}
             onRaid={onRaid}
+            onCombine={onCombine}
             onClose={() => setSelectedUnitId(null)}
           />
         )}
@@ -844,7 +860,7 @@ function pickAcquireTarget(game, pid, engineChipId) {
       .filter((u) => u.owner === pid)
       .sort((a, b) => b.strength - a.strength);
     for (const u of mine) {
-      if (slotsUsed(u.chips) + chipDef.slots <= CONFIG.unit.baySlots) {
+      if (slotsUsed(u.chips) + chipDef.slots <= (u.baySlots ?? CONFIG.unit.baySlots)) {
         return { unit: u.uid };
       }
     }

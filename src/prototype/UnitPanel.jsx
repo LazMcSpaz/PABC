@@ -5,7 +5,7 @@
 import { FACTIONS as UI_FACTIONS, theme } from "./data.js";
 import { IconBtn, Label, Btn, Pill } from "./kit.jsx";
 
-export default function UnitPanel({ unit, hex, canAct, reinforce, scrap, raid, onReinforce, onRaid, onClose }) {
+export default function UnitPanel({ unit, hex, canAct, reinforce, scrap, raid, combine, onReinforce, onRaid, onCombine, onClose }) {
   if (!unit) return null;
   const f = UI_FACTIONS[unit.owner];
   const eff = {
@@ -16,6 +16,7 @@ export default function UnitPanel({ unit, hex, canAct, reinforce, scrap, raid, o
   const canReinforce = canAct && reinforce && reinforce.deficit > 0 && !inTransit;
   const affordable = reinforce && scrap >= reinforce.cost;
   const showRaid = canAct && raid && raid.target;
+  const showCombine = canAct && combine && combine.with;
 
   return (
     <div
@@ -111,10 +112,11 @@ export default function UnitPanel({ unit, hex, canAct, reinforce, scrap, raid, o
             small
           />
         </div>
-        {(unit.veteran || unit.fortified) && (
+        {(unit.veteran || unit.fortified || unit.combined) && (
           <div style={{ display: "flex", gap: 6 }}>
             {unit.veteran && <Pill color={theme.accent} filled>Veteran</Pill>}
             {unit.fortified && <Pill color={theme.good} filled>Fortified</Pill>}
+            {unit.combined && <Pill color={theme.accent2} filled>Combined</Pill>}
           </div>
         )}
         {hex && (
@@ -132,6 +134,14 @@ export default function UnitPanel({ unit, hex, canAct, reinforce, scrap, raid, o
             title={raid.canRaid ? undefined : raid.reason}
           >
             {raid.canRaid ? `Raid ${raid.targetName} (1 Action)` : raid.reason}
+          </Btn>
+        )}
+        {showCombine && (
+          <Btn
+            onClick={() => onCombine?.(unit.uid, combine.with)}
+            title="Merge both units: Strength sums (cap 8), 3 chip slots, −1 Movement"
+          >
+            Combine with {combine.withName} (1 Action)
           </Btn>
         )}
         {inTransit && (

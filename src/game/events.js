@@ -23,7 +23,7 @@ export const EVENT_NAMES = new Set([
   // v0.2 §16 — attrition, salvage, reinforcement, veterancy
   "unit_destroyed", "unit_salvaged", "base_strength_changed",
   "unit_reinforced", "reinforcement_requested", "reinforcement_arrived",
-  "veteran_promoted",
+  "veteran_promoted", "units_combined",
   "loot_dropped", "loot_claimed",
   // Layer 5 — encounter & quest system (spec §15.13)
   "encounter_delivered", "trigger_fired",

@@ -11,7 +11,8 @@ export const CONFIG = {
     baseMovement: 1, // base 1; upgrade chips / Logistics add to it
     baySlots: 2,
     baseStrengthCap: 4, // v0.2 §16.3 — base Strength doubles as HP, capped here
-    veteranStrengthCap: 8, // reserved for §16.7 combining (deferred) — NOT veterancy
+    veteranStrengthCap: 8, // §16.7 — the cap for a COMBINED unit (not veterancy)
+    combinedBaySlots: 3, // §16.7 — a combined unit carries 3 chips
   },
   baseUnitCap: 3, // v0.2 §16.3 — cap = baseUnitCap + Training Grounds
   startingUnits: 2, // v0.2 §16.3

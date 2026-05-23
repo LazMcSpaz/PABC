@@ -58,6 +58,8 @@ function formatEvent(ev, engineState) {
       return { color: theme.accent2, text: `Foothold decayed at ${p.hex}` };
     case "unit_destroyed":
       return { color: theme.accent2, text: `${who(p.owner)} lost a unit` };
+    case "units_combined":
+      return { color: theme.accent, text: `${who(p.owner)} combined two units` };
     case "loot_dropped":
       return { color: theme.accent, text: `${(p.chips || []).length} chip(s) dropped at ${p.hex}` };
     case "loot_claimed": {

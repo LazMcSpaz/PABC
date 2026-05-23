@@ -146,7 +146,7 @@ function tryAcquire(state, pid) {
   for (const cand of sortedUnits) {
     for (const u of myUnits) {
       const slots = slotsUsed(state, u.chips) + cand.def.slots;
-      if (slots > CONFIG.unit.baySlots) continue;
+      if (slots > (u.baySlots ?? CONFIG.unit.baySlots)) continue;
       const r = performAction(state, "acquire", {
         chip: cand.chipUid, into: { unit: u.uid },
       });

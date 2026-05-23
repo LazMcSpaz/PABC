@@ -5,6 +5,18 @@ import { CONFIG } from "./config.js";
 import { emit } from "./events.js";
 import { TECH_NODES, hasTechNode, prereqMet } from "./tech.js";
 
+// A unit's base-Strength (HP) cap. Combining raises it to 8 (§16.7);
+// veterancy does NOT (its reward is the +1 contest roll). Everyone else
+// caps at the normal base cap.
+export function strengthCapOf(unit) {
+  return unit?.combined ? CONFIG.unit.veteranStrengthCap : CONFIG.unit.baseStrengthCap;
+}
+
+// A unit's Bay-slot capacity. A combined unit carries 3 (§16.7); others 2.
+export function bayCapOf(unit) {
+  return unit?.baySlots ?? CONFIG.unit.baySlots;
+}
+
 export function recomputeStats(state) {
   for (const unit of Object.values(state.units)) {
     let strength = unit.baseStrength;
@@ -29,6 +41,9 @@ export function recomputeStats(state) {
     if (hasTechNode(state, unit.owner, "log-entry")) {
       movement += TECH_NODES["log-entry"].effect.amount;
     }
+
+    // §16.7 — a combined unit coordinates poorly: −1 Movement, floored at 1.
+    if (unit.combined) movement = Math.max(1, movement - 1);
 
     unit.strength = Math.max(0, strength);
     unit.movement = Math.max(0, movement);

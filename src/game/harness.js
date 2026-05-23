@@ -998,5 +998,35 @@ line("\n  [Tech Wheel] entry-node effects");
   }
 }
 
+// --- Combining units (§16.7) ---
+line("\n  [Combine] merge two co-located units into one");
+{
+  const g = createGame({ seed }); startTurn(g);
+  const me = g.turnOrder[0];
+  const terrain = Object.values(g.board.hexes).find((h) => h.type === "terrain");
+  const mine = Object.values(g.units).filter((u) => u.owner === me);
+  const a = mine[0]; const b = mine[1];
+  a.node = terrain.id; b.node = terrain.id;
+  a.baseStrength = 5; b.baseStrength = 5;
+  // chips: give each a movement chip so the −1 penalty bites and overflow shows
+  const c1 = g.nextId("chip"); g.chips[c1] = { uid: c1, chipId: "navigator" }; // +1 move
+  const c2 = g.nextId("chip"); g.chips[c2] = { uid: c2, chipId: "sharpened-blades" };
+  const c3 = g.nextId("chip"); g.chips[c3] = { uid: c3, chipId: "drilled-troops" };
+  const c4 = g.nextId("chip"); g.chips[c4] = { uid: c4, chipId: "cannons" };
+  a.chips = [c1, c2]; b.chips = [c3, c4]; recomputeStats(g);
+  g.players[me].actions.remaining = 5;
+  const ownedBefore = Object.values(g.units).filter((u) => u.owner === me).length;
+  const actionsBefore = g.players[me].actions.remaining;
+  const r = performAction(g, "combine", { unit: a.uid, with: b.uid });
+  check("combine consumes one unit (cap relief)",
+    r.ok && !g.units[b.uid] && Object.values(g.units).filter((u) => u.owner === me).length === ownedBefore - 1);
+  check("combined Strength sums and caps at 8", g.units[a.uid].baseStrength === 8);
+  check("combine costs 1 Action", actionsBefore - g.players[me].actions.remaining === 1);
+  check("combined unit holds 3 chip slots, overflow drops as hex loot",
+    g.units[a.uid].chips.length === 3 && (g.hexLoot[terrain.id] || []).length === 1);
+  check("combined unit takes the −1 Movement penalty (floored at 1)",
+    g.units[a.uid].movement === 1); // base1 + navigator1 = 2, −1 = 1
+}
+
 line(`\n  v0.2 verification: ${v2pass} passed, ${v2fail} failed`);
 line("");

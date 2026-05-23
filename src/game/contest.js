@@ -8,7 +8,7 @@ import { emit } from "./events.js";
 import { openReactionWindow } from "./reactions.js";
 import { CONFIG } from "./config.js";
 import { CHIPS, LOCATIONS, FACTIONS } from "./content.js";
-import { recomputeStats, recomputeResearch } from "./stats.js";
+import { recomputeStats, recomputeResearch, bayCapOf } from "./stats.js";
 import { onLocationCaptured, onRaidWon } from "./standing.js";
 import { makeUnit } from "./setup.js";
 import { TECH_NODES, hasTechNode } from "./tech.js";
@@ -296,7 +296,7 @@ export function destroyUnit(state, unitUid, killerUid, ctx = {}) {
     return;
   }
 
-  const bayFree = CONFIG.unit.baySlots - slotsUsedOf(state, killer.chips);
+  const bayFree = bayCapOf(killer) - slotsUsedOf(state, killer.chips);
   let taken = autoSalvage(state, chips, bayFree);
   if (ctx.interact) {
     const picked = ctx.interact({ kind: "salvage", chips: [...chips], bayFree, killer: killerUid });
@@ -332,7 +332,7 @@ export function resolveSalvage(state, assignments = {}) {
   const universe = new Set([...(killer ? killer.chips : []), ...entry.chips]);
 
   if (killer) {
-    if (slotsUsedOf(state, unitSlots) > CONFIG.unit.baySlots)
+    if (slotsUsedOf(state, unitSlots) > bayCapOf(killer))
       return { ok: false, reason: "too many chips for the unit's bay" };
     killer.chips = unitSlots.filter((c) => universe.has(c));
   }
