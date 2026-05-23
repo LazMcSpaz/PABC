@@ -618,7 +618,7 @@ export default function Prototype({ config, onNewGame }) {
 
       {menuPanel === "market" && (
         <TitledWindow title="Market" icon={ICON.scrap} onClose={() => setMenuPanel(null)} width={560}>
-          <MarketRow state={state} isYourTurn={isYourTurn} onAcquire={onAcquire} />
+          <MarketRow state={state} isYourTurn={isYourTurn} onAcquire={onAcquire} chipWidth={76} />
         </TitledWindow>
       )}
 

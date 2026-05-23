@@ -2,8 +2,17 @@
 // Pure presentational components — every value and handler arrives via
 // props so the same chrome drives both the live game (Prototype.jsx) and
 // the static look-pass (HudShowcase.jsx).
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import ControlMeter from "./ControlMeter.jsx";
+
+// Close the active modal on Escape.
+function useEscClose(onClose) {
+  useEffect(() => {
+    const h = (e) => { if (e.key === "Escape") onClose?.(); };
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  }, [onClose]);
+}
 
 // --- palette -----------------------------------------------------------
 export const C = {
@@ -242,6 +251,7 @@ export function MenuOrb({ onOpen }) {
 }
 
 export function RadialMenu({ items, onPick, onClose }) {
+  useEscClose(onClose);
   const S = 460, c = S / 2, ri = 84, ro = 208, gap = 4;
   const span = 360 / items.length;
   const seg = (i) => ({ a0: -span / 2 + i * span + gap / 2, a1: -span / 2 + (i + 1) * span - gap / 2 });
@@ -270,9 +280,10 @@ export function CloseX({ onClose, style }) {
 // --- framed window -----------------------------------------------------
 export function FrameWindow({ children, onClose, footer, width = 470 }) {
   const W = width, H = Math.round(W / 0.809);
+  useEscClose(onClose);
   return (
-    <div style={{ position: "fixed", inset: 0, zIndex: 58, background: "radial-gradient(ellipse at center, rgba(8,14,14,0.86), rgba(2,5,5,0.94))", display: "flex", alignItems: "center", justifyContent: "center" }}>
-      <div style={{ position: "relative", width: W, height: H, backgroundImage: `url(${FRAME})`, backgroundSize: "100% 100%", backgroundRepeat: "no-repeat" }}>
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 58, background: "radial-gradient(ellipse at center, rgba(8,14,14,0.86), rgba(2,5,5,0.94))", display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ position: "relative", width: W, height: H, backgroundImage: `url(${FRAME})`, backgroundSize: "100% 100%", backgroundRepeat: "no-repeat" }}>
         <div style={{ position: "absolute", left: "12%", top: "9%", width: "64%", height: "48%", background: "radial-gradient(ellipse at 42% 36%, rgba(86,211,198,0.15), transparent 70%)", filter: "blur(6px)", pointerEvents: "none" }} />
         <div className="pc-scroll" style={{ position: "absolute", left: "11%", right: "12%", top: "8%", bottom: "9%", overflowY: "auto" }}>{children}</div>
         {footer}

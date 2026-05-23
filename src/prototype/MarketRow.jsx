@@ -7,12 +7,12 @@ import { ALL_UPGRADES, theme } from "./data.js";
 import { Btn } from "./kit.jsx";
 import Chip from "./Chip.jsx";
 
-export default function MarketRow({ state, isYourTurn, onAcquire }) {
+export default function MarketRow({ state, isYourTurn, onAcquire, chipWidth = 92 }) {
   const you = state.players[state.youId];
   const items = state.marketChips || [];
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 11 }}>
-      <div style={{ display: "flex", gap: 13, flexWrap: "wrap" }}>
+      <div style={{ display: "flex", gap: 12, flexWrap: "wrap", justifyContent: "center" }}>
         {items.map((item, i) => {
           const chip = ALL_UPGRADES[item.chipId];
           if (!chip) return null;
@@ -22,7 +22,7 @@ export default function MarketRow({ state, isYourTurn, onAcquire }) {
             isYourTurn;
           return (
             <div key={i} style={{ display: "flex", flexDirection: "column", gap: 7, alignItems: "center" }}>
-              <Chip chipId={item.chipId} width={92} dim={!affordable} />
+              <Chip chipId={item.chipId} width={chipWidth} dim={!affordable} />
               {item.isResale && (
                 <span
                   style={{
