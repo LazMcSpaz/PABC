@@ -11,7 +11,7 @@ import Inspector from "./Inspector.jsx";
 import UnitCard from "./UnitCard.jsx";
 import ControlMeter from "./ControlMeter.jsx";
 import {
-  ResourceWheel, FactionReadout, MenuOrb, RadialMenu, LocationWindow, TitledWindow, MarketBand, ICON, C as HUD,
+  ResourceWheel, FactionReadout, MenuOrb, RadialMenu, LocationWindow, TitledWindow, MarketBand, CloseX, ICON, C as HUD,
 } from "./HudChrome.jsx";
 import { createGame } from "../game/setup.js";
 import { startTurn, endTurn } from "../game/turn.js";
@@ -851,7 +851,8 @@ function TechWheelOverlay({ you, state, onAssign, onClose }) {
   return (
     <div
       style={{
-        position: "fixed", inset: 0, zIndex: 72, background: "rgba(0,0,0,0.8)",
+        position: "fixed", inset: 0, zIndex: 72,
+        background: "radial-gradient(ellipse at center, rgba(8,18,18,0.85), rgba(2,6,7,0.93))",
         display: "flex", alignItems: "center", justifyContent: "center",
       }}
       onClick={onClose}
@@ -859,21 +860,24 @@ function TechWheelOverlay({ you, state, onAssign, onClose }) {
       <div
         onClick={(e) => e.stopPropagation()}
         style={{
-          background: theme.plate, border: `1px solid ${theme.borderLit}`, borderRadius: 12,
-          boxShadow: theme.shadowDeep, padding: "18px 22px 20px", maxWidth: "96vw",
+          position: "relative",
+          background: "linear-gradient(160deg, rgba(20,32,33,0.96), rgba(8,16,17,0.97))",
+          border: `1px solid ${HUD.holo}55`, borderRadius: 16,
+          boxShadow: `0 18px 50px rgba(0,0,0,0.7), 0 0 30px ${HUD.holo}22, inset 0 0 0 1px rgba(86,211,198,0.12)`,
+          padding: "20px 26px 22px", maxWidth: "96vw",
         }}
       >
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-          <span style={{ fontFamily: theme.fontDisplay, fontSize: 14, fontWeight: 700, letterSpacing: 1.5, textTransform: "uppercase", color: theme.text }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 24, marginBottom: 8, paddingRight: 42 }}>
+          <span style={{ fontFamily: HUD.font, fontSize: 16, fontWeight: 700, letterSpacing: 3, textTransform: "uppercase", color: HUD.holoHi, textShadow: `0 0 8px ${HUD.holo}66` }}>
             Tech Wheel
           </span>
-          <span style={{ fontSize: 11, color: theme.textDim }}>
+          <span style={{ fontSize: 11, color: HUD.textDim, letterSpacing: 0.4 }}>
             Level {you.techLevel}/{state.maxTechLevel} · Research {you.research} ·{" "}
-            <span style={{ color: theme.accent, fontWeight: 700 }}>{you.abilityPointsAvailable} Ability Points</span>
+            <span style={{ color: HUD.gold, fontWeight: 700 }}>{you.abilityPointsAvailable} Ability Points</span>
           </span>
-          <Btn onClick={onClose}>Close</Btn>
         </div>
         <TechWheel player={you} onAssign={onAssign} />
+        <CloseX onClose={onClose} style={{ position: "absolute", top: 14, right: 14 }} />
       </div>
     </div>
   );

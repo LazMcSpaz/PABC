@@ -232,6 +232,9 @@ export function FactionReadout({ name, color = C.red, vp, vpGoal, actions, round
 // --- bottom-right menu orb + radial menu -------------------------------
 export function MenuOrb({ onOpen }) {
   const S = 240, cx = S, cy = S, ri = 96, ro = 150;
+  // Centre the glyph on the band's mid-radius along the 45° diagonal: a
+  // corner-anchored square of side (mid·√2) flex-centres content there.
+  const box = ((ri + ro) / 2) * Math.SQRT2;
   return (
     <button className="hud-int" onClick={onOpen} title="Menu"
       style={{ position: "absolute", right: 0, bottom: 0, width: S * 0.62, height: S * 0.62, zIndex: 28, border: "none", background: "transparent", padding: 0, cursor: "pointer", overflow: "visible" }}>
@@ -245,11 +248,13 @@ export function MenuOrb({ onOpen }) {
         <circle cx={cx} cy={cy} r={ro} fill="none" stroke={C.holoHi} strokeWidth="0.8" opacity="0.4" />
         <circle cx={cx} cy={cy} r={ri} fill="none" stroke={C.holoHi} strokeWidth="1" opacity="0.6" />
       </svg>
-      <span style={{ position: "absolute", right: 30, bottom: 34, display: "flex", flexDirection: "column", alignItems: "center", gap: 5, color: C.holoHi, textShadow: "0 1px 4px rgba(0,0,0,0.8)" }}>
-        <span style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 4 }}>
-          {[0, 1, 2, 3].map((i) => <span key={i} style={{ width: 7, height: 7, borderRadius: 2, background: C.holoHi, boxShadow: `0 0 6px ${C.holo}` }} />)}
+      <span style={{ position: "absolute", right: 0, bottom: 0, width: box, height: box, display: "flex", alignItems: "center", justifyContent: "center", pointerEvents: "none" }}>
+        <span style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6, color: C.holoHi, textShadow: "0 1px 4px rgba(0,0,0,0.8)" }}>
+          <span style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 4 }}>
+            {[0, 1, 2, 3].map((i) => <span key={i} style={{ width: 7, height: 7, borderRadius: 2, background: C.holoHi, boxShadow: `0 0 6px ${C.holo}` }} />)}
+          </span>
+          <span style={{ fontFamily: C.font, fontSize: 11, fontWeight: 700, letterSpacing: 2 }}>MENU</span>
         </span>
-        <span style={{ fontFamily: C.font, fontSize: 11, fontWeight: 700, letterSpacing: 2 }}>MENU</span>
       </span>
     </button>
   );
@@ -289,8 +294,9 @@ export function FrameWindow({ children, onClose, footer, width = 470 }) {
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 58, background: "radial-gradient(ellipse at center, rgba(8,14,14,0.86), rgba(2,5,5,0.94))", display: "flex", alignItems: "center", justifyContent: "center" }}>
       <div onClick={(e) => e.stopPropagation()} style={{ position: "relative", width: W, height: H, backgroundImage: `url(${FRAME})`, backgroundSize: "100% 100%", backgroundRepeat: "no-repeat" }}>
-        <div style={{ position: "absolute", left: "12%", top: "9%", width: "64%", height: "48%", background: "radial-gradient(ellipse at 42% 36%, rgba(86,211,198,0.15), transparent 70%)", filter: "blur(6px)", pointerEvents: "none" }} />
-        <div className="pc-scroll" style={{ position: "absolute", left: "11%", right: "12%", top: "8%", bottom: "9%", overflowY: "auto" }}>{children}</div>
+        <div style={{ position: "absolute", left: "16%", top: "12%", width: "56%", height: "42%", background: "radial-gradient(ellipse at 42% 36%, rgba(86,211,198,0.15), transparent 70%)", filter: "blur(6px)", pointerEvents: "none" }} />
+        {/* content sits well inside the display, clear of the metal edges */}
+        <div className="pc-scroll" style={{ position: "absolute", left: "16%", right: "14%", top: "11%", bottom: "13%", overflowY: "auto" }}>{children}</div>
         {footer}
         <CloseX onClose={onClose} style={{ position: "absolute", top: "4.5%", right: "6.5%" }} />
       </div>
@@ -452,24 +458,22 @@ function MarketChip({ item, def, affordable, size, onAcquire, onHover }) {
         transition: "transform .12s ease, filter .12s ease",
       }}
     >
-      {/* readout panel — inset from the frame, spread top-to-bottom; the
-          title clears the dial in the top-right corner. */}
-      <div style={{ position: "absolute", left: "11%", top: "17%", width: "58%", bottom: "15%", display: "flex", flexDirection: "column" }}>
+      {/* name + summary — top-left with breathing room from the frame */}
+      <div style={{ position: "absolute", left: "11%", top: "23%", width: "58%" }}>
         <div style={{ fontFamily: C.font, fontSize: 12, fontWeight: 800, lineHeight: 1.08, letterSpacing: 0.3, textTransform: "uppercase", color: C.text, textShadow: "0 1px 3px #000" }}>
           {def.name}
         </div>
         <div style={{ marginTop: 4, fontFamily: C.font, fontSize: 10, fontWeight: 600, lineHeight: 1.18, color: accent, textShadow: "0 1px 2px #000" }}>
           {chipSummary(def)}
         </div>
-        <div style={{ marginTop: "auto", display: "flex", alignItems: "center" }}>
-          <span style={{ display: "inline-flex", alignItems: "center", gap: 5, background: "rgba(2,7,8,0.74)", border: `1px solid ${accent}66`, borderRadius: 10, padding: "2px 9px 2px 5px", boxShadow: "0 1px 3px rgba(0,0,0,0.6)" }}>
-            <img src={ICON.scrap} alt="" style={{ width: 16, height: 16, objectFit: "contain" }} />
-            <span style={{ fontFamily: C.font, fontWeight: 800, fontSize: 15, color: "#fff" }}>{def.cost > 0 ? def.cost : "—"}</span>
-          </span>
-        </div>
       </div>
+      {/* price — bottom-right, off the dial, in a high-contrast pill */}
+      <span style={{ position: "absolute", right: "9%", bottom: "15%", display: "inline-flex", alignItems: "center", gap: 5, background: "rgba(2,7,8,0.78)", border: `1px solid ${accent}66`, borderRadius: 10, padding: "2px 9px 2px 5px", boxShadow: "0 1px 3px rgba(0,0,0,0.6)" }}>
+        <img src={ICON.scrap} alt="" style={{ width: 16, height: 16, objectFit: "contain" }} />
+        <span style={{ fontFamily: C.font, fontWeight: 800, fontSize: 15, color: "#fff" }}>{def.cost > 0 ? def.cost : "—"}</span>
+      </span>
       {item.isResale && (
-        <span style={{ position: "absolute", right: "6%", bottom: "10%", fontSize: 7, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", color: C.gold, border: `1px solid ${C.gold}`, borderRadius: 3, padding: "0 4px", background: "rgba(0,0,0,0.6)" }}>Resale</span>
+        <span style={{ position: "absolute", left: "11%", bottom: "16%", fontSize: 7, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", color: C.gold, border: `1px solid ${C.gold}`, borderRadius: 3, padding: "0 4px", background: "rgba(0,0,0,0.6)" }}>Resale</span>
       )}
       {affordable && hov && (
         <span style={{ position: "absolute", left: "50%", bottom: "-15px", transform: "translateX(-50%)", fontFamily: C.font, fontSize: 9, fontWeight: 700, letterSpacing: 1.5, textTransform: "uppercase", color: accent, whiteSpace: "nowrap", textShadow: "0 1px 3px #000" }}>Acquire</span>
@@ -505,7 +509,12 @@ export function MarketBand({ tiers = [], resale = [], scrap, actions = {}, isYou
   const cx = size.w / 2, cy = size.h - 4;
   const CW = 148, R0 = Math.max(272, Math.min(330, size.h * 0.38)), STEP = 124, halfSpan = 74, bandHalf = 52;
 
-  const tierData = tiers.map((t, idx) => ({
+  // Show every unlocked tier plus the next locked one as a teaser; deeper
+  // tiers stay hidden until they're next in line (keeps the band from
+  // crowding the header and conveys progressive reveal).
+  const firstLocked = tiers.findIndex((t) => !t.unlocked);
+  const visibleTiers = firstLocked < 0 ? tiers : tiers.slice(0, firstLocked + 1);
+  const tierData = visibleTiers.map((t, idx) => ({
     ...t,
     R: R0 + idx * STEP,
     items: idx === 0 ? [...t.items, ...resale] : t.items,
