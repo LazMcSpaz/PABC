@@ -78,7 +78,6 @@ function arc(cx, cy, r, a0, a1) {
 function HoloSegments({ svgW, svgH, cx, cy, ri, ro, accent = C.holo, segments, prominent = false, hub, offset = { left: 0, top: 0 } }) {
   const [hover, setHover] = useState(-1);
   const edge = prominent ? 2 : 1.4;
-  const glow = prominent ? 9 : 4;
   const gid = `holo-${accent.slice(1)}-${cx}-${cy}-${ro}`;
   return (
     <div style={{ position: "absolute", ...offset, width: svgW, height: svgH }}>
@@ -99,16 +98,16 @@ function HoloSegments({ svgW, svgH, cx, cy, ri, ro, accent = C.holo, segments, p
               fill={`url(#${gid})`}
               stroke={accent}
               strokeWidth={edge}
-              opacity={on ? 1 : 0.85}
-              style={{ cursor: s.onClick ? "pointer" : "default", filter: `drop-shadow(0 0 ${on ? glow + 5 : glow}px ${accent}${prominent ? "" : "88"})`, transition: "opacity .12s ease, filter .12s ease" }}
+              opacity={on ? 0.95 : 0.8}
+              style={{ cursor: s.onClick ? "pointer" : "default", filter: `blur(0.7px) drop-shadow(0 0 ${on ? (prominent ? 16 : 13) : (prominent ? 11 : 9)}px ${accent}) drop-shadow(0 0 ${on ? (prominent ? 30 : 26) : (prominent ? 24 : 20)}px ${accent}88)`, transition: "opacity .12s ease, filter .12s ease" }}
               onMouseEnter={() => setHover(i)}
               onMouseLeave={() => setHover((h) => (h === i ? -1 : h))}
               onClick={s.onClick}
             />
           );
         })}
-        <circle cx={cx} cy={cy} r={ro} fill="none" stroke={accent} strokeWidth="0.6" opacity="0.35" />
-        <circle cx={cx} cy={cy} r={ri} fill="none" stroke={accent} strokeWidth="0.8" opacity="0.5" />
+        <circle cx={cx} cy={cy} r={ro} fill="none" stroke={accent} strokeWidth="0.8" opacity="0.28" style={{ filter: `blur(0.9px) drop-shadow(0 0 6px ${accent})` }} />
+        <circle cx={cx} cy={cy} r={ri} fill="none" stroke={accent} strokeWidth="1" opacity="0.4" style={{ filter: `blur(0.9px) drop-shadow(0 0 6px ${accent})` }} />
       </svg>
       {segments.map((s, i) => {
         const mid = (s.a0 + s.a1) / 2;
@@ -244,9 +243,9 @@ export function MenuOrb({ onOpen }) {
             <stop offset="40%" stopColor={C.holo} stopOpacity="0.28" /><stop offset="78%" stopColor={C.holo} stopOpacity="0.12" /><stop offset="100%" stopColor={C.holo} stopOpacity="0.02" />
           </radialGradient>
         </defs>
-        <path d={donut(cx, cy, ri, ro, 270, 360)} fill="url(#orb)" stroke={C.holoHi} strokeWidth="2.4" style={{ filter: `drop-shadow(0 0 14px ${C.holo})` }} />
-        <circle cx={cx} cy={cy} r={ro} fill="none" stroke={C.holoHi} strokeWidth="0.8" opacity="0.4" />
-        <circle cx={cx} cy={cy} r={ri} fill="none" stroke={C.holoHi} strokeWidth="1" opacity="0.6" />
+        <path d={donut(cx, cy, ri, ro, 270, 360)} fill="url(#orb)" stroke={C.holoHi} strokeWidth="2.4" style={{ filter: `blur(1px) drop-shadow(0 0 16px ${C.holo}) drop-shadow(0 0 34px ${C.holo}aa)` }} />
+        <circle cx={cx} cy={cy} r={ro} fill="none" stroke={C.holoHi} strokeWidth="1" opacity="0.3" style={{ filter: `blur(1px) drop-shadow(0 0 7px ${C.holo})` }} />
+        <circle cx={cx} cy={cy} r={ri} fill="none" stroke={C.holoHi} strokeWidth="1.2" opacity="0.48" style={{ filter: `blur(1px) drop-shadow(0 0 7px ${C.holo})` }} />
       </svg>
       <span style={{ position: "absolute", right: 0, bottom: 0, width: box, height: box, display: "flex", alignItems: "center", justifyContent: "center", pointerEvents: "none" }}>
         <span style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6, color: C.holoHi, textShadow: "0 1px 4px rgba(0,0,0,0.8)" }}>
