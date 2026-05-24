@@ -1351,3 +1351,271 @@ now — to be designed in a later pass.
 - The four entry effects reuse existing levers (contest roll bonus, movement,
   per-location scrap, the field-encounter draw hook), so each is a small,
   one-sentence addition.
+
+## 18. Loyalty, Influence & the Diplomacy Track (v0.2+)
+
+Supersedes the foothold/decay parts of §6.3.1–§6.3.2 and makes the
+diplomacy-victory candidate of §17.6 concrete. This is the design of
+record for the political layer. Where it conflicts with earlier text,
+§18 wins. **Numeric values throughout are deliberately left as TBD** —
+the tables get filled and tuned in a later pass; this section fixes the
+*model*, not the constants.
+
+### 18.0 Terminology (ratified)
+
+These names are now canonical across the spec, the engine, and the UI:
+
+| Term | Means | Replaces / notes |
+|---|---|---|
+| **Control** | The **3-section ring** you fight over to capture/hold a Location. Contest-driven (§9). | Unchanged — the existing control meter. |
+| **Loyalty** | The **8-slice centre pie** (ceiling 8): the population's integration to its controller. Slow, time-based; governs decay and projects Influence. | Renames the old "foothold score `F`" / "assimilation". |
+| **Influence** | The scalar *quantity* a faction projects onto a hex. | New. |
+| **Zone of Control (ZoC)** | The *set of hexes* where a faction's Influence dominates. | Influence is the number, ZoC is the territory. |
+| **Standing** | Pairwise relation between two actors (player↔faction *and* faction↔faction). | Extends §15.3's player-only matrix. |
+| **Menace** | A player's **global** reputation for *unjustified* aggression. | New. |
+| **Temperament** | A faction's authored character (warlord / trader / opportunist…), with emergent drift. | New. |
+| **Tolerance** | How much of your Menace a given faction will accept in an ally; `f(Temperament, Standing)`. | New. |
+| **Pact** | An alliance commitment; a *pact call* (an ally's war) is a choosable obligation. | New. |
+
+### 18.1 Design intent
+
+Give a non-conquest path to victory that rewards a different game: hold
+and *integrate* territory, project Influence, and navigate a living
+political landscape of factions that have opinions about you **and about
+each other**. The path is not pacifism — it is *foreign policy*. A
+warlord can win it, provided their wars are seen as justified by the bloc
+they court.
+
+Three pillars, layered onto existing systems:
+1. **Loyalty** turns "occupying" a Location into "annexing" it — a slow
+   integration track that, once high, lets territory hold itself and
+   project power outward.
+2. **Influence / ZoC** is the soft territorial field Loyalty projects; it
+   gates a few things (reinforcement routing, encounter reveals) and is
+   read diplomatically as presence or pressure depending on Standing.
+3. **The diplomacy track** is reputation-relative: Standing, Menace,
+   Tolerance, and Pacts decide whether the factions will recognize you.
+
+### 18.2 Loyalty replaces foothold/decay (supersedes §6.3.2)
+
+The meter's centre no longer holds a signed foothold score `F`. It holds
+**Loyalty `L`**, an integer **0–8**, rendered as an **8-slice pie**
+(keeps the radial UI language of the Control ring, contest overlay, and
+tech wheel).
+
+- **Ceiling is fixed at 8.** Nothing raises it. (This retires the old
+  Town-Hall-raises-the-cap rule; see §18.6 on what those chips do now.)
+- **Loyalty rises** while the controller holds full Control *and* meets
+  the integration condition (e.g. a friendly unit present, and/or an
+  integration chip) — **+x per Upkeep**, capped at 8. *(rate TBD)*
+- **Loyalty decays** when the Location is neglected (no friendly unit /
+  no integration source) — **−y per Upkeep**, floored at 0. *(rate TBD)*
+- **Loyalty initialises low** on first reaching full Control. *(start
+  value TBD)* It resets when full Control changes hands.
+
+**The crucial rule — Control is no longer lost to passive ticking.**
+Control flips only two ways:
+
+1. **A lost contest** (§9) flips one Control section by the §6.3.1 rule.
+2. **Loyalty hits 0.** While Loyalty sits at 0 and the Location stays
+   neglected, **one Control section peels to neutral per Upkeep**, one at
+   a time, until the Location is fully neutral. Bringing a unit back
+   halts the peel and lets Loyalty climb again; rebuilding lost sections
+   is done by contesting (§9).
+
+So Loyalty is the *clock* on neglected territory, and Control is the
+*line* you hold by force. A garrisoned, fully-loyal Location is
+effectively permanent; an ungarrisoned fresh capture bleeds out.
+
+- **UI warning:** the engine must surface Loyalty dropping toward danger
+  **before** any Control peels — a "loyalty failing" alert at a
+  threshold *(TBD)* so the player can react in time.
+- **Capital exception preserved:** a Location carrying a **Capital** chip
+  does not decay — its Loyalty is inert/locked at full.
+- Pure contested partial progress still does **not** decay (unchanged):
+  if Control sections are split and no one has held full Control, the
+  meter is static until the next contest.
+
+### 18.3 Influence and Zone of Control
+
+Influence is a **deterministic scalar field**, recomputed (no dice) on
+any relevant change — exactly like the Control meter's bookkeeping.
+
+```
+influence(faction, hex) =
+    Σ over that faction's controlled Locations within range R of:
+        ( faction base influence              // faction-wide score / tech / chips
+        + location local influence            // scales with that Location's Loyalty
+        + influence-chip bonuses )
+      × distance falloff(hex, location)
+```
+
+- A hex joins a faction's **ZoC** when that faction's Influence there is
+  the **highest and clears a threshold** *(threshold TBD)*. Highest-below-
+  threshold or ties → **contested / neutral** (no owner).
+- **Loyalty feeds Influence:** a freshly captured, low-Loyalty Location
+  projects little; a fully integrated one projects strongly. Integrating
+  territory *is* the influence build.
+- **Influence chips:** because the Loyalty ceiling is fixed, chips that
+  used to raise it are repurposed (§18.6); a dedicated influence chip
+  raises faction base or a Location's local influence / range.
+
+**What ZoC gates (light-touch by decision):**
+- **Reinforcement routing** (already in §16.5) — friendly/neutral-hex
+  pathing is a ZoC concept.
+- **Encounter reveals** — an encounter drawn inside your ZoC may expose
+  **additional choices** (a "home advantage"); content-authored per
+  encounter via a `condition` on the choice.
+- **Diplomatic reading** — your ZoC bordering a faction is read as
+  *presence* or *pressure* depending on that faction's Standing toward
+  you (§18.5). It is **not** wired to contest math or passive yield in
+  this pass (those were considered and deliberately deferred).
+
+### 18.4 Faction model
+
+A faction is no longer cosmetic (cf. §6.6). It carries authored
+**characteristics** that the AI pursues and that others judge you
+against. **All values below are TBD** — this fixes the fields, not the
+numbers; the per-faction tables get authored later.
+
+**Diplomatic personality** (authored constants modulating runtime values):
+- **Temperament** — baseline aggression / character (warlord, trader,
+  opportunist…), with an emergent drift from the faction's own behavior.
+- **Trustworthiness** — how reliably *they* honor their own pact calls.
+- **Grudge / forgiveness** — how fast their Standing recovers after a
+  slight (the knob on the souring-spiral recovery path, §18.5).
+- **Sociability** — how eagerly they seek alliances at all.
+
+**Strategic goals:**
+- **Victory lean** — conquest vs. diplomacy. A diplomacy-leaning AI is the
+  player's direct *competitor for alliances*, which is what gives the
+  political track an opponent rather than a checklist.
+- **Expansion appetite** — greedy vs. content with current holdings.
+- **Coveted targets** — preferred Location types (Labs, high-VP) or a
+  fixated nemesis faction.
+
+**Inter-faction Standing (load-bearing):**
+- Factions hold **Standing toward each other**, not only toward the
+  player. Without it, "my ally's enemy is my enemy" has nothing to read
+  and the map is a hub-and-spoke around the player. This is the spine of
+  the political landscape and the source of AI-vs-AI dynamics the player
+  can exploit or mediate. Stored by extending `state.factionStanding`
+  (§15.3) to include faction→faction rows.
+
+**Mechanical asymmetry (later pass):**
+- A per-faction lean (combat / economy / influence / tech), a signature
+  unit or chip, asymmetric starting position. Flavorful but not required
+  for the diplomacy victory to function.
+
+### 18.5 Diplomacy: Standing, Menace, Tolerance, Pacts
+
+**Standing** — pairwise relation (Allied → Wary → Enemy), runtime, nudged
+not rolled. Already exists player↔faction (§15.3); extended to
+faction↔faction here.
+
+**Menace** — a player's **global** reputation for *unjustified*
+aggression. The key idea: **aggression is scored relative to the
+target's Temperament.**
+- Attacking a faction **more aggressive than you** holds Menace flat or
+  **lowers** it — you're checking a warlord, doing the world a favor.
+- Attacking a faction **less aggressive / relatively peaceful** **raises**
+  Menace — you're the bully now.
+- High Menace is what takes the diplomacy victory off the table, not
+  fighting per se.
+
+**Tolerance** — how much Menace a given faction will accept in an ally.
+`Tolerance = f(their Temperament, their Standing toward you)`:
+- A militaristic faction tolerates a bloodier ally than a pacifist one.
+- **Tolerance rises as Standing rises** — a deep ally forgives aggression
+  a stranger would not. So early game constrains you; a strong alliance
+  *buys you latitude*. Relationships compound into freedom of action.
+
+**Influence reception follows Standing.** The same ZoC border reads
+differently by relation:
+- High Standing → your ZoC is **benign presence** (open borders between
+  friends); no penalty, possibly a small positive.
+- Low Standing → the same border is a **threat** and erodes Standing
+  further. This is a **feedback loop** by design (souring relations make
+  presence provocative). A deliberate **recovery path** must exist —
+  encounter goodwill choices, gifts, withdrawing a garrison, pulling
+  influence back — gated by the faction's Grudge/forgiveness.
+
+**Pacts.** Allying a faction **couples** your Standing to theirs:
+- Their enemies drag your Standing with those enemies down; fighting an
+  ally's enemy *raises* your Standing with the ally.
+- A **pact call** (the ally goes to war and asks you in) is a **player
+  choice**, not an automatic war declaration. **Honoring** it builds the
+  alliance; **declining** it costs you significant Standing with that
+  ally. Alliances are recurring decisions with costs, not one-time
+  toggles.
+
+### 18.6 Chips & content implications
+
+- The Loyalty ceiling is fixed, so **chips act on rates, not caps**:
+  *slow Loyalty decay* and/or *speed Loyalty gain*. The old
+  Town-Hall-raises-the-foothold-cap chip is repurposed to a rate chip.
+- A new **Influence chip** family raises faction base influence or a
+  Location's local influence / range (§18.3).
+- Encounters may carry **ZoC-gated extra choices** (a `condition` reading
+  "recipient's ZoC contains this hex").
+- The faction characteristic tables (§18.4), the diplomacy-screen content,
+  and all numeric constants are authoring tasks for the content pass.
+
+### 18.7 The diplomacy victory (reputation-gated, not peace-gated)
+
+- **Peace is *not* required.** The path is open to an aggressive player
+  whose wars are *justified* (low Menace) in the eyes of the bloc they
+  court — eliminating a radical, overly-aggressive faction can *help*
+  your standing with the rest.
+- **Win condition (shape, threshold TBD):** be recognized by the faction
+  community — reach alliance / vassal / recognized-leader Standing with
+  **enough** factions **while your Menace stays under their Tolerance**.
+  Bullying peaceful factions spikes Menace past Tolerance and closes the
+  path; honoring pacts and checking warlords keeps it open.
+- **Conquest victory (VP 12) remains** the parallel, always-available
+  path. The two are distinct because the diplomacy path rewards *who* and
+  *how* you fight, not *whether*.
+- **No tech victory** (unchanged from §17.6).
+
+### 18.8 Engine mapping (for implementers — design only, not yet built)
+
+High-level; consistent with §15–§17 patterns. Detailed schemas and the
+effect/event lists are written when this leaves the design phase.
+
+- **Location state:** replace foothold `F` with **`loyalty` (0–8)**;
+  Control peel driven by `loyalty == 0` per Upkeep (§18.2). Loyalty
+  rise/decay rates read from config + chip rate-modifiers.
+- **Influence field:** a recompute pass (sibling to `recomputeStats` /
+  `recomputeResearch`) producing per-hex Influence and a derived ZoC
+  owner map in `state.world`. No dice; runs on control/Loyalty/chip
+  changes.
+- **Faction model:** authored characteristics (§18.4) on the faction
+  record (no longer cosmetic per §6.6); extend `state.factionStanding`
+  to faction↔faction.
+- **Player state:** add **`menace`**; Tolerance is derived, not stored.
+- **Diplomacy:** Standing nudges, Menace updates on contest resolution
+  (relative to target Temperament), pact-call as a `private` encounter /
+  interactive choice, victory check in the win-condition evaluator.
+- **New effects/events** (to enumerate later): adjust-menace,
+  adjust-influence-source, pact-call delivery, plus `loyalty_changed`,
+  `loyalty_failing` (UI warning), `control_peeled`, `zone_changed`,
+  `menace_changed`, `pact_formed` / `pact_called` / `pact_broken`.
+
+### 18.9 Open questions / tables to fill
+
+- **Loyalty constants:** start value, rise/decay rates, the danger-warning
+  threshold, peel cadence at 0.
+- **Influence field:** range `R`, distance falloff, Loyalty→local-influence
+  scaling, the ZoC dominance threshold, contested-tie handling.
+- **Faction tables:** per-faction Temperament, Trustworthiness, Grudge,
+  Sociability, Victory lean, Expansion appetite, Coveted targets, and the
+  full faction↔faction starting Standing matrix.
+- **Menace formula:** how target-vs-self aggression delta maps to a Menace
+  change; decay of Menace over time (does justified play heal it?).
+- **Tolerance curve:** the `f(Temperament, Standing)` shape.
+- **Victory threshold:** how many factions, at what Standing tier (all 3
+  Allied? 2 of 3? does a vassal count double?).
+- **Recovery path specifics:** which encounter/gift/withdrawal actions
+  repair Standing, and how Grudge gates them.
+- **Diplomacy screen:** the interaction surface (what the player can
+  propose/accept/decline) — its own design pass.
