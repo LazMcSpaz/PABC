@@ -75,7 +75,7 @@ export default function TechWheel({ player, onAssign }) {
 
         {/* faint guide rings reinforce the radial language */}
         {[RADIUS[1], RADIUS[2], RADIUS[3]].map((r) => (
-          <circle key={r} cx={CC} cy={CC} r={r} fill="none" stroke={HOLO} strokeWidth="0.6" opacity="0.16" />
+          <circle key={r} cx={CC} cy={CC} r={r} fill="none" stroke={HOLO} strokeWidth="0.9" opacity="0.15" style={{ filter: `blur(1px) drop-shadow(0 0 6px ${HOLO})` }} />
         ))}
 
         {/* spokes / prereq links */}
@@ -89,14 +89,14 @@ export default function TechWheel({ player, onAssign }) {
               x1={from.x} y1={from.y} x2={pos[n.id].x} y2={pos[n.id].y}
               stroke={col}
               strokeWidth={lit ? 3 : 1.4}
-              opacity={lit ? 0.95 : 0.32}
-              style={lit ? { filter: `drop-shadow(0 0 5px ${col})` } : undefined}
+              opacity={lit ? 0.95 : 0.3}
+              style={{ filter: lit ? `blur(0.7px) drop-shadow(0 0 7px ${col}) drop-shadow(0 0 16px ${col}88)` : `blur(0.7px) drop-shadow(0 0 4px ${col})` }}
             />
           );
         })}
 
         {/* hub */}
-        <circle cx={CC} cy={CC} r={23} fill="url(#tw-hub)" stroke={HOLO} strokeWidth={1.6} style={{ filter: `drop-shadow(0 0 8px ${HOLO}66)` }} />
+        <circle cx={CC} cy={CC} r={23} fill="url(#tw-hub)" stroke={HOLO} strokeWidth={1.6} style={{ filter: `blur(0.6px) drop-shadow(0 0 9px ${HOLO}) drop-shadow(0 0 18px ${HOLO}66)` }} />
         <text x={CC} y={CC + 3} textAnchor="middle" fontSize="10" fill={HOLO_HI} fontFamily={FONT} style={{ letterSpacing: 2, fontWeight: 700 }}>TECH</text>
 
         {/* nodes */}
@@ -120,7 +120,7 @@ export default function TechWheel({ player, onAssign }) {
                 <circle cx={p.x} cy={p.y} r={29} fill="url(#tw-node)" stroke={ringStroke}
                   strokeWidth={isAssigned || assignable ? 2.4 : 1.4}
                   opacity={isAssigned || assignable ? 1 : 0.7}
-                  style={assignable ? { filter: `drop-shadow(0 0 7px ${HOLO})` } : isAssigned ? { filter: `drop-shadow(0 0 6px ${col})` } : undefined}
+                  style={{ filter: assignable ? `blur(0.6px) drop-shadow(0 0 8px ${HOLO}) drop-shadow(0 0 17px ${HOLO}88)` : isAssigned ? `blur(0.6px) drop-shadow(0 0 7px ${col}) drop-shadow(0 0 15px ${col}66)` : `blur(0.6px) drop-shadow(0 0 4px ${HOLO}88)` }}
                 />
                 <image href={PATH_LOGO[n.path]} x={p.x - 23} y={p.y - 23} width={46} height={46}
                   opacity={isAssigned || assignable ? 1 : 0.82}
@@ -143,7 +143,7 @@ export default function TechWheel({ player, onAssign }) {
                 stroke={stroke}
                 strokeWidth={assignable || isAssigned ? 2.4 : 1.4}
                 opacity={isAssigned || assignable ? 1 : 0.55}
-                style={assignable ? { filter: `drop-shadow(0 0 6px ${HOLO})` } : undefined}
+                style={{ filter: assignable ? `blur(0.5px) drop-shadow(0 0 7px ${HOLO}) drop-shadow(0 0 15px ${HOLO}88)` : isAssigned ? `blur(0.5px) drop-shadow(0 0 6px ${col})` : `blur(0.5px) drop-shadow(0 0 3px ${HOLO}66)` }}
               />
               <text x={p.x} y={p.y + 3} textAnchor="middle" fontSize="7.5"
                 fill={isAssigned ? "#0a1414" : HOLO_HI}

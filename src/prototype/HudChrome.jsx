@@ -532,11 +532,14 @@ export function MarketBand({ tiers = [], resale = [], scrap, actions = {}, isYou
         </defs>
         {tierData.map((t) => {
           const col = t.unlocked ? C.holo : "#5b6b6b";
+          const edgeGlow = t.unlocked
+            ? `blur(0.9px) drop-shadow(0 0 7px ${col})`
+            : `blur(0.9px) drop-shadow(0 0 4px ${col}88)`;
           return (
             <g key={t.tier}>
-              <path d={donut(cx, cy, t.R - bandHalf, t.R + bandHalf, -halfSpan - 6, halfSpan + 6)} fill={`url(#mb-${t.tier})`} stroke={col} strokeWidth={t.unlocked ? 1.4 : 1} opacity={t.unlocked ? 0.9 : 0.5} style={{ filter: t.unlocked ? `drop-shadow(0 0 9px ${C.holo}55)` : "none" }} />
-              <path d={arc(cx, cy, t.R + bandHalf, -halfSpan - 6, halfSpan + 6)} fill="none" stroke={col} strokeWidth="0.6" opacity="0.45" />
-              <path d={arc(cx, cy, t.R - bandHalf, -halfSpan - 6, halfSpan + 6)} fill="none" stroke={col} strokeWidth="0.6" opacity="0.45" />
+              <path d={donut(cx, cy, t.R - bandHalf, t.R + bandHalf, -halfSpan - 6, halfSpan + 6)} fill={`url(#mb-${t.tier})`} stroke={col} strokeWidth={t.unlocked ? 1.4 : 1} opacity={t.unlocked ? 0.85 : 0.45} style={{ filter: t.unlocked ? `blur(0.8px) drop-shadow(0 0 12px ${C.holo}) drop-shadow(0 0 28px ${C.holo}66)` : `blur(0.8px) drop-shadow(0 0 6px ${col}66)` }} />
+              <path d={arc(cx, cy, t.R + bandHalf, -halfSpan - 6, halfSpan + 6)} fill="none" stroke={col} strokeWidth="0.8" opacity="0.4" style={{ filter: edgeGlow }} />
+              <path d={arc(cx, cy, t.R - bandHalf, -halfSpan - 6, halfSpan + 6)} fill="none" stroke={col} strokeWidth="0.8" opacity="0.4" style={{ filter: edgeGlow }} />
             </g>
           );
         })}
