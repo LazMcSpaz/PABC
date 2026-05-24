@@ -1862,3 +1862,226 @@ nudges.)
   acceptance logic.
 - **Diplomacy screen:** the interaction surface (propose / accept / decline
   / counter) — its own design pass.
+
+## 19. Exploration, Vision & Fog of War (v0.2+)
+
+New section. Touches §6.1 (the Board is no longer globally visible to all),
+§16.6 (adds the ambush lever), §17.5 (gives the Intelligence path its
+theme), and §18.3 / §18.6 (ZoC projects vision; intel is a deal good).
+**Designed for a map larger than the current test field** — distances,
+regions, and line of sight only matter at scale, so nothing here keys off
+the 30-hex board. **Numeric values are TBD.**
+
+### 19.0 Terminology
+
+| Term | Means |
+|---|---|
+| **Fog** | A **per-faction** visibility overlay with three states (§19.2). There is no single global truth any player reads. |
+| **Vision** | A source's sight **radius** — now a first-class stat, leverable by chips/tech/terrain. |
+| **Line of sight (LoS)** | Whether terrain (elevation/cover) blocks vision between two hexes. |
+| **Ghost** | A dimmed **last-known** marker of an enemy unit / state, shown in explored-but-not-visible fog. |
+| **Concealment** | A unit hidden *even inside* an enemy's vision (cover or stealth) until a **Detection** source is near. |
+| **Detection** | A source's ability to pierce Concealment, at a (usually shorter) range. |
+| **Ambush** | A Contest opened by a unit the other side could not see; grants a combat edge (§19.5). |
+| **Scout loadout** | A unit kitted via chips for Vision/Movement/Detection rather than Strength — not a unit class. |
+| **Intel** | Information as a tradeable / steal-able good (vision, map data); the §18.6 deal Item. |
+
+### 19.1 Design intent
+
+Fog is the **keystone that switches on systems already built**: it gives
+the Intelligence tech path (§17.5) a theme (information dominance), makes
+the diplomacy `intel` deal Item and shared-ally vision (§18.6) meaningful,
+makes terrain a readable puzzle, and turns the encounter system (§15) into
+genuine discovery. Four parts: a **layered fog model**, **Vision as a
+leverable stat**, a **counter-game** (concealment / ambush / denial), and a
+**reward loop** that pulls players into the dark. **The AI plays under the
+same fog** — its imperfect information is a feature, not a handicap to be
+papered over with vision cheats.
+
+### 19.2 The fog model (supersedes §6.1's global visibility)
+
+Per faction, every hex is in one of three states:
+
+| State | Terrain | Live activity (units, Control, Loyalty, garrison) | Render |
+|---|---|---|---|
+| **Unexplored** | unknown | unknown | black |
+| **Explored** (remembered) | known — **persists once seen** | **last-known snapshot only** | dimmed |
+| **Visible** (live) | known | **real-time truth** | full |
+
+The governing rule: **static facts persist, live facts don't.** Once a hex
+is seen, its terrain and the *existence* of any Location there is remembered
+forever; but unit positions, Control/Loyalty, and garrison strength are
+trustworthy **only while the hex is in that faction's `visible` set**.
+Leaving vision **snapshots** the last-live state into memory — the source of
+the **ghosts** (§19.11). This asymmetry *is* the point of fog: you act on
+stale intel about anything you are not currently watching.
+
+### 19.3 Vision — the stat and its sources
+
+**Vision** is a first-class attribute (sibling to Movement): a sight
+**radius**, modified by chips, tech, and terrain. A faction's `visible` set
+each recompute is the **LoS-limited union** of the radius around every
+source it owns:
+
+- **Units** — radius around each unit.
+- **Controlled Locations** — radius scaling with tier / Loyalty (a loyal
+  core sees farther than a fresh capture).
+- **ZoC projects vision** (§18.3) — the influence field contributes sight,
+  so presence and visibility share a shape.
+
+> **ZoC ≠ Vision — do not conflate.** ZoC is *influence dominance*
+> (territory); Vision is *sight*. ZoC contributes to Vision, but Vision can
+> reach **beyond** ZoC (a scout deep in the dark), and a **concealed** enemy
+> can sit *inside* your ZoC unseen if you have no Detection source near
+> (§19.5). The engine keeps two separate per-faction sets.
+
+### 19.4 Terrain, elevation & line of sight
+
+Fog is what makes terrain matter beyond the §16.6 combat +1. Two new roles:
+
+- **Elevation** — high ground (mountains/hills) **extends** a source's
+  effective Vision and **blocks LoS** to lower hexes behind it (ridgelines
+  are natural sight-walls). LoS is computed, not just a radius.
+- **Cover** — forest/ruins **reduce** Vision through them and **conceal**
+  units within them (§19.5).
+
+LoS is deterministic (a standard hex visibility cast; no dice). On the
+larger map this turns ridges into watchtowers, forests into infiltration
+lanes, and chokepoints into the hexes worth scouting.
+
+### 19.5 Concealment, hidden armies & ambush (adds a term to §16.6)
+
+The counter-game — what makes Intelligence *offensive* and blind aggression
+*costly*.
+
+- **Concealment:** a unit in cover terrain or carrying a stealth chip is
+  **hidden even inside an enemy's Vision radius** unless that enemy has a
+  **Detection** source within (shorter) detection range. Armies can lurk;
+  you can mass unseen in a forest.
+- **Detection** pierces Concealment: scout loadouts, recon chips, watchtower
+  chips, and Intelligence-vision nodes carry it.
+- **Ambush — attacker unseen:** when a unit opens a Contest while it was
+  **not in the defender's `visible` set** (or was concealed) at declaration,
+  it gains an **ambush edge** — the defender **loses its §10 reaction
+  window** and a roll penalty applies *(magnitude TBD)*. This adds a term to
+  the §16.6 total.
+- **Ambush — defender unseen:** symmetrically, a **hidden defender** an
+  attacker blunders into (contesting a hex/Location whose true garrison was
+  fogged) gets the ambush edge **against the attacker**. This is why
+  scouting before committing is a real skill: attacking into fog risks
+  walking onto a force you could not size.
+- **Movement reveals:** a unit entering an enemy's Vision is revealed for
+  that turn; staying concealed means staying out of Detection.
+
+### 19.6 The exploration reward loop
+
+Fog without payoff is chores. The pulls into the dark:
+
+- **Discoveries:** encounter hexes (§15.8) are **hidden until revealed** —
+  exploring is how you turn them up. The encounter system is unchanged; only
+  its hexes are now fogged.
+- **First-discovery edge:** the first faction to sight a Location or special
+  site gets claim priority or a one-time reward *(TBD)* — scouting races
+  rivals.
+- **Special sites:** new map features (resource hexes, ruins) worth finding
+  and expanding toward — also the hook for deepening the Exploit pillar.
+
+### 19.7 Scouting as a loadout (not a unit class)
+
+No dedicated scout unit. Scouting is a **composable chip loadout**: a
+vision/recon chip raises Vision (and likely Movement) and grants Detection,
+trading the bay slot that would have held combat gear. A **Watchtower**
+location chip provides static Vision + Detection. This keeps army
+composition a decision and avoids a bolt-on unit type. (The chips are
+authored later.)
+
+### 19.8 Intelligence tech path — payoff (gives §17.5 branches their theme)
+
+The stubbed Intelligence branch nodes (§17.5) now have a unifying theme:
+**information dominance.** Proposed branch split (node effects authored when
+branches are designed):
+
+- **Entry — Recon:** the existing encounter discard/redraw (unchanged).
+- **Vision branch:** extended sight, LoS through some cover/elevation,
+  Detection, and an activated **reveal-region pulse**.
+- **Espionage branch:** borrow sight inside a rival's territory, read
+  normally-hidden rival state (wheel allocation, Standing, a Location's
+  Loyalty), and **sabotage** (lower a target Loyalty, plant a **false
+  ghost**). This is the covert offense the diplomacy player wants.
+
+### 19.9 Diplomacy interlock — shared vision & intel trade
+
+Closes the loop with §18:
+
+- The **`intel` deal Item** (§18.6) delivers either **vision** (temporary
+  shared sight of an area) or **mapData** (reveal explored terrain you
+  know). Map knowledge is a tradeable good.
+- **Allies share vision** as a pact / open-borders perk — alliance literally
+  lets you see through a friend's eyes.
+- **Espionage steals** what diplomacy would otherwise *trade* — the covert
+  route to the same information, without consent and at an Honor/Standing
+  risk if exposed.
+
+### 19.10 AI under fog
+
+The AI consumes the **same per-faction visibility API** as the human and
+plans on its own fog + memory:
+
+- It scouts, can be ambushed, and can be denied sight — so Detection,
+  concealment, and the Intelligence path **work against it**. This is the
+  whole reason the pillar pays off.
+- Acting on **stale ghosts** (committing to an attack on a force that has
+  since moved or grown) is expected AI behavior, not a bug.
+- Baseline grants the AI **no vision cheats**. Higher difficulty tiers *may*
+  later add decision aids or partial reveal as a tuning knob, but the
+  default is fair fog.
+
+### 19.11 Engine mapping (design only, not yet built)
+
+Consistent with §15–§18 patterns; this is the most compute-heavy system, so
+it is built for the larger map from the start.
+
+**State**
+- Per-faction visibility under **`state.visibility[fid]`**:
+  - `explored` — Set of hexes ever seen (**persists**).
+  - `visible` — Set currently in live sight (**recomputed**).
+  - `memory` — `hex → snapshot` for explored-but-not-visible: terrain
+    (static), last-seen Location controller / Loyalty / garrison, and
+    **ghosts** `{ unitId, hex, strength, round }` (dimmed; **do not update**
+    until re-sighted; may age out *(TBD)*).
+- **Vision** as a unit stat + Location/ZoC contribution; **Detection** as a
+  separate short-range capability on certain sources.
+
+**Computation**
+- A **visibility recompute** per faction = the LoS-limited union of its
+  Vision sources. **Incremental** on unit move (dirty the moved unit's
+  old/new footprint) rather than full-map each time — the scale guard.
+- **LoS** is a deterministic hex cast factoring elevation + cover; no dice.
+- On a hex **leaving** `visible`, snapshot its live state into `memory`.
+- **Concealment check** (at render *and* at Contest declaration): a unit is
+  shown to faction F iff its hex ∈ `F.visible` **and** (it is not concealed
+  **or** an F-owned Detection source is in range). Ambush (§19.5) keys off
+  this same check.
+
+**Effects / events** (additive): `REVEAL_REGION`, `GRANT_VISION`
+(shared/ally), `PLANT_FALSE_INTEL`; events `hex_explored`, `unit_spotted`,
+`unit_lost_sight`, `ambush_triggered`.
+
+**Combat:** ambush adds a term to the §16.6 total and suppresses the §10
+reaction window for the surprised side.
+
+### 19.12 Open questions / tables to fill
+
+- **Vision radii** (unit base, by Location tier/Loyalty, ZoC contribution)
+  and **Detection** ranges.
+- **Elevation / cover LoS** rules — how much each blocks or extends.
+- **Ambush magnitude** — does it remove the defensive die, or only add a
+  roll penalty alongside dropping the reaction window?
+- **Ghost aging** — do last-known markers expire, and after how many rounds?
+- **First-discovery reward** and **special-site** contents.
+- **Scout / watchtower chip** stats; **Intelligence branch** node effects.
+- **Shared-vision scope** — whole map vs. region; automatic for allies vs.
+  opt-in deal.
+- **AI fog policy** by difficulty — where, if ever, partial reveal kicks in.
+- **Fog-aware pathing** — does a Move **halt on first contact** with a newly
+  revealed enemy (interrupt-on-sighting)? Designed later.
