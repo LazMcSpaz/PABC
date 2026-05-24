@@ -1373,9 +1373,14 @@ These names are now canonical across the spec, the engine, and the UI:
 | **Zone of Control (ZoC)** | The *set of hexes* where a faction's Influence dominates. | Influence is the number, ZoC is the territory. |
 | **Standing** | Pairwise relation between two actors (player↔faction *and* faction↔faction). | Extends §15.3's player-only matrix. |
 | **Menace** | A player's **global** reputation for *unjustified* aggression. | New. |
+| **Honor** | A player's **global** reputation for keeping their word (pacts, treaties, deals). | New — orthogonal counterpart to Menace. |
 | **Temperament** | A faction's authored character (warlord / trader / opportunist…), with emergent drift. | New. |
 | **Tolerance** | How much of your Menace a given faction will accept in an ally; `f(Temperament, Standing)`. | New. |
 | **Pact** | An alliance commitment; a *pact call* (an ally's war) is a choosable obligation. | New. |
+| **Deal** | An atomic basket of give/get items two actors both accept (trade, gift, treaty, tribute). | New. |
+| **Coalition** | A multi-faction pact formed specifically against a threatening player. | New. |
+| **Vassalage** | A negotiated subordination of one faction to a lord, short of conquest. | New. |
+| **Recognition** | The diplomacy victory track — formal acknowledgement (alliance / vassalage) by enough factions. | New. |
 
 ### 18.1 Design intent
 
@@ -1393,8 +1398,12 @@ Three pillars, layered onto existing systems:
 2. **Influence / ZoC** is the soft territorial field Loyalty projects; it
    gates a few things (reinforcement routing, encounter reveals) and is
    read diplomatically as presence or pressure depending on Standing.
-3. **The diplomacy track** is reputation-relative: Standing, Menace,
-   Tolerance, and Pacts decide whether the factions will recognize you.
+3. **The diplomacy track** is reputation-relative *and active*. Two global
+   reputations (Menace, Honor) plus pairwise Standing gate what factions
+   will agree to; **deals** are the transaction primitive; **pacts,
+   mediation, denouncement, and vassalage** are the verbs; **coalitions**
+   unite the board against a runaway player; and **Recognition** by enough
+   factions is the win.
 
 ### 18.2 Loyalty replaces foothold/decay (supersedes §6.3.2)
 
@@ -1404,7 +1413,7 @@ The meter's centre no longer holds a signed foothold score `F`. It holds
 tech wheel).
 
 - **Ceiling is fixed at 8.** Nothing raises it. (This retires the old
-  Town-Hall-raises-the-cap rule; see §18.6 on what those chips do now.)
+  Town-Hall-raises-the-cap rule; see §18.11 on what those chips do now.)
 - **Loyalty rises** while the controller holds full Control *and* meets
   the integration condition (e.g. a friendly unit present, and/or an
   integration chip) — **+x per Upkeep**, capped at 8. *(rate TBD)*
@@ -1457,7 +1466,7 @@ influence(faction, hex) =
   projects little; a fully integrated one projects strongly. Integrating
   territory *is* the influence build.
 - **Influence chips:** because the Loyalty ceiling is fixed, chips that
-  used to raise it are repurposed (§18.6); a dedicated influence chip
+  used to raise it are repurposed (§18.11); a dedicated influence chip
   raises faction base or a Location's local influence / range.
 
 **What ZoC gates (light-touch by decision):**
@@ -1507,115 +1516,349 @@ numbers; the per-faction tables get authored later.
   unit or chip, asymmetric starting position. Flavorful but not required
   for the diplomacy victory to function.
 
-### 18.5 Diplomacy: Standing, Menace, Tolerance, Pacts
+### 18.5 Reputation & relationship state
 
-**Standing** — pairwise relation (Allied → Wary → Enemy), runtime, nudged
-not rolled. Already exists player↔faction (§15.3); extended to
-faction↔faction here.
+This is the data every diplomatic decision reads. All values are runtime,
+nudged by play (never rolled).
 
-**Menace** — a player's **global** reputation for *unjustified*
-aggression. The key idea: **aggression is scored relative to the
-target's Temperament.**
-- Attacking a faction **more aggressive than you** holds Menace flat or
-  **lowers** it — you're checking a warlord, doing the world a favor.
-- Attacking a faction **less aggressive / relatively peaceful** **raises**
-  Menace — you're the bully now.
-- High Menace is what takes the diplomacy victory off the table, not
-  fighting per se.
+**Standing** — pairwise relation, held **both** player↔faction **and
+faction↔faction** (extends the player-only matrix of §15.3). Suggested
+tiers: **Hostile → Wary → Neutral → Friendly → Allied**, with **Vassal**
+(§18.9) as a formal sub-state above Allied. Standing **drifts slowly
+toward Neutral** when nothing reinforces it *(rate TBD)*, so neglected
+friendships cool and old grudges fade — the fade rate *is* the faction's
+**Grudge/forgiveness** trait (§18.4).
 
-**Tolerance** — how much Menace a given faction will accept in an ally.
-`Tolerance = f(their Temperament, their Standing toward you)`:
-- A militaristic faction tolerates a bloodier ally than a pacifist one.
-- **Tolerance rises as Standing rises** — a deep ally forgives aggression
-  a stranger would not. So early game constrains you; a strong alliance
-  *buys you latitude*. Relationships compound into freedom of action.
+**Two global reputations.** A player carries both; every faction reads
+both, weighting them by its own **Temperament**:
 
-**Influence reception follows Standing.** The same ZoC border reads
-differently by relation:
-- High Standing → your ZoC is **benign presence** (open borders between
-  friends); no penalty, possibly a small positive.
-- Low Standing → the same border is a **threat** and erodes Standing
-  further. This is a **feedback loop** by design (souring relations make
-  presence provocative). A deliberate **recovery path** must exist —
-  encounter goodwill choices, gifts, withdrawing a garrison, pulling
-  influence back — gated by the faction's Grudge/forgiveness.
+- **Menace** — reputation for *unjustified* aggression, scored **relative
+  to the target's Temperament**:
+  - Attacking a faction **more aggressive than you** holds Menace flat or
+    **lowers** it (you checked a warlord — a public service).
+  - Attacking a **relatively peaceful** faction **raises** it (you're the
+    bully).
+  - Menace **decays slowly** with time and clean play *(rate TBD)*.
+- **Honor** — reputation for keeping your word. **Raised** by honoring
+  pacts, treaties, and deals to term; **dropped sharply** by breaking a
+  pact call, declaring war on an ally, tearing up a treaty, or reneging on
+  a deal's promise. Unlike Standing (pairwise), an Honor hit is **global**
+  — *every* faction becomes warier at once.
 
-**Pacts.** Allying a faction **couples** your Standing to theirs:
-- Their enemies drag your Standing with those enemies down; fighting an
-  ally's enemy *raises* your Standing with the ally.
-- A **pact call** (the ally goes to war and asks you in) is a **player
-  choice**, not an automatic war declaration. **Honoring** it builds the
-  alliance; **declining** it costs you significant Standing with that
-  ally. Alliances are recurring decisions with costs, not one-time
-  toggles.
+The two are **orthogonal**: you can be a feared-but-reliable power (high
+Menace, high Honor) or a peaceful snake (low Menace, low Honor). They gate
+different things, so a player manages them separately.
 
-### 18.6 Chips & content implications
+**Tolerance (derived, per faction).** How much of your Menace a faction
+accepts before refusing to deepen relations: `Tolerance = f(their
+Temperament, their Standing toward you)` — a militaristic faction tolerates
+a bloodier ally than a pacifist one, and **Tolerance rises as Standing
+rises**, so a deep alliance *buys you latitude* a stranger would never
+grant. **Honor has an analogous gate:** below a faction's temperament-set
+**trust floor**, no amount of gifts raises Standing past a ceiling — liars
+hit a wall.
 
-- The Loyalty ceiling is fixed, so **chips act on rates, not caps**:
-  *slow Loyalty decay* and/or *speed Loyalty gain*. The old
+**Influence reception follows Standing** (the feedback loop): high Standing
+→ your ZoC border is benign presence (allies keep open borders); low
+Standing → the same border reads as a **threat** and erodes Standing
+further. The deliberate **recovery path** (goodwill encounter choices,
+gifts, withdrawing influence) is gated by the faction's Grudge/forgiveness.
+
+> **Interaction summary.** Standing is the *relationship*; Menace and Honor
+> are your *reputation*; Tolerance and the trust floor are the *gates*
+> reputation places on how far a relationship can go. Deals and actions
+> (§18.6–18.7) move Standing; combat moves Menace; kept/broken promises
+> move Honor; the AI (§18.8) reads all of it.
+
+### 18.6 Deals — the diplomatic transaction primitive
+
+Almost every peaceful interaction is one primitive: a **deal**, an
+**atomic** basket of give/get items both parties accept together or not at
+all.
+
+```
+Deal {
+  proposer, recipient,
+  give: [Item],     // proposer → recipient
+  get:  [Item],     // recipient → proposer
+}
+Item ∈
+  { resource: {resource, amount} }          // one-time transfer
+  { flow:     {resource, amountPerTurn} }    // ongoing until cancelled/broken (a trade route)
+  { chip:     {chipUid} }                    // hand over owned/installed gear
+  { research: {amount} }                     // one-time Research grant
+  { intel:    {kind: vision|mapData} }       // information (hooks into Explore, later)
+  { promise:  {kind, target?, duration?} }   // tracked obligation; see below
+promise.kind ∈ { peace, nonAggression, openBorders, joinWar(target), dontAlly(target), tribute }
+```
+
+- **Atomic:** the engine applies both sides in one transaction or rejects
+  the whole deal — never partially.
+- **Gift** = a deal with an empty `get`. **Tribute** = a deal extracted
+  under an ultimatum (§18.7).
+- **Flows** (trade routes, ongoing tribute) persist as live state until
+  **cancelled at term** (no penalty) or **broken early** (an Honor ding).
+- **Promises** register **obligations** the engine tracks; **breaking** a
+  promise is the canonical Honor-dinging event and usually also crashes
+  Standing with the wronged party.
+- **Delivery:** a **player→AI** proposal is evaluated immediately (§18.8)
+  and **accepted / countered / refused**; an **AI→player** proposal arrives
+  as a **`private` encounter** (§15.5) whose choices are accept / decline /
+  counter — reusing the existing encounter + `ctx.interact` path, *not* a
+  new channel.
+
+Live agreements live in `state.diplomacy.agreements`; the engine checks
+promise obligations when relevant events fire (e.g. you attack a faction
+you promised non-aggression → promise broken → Honor + Standing hit).
+
+### 18.7 Diplomatic actions (the verbs)
+
+Three axes, so a player always has moves whether at war or at peace. Each
+action is either a **deal** (§18.6) or a **state operation** on
+Standing/war-state; effects are spelled out to remove ambiguity.
+
+**Conflict axis**
+- **Declare war** — set war-state with a faction (Standing → Hostile).
+  Declaring war on a faction you hold a pact/non-aggression with **breaks
+  that promise** (Honor ding). War-state is what *permits* contesting their
+  units/Locations; the **per-attack Menace** is still computed by target
+  Temperament (§18.5), so *who* you war matters more than *that* you war.
+- **Sue for peace** — a deal carrying a `peace` promise; the AI weighs war
+  exhaustion, who's winning, and Standing.
+- **Ultimatum** — a *coerced* deal: demand items backed by the threat of
+  your military / Menace. The AI weighs caving vs. resisting by the power
+  gap and its Temperament; a refused ultimatum typically escalates to war
+  or a Standing drop. Accepting yields **tribute**.
+- **Denounce** — publicly condemn a faction. Costs nothing material but
+  **shifts faction↔faction Standing**: lowers the bloc's Standing toward
+  the denounced, raises yours with its enemies, lowers it with its friends.
+  A way to take sides and shape the landscape; the inverse of Mediate.
+
+**Exchange axis**
+- **Propose deal / gift** — §18.6. Gifts are the main *Standing-buying* and
+  recovery-path tool.
+- **Trade route** — a `flow` deal; a steady scrap/Research stream that also
+  builds Standing while it runs. (Later, routes may require connected/secure
+  territory — an Explore/ZoC hook.)
+- **Open borders** — an `openBorders` promise letting the other's ZoC/units
+  pass your territory **without the threat reading** (§18.5). Mutual or
+  one-way; default-on between allies.
+
+**Bloc axis**
+- **Pact (alliance)** — **couples** your Standing to theirs: their enemies
+  drag your Standing with those enemies down, and fighting their enemy
+  *raises* Standing with them. Enables pact calls; open borders by default.
+  Forming one requires sufficient Standing **and** passing the other's
+  Tolerance/trust gates (§18.5).
+- **Pact call** — when an ally goes to war it may **call you in** (delivered
+  as a `private` encounter). **Honoring** commits you to war with the target
+  (normal per-attack Menace) and *builds* the alliance; **declining** costs
+  **significant Standing with that ally and a global Honor ding** — you
+  broke your word. This is the recurring alliance dilemma.
+- **Mediate** — broker peace between two *other* warring factions. If both
+  accept (the AI weighs war exhaustion and your Honor/Standing), you bank
+  Standing with both and **gain Honor** (peacemaker reputation). The
+  diplomacy player's signature lever.
+- **Vassalize** — see §18.9.
+
+### 18.8 AI evaluation, acceptance & coalitions
+
+The load-bearing layer — the verbs above are inert without it. One
+valuation engine drives **both** the AI's answers to the player **and** its
+own proactive offers and AI-to-AI politics.
+
+**Deal valuation.** An AI assigns a subjective value to each Item (a
+resource by current need, a chip by fit, a promise by its goals and the
+board) and **accepts when** `value(get) − value(give) + relationshipBias ≥
+0`, where `relationshipBias` scales with Standing. The *same* function lets
+the AI generate offers it expects to be mutually positive.
+
+**Hard gates (checked before any bias):**
+- Won't form a pact or rise to high Standing while your **Menace > its
+  Tolerance** or your **Honor < its trust floor**.
+- Won't accept a deal whose promises **conflict with existing agreements**
+  (can't ally you if you're allied to its sworn enemy) — the landscape
+  constrains what is even offerable.
+
+**AI-to-AI diplomacy.** Factions run this same machinery against each other
+on a round cadence: forming pacts with compatible Temperaments and shared
+enemies, declaring wars per goals/grudges, denouncing, mediating. This is
+what makes the board a **living landscape** the player reads and exploits,
+not spokes around the human. It writes to faction↔faction Standing and
+`state.diplomacy.agreements`.
+
+**Coalitions (the anti-snowball valve).** A **coalition** is a special
+multi-faction pact formed *against a leading player*. Per the design
+decision, the trigger reads a combined **threat score** with **both**
+inputs:
+- **Menace pressure** — a high-Menace player collectively sours the bloc
+  (earned hostility).
+- **Power lead** — a runaway leader by **VP and/or territory/strength**
+  threatens everyone *regardless of how cleanly they played*.
+
+`threat(player) = wM·Menace + wP·powerLead` *(weights TBD)*. When a
+player's threat crosses a **threshold**, eligible factions (not allied or
+vassal to that player, and able to cooperate) **join the coalition**: their
+Standing toward the player drops and they are pushed to war the player and
+to ally **each other**. The coalition **dissolves** when threat falls
+(territory lost, peace made, Menace decayed). Consequences by playstyle:
+- **Conquest player:** a rising-difficulty brake — the more you win, the
+  more the world unites against you. Pacing + anti-runaway in one.
+- **Diplomacy player:** the Menace half is avoidable (play clean), but the
+  **power half still bites** — sprinting toward Recognition makes you
+  threatening, so you cannot ignore the board even on the peaceful path.
+  This is the diplomacy victory's built-in tension (§18.10).
+
+**Faction wants / leverage.** Each faction exposes, from its
+Temperament/goals, *what it values*, so the player can read how to court it
+— a warlord wants joint wars and targets; a trader wants routes, open
+borders, and your Honor; an opportunist backs the current leader and
+abandons a faltering one. The diplomacy screen surfaces these as hints so
+courtship is **legible**, not guesswork.
+
+### 18.9 Vassalage
+
+A **vassal** is a faction subordinated to a **lord** (player or AI) short of
+conquest — the negotiated, peaceful analog of capture, and a formal Standing
+sub-state above Allied.
+
+- **Formation.** Offered via a lopsided pact when the would-be vassal is
+  weak or cornered (lost a war, surrounded, very low power, no better ally).
+  The AI accepts when **subordination beats its alternatives** (annihilation,
+  isolation). It can also be a **deal term** ("become my vassal and the war
+  ends").
+- **Effects while a vassal:**
+  - Vassal's Standing toward the lord is **locked high**; it will not attack
+    the lord and **cannot ally the lord's enemies**.
+  - Lord receives a **tribute `flow`** (scrap/Research per turn) and a
+    stronger **pact call** the vassal must usually answer.
+  - Vassal **keeps its units, Locations, and identity** — it is *not*
+    absorbed (that is what separates vassalage from conquest).
+  - The lord's **Menace is not charged** for an accepted vassalization (it
+    is submission, not bullying) — though one forced under **ultimatum** may
+    carry some Menace *(tune)*.
+- **Autonomy & rebellion.** A vassal carries an **autonomy/resentment**
+  track. Heavy tribute, lord weakness, an attractive rival, or the lord's
+  **Honor abuse / over-extraction** raise resentment; past a threshold the
+  vassal **rebels** — breaks free, Standing crashes, and it may immediately
+  join a coalition (§18.8).
+- **Counts double toward Recognition** (§18.10): a vassal is a stronger
+  acknowledgement than an ally.
+
+> **Interaction note.** A vassal will **not** join a coalition against its
+> own lord unless it rebels first; and because vassals count double, the
+> diplomacy victory often runs *through* converting weak factions into
+> vassals rather than courting strong ones into equal alliances.
+
+### 18.10 The diplomacy victory — Recognition (reputation-gated, not peace-gated)
+
+- **Recognition track.** Each faction contributes **Recognition weight** by
+  its formal relation to you: **Allied = 1, Vassal = 2** *(weights TBD)*.
+  You win when total Recognition crosses a **threshold** *(TBD; e.g. a
+  majority of the living factions)* **and**, at the moment of counting, your
+  **Menace is under each contributing faction's Tolerance** and your **Honor
+  is above its floor**. A faction in coalition against you contributes
+  nothing.
+- **Not peace-gated.** Justified war is fine — eliminating a radical faction
+  can *help* you with the rest. **Bullying peaceful factions (Menace) or
+  breaking your word (Honor) is what closes the path**, not fighting itself.
+- **Built-in brake.** Because the coalition threat score reads **power lead**
+  too (§18.8), racing toward Recognition raises your threat and can provoke
+  the very factions you need. So the peaceful path has its own pacing
+  tension: keep Menace low, spend Honor and deals to hold allies through the
+  surge, and don't grow so dominant the board unites.
+- **Conquest (VP 12) remains** the parallel, always-available path; **no
+  tech victory** (unchanged from §17.6). The paths stay distinct: diplomacy
+  rewards *who and how* you fight and *who recognizes you*; conquest rewards
+  raw VP.
+
+### 18.11 Chips & content implications
+
+- The Loyalty ceiling is fixed, so **chips act on rates, not caps**: *slow
+  Loyalty decay* and/or *speed Loyalty gain*. The old
   Town-Hall-raises-the-foothold-cap chip is repurposed to a rate chip.
 - A new **Influence chip** family raises faction base influence or a
   Location's local influence / range (§18.3).
+- **Diplomacy-flavored content** becomes possible: chips/abilities that
+  speed Honor recovery, shrink your Menace footprint, boost tribute, or
+  accelerate Standing gain; and **Intelligence-path** wheel nodes that feed
+  the diplomacy game (intel as a deal Item).
 - Encounters may carry **ZoC-gated extra choices** (a `condition` reading
-  "recipient's ZoC contains this hex").
+  "recipient's ZoC contains this hex"); **diplomacy proposals and pact calls
+  are delivered as `private` encounters** (§18.6).
 - The faction characteristic tables (§18.4), the diplomacy-screen content,
   and all numeric constants are authoring tasks for the content pass.
 
-### 18.7 The diplomacy victory (reputation-gated, not peace-gated)
+### 18.12 Engine mapping (for implementers — design only, not yet built)
 
-- **Peace is *not* required.** The path is open to an aggressive player
-  whose wars are *justified* (low Menace) in the eyes of the bloc they
-  court — eliminating a radical, overly-aggressive faction can *help*
-  your standing with the rest.
-- **Win condition (shape, threshold TBD):** be recognized by the faction
-  community — reach alliance / vassal / recognized-leader Standing with
-  **enough** factions **while your Menace stays under their Tolerance**.
-  Bullying peaceful factions spikes Menace past Tolerance and closes the
-  path; honoring pacts and checking warlords keeps it open.
-- **Conquest victory (VP 12) remains** the parallel, always-available
-  path. The two are distinct because the diplomacy path rewards *who* and
-  *how* you fight, not *whether*.
-- **No tech victory** (unchanged from §17.6).
+High-level; consistent with §15–§17 patterns. Detailed schemas and the full
+effect/event lists are finalized when this leaves the design phase.
 
-### 18.8 Engine mapping (for implementers — design only, not yet built)
-
-High-level; consistent with §15–§17 patterns. Detailed schemas and the
-effect/event lists are written when this leaves the design phase.
-
-- **Location state:** replace foothold `F` with **`loyalty` (0–8)**;
-  Control peel driven by `loyalty == 0` per Upkeep (§18.2). Loyalty
-  rise/decay rates read from config + chip rate-modifiers.
+**State additions**
+- **Location:** replace foothold `F` with **`loyalty` (0–8)**; Control peel
+  driven by `loyalty == 0` per Upkeep (§18.2).
+- **Player:** add **`menace`** and **`honor`** (both global). Tolerance and
+  trust-floor checks are **derived**, not stored.
+- **Faction:** authored characteristics (§18.4) on the faction record (no
+  longer cosmetic per §6.6).
+- **`state.factionStanding`:** extend from player-only (§15.3) to include
+  **faction↔faction** rows.
+- **`state.diplomacy`** (new): `{ agreements:[], pacts:[], coalitions:[],
+  vassals:{ vassalFid: lordId }, threatScores:{}, recognition:{} }`.
 - **Influence field:** a recompute pass (sibling to `recomputeStats` /
-  `recomputeResearch`) producing per-hex Influence and a derived ZoC
-  owner map in `state.world`. No dice; runs on control/Loyalty/chip
-  changes.
-- **Faction model:** authored characteristics (§18.4) on the faction
-  record (no longer cosmetic per §6.6); extend `state.factionStanding`
-  to faction↔faction.
-- **Player state:** add **`menace`**; Tolerance is derived, not stored.
-- **Diplomacy:** Standing nudges, Menace updates on contest resolution
-  (relative to target Temperament), pact-call as a `private` encounter /
-  interactive choice, victory check in the win-condition evaluator.
-- **New effects/events** (to enumerate later): adjust-menace,
-  adjust-influence-source, pact-call delivery, plus `loyalty_changed`,
-  `loyalty_failing` (UI warning), `control_peeled`, `zone_changed`,
-  `menace_changed`, `pact_formed` / `pact_called` / `pact_broken`.
+  `recomputeResearch`) producing per-hex Influence and a derived **ZoC owner
+  map** in `state.world`. No dice; runs on control/Loyalty/chip changes.
 
-### 18.9 Open questions / tables to fill
+**Evaluators / cadence**
+- **Deal evaluator** — `valueOf(faction, item)` + `wouldAccept(faction,
+  deal)`; used by both AI answers and AI offers.
+- **AI-to-AI diplomacy + coalition check** — runs once per round (in the
+  §15.12 round-rollover sequence): update faction↔faction Standing,
+  form/dissolve pacts and wars, recompute `threatScores`, form/dissolve
+  coalitions.
+- **Menace/Honor updates** — Menace on **contest resolution** (relative to
+  target Temperament); Honor on **promise/pact resolution** (kept vs broken).
+- **Vassal tick** — resentment update at round-end; rebellion check.
+- **Recognition check** — in the win-condition evaluator, gated by the
+  Tolerance/Honor conditions of §18.10.
+- **Delivery** — incoming AI proposals/pact calls as `private` encounters
+  (§15.5); the **diplomacy screen** is the outgoing surface.
 
-- **Loyalty constants:** start value, rise/decay rates, the danger-warning
+**New effects** (additive handlers, §12 style): `PROPOSE_DEAL` /
+`RESOLVE_DEAL`, `ADJUST_MENACE`, `ADJUST_HONOR`, `DECLARE_WAR`, `MAKE_PEACE`,
+`FORM_PACT` / `BREAK_PACT` / `CALL_PACT`, `DENOUNCE`, `MEDIATE`, `VASSALIZE`
+/ `RELEASE_VASSAL`. (`ADJUST_STANDING` from §15.10 is reused for all pairwise
+nudges.)
+
+**New events:** `loyalty_changed`, `loyalty_failing` (UI warning),
+`control_peeled`, `zone_changed`, `menace_changed`, `honor_changed`,
+`deal_struck`, `war_declared`, `peace_made`, `pact_formed` / `pact_called` /
+`pact_broken`, `coalition_formed` / `coalition_dissolved`,
+`vassal_established` / `vassal_rebelled`, `recognition_changed`.
+
+### 18.13 Open questions / tables to fill
+
+- **Loyalty constants:** start value, rise/decay rates, danger-warning
   threshold, peel cadence at 0.
 - **Influence field:** range `R`, distance falloff, Loyalty→local-influence
   scaling, the ZoC dominance threshold, contested-tie handling.
 - **Faction tables:** per-faction Temperament, Trustworthiness, Grudge,
   Sociability, Victory lean, Expansion appetite, Coveted targets, and the
   full faction↔faction starting Standing matrix.
-- **Menace formula:** how target-vs-self aggression delta maps to a Menace
-  change; decay of Menace over time (does justified play heal it?).
-- **Tolerance curve:** the `f(Temperament, Standing)` shape.
-- **Victory threshold:** how many factions, at what Standing tier (all 3
-  Allied? 2 of 3? does a vassal count double?).
-- **Recovery path specifics:** which encounter/gift/withdrawal actions
-  repair Standing, and how Grudge gates them.
-- **Diplomacy screen:** the interaction surface (what the player can
-  propose/accept/decline) — its own design pass.
+- **Menace formula:** how the target-vs-self aggression delta maps to a
+  Menace change, and the time/clean-play decay rate.
+- **Honor formula:** gain on kept promises, loss magnitudes per break type,
+  and whether/how it decays.
+- **Tolerance & trust-floor curves:** the `f(Temperament, Standing)` shapes.
+- **Deal valuation:** per-Temperament item values and `relationshipBias`
+  scaling.
+- **Coalition tuning:** the `wM`/`wP` weights and threat threshold, how power
+  lead is measured (VP vs territory vs strength), join/leave hysteresis.
+- **Vassalage tuning:** tribute rates, resentment drivers, rebellion
+  threshold, ultimatum-vassal Menace cost.
+- **Recognition:** Allied/Vassal weights, the win threshold (majority of
+  living factions?), and the exact counting-moment gate.
+- **AI cadence:** how often AI-to-AI diplomacy and offers run; mediation
+  acceptance logic.
+- **Diplomacy screen:** the interaction surface (propose / accept / decline
+  / counter) — its own design pass.
