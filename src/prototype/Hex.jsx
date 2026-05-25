@@ -139,8 +139,8 @@ export default function Hex({ hex, units, selected, reachable, selectedUnitId, o
             <Plaque>{loc.name}</Plaque>
             <ControlMeter
               sections={hex.control.sections}
-              foothold={hex.control.foothold}
-              footholdCap={hex.control.footholdCap}
+              loyalty={hex.control.loyalty}
+              danger={hex.control.loyaltyDanger}
               size={54}
             />
             <GarrisonValue

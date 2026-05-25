@@ -19,12 +19,15 @@ export const PLAYERS = {
   plainers: { id: "plainers", scrap: 4, vp: 5, actions: { remaining: 1, max: 3 }, unitCap: 1 },
 };
 
-// control: { sections:[3], foothold, footholdCap, chips:[] }
-// `foothold` is null until a player holds all 3 sections.
-const held = (owner, foothold, footholdCap, chips) => ({
+// control: { sections:[3], loyalty, loyaltyMax, loyaltyDanger, chips:[] }
+// §18.2 — `loyalty` is null until a player holds all 3 sections; it is the
+// 0–8 centre pie (ceiling fixed at 8). `loyaltyDanger` flags a Location
+// bleeding toward a Control peel.
+const held = (owner, loyalty, chips) => ({
   sections: [owner, owner, owner],
-  foothold,
-  footholdCap,
+  loyalty,
+  loyaltyMax: 8,
+  loyaltyDanger: loyalty != null && loyalty <= 2,
   chips,
 });
 
@@ -32,8 +35,9 @@ const held = (owner, foothold, footholdCap, chips) => ({
 // or a partial split passed in explicitly.
 const open = (sections = ["neutral", "neutral", "neutral"]) => ({
   sections,
-  foothold: null,
-  footholdCap: 3,
+  loyalty: null,
+  loyaltyMax: 8,
+  loyaltyDanger: false,
   chips: [],
 });
 
@@ -63,7 +67,7 @@ export const ROWS = [
 export const HEXES = {
   // row 0
   "t-nw": terrain("t-nw"),
-  chigan: location("chigan", held("goldgrass", 2, 3, ["capital", "recyclers"])),
+  chigan: location("chigan", held("goldgrass", 8, ["capital", "recyclers"])),
   "t-ne": terrain("t-ne"),
   // row 1
   kansit: location("kansit", open()),
@@ -77,15 +81,15 @@ export const HEXES = {
   droit: location("droit", open()),
   "t-e1": terrain("t-e1"),
   // row 3
-  korad: location("korad", held("versari", 3, 3, ["capital", "factory", "defenseTurrets"])),
+  korad: location("korad", held("versari", 8, ["capital", "factory", "defenseTurrets"])),
   "e-4": encounter("e-4"),
   "e-5": encounter("e-5"),
   "e-6": encounter("e-6"),
   "e-10": encounter("e-10"),
-  erport: location("erport", held("plainers", 1, 3, ["capital"]), "fp-windriders"),
+  erport: location("erport", held("plainers", 8, ["capital"]), "fp-windriders"),
   // row 4
   "t-w2": terrain("t-w2"),
-  concordan: location("concordan", held("lakers", 1, 3, [])),
+  concordan: location("concordan", held("lakers", 2, [])),
   "e-7": encounter("e-7"),
   tinTown: location("tinTown", open()),
   "t-e2": terrain("t-e2"),
@@ -96,7 +100,7 @@ export const HEXES = {
   "t-se": terrain("t-se"),
   // row 6
   "t-s1": terrain("t-s1"),
-  dambar: location("dambar", held("lakers", 3, 4, ["capital", "townHall"]), "gl-tidewardens"),
+  dambar: location("dambar", held("lakers", 8, ["capital", "townHall"]), "gl-tidewardens"),
   "t-s2": terrain("t-s2"),
 };
 

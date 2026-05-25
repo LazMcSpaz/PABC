@@ -1,5 +1,5 @@
 // The turn loop (mechanical-spec §7) — round / phase progression, the
-// Upkeep work (action reset, modifier expiry, foothold tick, scrap
+// Upkeep work (action reset, modifier expiry, Loyalty tick, scrap
 // production) and Cleanup.
 import { emit } from "./events.js";
 import { recomputeStats, recomputeResearch } from "./stats.js";
@@ -21,41 +21,75 @@ function expireModifiers(state, pid) {
   );
 }
 
-// Foothold tick (§6.3.2): a controlled location's grip rises while the
-// owner's unit garrisons it and falls when absent; at -1 a section
-// decays to neutral. Capital locations are decay-immune.
-function tickFootholds(state, pid) {
+// Loyalty tick (§18.2 — supersedes the old foothold/decay step). Loyalty
+// is the 0–8 centre pie, ceiling fixed at 8. It climbs to the ceiling
+// while the owner garrisons a fully-held Location and bleeds to 0 when the
+// Location is neglected. The crucial rule: Control is NOT lost to ticking.
+// Only once Loyalty sits at 0 *and* the Location stays neglected does one
+// Control section peel to neutral per Upkeep, until the Location is fully
+// neutral. A `loyalty_failing` warning always fires before any peel.
+// Bringing a unit back halts the peel and lets Loyalty climb again.
+// Capital Locations are inert — their Loyalty is locked at full.
+// Exported so the headless harness can drive Upkeep ticks directly.
+export function tickLoyalty(state, pid) {
+  const cfg = CONFIG.loyalty;
   let lostControl = false;
   for (const loc of Object.values(state.locations)) {
-    if (loc.footholdOwner !== pid) continue;
+    if (loc.loyaltyOwner !== pid) continue;
     const hasCapital = loc.chips.some((u) => state.chips[u]?.chipId === "capital");
-    if (hasCapital) continue;
+    if (hasCapital) continue; // §18.2 — inert, locked at full
 
-    const unitHere = Object.values(state.units).some(
+    const garrisoned = Object.values(state.units).some(
       (u) => u.owner === pid && u.node === loc.hexId,
     );
-    if (unitHere) {
-      loc.foothold = Math.min((loc.foothold ?? 0) + 1, loc.footholdCap);
-    } else {
-      loc.foothold = (loc.foothold ?? 0) - 1;
-      if (loc.foothold < 0) {
-        const idx = loc.sections.indexOf(pid);
-        if (idx >= 0) loc.sections[idx] = "neutral";
-        loc.foothold = 0;
-        emit(state, "section_flipped", { hex: loc.hexId, cause: "decay" });
-        if (!loc.sections.every((s) => s === pid)) {
-          loc.controller = null;
-          lostControl = true;
-        }
-        if (!loc.sections.includes(pid)) {
-          loc.footholdOwner = null;
-          loc.foothold = null;
-          emit(state, "location_decayed", { hex: loc.hexId });
-        }
+
+    if (garrisoned) {
+      // Integrating — Loyalty rises to the fixed ceiling. A returning unit
+      // also halts any in-progress peel simply by not reaching the peel path.
+      if ((loc.loyalty ?? 0) < cfg.ceiling) {
+        loc.loyalty = Math.min((loc.loyalty ?? 0) + cfg.risePerUpkeep, cfg.ceiling);
+        emit(state, "loyalty_changed", { hex: loc.hexId, owner: pid, loyalty: loc.loyalty });
+      }
+      continue;
+    }
+
+    // Neglected and still loyal — bleed toward 0, never peeling Control yet.
+    if ((loc.loyalty ?? 0) > 0) {
+      loc.loyalty = Math.max((loc.loyalty ?? 0) - cfg.decayPerUpkeep, 0);
+      emit(state, "loyalty_changed", { hex: loc.hexId, owner: pid, loyalty: loc.loyalty });
+      // Surface danger BEFORE any Control peels (§18.2 UI warning) — the
+      // alert lands at least one Upkeep before the first section is lost.
+      if (loc.loyalty <= cfg.dangerThreshold) {
+        emit(state, "loyalty_failing", {
+          hex: loc.hexId, owner: pid, loyalty: loc.loyalty, imminent: loc.loyalty === 0,
+        });
+      }
+      continue;
+    }
+
+    // Loyalty already sits at 0 and the Location is still neglected — peel
+    // Control toward neutral (§18.2). Warn first, then peel.
+    emit(state, "loyalty_failing", { hex: loc.hexId, owner: pid, loyalty: 0, imminent: true, peeling: true });
+    for (let n = 0; n < cfg.peelPerUpkeep; n++) {
+      const idx = loc.sections.indexOf(pid);
+      if (idx < 0) break;
+      loc.sections[idx] = "neutral";
+      emit(state, "control_peeled", { hex: loc.hexId, from: pid });
+      emit(state, "section_flipped", { hex: loc.hexId, cause: "loyalty" });
+      if (loc.controller === pid && !loc.sections.every((s) => s === pid)) {
+        loc.controller = null; // dropped below full Control
+        lostControl = true;
+      }
+      if (!loc.sections.includes(pid)) {
+        // Fully neutral — Loyalty deactivates for this Location.
+        loc.loyaltyOwner = null;
+        loc.loyalty = null;
+        emit(state, "location_decayed", { hex: loc.hexId });
+        break;
       }
     }
   }
-  // A decay-driven control loss may have stripped a Lab from `pid` — sync.
+  // A peel-driven control loss may have stripped a Lab from `pid` — sync.
   if (lostControl) recomputeResearch(state);
 }
 
@@ -132,7 +166,7 @@ export function startTurn(state) {
   expireModifiers(state, pid);
   recomputeStats(state);
   refreshMoveBudget(state, pid);
-  tickFootholds(state, pid);
+  tickLoyalty(state, pid);
   passiveHeal(state, pid);
   collectProduction(state, pid);
   churnMarket(state);

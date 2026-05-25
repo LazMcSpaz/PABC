@@ -225,8 +225,14 @@ export function adaptState(state) {
       hex.engineLocationId = loc.locationId;
       hex.control = {
         sections: [...loc.sections],
-        foothold: loc.foothold,
-        footholdCap: loc.footholdCap,
+        // §18.2 Loyalty — the 8-slice centre pie (replaces foothold/decay).
+        // `loyalty` is null until a player holds full Control; `loyaltyDanger`
+        // mirrors the engine's `loyalty_failing` threshold so the UI can warn
+        // before any Control peels.
+        loyalty: loc.loyalty,
+        loyaltyMax: CONFIG.loyalty.ceiling,
+        loyaltyDanger:
+          loc.loyalty != null && loc.loyalty <= CONFIG.loyalty.dangerThreshold,
         chips: adaptChips(state, loc.chips),
         chipUids: [...loc.chips],
         // Engine-derived: the ability eats one base slot, so this is

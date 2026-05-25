@@ -124,10 +124,11 @@ export function createGame({
       hexId,
       locationId: locId,
       controller,
-      footholdOwner: controller,
+      loyaltyOwner: controller,
       sections: Array(3).fill(controller || "neutral"),
-      foothold: controller ? 0 : null,
-      footholdCap: CONFIG.footholdCap,
+      // §18.2 — starting Locations are all Capitals, inert and locked at
+      // full Loyalty; neutral Locations have no Loyalty until captured.
+      loyalty: controller ? CONFIG.loyalty.ceiling : null,
       chipSlots,
       chips: locChips,
       garrison,

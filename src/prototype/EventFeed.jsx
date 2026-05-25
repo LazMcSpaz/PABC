@@ -55,7 +55,32 @@ function formatEvent(ev, engineState) {
       };
     }
     case "location_decayed":
-      return { color: theme.accent2, text: `Foothold decayed at ${p.hex}` };
+      return { color: theme.accent2, text: `Location fell to neutral at ${p.hex}` };
+    // §18.2 — the loyalty-failing alert path. Fires before any Control peel
+    // so the player has an Upkeep to garrison and halt the bleed.
+    case "loyalty_failing": {
+      const hex = engineState.locations[p.hex];
+      const locName = (hex
+        ? engineLocationIdToUi(hex.locationId).replace(/[A-Z]/g, (c) => " " + c)
+        : p.hex
+      ).trim();
+      return {
+        color: "#d2453f",
+        text: p.peeling
+          ? `Loyalty collapsed at ${locName} — Control is peeling to neutral`
+          : `Loyalty failing at ${locName} (${p.loyalty}) — garrison it before Control peels`,
+      };
+    }
+    case "control_peeled": {
+      const hex = engineState.locations[p.hex];
+      const locName = (hex
+        ? engineLocationIdToUi(hex.locationId).replace(/[A-Z]/g, (c) => " " + c)
+        : p.hex
+      ).trim();
+      return { color: theme.accent2, text: `Control peeled to neutral at ${locName}` };
+    }
+    case "loyalty_changed":
+      return null; // routine per-Upkeep tick — too chatty for the feed
     case "unit_destroyed":
       return { color: theme.accent2, text: `${who(p.owner)} lost a unit` };
     case "loot_dropped":

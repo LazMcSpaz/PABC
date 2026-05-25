@@ -1,6 +1,7 @@
 // The signature control meter: a ring of 3 sections (each owned by a
-// player or neutral) with the foothold score in the centre.
+// player or neutral) with the §18.2 Loyalty pie (8 slices) in the centre.
 import { ownerColor, fullController, theme } from "./data.js";
+import LoyaltyPie from "./LoyaltyPie.jsx";
 
 function wedgePath(cx, cy, r, a0, a1) {
   const pt = (a) => {
@@ -14,19 +15,19 @@ function wedgePath(cx, cy, r, a0, a1) {
 
 export default function ControlMeter({
   sections,
-  foothold,
-  footholdCap,
+  loyalty,
+  danger = false,
   size = 44,
 }) {
   const cx = size / 2;
   const cy = size / 2;
   const r = size / 2;
   const gap = 6; // degrees of dark gutter between sections
-  const innerR = size * 0.31;
+  const innerR = size * 0.34;
   const ctrl = fullController(sections);
 
-  const showNum = size >= 30;
-  const footholdText = foothold == null ? "·" : `${foothold}`;
+  const showPie = size >= 30 && loyalty != null;
+  const pieSize = innerR * 2 - 2;
 
   return (
     <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} aria-hidden>
@@ -45,28 +46,38 @@ export default function ControlMeter({
       })}
       {/* crisp outer ring */}
       <circle cx={cx} cy={cy} r={r - 0.6} fill="none" stroke="rgba(0,0,0,0.6)" strokeWidth="1.2" />
-      {/* centre disc — holds the foothold score */}
+      {/* centre disc — holds the §18.2 Loyalty pie */}
       <circle
         cx={cx}
         cy={cy}
         r={innerR}
         fill={theme.panel}
-        stroke={ctrl ? ownerColor(ctrl) : theme.border}
+        stroke={danger ? "#d2453f" : ctrl ? ownerColor(ctrl) : theme.border}
         strokeWidth={ctrl ? 2 : 1}
       />
-      {showNum && (
-        <text
-          x={cx}
-          y={cy}
-          textAnchor="middle"
-          dominantBaseline="central"
-          fontSize={size * 0.36}
-          fontWeight="700"
-          fill={foothold == null ? theme.textFaint : theme.accent}
-          fontFamily="'Oswald', sans-serif"
-        >
-          {footholdText}
-        </text>
+      {showPie ? (
+        <LoyaltyPie
+          value={loyalty}
+          danger={danger}
+          size={pieSize}
+          x={cx - pieSize / 2}
+          y={cy - pieSize / 2}
+        />
+      ) : (
+        size >= 30 && (
+          <text
+            x={cx}
+            y={cy}
+            textAnchor="middle"
+            dominantBaseline="central"
+            fontSize={size * 0.36}
+            fontWeight="700"
+            fill={theme.textFaint}
+            fontFamily="'Oswald', sans-serif"
+          >
+            ·
+          </text>
+        )
       )}
     </svg>
   );

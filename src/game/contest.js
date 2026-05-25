@@ -152,7 +152,7 @@ function destroyLocationChip(state, loc, chipUid) {
 
 // Full control has transferred (§6.3.3 / §6.3.4): the newest chip is
 // destroyed, any Capital is removed (never inherited), the rest carry
-// over, and the foothold activates at 0 for the new controller.
+// over, and Loyalty initialises low for the new controller (§18.2).
 function captureLocation(state, loc, victor) {
   const from = loc.controller;
   if (loc.chips.length)
@@ -161,8 +161,8 @@ function captureLocation(state, loc, victor) {
     if (state.chips[c]?.chipId === "capital") destroyLocationChip(state, loc, c);
 
   loc.controller = victor;
-  loc.footholdOwner = victor;
-  loc.foothold = 0; // §6.3.2 — F activates at full control, starting at 0
+  loc.loyaltyOwner = victor;
+  loc.loyalty = CONFIG.loyalty.start; // §18.2 — Loyalty initialises low on capture
   emit(state, "location_captured", { hex: loc.hexId, controller: victor, from });
 
   // §16.5 severed supply — any in-transit reinforcement whose origin was

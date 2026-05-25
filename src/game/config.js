@@ -4,7 +4,20 @@
 export const CONFIG = {
   vpThreshold: 12,
   baseActions: 2,
-  footholdCap: 3,
+
+  // §18.2 Loyalty — the 8-slice centre pie that replaces foothold/decay.
+  // The ceiling is fixed; the rest are TBD-in-spec tunables, set here for
+  // the demo. Capture starts low; a garrisoned, fully-held Location climbs
+  // to the ceiling and holds itself; a neglected one bleeds to 0 and then
+  // peels Control one section per Upkeep.
+  loyalty: {
+    ceiling: 8, // §18.2 — fixed; nothing raises it
+    start: 2, // initialises low on first reaching full Control
+    risePerUpkeep: 1, // +x per Upkeep while garrisoned (capped at ceiling)
+    decayPerUpkeep: 1, // −y per Upkeep while neglected (floored at 0)
+    dangerThreshold: 2, // warn (loyalty_failing) at/below this, before any peel
+    peelPerUpkeep: 1, // Control sections peeled to neutral per Upkeep at 0
+  },
 
   unit: {
     baseStrength: 4,
