@@ -251,7 +251,7 @@ function locationModel(state, hex, actions) {
 
   return {
     title: loc.name,
-    subtitle: ctrl ? `Held — ${FACTIONS[ctrl].name}` : claimed ? "Contested" : "Uncontrolled",
+    subtitle: ctrl ? `Held — ${FACTIONS[ctrl]?.name || ctrl}` : claimed ? "Contested" : "Uncontrolled",
     tabs,
   };
 }
