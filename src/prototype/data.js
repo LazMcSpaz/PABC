@@ -33,6 +33,12 @@ export const FACTIONS = {
   lakers: { id: "lakers", name: "Grand Lakers", short: "Lakers", color: "#3f84c4", capital: "dambar" },
   goldgrass: { id: "goldgrass", name: "Goldgrass Coalition", short: "Goldgrass", color: "#85ab3e", capital: "chigan" },
   plainers: { id: "plainers", name: "Free Plainers", short: "Plainers", color: "#9d70c4", capital: "erport" },
+  // §18.4.1 minor factions — now real on-board actors (seated near their
+  // major), so the UI must resolve their name/short/colour like any faction.
+  tempest: { id: "tempest", name: "Clan Tempest", short: "Tempest", color: "#4a6fa5", capital: null },
+  croppers: { id: "croppers", name: "The Croppers", short: "Croppers", color: "#c9b24e", capital: null },
+  steeltraders: { id: "steeltraders", name: "The Steel Traders", short: "Steel Traders", color: "#a8584f", capital: null },
+  dambarans: { id: "dambarans", name: "The Dambarans", short: "Dambarans", color: "#5fa06e", capital: null },
 };
 
 // Strategic value — shown on an uncontrolled (face-down) location card.

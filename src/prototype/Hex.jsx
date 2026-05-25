@@ -28,7 +28,9 @@ const TOKEN_SLOTS = [
 ];
 
 function UnitToken({ unit, selected, slot = 0, onClick }) {
-  const faction = FACTIONS[unit.owner];
+  // Fall back for any faction id the UI table doesn't know (so an
+  // unexpected owner never blanks the board).
+  const faction = FACTIONS[unit.owner] || { name: unit.owner || "Unknown", color: "#888" };
   const pos = TOKEN_SLOTS[Math.min(slot, TOKEN_SLOTS.length - 1)];
   return (
     <div
