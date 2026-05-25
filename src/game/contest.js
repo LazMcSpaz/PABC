@@ -9,6 +9,7 @@ import { openReactionWindow } from "./reactions.js";
 import { CONFIG } from "./config.js";
 import { CHIPS, LOCATIONS, FACTIONS } from "./content.js";
 import { recomputeStats, recomputeResearch } from "./stats.js";
+import { recomputeInfluence } from "./influence.js";
 import { onLocationCaptured, onRaidWon } from "./standing.js";
 import { makeUnit } from "./setup.js";
 import { TECH_NODES, hasTechNode } from "./tech.js";
@@ -193,6 +194,8 @@ function captureLocation(state, loc, victor) {
   // been destroyed — resync Research for everyone (§17.3: tech denial is
   // emergent — the captor's Research rises, the former owner's falls).
   recomputeResearch(state);
+  // §18.3 — control changed hands; recompute the Influence field + ZoC.
+  recomputeInfluence(state);
   // §15.3 — the affiliated faction (if any) loses standing toward
   // the new controller.
   onLocationCaptured(state, loc.hexId, victor, from);

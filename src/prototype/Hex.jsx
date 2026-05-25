@@ -90,6 +90,10 @@ export default function Hex({ hex, units, selected, reachable, selectedUnitId, o
   const isLocation = hex.type === "location";
   const loc = isLocation ? LOCATIONS[hex.locationId] : null;
   const ctrl = isLocation ? fullController(hex.control?.sections) : null;
+  // §18.3 — soft ZoC tint: the faction whose Influence dominates this hex
+  // (may differ from who holds the Location's Control ring). Projected
+  // territory, not ownership — kept faint so the Control rim still reads.
+  const zocColor = hex.zocOwner ? ownerColor(hex.zocOwner) : null;
 
   let rim = "#4a4231";
   if (hex.type === "encounter") rim = "#3c5b65";
@@ -193,6 +197,22 @@ export default function Hex({ hex, units, selected, reachable, selectedUnitId, o
           </div>
         )}
       </div>
+      {/* §18.3 ZoC overlay — a faint inner tint + glow in the dominating
+          faction's color, layered over the fill but under the tokens. */}
+      {zocColor && (
+        <div
+          className="pc-hex"
+          title={`Zone of Control — ${FACTIONS[hex.zocOwner]?.name || hex.zocOwner}`}
+          style={{
+            position: "absolute",
+            inset: selected ? 4 : 3,
+            background: `radial-gradient(circle at 50% 45%, ${zocColor}33 0%, ${zocColor}14 55%, transparent 78%)`,
+            boxShadow: `inset 0 0 14px ${zocColor}55`,
+            pointerEvents: "none",
+            zIndex: 2,
+          }}
+        />
+      )}
       {(units || []).map((u, i) => (
         <UnitToken
           key={u.uid}

@@ -9,6 +9,7 @@ import { CONFIG } from "./config.js";
 import { FACTIONS, CHIPS, ABILITIES, chipDefOf } from "./content.js";
 import { validateContest, runContest } from "./contest.js";
 import { recomputeStats, recomputeResearch } from "./stats.js";
+import { recomputeInfluence } from "./influence.js";
 import { applyEffects } from "./effects.js";
 import { drawFieldEncounter, resolveMarkerOnHex } from "./encounters.js";
 import { makeUnit } from "./setup.js";
@@ -288,6 +289,7 @@ function runAcquire(state, { pid, player, params }) {
     recomputeStats(state);
   } else {
     state.locations[params.into.location].chips.push(chipUid);
+    recomputeInfluence(state); // §18.3 — an influence chip shifts the field/ZoC
   }
 
   emit(state, "card_acquired", {

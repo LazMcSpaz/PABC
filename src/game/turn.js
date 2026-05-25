@@ -3,6 +3,7 @@
 // production) and Cleanup.
 import { emit } from "./events.js";
 import { recomputeStats, recomputeResearch } from "./stats.js";
+import { recomputeInfluence } from "./influence.js";
 import { reinforcementRoute } from "./board.js";
 import { TECH_NODES, hasTechNode } from "./tech.js";
 import { CONFIG } from "./config.js";
@@ -91,6 +92,9 @@ export function tickLoyalty(state, pid) {
   }
   // A peel-driven control loss may have stripped a Lab from `pid` — sync.
   if (lostControl) recomputeResearch(state);
+  // §18.3 — Loyalty rises/decays and any peel shift this faction's
+  // Influence; recompute the field + ZoC once after the tick.
+  recomputeInfluence(state);
 }
 
 // Fully-held locations yield their scrap production to the controller

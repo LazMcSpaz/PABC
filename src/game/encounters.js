@@ -176,7 +176,9 @@ export function drawFieldEncounter(state, unit, ctx = {}) {
   return deliverEncounter(
     state, encounterId,
     { mode: "private", recipient: unit.owner },
-    { ...ctx, sourcePlayer: unit.owner },
+    // §18.3 — carry the draw hex so a choice's `zoc_contains` condition
+    // can read "recipient's ZoC contains this hex" without extra wiring.
+    { ...ctx, sourcePlayer: unit.owner, sourceHex: unit.node },
   );
 }
 
@@ -209,7 +211,8 @@ export function resolveMarkerOnHex(state, hex, unit, ctx = {}) {
   return deliverEncounter(
     state, encounterId,
     { mode: "private", recipient: unit.owner },
-    { ...ctx, sourcePlayer: unit.owner },
+    // §18.3 — carry the marker hex for `zoc_contains` choice conditions.
+    { ...ctx, sourcePlayer: unit.owner, sourceHex: hex },
   );
 }
 

@@ -6,6 +6,8 @@ import { startTurn, endTurn, tickLoyalty } from "./turn.js";
 import { performAction } from "./actions.js";
 import { applyEffect } from "./effects.js";
 import { recomputeStats, recomputeResearch, assignTechNode } from "./stats.js";
+import { recomputeInfluence, zocOwner, inZoC } from "./influence.js";
+import { reinforcementRoute } from "./board.js";
 import { activePlayerId } from "./targeting.js";
 import { FACTIONS, LOCATIONS, ABILITIES, REACTIVES, CHIPS } from "./content.js";
 import { resolveSalvage } from "./contest.js";
@@ -1030,6 +1032,159 @@ line("\n  [Tech Wheel] entry-node effects");
     const delivered = [...g.log].reverse().find((e) => e.name === "encounter_delivered");
     check("Intelligence + Recon Team grant 2 discards (3rd card drawn)",
       discards === 2 && delivered && delivered.payload.encounter === original[2]);
+  }
+}
+
+// =====================================================================
+// §18.3 INFLUENCE & ZONE OF CONTROL — the deterministic scalar field +
+// the derived ZoC owner map. Light-touch: capturing/integrating shifts
+// ZoC borders, and reinforcement routing respects them.
+// =====================================================================
+line("\n§18.3 INFLUENCE & ZONE OF CONTROL");
+{
+  // The field + ZoC are seeded at setup; a starting Capital (Loyalty 8)
+  // projects strongly enough to own its own hex.
+  const g = createGame({ seed });
+  const me = g.turnOrder[0];
+  const home = Object.values(g.locations).find((l) => l.controller === me);
+  check("setup seeds an Influence field for a controlling faction",
+    !!g.world.influence[me] && (g.world.influence[me][home.hexId] || 0) > 0);
+  check("a Capital owns its own hex in the ZoC map",
+    zocOwner(g, home.hexId) === me && inZoC(g, me, home.hexId));
+  check("the field is deterministic (no dice)", (() => {
+    const g2 = createGame({ seed });
+    return JSON.stringify(g2.world.zoc) === JSON.stringify(g.world.zoc);
+  })());
+
+  // Capturing a previously-neutral Location extends the captor's ZoC to
+  // that hex — borders visibly shift on a control change.
+  {
+    const g3 = createGame({ seed });
+    const fid = g3.turnOrder[0];
+    const neutral = Object.values(g3.locations).find((l) => !l.controller);
+    const ownerBefore = zocOwner(g3, neutral.hexId); // null or a spillover owner
+    check("a neutral Location is not yet in the would-be captor's ZoC",
+      neutral && ownerBefore !== fid);
+    neutral.controller = fid;
+    neutral.loyaltyOwner = fid;
+    neutral.sections = [fid, fid, fid];
+    neutral.loyalty = CONFIG.loyalty.ceiling;
+    recomputeInfluence(g3);
+    check("capturing it pulls that hex into the captor's ZoC",
+      zocOwner(g3, neutral.hexId) === fid);
+  }
+
+  // Integration (raising Loyalty) is the influence build: a fresh, low-
+  // Loyalty capture projects little; integrating it expands the border.
+  {
+    const g4 = createGame({ seed });
+    const fid = g4.turnOrder[0];
+    const neutral = Object.values(g4.locations).find((l) => !l.controller);
+    neutral.controller = fid;
+    neutral.loyaltyOwner = fid;
+    neutral.sections = [fid, fid, fid];
+    neutral.loyalty = CONFIG.loyalty.start; // fresh capture — low Loyalty
+    recomputeInfluence(g4);
+    const lowReach = Object.keys(g4.world.zoc).filter((h) => g4.world.zoc[h] === fid).length;
+    const lowSelf = g4.world.influence[fid][neutral.hexId] || 0;
+    neutral.loyalty = CONFIG.loyalty.ceiling; // fully integrated
+    recomputeInfluence(g4);
+    const highReach = Object.keys(g4.world.zoc).filter((h) => g4.world.zoc[h] === fid).length;
+    const highSelf = g4.world.influence[fid][neutral.hexId] || 0;
+    check("a fresh low-Loyalty capture projects less than an integrated one",
+      lowSelf > 0 && highSelf > lowSelf);
+    check("integrating (Loyalty → ceiling) expands the ZoC border",
+      highReach > lowReach);
+  }
+
+  // A border shift emits zone_changed.
+  {
+    const g5 = createGame({ seed });
+    const fid = g5.turnOrder[0];
+    const neutral = Object.values(g5.locations).find((l) => !l.controller);
+    const before = g5.log.filter((e) => e.name === "zone_changed").length;
+    neutral.controller = fid;
+    neutral.loyaltyOwner = fid;
+    neutral.sections = [fid, fid, fid];
+    neutral.loyalty = CONFIG.loyalty.ceiling;
+    recomputeInfluence(g5);
+    const after = g5.log.filter((e) => e.name === "zone_changed").length;
+    check("a ZoC border shift emits zone_changed", after > before);
+  }
+
+  // Loyalty decay shrinks the projected ZoC (the Upkeep tick recomputes).
+  {
+    const g6 = createGame({ seed });
+    const fid = g6.turnOrder[0];
+    const neutral = Object.values(g6.locations).find((l) => !l.controller);
+    neutral.controller = fid;
+    neutral.loyaltyOwner = fid;
+    neutral.sections = [fid, fid, fid];
+    neutral.loyalty = CONFIG.loyalty.ceiling;
+    recomputeInfluence(g6);
+    const reachFull = Object.keys(g6.world.zoc).filter((h) => g6.world.zoc[h] === fid).length;
+    neutral.loyalty = 0; // neglected to nothing
+    recomputeInfluence(g6);
+    const reachZero = Object.keys(g6.world.zoc).filter((h) => g6.world.zoc[h] === fid).length;
+    check("a neglected (Loyalty 0) Location projects a smaller ZoC",
+      reachZero < reachFull);
+  }
+
+  // Reinforcement routing respects ZoC: an enemy zone walls a corridor.
+  {
+    const g7 = createGame({ seed });
+    const fid = g7.turnOrder[0];
+    const foe = g7.turnOrder.find((p) => p !== fid);
+    const myLocHexes = new Set(
+      Object.values(g7.locations).filter((l) => l.controller === fid).map((l) => l.hexId),
+    );
+    // A target hex that is not mine, not adjacent to any of my Locations
+    // (so its only approaches are walkable hexes), and reachable now.
+    const target = Object.keys(g7.board.hexes).find((h) => {
+      if (myLocHexes.has(h)) return false;
+      const nbs = g7.board.adjacency[h] || [];
+      if (nbs.some((n) => myLocHexes.has(n))) return false;
+      if (!nbs.length) return false;
+      return reinforcementRoute(g7, fid, h) != null;
+    });
+    check("found a routable target hex for the ZoC-walling test", !!target);
+    if (target) {
+      const baseline = reinforcementRoute(g7, fid, target);
+      // Wall every approach with the foe's ZoC.
+      for (const nb of g7.board.adjacency[target]) g7.world.zoc[nb] = foe;
+      const walled = reinforcementRoute(g7, fid, target);
+      check("enemy ZoC over every approach severs the supply route",
+        baseline != null && walled == null);
+      // Clearing the foe's ZoC reopens the route.
+      for (const nb of g7.board.adjacency[target]) g7.world.zoc[nb] = null;
+      const reopened = reinforcementRoute(g7, fid, target);
+      check("clearing the enemy ZoC reopens the route", reopened != null);
+    }
+
+    // Friendly ZoC never walls your own routing.
+    const target2 = Object.keys(g7.board.hexes).find((h) => {
+      if (myLocHexes.has(h)) return false;
+      const nbs = g7.board.adjacency[h] || [];
+      return nbs.length && !nbs.some((n) => myLocHexes.has(n)) &&
+        reinforcementRoute(g7, fid, h) != null;
+    });
+    if (target2) {
+      for (const nb of g7.board.adjacency[target2]) g7.world.zoc[nb] = fid;
+      check("your own ZoC does not wall your routing",
+        reinforcementRoute(g7, fid, target2) != null);
+    }
+  }
+
+  // The encounter-reveal hook: zoc_contains reads the recipient's ZoC.
+  {
+    const g8 = createGame({ seed });
+    const fid = g8.turnOrder[0];
+    const home = Object.values(g8.locations).find((l) => l.controller === fid);
+    const outsideHex = Object.keys(g8.world.zoc).find((h) => g8.world.zoc[h] !== fid);
+    check("zoc_contains is true inside the recipient's ZoC",
+      evalCond(g8, { zoc_contains: {} }, { sourcePlayer: fid, sourceHex: home.hexId }) === true);
+    check("zoc_contains is false outside it",
+      evalCond(g8, { zoc_contains: {} }, { sourcePlayer: fid, sourceHex: outsideHex }) === false);
   }
 }
 

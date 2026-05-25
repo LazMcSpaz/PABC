@@ -21,6 +21,8 @@ export const EVENT_NAMES = new Set([
   "location_spawned", "section_flipped", "location_captured", "location_decayed",
   // §18.2 Loyalty
   "loyalty_changed", "loyalty_failing", "control_peeled",
+  // §18.3 Influence & Zone of Control
+  "zone_changed",
   "reward_granted",
   // v0.2 §16 — attrition, salvage, reinforcement, veterancy
   "unit_destroyed", "unit_salvaged", "base_strength_changed",

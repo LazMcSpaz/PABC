@@ -102,6 +102,22 @@ export function evalCond(state, cond, ctx = {}) {
     return n;
   }
 
+  // §18.3 — "recipient's ZoC contains this hex". Defaults the faction to
+  // the encounter recipient (ctx.sourcePlayer) and the hex to where the
+  // encounter was drawn (ctx.sourceHex); both can be overridden. The
+  // encounter-reveal "home advantage" hook (a ZoC-gated extra choice).
+  if (cond.zoc_contains) {
+    const z = cond.zoc_contains;
+    const pid =
+      z.faction || z.player
+        ? resolvePlayer(state, z.faction || z.player, ctx)
+        : ctx.sourcePlayer ?? null;
+    let hex = z.hex ?? ctx.sourceHex ?? null;
+    if (typeof hex === "string" && hex.includes(".")) hex = resolvePath(state, hex);
+    if (!pid || !hex) return false;
+    return (state.world?.zoc?.[hex] ?? null) === pid;
+  }
+
   if (cond.control_duration) {
     const pid = resolvePlayer(state, cond.control_duration.player, ctx);
     const hex = cond.control_duration.hex;

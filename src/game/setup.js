@@ -6,6 +6,7 @@ import { FIELD_ENCOUNTERS } from "./content/index.js";
 import { makeRng } from "./rng.js";
 import { createIdGen } from "./ids.js";
 import { buildHexGrid, generateLayout } from "./board.js";
+import { recomputeInfluence } from "./influence.js";
 
 // A fresh unit with the full v0.2 field set (§16.3 / plan). `moveRemaining`
 // seeds to base Movement; the owner's Upkeep refreshes it from effective.
@@ -215,7 +216,7 @@ export function createGame({
     }
   }
 
-  return {
+  const state = {
     seed,
     rng, // live seeded generator — contest dice draw from it
     nextId: uid, // shared instance id generator — used by runtime Recruit
@@ -253,6 +254,11 @@ export function createGame({
       eventTimeline: [],
       encounterHexCooldowns: {},
       encounterMarkers: {},
+      // §18.3 Influence & ZoC — seeded by recomputeInfluence below. `zoc`
+      // is the derived owner map (hexId -> fid|null); `influence` is the
+      // per-faction scalar field (fid -> hexId -> number).
+      influence: {},
+      zoc: {},
     },
     factionStanding: Object.fromEntries(
       playing.map((fid) => [fid, Object.fromEntries(playing.map((pid) => [pid, 0]))]),
@@ -261,4 +267,9 @@ export function createGame({
     deferred: [],
     activeQuests: {},
   };
+
+  // §18.3 — establish the starting Influence field + ZoC owner map so the
+  // HUD and routing have them before the first turn.
+  recomputeInfluence(state);
+  return state;
 }

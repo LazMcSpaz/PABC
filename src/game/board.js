@@ -54,15 +54,23 @@ export function bfsDistances(adjacency, start) {
 // friendly / neutral hexes (an enemy-controlled Location is a wall; the
 // target hex itself is always reachable if a path leads to it). Returns
 // `{ dist, originHex }` or null if walled off entirely.
+//
+// §18.3 — friendly/neutral-hex pathing is a ZoC concept: a hex that sits
+// inside an *enemy* faction's Zone of Control is also a wall, so growing
+// your ZoC over a corridor severs an opponent's supply line and shrinking
+// it reopens one. Friendly / contested-neutral ZoC stays passable.
 export function reinforcementRoute(state, pid, targetNode) {
   const sources = Object.values(state.locations)
     .filter((l) => l.controller === pid)
     .map((l) => l.hexId);
   if (!sources.length) return null;
 
+  const zoc = state.world?.zoc;
   const isWall = (hex) => {
     const loc = state.locations[hex];
-    return !!(loc && loc.controller && loc.controller !== pid);
+    if (loc && loc.controller && loc.controller !== pid) return true;
+    const owner = zoc?.[hex];
+    return !!(owner && owner !== pid);
   };
 
   const dist = {};

@@ -204,6 +204,7 @@ export function adaptState(state) {
     };
   }
 
+  const zoc = state.world?.zoc || {};
   const hexes = {};
   for (const h of Object.values(state.board.hexes)) {
     const hex = {
@@ -211,6 +212,9 @@ export function adaptState(state) {
       type: h.type,
       row: h.row,
       col: h.col,
+      // §18.3 — the faction whose ZoC contains this hex (null = contested
+      // / neutral). Drives the board's ZoC overlay tint.
+      zocOwner: zoc[h.id] || null,
     };
     if (unitAt[h.id]) hex.unitId = unitAt[h.id];
     if (unitIdsAt[h.id]) hex.unitIds = unitIdsAt[h.id];
@@ -334,6 +338,11 @@ export function adaptState(state) {
     // v0.2 §16.5 — in-transit field reinforcements, for board overlay /
     // unit panel ETA display.
     reinforcements: (state.reinforcements || []).map((r) => ({ ...r })),
+    // §18.3 — the derived ZoC owner map (hexId -> fid|null) and the
+    // per-faction Influence scalar field (fid -> hexId -> number), for the
+    // board's ZoC overlay and any influence read-out.
+    zoc: { ...zoc },
+    influence: state.world?.influence || {},
     // Surface the raw engine state so Phase-4 action handlers can reach
     // engine APIs without re-deriving everything.
     engineState: state,

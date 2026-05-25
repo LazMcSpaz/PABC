@@ -66,6 +66,22 @@ export const CONFIG = {
 
   // Capital chip bonuses (content/config.csv).
   capital: { garrisonBonus: 2, productionBonus: 2 },
+
+  // §18.3 Influence & Zone of Control — the deterministic scalar field a
+  // faction's controlled Locations project, and the dominance test that
+  // turns it into a ZoC owner map. All TBD-in-spec; demo defaults here.
+  // A capital (Loyalty 8) projects factionBase + loyaltyScale·8 = 10 at
+  // its hex, 5 one hop out, 2.5 at two — so a fully-integrated Location
+  // owns itself + its neighbours, while a fresh capture (Loyalty 2, source
+  // 4) only holds its own hex until it integrates. Integrating IS the
+  // influence build, and capturing visibly shifts ZoC borders.
+  influence: {
+    range: 2, // R — hops a Location projects influence
+    factionBase: 2, // faction-wide base contributed per controlled Location
+    loyaltyScale: 1, // local influence = loyaltyScale × the Location's Loyalty
+    falloff: 0.5, // per-hop multiplier — contribution at d hops = source × falloff^d
+    dominanceThreshold: 3, // a hex needs at least this Influence to join any ZoC
+  },
 };
 
 // Strategic-value ordering helper.
