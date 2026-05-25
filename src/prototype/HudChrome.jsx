@@ -4,7 +4,6 @@
 // the static look-pass (HudShowcase.jsx).
 import { useEffect, useState } from "react";
 import ControlMeter from "./ControlMeter.jsx";
-import { ALL_UPGRADES } from "./data.js";
 
 // Close the active modal on Escape.
 function useEscClose(onClose) {
@@ -314,17 +313,19 @@ function Stat({ icon, value, label }) {
 }
 
 // Single-window Location view. `view` is a plain object built by the host.
-export function LocationWindow({ view, onClose, onActivate, onContest, onRecruit }) {
+export function LocationWindow({ view, onClose, onActivate, onContest, onRecruit, onBuild, onUpgrade, onRush, onSetSlider }) {
   const v = view;
   return (
     <FrameWindow
       onClose={onClose}
       footer={
         <>
-          <div style={{ position: "absolute", right: "9%", bottom: "9.5%", width: "23%", textAlign: "center", pointerEvents: "none" }}>
-            <div style={{ fontFamily: C.font, fontWeight: 800, fontSize: 26, color: C.gold, textShadow: "0 1px 3px #000", lineHeight: 1 }}>{v.foothold}/{v.footholdCap}</div>
-            <div style={{ fontSize: 8, letterSpacing: 1.5, textTransform: "uppercase", color: C.holoHi }}>Foothold</div>
-          </div>
+          {v.loyalty != null && (
+            <div style={{ position: "absolute", right: "9%", bottom: "9.5%", width: "23%", textAlign: "center", pointerEvents: "none" }}>
+              <div style={{ fontFamily: C.font, fontWeight: 800, fontSize: 26, color: v.loyaltyDanger ? C.red : C.gold, textShadow: "0 1px 3px #000", lineHeight: 1 }}>{v.loyalty}/{v.loyaltyMax}</div>
+              <div style={{ fontSize: 8, letterSpacing: 1.5, textTransform: "uppercase", color: C.holoHi }}>Loyalty</div>
+            </div>
+          )}
           {v.contest && (
             <button className="hud-int" onClick={v.contest.canContest ? () => onContest?.({ unit: v.contest.unitId }) : undefined} disabled={!v.contest.canContest}
               style={{ position: "absolute", right: "34%", bottom: "11%", fontFamily: C.font, fontSize: 13, fontWeight: 700, letterSpacing: 1.6, textTransform: "uppercase", color: "#fff", padding: "8px 18px", borderRadius: 7, border: `1px solid ${C.red}`, background: "linear-gradient(180deg, #e2554c, #a3322c)", boxShadow: `0 2px 0 #6e201b, 0 0 12px ${C.red}66`, cursor: v.contest.canContest ? "pointer" : "not-allowed", opacity: v.contest.canContest ? 1 : 0.5 }}>
@@ -345,16 +346,27 @@ export function LocationWindow({ view, onClose, onActivate, onContest, onRecruit
             <div style={{ fontSize: 10, letterSpacing: 1.4, textTransform: "uppercase", color: C.textFaint, marginTop: 6 }}>{v.statusLabel}</div>
           </div>
           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2, marginTop: 6, marginRight: 30 }}>
-            <ControlMeter sections={v.sections} foothold={v.foothold} footholdCap={v.footholdCap} size={54} />
+            <ControlMeter sections={v.sections} loyalty={v.loyalty} danger={v.loyaltyDanger} size={54} />
             <SectionLabel color={C.textDim}>Control</SectionLabel>
           </div>
         </div>
 
         <div style={{ display: "flex", gap: 18, padding: "8px 0", borderTop: "1px solid rgba(192,124,56,0.3)", borderBottom: "1px solid rgba(192,124,56,0.3)" }}>
           <Stat icon={ICON.shield} value={v.garrison} label="Garrison" />
-          <Stat icon={ICON.scrap} value={`+${v.production}`} label="Production" />
-          <Stat icon={ICON.units} value={v.chipSlots} label="Chip Slots" />
+          <Stat icon={ICON.scrap} value={`+${v.economy ? v.economy.output : v.production}`} label="Output" />
+          <Stat icon={ICON.units} value={v.economy ? `${v.economy.slotsUsed}/${v.economy.slotCapacity}` : v.chipSlots} label="Chip Slots" />
         </div>
+
+        {v.economy && (
+          <EconomyPanel
+            hexId={v.hexId}
+            eco={v.economy}
+            onBuild={onBuild}
+            onUpgrade={onUpgrade}
+            onRush={onRush}
+            onSetSlider={onSetSlider}
+          />
+        )}
 
         {v.ability && (
           <div>
@@ -399,6 +411,144 @@ export function LocationWindow({ view, onClose, onActivate, onContest, onRecruit
   );
 }
 
+// =======================================================================
+// EconomyPanel (§20) — the per-city build interface. The guns/butter slider
+// splits Output; an empty slot opens the build menu (§20.6 display contract:
+// only Tech-allowed chips, Loyalty-locked ones greyed with a reason); an
+// installed chip opens its upgrade view (always shows the next tier, greyed
+// if Tech or Loyalty is short). Construction advances at Upkeep; Rush spends
+// banked scrap to finish now.
+function EconomyPanel({ hexId, eco, onBuild, onUpgrade, onRush, onSetSlider }) {
+  const [open, setOpen] = useState(null); // null | "build" | { upgrade: chipUid }
+  const can = eco.canManage;
+  const slot = (label, active, val) => (
+    <button
+      key={label}
+      className="hud-int"
+      disabled={!can}
+      onClick={can ? () => onSetSlider?.(hexId, val) : undefined}
+      style={{
+        flex: 1, fontFamily: C.font, fontSize: 10, fontWeight: 700, letterSpacing: 1,
+        textTransform: "uppercase", padding: "5px 4px", borderRadius: 5, cursor: can ? "pointer" : "default",
+        border: `1px solid ${active ? C.holo : "rgba(192,124,56,0.3)"}`,
+        background: active ? "rgba(86,211,198,0.18)" : "rgba(0,0,0,0.25)",
+        color: active ? C.holoHi : C.textDim,
+      }}
+    >
+      {label}
+    </button>
+  );
+  const f = eco.slider ?? 0;
+  const emptySlots = Math.max(0, eco.slotCapacity - eco.slotsUsed);
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      <SectionLabel>Economy · Output {eco.output}/turn</SectionLabel>
+
+      {/* guns/butter slider — discrete Bank / Balance / Build */}
+      <div style={{ display: "flex", gap: 6 }}>
+        {slot("Bank", f <= 0.01, 0)}
+        {slot("Balance", f > 0.01 && f < 0.99, 0.5)}
+        {slot("Build", f >= 0.99, 1)}
+      </div>
+
+      {/* active build + rush */}
+      {eco.activeBuild ? (
+        <div style={{ display: "flex", alignItems: "center", gap: 10, background: "rgba(0,0,0,0.25)", border: "1px solid rgba(86,211,198,0.3)", borderRadius: 7, padding: "7px 10px" }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontFamily: C.font, fontSize: 13, fontWeight: 700, color: C.text }}>
+              {eco.activeBuild.kind === "upgrade" ? "Upgrading → " : "Building "}{eco.activeBuild.name}
+            </div>
+            <div style={{ height: 6, background: "rgba(0,0,0,0.5)", borderRadius: 4, marginTop: 4, overflow: "hidden" }}>
+              <div style={{ width: `${Math.min(100, Math.round(100 * eco.activeBuild.progress / Math.max(1, eco.activeBuild.cost)))}%`, height: "100%", background: C.holo }} />
+            </div>
+            <div style={{ fontSize: 9.5, color: C.textFaint, marginTop: 3 }}>
+              {Math.floor(eco.activeBuild.progress)}/{eco.activeBuild.cost} · {eco.activeBuild.remaining} to go
+            </div>
+          </div>
+          <button className="hud-int" disabled={!can || eco.scrap < 1} onClick={can && eco.scrap >= 1 ? () => onRush?.(hexId) : undefined}
+            style={{ flexShrink: 0, fontFamily: C.font, fontSize: 11, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", color: "#1a1206", padding: "7px 12px", borderRadius: 6, border: "1px solid #8a5e16", background: `linear-gradient(180deg, ${C.copperHi}, ${C.copper})`, cursor: can && eco.scrap >= 1 ? "pointer" : "not-allowed", opacity: can && eco.scrap >= 1 ? 1 : 0.5 }}>
+            Rush
+          </button>
+        </div>
+      ) : (
+        <div style={{ fontSize: 11, color: C.textFaint }}>No active build — click an empty slot below.</div>
+      )}
+
+      {/* slot grid: installed chips (click → upgrade) + empty slots (click → build) */}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+        {eco.chips.map((c) => (
+          <button key={c.uid} className="hud-int" disabled={!can || !c.upgrade}
+            onClick={can && c.upgrade ? () => setOpen((o) => (o && o.upgrade === c.uid ? null : { upgrade: c.uid })) : undefined}
+            title={c.upgrade ? `Upgrade → ${c.upgrade.name}` : "No upgrade"}
+            style={{ fontFamily: C.font, fontSize: 11, fontWeight: 700, padding: "6px 9px", borderRadius: 6, border: `1px solid ${c.disabled ? C.red : "rgba(192,124,56,0.4)"}`, background: "rgba(0,0,0,0.3)", color: c.disabled ? C.red : C.text, cursor: can && c.upgrade ? "pointer" : "default" }}>
+            {c.name}{c.disabled ? " (dormant)" : ""}{c.upgrade ? " ▲" : ""}
+          </button>
+        ))}
+        {Array.from({ length: emptySlots }).map((_, i) => (
+          <button key={`empty-${i}`} className="hud-int" disabled={!can}
+            onClick={can ? () => setOpen((o) => (o === "build" ? null : "build")) : undefined}
+            style={{ fontFamily: C.font, fontSize: 11, fontWeight: 700, padding: "6px 12px", borderRadius: 6, border: "1px dashed rgba(86,211,198,0.5)", background: "rgba(86,211,198,0.06)", color: C.holoHi, cursor: can ? "pointer" : "default" }}>
+            + Build
+          </button>
+        ))}
+      </div>
+
+      {/* build menu — §20.6: only Tech-allowed chips; Loyalty-locked greyed */}
+      {open === "build" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 4, background: "rgba(0,0,0,0.3)", border: "1px solid rgba(86,211,198,0.3)", borderRadius: 7, padding: 8 }}>
+          <SectionLabel>Build menu</SectionLabel>
+          {eco.buildMenu.length === 0 && <div style={{ fontSize: 11, color: C.textFaint }}>Nothing your Tech Level can build yet.</div>}
+          {eco.buildMenu.map((b) => {
+            const enabled = can && b.buildable;
+            return (
+              <button key={b.chipId} className="hud-int" disabled={!enabled}
+                onClick={enabled ? () => { onBuild?.(hexId, b.chipId); setOpen(null); } : undefined}
+                style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, textAlign: "left", padding: "6px 9px", borderRadius: 5, border: "1px solid rgba(192,124,56,0.25)", background: enabled ? "rgba(0,0,0,0.2)" : "rgba(0,0,0,0.35)", color: enabled ? C.text : C.textFaint, cursor: enabled ? "pointer" : "not-allowed", opacity: b.locked ? 0.55 : 1 }}>
+                <span>
+                  <b style={{ color: enabled ? C.text : C.textFaint }}>{b.name}</b>
+                  <span style={{ fontSize: 10, color: C.textFaint }}> · {b.desc}</span>
+                  {b.reason && <span style={{ fontSize: 9.5, color: C.red }}> · {b.reason}</span>}
+                </span>
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
+                  <img src={ICON.scrap} alt="" style={{ width: 13, height: 13 }} />
+                  <span style={{ fontFamily: C.font, fontWeight: 700 }}>{b.cost}</span>
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {/* upgrade view — §20.6: always shows the next tier, greyed if gated */}
+      {open && open.upgrade && (() => {
+        const c = eco.chips.find((x) => x.uid === open.upgrade);
+        const up = c?.upgrade;
+        if (!up) return null;
+        const enabled = can && !up.locked;
+        return (
+          <div style={{ display: "flex", flexDirection: "column", gap: 4, background: "rgba(0,0,0,0.3)", border: "1px solid rgba(86,211,198,0.3)", borderRadius: 7, padding: 8 }}>
+            <SectionLabel>Upgrade {c.name}</SectionLabel>
+            <button className="hud-int" disabled={!enabled}
+              onClick={enabled ? () => { onUpgrade?.(hexId, c.uid); setOpen(null); } : undefined}
+              style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, textAlign: "left", padding: "6px 9px", borderRadius: 5, border: "1px solid rgba(192,124,56,0.25)", background: enabled ? "rgba(0,0,0,0.2)" : "rgba(0,0,0,0.35)", color: enabled ? C.text : C.textFaint, cursor: enabled ? "pointer" : "not-allowed", opacity: up.locked ? 0.55 : 1 }}>
+              <span>
+                <b style={{ color: enabled ? C.text : C.textFaint }}>→ {up.name}</b>
+                <span style={{ fontSize: 10, color: C.textFaint }}> · {up.desc}</span>
+                {up.reason && <span style={{ fontSize: 9.5, color: C.red }}> · {up.reason}</span>}
+              </span>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
+                <img src={ICON.scrap} alt="" style={{ width: 13, height: 13 }} />
+                <span style={{ fontFamily: C.font, fontWeight: 700 }}>{up.cost}</span>
+              </span>
+            </button>
+          </div>
+        );
+      })()}
+    </div>
+  );
+}
+
 // Generic titled framed window (Units / Market / etc.).
 export function TitledWindow({ title, icon, onClose, children, width }) {
   return (
@@ -412,161 +562,5 @@ export function TitledWindow({ title, icon, onClose, children, width }) {
         {children}
       </div>
     </FrameWindow>
-  );
-}
-
-// =======================================================================
-// MarketBand — the Market as a continuation of the radial language: a
-// holographic semicircle emanating from the bottom of the screen. Chips
-// ride concentric arcs (one per market tier); the band "gains a layer on
-// top" as higher tiers unlock. Chips render on the uploaded chip-plate
-// artwork (orange = unit upgrade, teal = location upgrade).
-// =======================================================================
-// A terse one-line effect summary for a market chip ("+1 Decay Limit").
-// Prefers an authored `short`, else derives from unit str/mov deltas.
-function chipSummary(def) {
-  if (def.short) return def.short;
-  const p = [];
-  if (def.str) p.push(`${def.str > 0 ? "+" : ""}${def.str} Strength`);
-  if (def.mov) p.push(`${def.mov > 0 ? "+" : ""}${def.mov} Movement`);
-  return p.join(" · ") || def.effect || "";
-}
-
-function MarketChip({ item, def, affordable, size, onAcquire, onHover }) {
-  const kind = def.kind === "location" ? "location" : "unit";
-  const accent = kind === "location" ? "#5fd0c8" : "#e69a4a";
-  const CW = size, CH = Math.round(size / 1.6);
-  const [hov, setHov] = useState(false);
-  return (
-    <div
-      onMouseEnter={() => { setHov(true); onHover?.(true); }}
-      onMouseLeave={() => { setHov(false); onHover?.(false); }}
-      onClick={affordable ? () => onAcquire?.(item) : undefined}
-      style={{
-        position: "relative", width: CW, height: CH,
-        backgroundImage: `url(${CHIPBG[kind]})`, backgroundSize: "100% 100%", backgroundRepeat: "no-repeat",
-        cursor: affordable ? "pointer" : "default",
-        filter: affordable ? (hov ? `drop-shadow(0 0 13px ${accent})` : "drop-shadow(0 4px 8px rgba(0,0,0,0.6))") : "grayscale(0.6) brightness(0.66)",
-        opacity: affordable ? 1 : 0.72,
-        transform: hov && affordable ? "scale(1.06)" : "scale(1)",
-        transition: "transform .12s ease, filter .12s ease",
-      }}
-    >
-      {/* readout panel — inset from the frame, spread top-to-bottom; the
-          title clears the dial in the top-right corner. */}
-      <div style={{ position: "absolute", left: "11%", top: "17%", width: "58%", bottom: "15%", display: "flex", flexDirection: "column" }}>
-        <div style={{ fontFamily: C.font, fontSize: 12, fontWeight: 800, lineHeight: 1.08, letterSpacing: 0.3, textTransform: "uppercase", color: C.text, textShadow: "0 1px 3px #000" }}>
-          {def.name}
-        </div>
-        <div style={{ marginTop: 4, fontFamily: C.font, fontSize: 10, fontWeight: 600, lineHeight: 1.18, color: accent, textShadow: "0 1px 2px #000" }}>
-          {chipSummary(def)}
-        </div>
-        <div style={{ marginTop: "auto", display: "flex", alignItems: "center" }}>
-          <span style={{ display: "inline-flex", alignItems: "center", gap: 5, background: "rgba(2,7,8,0.74)", border: `1px solid ${accent}66`, borderRadius: 10, padding: "2px 9px 2px 5px", boxShadow: "0 1px 3px rgba(0,0,0,0.6)" }}>
-            <img src={ICON.scrap} alt="" style={{ width: 16, height: 16, objectFit: "contain" }} />
-            <span style={{ fontFamily: C.font, fontWeight: 800, fontSize: 15, color: "#fff" }}>{def.cost > 0 ? def.cost : "—"}</span>
-          </span>
-        </div>
-      </div>
-      {item.isResale && (
-        <span style={{ position: "absolute", right: "6%", bottom: "10%", fontSize: 7, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", color: C.gold, border: `1px solid ${C.gold}`, borderRadius: 3, padding: "0 4px", background: "rgba(0,0,0,0.6)" }}>Resale</span>
-      )}
-      {affordable && hov && (
-        <span style={{ position: "absolute", left: "50%", bottom: "-15px", transform: "translateX(-50%)", fontFamily: C.font, fontSize: 9, fontWeight: 700, letterSpacing: 1.5, textTransform: "uppercase", color: accent, whiteSpace: "nowrap", textShadow: "0 1px 3px #000" }}>Acquire</span>
-      )}
-    </div>
-  );
-}
-
-function MarketTip({ tip }) {
-  const W = 210;
-  const left = Math.min(Math.max(tip.x - W / 2, 8), window.innerWidth - W - 8);
-  return (
-    <div style={{ position: "fixed", left, top: tip.y - 62, transform: "translateY(-100%)", width: W, zIndex: 80, pointerEvents: "none", background: "rgba(8,16,16,0.96)", border: `1px solid ${C.holo}`, borderRadius: 8, padding: 10, boxShadow: `0 8px 24px rgba(0,0,0,0.6), 0 0 12px ${C.holo}44` }}>
-      <div style={{ fontFamily: C.font, fontSize: 13, fontWeight: 800, color: C.holoHi }}>{tip.def.name}</div>
-      <div style={{ fontSize: 8.5, fontWeight: 700, letterSpacing: 0.8, textTransform: "uppercase", color: C.textFaint, marginTop: 1, marginBottom: 6 }}>
-        {tip.def.kind === "capital" ? "Faction chip" : `${tip.def.kind} upgrade`}{tip.def.rare ? " · Rare" : ""}
-      </div>
-      <div style={{ fontSize: 11, color: C.text, lineHeight: 1.45 }}>{tip.def.effect}</div>
-      <div style={{ marginTop: 8, fontSize: 10.5, color: C.gold, fontWeight: 700 }}>Cost {tip.def.cost} scrap</div>
-    </div>
-  );
-}
-
-export function MarketBand({ tiers = [], resale = [], scrap, actions = {}, isYourTurn, onAcquire, onClose }) {
-  useEscClose(onClose);
-  const [size, setSize] = useState(() => ({ w: window.innerWidth, h: window.innerHeight }));
-  const [tip, setTip] = useState(null);
-  useEffect(() => {
-    const r = () => setSize({ w: window.innerWidth, h: window.innerHeight });
-    window.addEventListener("resize", r);
-    return () => window.removeEventListener("resize", r);
-  }, []);
-  const cx = size.w / 2, cy = size.h - 4;
-  const CW = 148, R0 = Math.max(272, Math.min(330, size.h * 0.38)), STEP = 124, halfSpan = 74, bandHalf = 52;
-
-  const tierData = tiers.map((t, idx) => ({
-    ...t,
-    R: R0 + idx * STEP,
-    items: idx === 0 ? [...t.items, ...resale] : t.items,
-  }));
-
-  return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 58, background: "radial-gradient(ellipse at 50% 122%, rgba(8,18,18,0.8), rgba(2,5,6,0.92))", overflow: "hidden" }}>
-      <svg width={size.w} height={size.h} style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
-        <defs>
-          {tierData.map((t) => (
-            <radialGradient key={t.tier} id={`mb-${t.tier}`} gradientUnits="userSpaceOnUse" cx={cx} cy={cy} r={t.R + bandHalf} fx={cx} fy={cy}>
-              <stop offset="0%" stopColor={C.holo} stopOpacity="0.02" />
-              <stop offset="100%" stopColor={C.holo} stopOpacity={t.unlocked ? 0.15 : 0.05} />
-            </radialGradient>
-          ))}
-        </defs>
-        {tierData.map((t) => {
-          const col = t.unlocked ? C.holo : "#5b6b6b";
-          return (
-            <g key={t.tier}>
-              <path d={donut(cx, cy, t.R - bandHalf, t.R + bandHalf, -halfSpan - 6, halfSpan + 6)} fill={`url(#mb-${t.tier})`} stroke={col} strokeWidth={t.unlocked ? 1.4 : 1} opacity={t.unlocked ? 0.9 : 0.5} style={{ filter: t.unlocked ? `drop-shadow(0 0 9px ${C.holo}55)` : "none" }} />
-              <path d={arc(cx, cy, t.R + bandHalf, -halfSpan - 6, halfSpan + 6)} fill="none" stroke={col} strokeWidth="0.6" opacity="0.45" />
-              <path d={arc(cx, cy, t.R - bandHalf, -halfSpan - 6, halfSpan + 6)} fill="none" stroke={col} strokeWidth="0.6" opacity="0.45" />
-            </g>
-          );
-        })}
-      </svg>
-
-      <div onClick={(e) => e.stopPropagation()} style={{ position: "absolute", inset: 0 }}>
-        {tierData.map((t) => {
-          if (!t.unlocked) {
-            const [lx, ly] = pt(cx, cy, t.R, 0);
-            return (
-              <div key={t.tier} style={{ position: "absolute", left: lx, top: ly, transform: "translate(-50%,-50%)", textAlign: "center", color: "#7c8a8a", pointerEvents: "none" }}>
-                <div style={{ fontFamily: C.font, fontSize: 12, fontWeight: 700, letterSpacing: 2, textTransform: "uppercase" }}>Tier {t.tier} · Locked</div>
-                <div style={{ fontSize: 9.5, letterSpacing: 1, color: "#5f6d6d" }}>Reach Tech L{t.unlockLevel}</div>
-              </div>
-            );
-          }
-          const n = t.items.length;
-          return t.items.map((item, i) => {
-            const def = ALL_UPGRADES[item.chipId];
-            if (!def) return null;
-            const deg = n <= 1 ? 0 : -halfSpan + 2 * halfSpan * (i / (n - 1));
-            const [x, y] = pt(cx, cy, t.R, deg);
-            const affordable = isYourTurn && (scrap ?? 0) >= (def.cost || 0) && (actions.remaining ?? 0) >= 1;
-            return (
-              <div key={item.uid} style={{ position: "absolute", left: x, top: y, transform: "translate(-50%,-50%)" }}>
-                <MarketChip item={item} def={def} affordable={affordable} size={CW} onAcquire={onAcquire} onHover={(on) => setTip(on ? { x, y, def } : null)} />
-              </div>
-            );
-          });
-        })}
-      </div>
-
-      <div style={{ position: "absolute", top: 18, left: "50%", transform: "translateX(-50%)", textAlign: "center", color: C.holoHi, pointerEvents: "none" }}>
-        <div style={{ fontFamily: C.font, fontSize: 18, fontWeight: 700, letterSpacing: 4, textTransform: "uppercase" }}>Market</div>
-        <div style={{ fontSize: 9.5, letterSpacing: 1.5, color: C.textFaint }}>Acquire — 1 Action + scrap cost</div>
-      </div>
-      <CloseX onClose={onClose} style={{ position: "absolute", top: 16, right: 16 }} />
-      {tip && <MarketTip tip={tip} />}
-    </div>
   );
 }

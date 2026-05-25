@@ -14,6 +14,7 @@ import { evalCond, evalStrength } from "./dsl.js";
 import { registerQuest } from "./quests.js";
 import { CONFIG } from "./config.js";
 import { takeAITurn } from "./ai.js";
+import { enforceLoyaltySlotCap, chargeChipUpkeep } from "./economy.js";
 
 const seed = Number(process.argv[2]) || 42;
 const line = (s = "") => console.log(s);
@@ -168,52 +169,51 @@ line("\nLOYALTY  (§18.2 — 8-slice pie; Control peels only at Loyalty 0)");
   line(`  PASS: ${held && neutralised && warnFirst ? "yes" : "NO"}`);
 }
 
-// --- Layer 3.3 — Acquire + Activate + tech progression ---
-line("\nMARKET / ACQUIRE  (Layer 3.3)");
-applyEffect(game, { type: "ADJUST_RESOURCE", resource: "Resource", amount: 30, target: "active_player" }, ctx);
+// --- §20 — Build / Upgrade / Rush off Output (replaces Acquire) ---
+// The Market is gone: chips are BUILT at a Location off its Output. The demo
+// builds deterministically by setting a build then RUSHING it with banked
+// scrap (so it completes this turn regardless of the slider/upkeep cadence).
+line("\nECONOMY — BUILD / UPGRADE / RUSH  (§20)");
+applyEffect(game, { type: "ADJUST_RESOURCE", resource: "Resource", amount: 60, target: "active_player" }, ctx);
+champ.node = prize.hexId; // champ garrisons the freshly-captured prize (for unit-chip builds)
 
-// Pull a specific chip into a tier's face-up row by swapping out a
-// non-protected chip — keeps the demo deterministic regardless of the
-// seed's market shuffle. Chips passed through this helper are protected
-// from later swaps, so multiple ensures stack without clobbering.
-const protectedChipIds = new Set();
-const ensureInRow = (tier, chipId) => {
-  protectedChipIds.add(chipId);
-  const m = game.market.tiers[tier];
-  if (m.row.some((c) => game.chips[c]?.chipId === chipId)) return;
-  const i = m.deck.findIndex((c) => game.chips[c]?.chipId === chipId);
-  if (i < 0) return;
-  const [pulled] = m.deck.splice(i, 1);
-  const victimIdx = m.row.findIndex((c) => !protectedChipIds.has(game.chips[c]?.chipId));
-  if (victimIdx < 0) { m.row.push(pulled); return; }
-  const victim = m.row.splice(victimIdx, 1, pulled)[0];
-  m.deck.push(victim);
-};
-const findChip = (tier, chipId) =>
-  game.market.tiers[tier].row.find((c) => game.chips[c]?.chipId === chipId);
+// 1. Build Labs (location chip, techLevel 1, loyaltyReq 0) and rush it.
+line(`  ${LOCATIONS[prize.locationId].name}: loyalty ${prize.loyalty}, research ${game.players[me].research} L${game.players[me].techLevel}`);
+const b1 = performAction(game, "build", { at: prize.hexId, chipId: "labs" });
+performAction(game, "rush", { at: prize.hexId });
+line(`  build+rush Labs -> ${b1.ok ? "ok" : "blocked — " + b1.reason}; research now ${game.players[me].research} L${game.players[me].techLevel}`);
 
-ensureInRow(1, "drilled-troops");
-ensureInRow(1, "labs");
-ensureInRow(2, "sharpened-blades");
+// 2. Build a unit chip onto the stationed champ and rush it.
+const champBefore = champ.strength;
+const b2 = performAction(game, "build", { at: prize.hexId, chipId: "drilled-troops" });
+performAction(game, "rush", { at: prize.hexId });
+line(`  build+rush Drilled Troops onto champ -> ${b2.ok ? "ok" : "blocked — " + b2.reason}; champ STR ${champBefore} -> ${champ.strength}`);
 
-line(`  tier 1 row: ${game.market.tiers[1].row.map((c) => game.chips[c].chipId).join(", ")}`);
-line(`  champ STR ${champ.strength}; scrap ${game.players[me].resource}`);
-const acq1 = performAction(game, "acquire", { chip: findChip(1, "drilled-troops"), into: { unit: champ.uid } });
-line(`  acquire drilled-troops -> ${acq1.ok ? `ok (chip ${acq1.chip})` : "blocked — " + acq1.reason}`);
-line(`  champ STR ${champ.strength}; scrap ${game.players[me].resource}`);
+// 3. §20.6 Tech gate — sharpened-blades is techLevel 2 (needs player L3).
+const gated = performAction(game, "build", { at: prize.hexId, chipId: "sharpened-blades" });
+line(`  build Sharpened Blades at L${game.players[me].techLevel} -> ${gated.ok ? "ok" : "blocked — " + gated.reason} (§20.6 Tech gate)`);
 
-line(`\nTECH WHEEL (§17)  versari research ${game.players[me].research} · level ${game.players[me].techLevel}`);
-performAction(game, "acquire", { chip: findChip(1, "labs"), into: { location: prize.hexId } });
-ensureInRow(1, "labs"); // bring a second copy face-up
-performAction(game, "acquire", { chip: findChip(1, "labs"), into: { location: prize.hexId } });
-line(`  installed 2 Labs at ${LOCATIONS[prize.locationId].name} -> research ${game.players[me].research}, level ${game.players[me].techLevel}`);
-// A permanent (encounter) Research grant pushes versari to Level 3 so the
-// tier-2 Market row unlocks.
-applyEffect(game, { type: "ADJUST_RESOURCE", resource: "Research", amount: 2, target: "active_player" }, ctx);
-line(`  +2 permanent Research -> research ${game.players[me].research}, level ${game.players[me].techLevel} (tier-2 Market unlocks at L3)`);
+// Lift Research to L3 so Tech allows tier-2 chips.
+applyEffect(game, { type: "ADJUST_RESOURCE", resource: "Research", amount: 4, target: "active_player" }, ctx);
+line(`  +4 permanent Research -> research ${game.players[me].research} L${game.players[me].techLevel}`);
 
-const acq2 = performAction(game, "acquire", { chip: findChip(2, "sharpened-blades"), into: { unit: champ.uid } });
-line(`  acquire sharpened-blades (tier 2) -> ${acq2.ok ? "ok" : "blocked — " + acq2.reason}; champ STR ${champ.strength}`);
+// 4. §20.6 Loyalty gate — at L3 the Tech gate clears, but a fresh capture's
+//    Loyalty (2) is below sharpened-blades' rung (3).
+const loyGated = performAction(game, "build", { at: prize.hexId, chipId: "sharpened-blades" });
+line(`  build Sharpened Blades @loyalty ${prize.loyalty} -> ${loyGated.ok ? "ok" : "blocked — " + loyGated.reason} (§20.6 Loyalty gate)`);
+
+// Integrate the city (Loyalty 3) and the same build now passes both gates.
+prize.loyalty = 3;
+const b3 = performAction(game, "build", { at: prize.hexId, chipId: "sharpened-blades" });
+performAction(game, "rush", { at: prize.hexId });
+line(`  build+rush Sharpened Blades @loyalty ${prize.loyalty} -> ${b3.ok ? "ok" : "blocked — " + b3.reason}; champ STR ${champ.strength}`);
+
+// 5. §20.5 Upgrade in place — upgrade a Lab → Advanced Lab (techL2 ok @L3,
+//    loyaltyReq 3 ok). The chip is replaced in its own slot.
+const labUid = prize.chips.find((c) => game.chips[c]?.chipId === "labs");
+const up = performAction(game, "upgrade", { at: prize.hexId, chip: labUid });
+performAction(game, "rush", { at: prize.hexId });
+line(`  upgrade Labs -> ${up.ok ? `ok (now ${game.chips[labUid]?.chipId})` : "blocked — " + up.reason}; research ${game.players[me].research}`);
 
 line("\nACTIVATE");
 const korad = Object.values(game.locations).find((l) => l.locationId === "korad");
@@ -834,11 +834,10 @@ line("\n  [Salvage] deferred interactive salvage + resale row");
     g.resaleRow.includes(c2) &&
     g.players[me].resource === scrapBefore + Math.ceil(CHIPS["sharpened-blades"].cost / 2));
   check("pending salvage cleared", g.pendingSalvage.length === 0);
-
-  g.players[me].resource += 100;
-  const acq = performAction(g, "acquire", { chip: c2, into: { unit: atk.uid } });
-  check("resale chips are acquirable at full cost",
-    acq.ok && atk.chips.includes(c2) && !g.resaleRow.includes(c2));
+  // §20.2 — the Market is retired, so resale is pure scrap recovery now: the
+  // resold chip stays parked on the resale row (no buy-back path remains).
+  check("resold chip remains on the resale row (no Market to re-acquire from)",
+    g.resaleRow.includes(c2));
 }
 
 // --- Hex loot: chips drop on the hex when no unit can claim them ---
@@ -1030,6 +1029,148 @@ line("\n  [Tech Wheel] entry-node effects");
     const delivered = [...g.log].reverse().find((e) => e.name === "encounter_delivered");
     check("Intelligence + Recon Team grant 2 discards (3rd card drawn)",
       discards === 2 && delivered && delivered.payload.encounter === original[2]);
+  }
+}
+
+// --- §20 Economy: Output + slider, build, rush, upgrade, dormancy, gating ---
+line("\n  [§20 Economy] Output slider, build/upgrade/rush, upkeep dormancy, gating");
+{
+  // Helper: fully capture a neutral Location for `pid` and integrate it.
+  const grab = (g, pid, loy = 8) => {
+    const loc = Object.values(g.locations).find((l) => l.controller == null);
+    loc.controller = pid; loc.loyaltyOwner = pid; loc.sections = [pid, pid, pid]; loc.loyalty = loy;
+    loc.chips = loc.chips.filter((c) => g.chips[c]?.chipId !== "capital");
+    loc.activeBuild = null; loc.buildProgress = 0; loc.buildSlider = 0;
+    return loc;
+  };
+
+  // Output banks to scrap when the slider is at 0 (no waste, no build).
+  {
+    const g = createGame({ seed }); startTurn(g);
+    const me = g.turnOrder[0];
+    const loc = grab(g, me); loc.production = 4;
+    performAction(g, "set-slider", { at: loc.hexId, value: 0 });
+    const before = g.players[me].resource;
+    for (let i = 0; i < g.turnOrder.length; i++) endTurn(g); // back to me's Upkeep
+    check("slider=0 banks the whole Output as scrap", g.players[me].resource - before >= 4);
+  }
+
+  // Slider routes Output into buildProgress; the build completes off Output.
+  {
+    const g = createGame({ seed }); startTurn(g);
+    const me = g.turnOrder[0];
+    const loc = grab(g, me); loc.production = 3;
+    const b = performAction(g, "build", { at: loc.hexId, chipId: "recyclers" }); // buildCost 3, loyaltyReq 0
+    performAction(g, "set-slider", { at: loc.hexId, value: 1 });
+    check("build queues an activeBuild", b.ok && loc.activeBuild?.chipId === "recyclers");
+    for (let i = 0; i < g.turnOrder.length; i++) endTurn(g); // one Upkeep: +3 buildProgress
+    check("build completes off Output (Recyclers installed)",
+      loc.chips.some((c) => g.chips[c]?.chipId === "recyclers") && loc.activeBuild == null);
+    // The installed Recyclers raises Output by +1 (its yield).
+    const out = loc.production + 1;
+    const before = g.players[me].resource;
+    performAction(g, "set-slider", { at: loc.hexId, value: 0 });
+    for (let i = 0; i < g.turnOrder.length; i++) endTurn(g);
+    check("an economy chip raises Output", g.players[me].resource - before >= out);
+  }
+
+  // Rush spends banked scrap to finish a build immediately.
+  {
+    const g = createGame({ seed }); startTurn(g);
+    const me = g.turnOrder[0];
+    const loc = grab(g, me);
+    g.players[me].resource += 50;
+    performAction(g, "build", { at: loc.hexId, chipId: "labs" }); // buildCost 3
+    const before = g.players[me].resource;
+    const r = performAction(g, "rush", { at: loc.hexId });
+    check("rush completes the build at once and spends scrap",
+      r.ok && loc.chips.some((c) => g.chips[c]?.chipId === "labs") &&
+      loc.activeBuild == null && g.players[me].resource === before - 3);
+  }
+
+  // Upgrade in place: labs → advanced-lab, same slot (scarcity preserved).
+  {
+    const g = createGame({ seed }); startTurn(g);
+    const me = g.turnOrder[0];
+    const loc = grab(g, me); // loyalty 8 clears advanced-lab's rung (3)
+    g.players[me].resource += 50;
+    g.players[me].permanentResearch = 4; recomputeResearch(g); // L3 clears techL2 gate
+    performAction(g, "build", { at: loc.hexId, chipId: "labs" });
+    performAction(g, "rush", { at: loc.hexId });
+    const labUid = loc.chips.find((c) => g.chips[c]?.chipId === "labs");
+    const slotsBefore = loc.chips.length;
+    const u = performAction(g, "upgrade", { at: loc.hexId, chip: labUid });
+    performAction(g, "rush", { at: loc.hexId });
+    check("upgrade replaces the chip in place (same uid, same slot count)",
+      u.ok && g.chips[labUid]?.chipId === "advanced-lab" && loc.chips.length === slotsBefore);
+  }
+
+  // §20.6 gating: Tech-forbidden chips never validate; Loyalty-locked ones
+  // block until integrated.
+  {
+    const g = createGame({ seed }); startTurn(g);
+    const me = g.turnOrder[0];
+    const loc = grab(g, me, 0); // loyalty 0
+    const techBlock = performAction(g, "build", { at: loc.hexId, chipId: "sharpened-blades" }); // techL2 @ player L1
+    check("§20.6 Tech gate blocks a too-advanced chip", !techBlock.ok);
+    g.players[me].permanentResearch = 4; recomputeResearch(g); // L3
+    const loyBlock = performAction(g, "build", { at: loc.hexId, chipId: "sharpened-blades" }); // loyaltyReq 3 @ loyalty 0
+    check("§20.6 Loyalty gate blocks until the rung is reached",
+      !loyBlock.ok && /Loyalty/.test(loyBlock.reason));
+    loc.loyalty = 3;
+    // sharpened-blades is a unit chip → it needs a friendly unit stationed
+    // here (the city arms the army). Park one with an empty bay.
+    const u = Object.values(g.units).find((x) => x.owner === me);
+    u.node = loc.hexId; u.chips = []; recomputeStats(g);
+    const pass = performAction(g, "build", { at: loc.hexId, chipId: "sharpened-blades" });
+    check("clearing both gates (with a unit to arm) lets the build through", pass.ok);
+  }
+
+  // §20.6 — the +1 bonus slot appears at the bonus-slot Loyalty rung, and
+  // §20.8 — dropping below it ejects the bonus-slot chip (newest-first).
+  {
+    const g = createGame({ seed }); startTurn(g);
+    const me = g.turnOrder[0];
+    const loc = grab(g, me, 8); loc.chipSlots = 1; // base 1, +1 bonus slot at high loyalty
+    g.players[me].resource += 50;
+    performAction(g, "build", { at: loc.hexId, chipId: "labs" });
+    performAction(g, "rush", { at: loc.hexId });
+    performAction(g, "build", { at: loc.hexId, chipId: "recyclers" }); // uses the bonus slot
+    performAction(g, "rush", { at: loc.hexId });
+    check("bonus slot (high Loyalty) holds a 2nd chip past base capacity",
+      loc.chips.filter((c) => g.chips[c]?.chipId !== "capital").length === 2);
+    loc.loyalty = CONFIG.economy.bonusSlotLoyalty - 1; // drop below the rung
+    enforceLoyaltySlotCap(g, me);
+    check("§20.8 dropping below the bonus rung ejects the newest chip",
+      loc.chips.filter((c) => g.chips[c]?.chipId !== "capital").length === 1 &&
+      loc.chips.some((c) => g.chips[c]?.chipId === "labs") &&
+      !loc.chips.some((c) => g.chips[c]?.chipId === "recyclers"));
+  }
+
+  // §20.9 selective upkeep — an upkeep-bearing chip goes DORMANT when scrap
+  // can't cover it (passives suppressed, not destroyed), then reactivates.
+  {
+    const g = createGame({ seed }); startTurn(g);
+    const me = g.turnOrder[0];
+    const loc = grab(g, me, 8);
+    g.players[me].resource += 50;
+    g.players[me].permanentResearch = 4; recomputeResearch(g);
+    performAction(g, "build", { at: loc.hexId, chipId: "advanced-lab" }); // research 2, upkeep 1
+    performAction(g, "rush", { at: loc.hexId });
+    const chip = loc.chips.find((c) => g.chips[c]?.chipId === "advanced-lab");
+    const researchWith = g.players[me].research;
+    // Drive the §20.9 charge directly (the real Upkeep step) with the
+    // treasury empty — me's other cities would otherwise refill scrap and
+    // cover the bill, so we isolate the charge here.
+    g.players[me].resource = 0;
+    chargeChipUpkeep(g, me);
+    check("unpaid upkeep sends the chip dormant (passive suppressed, not destroyed)",
+      g.chips[chip].disabled === true && loc.chips.includes(chip) &&
+      g.players[me].research === researchWith - 2);
+    g.players[me].resource = 20; // can pay again
+    chargeChipUpkeep(g, me);
+    check("paying upkeep reactivates the dormant chip",
+      g.chips[chip].disabled === false && g.players[me].research === researchWith);
   }
 }
 

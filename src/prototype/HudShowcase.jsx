@@ -4,34 +4,34 @@
 import { useState } from "react";
 import ControlMeter from "./ControlMeter.jsx";
 import {
-  C, ICON, ResourceWheel, FactionReadout, MenuOrb, RadialMenu, LocationWindow, TitledWindow, MarketBand,
+  C, ICON, ResourceWheel, FactionReadout, MenuOrb, RadialMenu, LocationWindow, TitledWindow,
 } from "./HudChrome.jsx";
 
-const MOCK_MARKET = {
-  tiers: [
-    { tier: 1, unlocked: true, unlockLevel: 1, items: [
-      { uid: "m1", chipId: "drilledTroops" }, { uid: "m2", chipId: "recyclers" },
-      { uid: "m3", chipId: "townHall" }, { uid: "m4", chipId: "navigator" }, { uid: "m5", chipId: "sharpenedBlades" },
-    ] },
-    { tier: 2, unlocked: false, unlockLevel: 3, items: [] },
-    { tier: 3, unlocked: false, unlockLevel: 5, items: [] },
-  ],
-  resale: [{ uid: "r1", chipId: "cannons", isResale: true }],
-};
-
+// §20.2 — the Market is retired; the radial menu drops its sector and chips
+// are built per-Location in the Location window.
 const MENU_ITEMS = [
   { key: "research", icon: ICON.research, label: "Research" },
   { key: "units", icon: ICON.units, label: "Units" },
   { key: "locations", icon: ICON.shield, label: "Locations" },
-  { key: "market", icon: ICON.scrap, label: "Market" },
 ];
 
 const MOCK_LOC = {
   hexId: "korad", name: "KORAD", valueLabel: "High Value", valueColor: C.copperHi, vp: 3,
-  statusLabel: "Held — Versari Korad", sections: ["versari", "versari", "neutral"],
-  foothold: 2, footholdCap: 3, garrison: 6, production: 3, chipSlots: 2,
+  statusLabel: "Held — Versari Korad", sections: ["versari", "versari", "versari"],
+  loyalty: 4, loyaltyMax: 8, loyaltyDanger: false, garrison: 6, production: 3, chipSlots: 2,
+  // §20 economy showcase — Output, slider, an active build, and the build menu
+  // (Loyalty-locked entries greyed per the §20.6 display contract).
+  economy: {
+    output: 4, slider: 0.5, progress: 2, slotCapacity: 2, slotsUsed: 1, scrap: 18, canManage: true,
+    activeBuild: { kind: "build", name: "Labs", cost: 3, progress: 2, remaining: 1 },
+    chips: [{ uid: "c1", name: "Recyclers", disabled: false, upgrade: { name: "Factory", cost: 5, desc: "+2 scrap Output", locked: true, reason: "needs Loyalty 3" } }],
+    buildMenu: [
+      { chipId: "labs", name: "Labs", kind: "location", cost: 3, desc: "+1 Research", locked: false, reason: null, buildable: true },
+      { chipId: "factory", name: "Factory", kind: "location", cost: 5, desc: "+2 scrap Output", locked: true, reason: "needs Loyalty 3", buildable: false },
+    ],
+  },
   ability: { name: "Forge", text: "Once per turn, spend 2 scrap to give a unit here +1 Strength until your next turn.", usedThisTurn: false, canActivate: true },
-  contest: { attackerName: "Vanguard", attackerTotal: 7, defenderLabel: "Garrison", defenderValue: 6, defenderRollsDie: false, hasNeutral: true, canContest: true, unitId: "u1" },
+  contest: { attackerName: "Vanguard", attackerTotal: 7, defenderLabel: "Garrison", defenderValue: 6, defenderRollsDie: false, hasNeutral: false, canContest: true, unitId: "u1" },
 };
 
 export default function HudShowcase({ onExit }) {
@@ -47,7 +47,7 @@ export default function HudShowcase({ onExit }) {
       <button className="hud-int" onClick={() => setPanel("locations")} title="KORAD (click to inspect)"
         style={{ position: "absolute", left: "44%", top: "46%", transform: "translate(-50%,-50%)", zIndex: 10, display: "flex", flexDirection: "column", alignItems: "center", gap: 6, background: "transparent", border: "none", cursor: "pointer" }}>
         <div style={{ filter: "drop-shadow(0 4px 10px rgba(0,0,0,0.6))" }}>
-          <ControlMeter sections={["versari", "versari", "neutral"]} foothold={2} footholdCap={3} size={64} />
+          <ControlMeter sections={["versari", "versari", "versari"]} loyalty={4} size={64} />
         </div>
         <span style={{ fontFamily: C.font, fontSize: 12, letterSpacing: 2, textTransform: "uppercase", color: C.textDim }}>Korad</span>
       </button>
@@ -57,25 +57,13 @@ export default function HudShowcase({ onExit }) {
       <MenuOrb onOpen={() => setMenuOpen(true)} />
 
       {menuOpen && <RadialMenu items={MENU_ITEMS} onPick={open} onClose={() => setMenuOpen(false)} />}
-      {panel === "locations" && <LocationWindow view={MOCK_LOC} onClose={() => setPanel(null)} onActivate={() => {}} onContest={() => {}} onRecruit={() => {}} />}
+      {panel === "locations" && <LocationWindow view={MOCK_LOC} onClose={() => setPanel(null)} onActivate={() => {}} onContest={() => {}} onRecruit={() => {}} onBuild={() => {}} onUpgrade={() => {}} onRush={() => {}} onSetSlider={() => {}} />}
       {panel === "research" && <TitledWindow title="Research" icon={ICON.research} onClose={() => setPanel(null)}>
         <p className="pc-prose" style={{ margin: 0, fontSize: 13, lineHeight: 1.6, color: C.textDim }}>Advance your tech level to earn ability points on the Tech Wheel — Military, Industry, Logistics and Intelligence branches.</p>
       </TitledWindow>}
       {panel === "units" && <TitledWindow title="Units" icon={ICON.units} onClose={() => setPanel(null)}>
         <p className="pc-prose" style={{ margin: 0, fontSize: 13, lineHeight: 1.6, color: C.textDim }}>Your fielded units, their strength and movement, installed chips, and reinforcement options.</p>
       </TitledWindow>}
-      {panel === "market" && (
-        <MarketBand
-          tiers={MOCK_MARKET.tiers}
-          resale={MOCK_MARKET.resale}
-          scrap={18}
-          actions={{ remaining: 2, max: 2 }}
-          isYourTurn
-          onAcquire={() => {}}
-          onClose={() => setPanel(null)}
-        />
-      )}
-
       <div style={{ position: "absolute", bottom: 18, left: 24, color: C.textFaint, zIndex: 20 }}>
         <div style={{ fontFamily: C.font, fontSize: 11, letterSpacing: 3, textTransform: "uppercase" }}>HUD Look Pass · v2</div>
         {onExit && <button className="hud-int" onClick={onExit} style={{ marginTop: 8, fontFamily: C.font, fontSize: 11, letterSpacing: 1.5, textTransform: "uppercase", color: C.textDim, background: "transparent", border: `1px solid ${C.steelHi}`, borderRadius: 5, padding: "5px 14px", cursor: "pointer" }}>← Back to game</button>}

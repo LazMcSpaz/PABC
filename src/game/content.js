@@ -30,29 +30,36 @@ export const LOCATIONS = {
   erport: { id: "erport", name: "Erport", strategicValue: "medium", affiliation: null, production: [2, 3], vpReward: 1 },
 };
 
-// Upgrade chips. kind = which slot type; slots = slots occupied (2-slot
-// chips are powerful + rare); techLevel = Market tier; cost = scrap;
-// copies = how many seed the tier's market deck. techLevel / cost /
-// copies are PROVISIONAL until the content batch. `effects` are left for
-// Layer 2 (the effect library); `desc` carries the plain-text effect.
+// Upgrade chips — §20 makes these the whole economy: built at a Location
+// off its Output (the Market is retired), and upgraded in place.
+//   kind         which slot type (unit chips need a stationed friendly unit)
+//   slots        slots occupied (2-slot chips are powerful + rare)
+//   techLevel    §20.6 Tech-Level band gate (1/2/3 → player Tech L ≥ 1/3/5)
+//   buildCost    §20.4 construction cost in Output units (defaults to `cost`)
+//   loyaltyReq   §20.6 Loyalty rung (0–8) this city needs to build the chip
+//   upgradesTo   §20.5 next-tier chip id this one upgrades into, if any
+//   upkeep       §20.9 optional scrap/turn; unpaid → dormant (disabled), not destroyed
+//   output       §20.3 scrap-equivalent this economy chip adds to Location Output
+//   cost/copies  legacy Market fields, retained as build-cost fallback / data
+// Values are PROVISIONAL demo tunables. `desc` carries the plain-text effect.
 export const CHIPS = {
   // --- unit chips --- (strength / movement = structured stat bonuses)
   // §16.5 — recruitment is now an action; this stays a +1 Strength gear chip.
-  "drilled-troops": { id: "drilled-troops", name: "Drilled Troops", kind: "unit", slots: 1, techLevel: 1, cost: 2, copies: 3, strength: 1, desc: "+1 Strength" },
-  navigator: { id: "navigator", name: "Navigator", kind: "unit", slots: 1, techLevel: 1, cost: 2, copies: 3, movement: 1, desc: "+1 Movement" },
-  "sharpened-blades": { id: "sharpened-blades", name: "Sharpened Blades", kind: "unit", slots: 1, techLevel: 2, cost: 4, copies: 3, strength: 2, desc: "+2 Strength" },
-  cannons: { id: "cannons", name: "Cannons", kind: "unit", slots: 1, techLevel: 3, cost: 6, copies: 2, strength: 3, desc: "+3 Strength" },
-  landship: { id: "landship", name: "Landship", kind: "unit", slots: 2, techLevel: 3, cost: 7, copies: 2, movement: 2, desc: "+2 Movement (rare, 2-slot)" },
+  "drilled-troops": { id: "drilled-troops", name: "Drilled Troops", kind: "unit", slots: 1, techLevel: 1, cost: 2, copies: 3, strength: 1, buildCost: 2, loyaltyReq: 0, upgradesTo: "sharpened-blades", desc: "+1 Strength" },
+  navigator: { id: "navigator", name: "Navigator", kind: "unit", slots: 1, techLevel: 1, cost: 2, copies: 3, movement: 1, buildCost: 2, loyaltyReq: 0, desc: "+1 Movement" },
+  "sharpened-blades": { id: "sharpened-blades", name: "Sharpened Blades", kind: "unit", slots: 1, techLevel: 2, cost: 4, copies: 3, strength: 2, buildCost: 4, loyaltyReq: 3, upgradesTo: "cannons", desc: "+2 Strength" },
+  cannons: { id: "cannons", name: "Cannons", kind: "unit", slots: 1, techLevel: 3, cost: 6, copies: 2, strength: 3, buildCost: 6, loyaltyReq: 6, upkeep: 1, desc: "+3 Strength (upkeep 1)" },
+  landship: { id: "landship", name: "Landship", kind: "unit", slots: 2, techLevel: 3, cost: 7, copies: 2, movement: 2, buildCost: 7, loyaltyReq: 6, upkeep: 2, desc: "+2 Movement (rare, 2-slot; upkeep 2)" },
   // --- location chips ---
-  recyclers: { id: "recyclers", name: "Recyclers", kind: "location", slots: 1, techLevel: 1, cost: 3, copies: 3, desc: "+1 scrap production" },
-  "town-hall": { id: "town-hall", name: "Town Hall", kind: "location", slots: 1, techLevel: 1, cost: 3, copies: 3, desc: "+1 to this location's foothold cap" },
-  "recon-team": { id: "recon-team", name: "Recon Team", kind: "location", slots: 1, techLevel: 1, cost: 3, copies: 2, desc: "Discard a drawn encounter and draw again" },
-  "training-grounds": { id: "training-grounds", name: "Training Grounds", kind: "location", slots: 1, techLevel: 1, cost: 4, copies: 3, desc: "Enables recruiting units; +1 unit cap" },
-  labs: { id: "labs", name: "Labs", kind: "location", slots: 1, techLevel: 1, cost: 3, copies: 3, research: 1, desc: "+1 Research while controlled" },
-  "advanced-lab": { id: "advanced-lab", name: "Advanced Lab", kind: "location", slots: 1, techLevel: 2, cost: 5, copies: 2, research: 2, desc: "+2 Research while controlled" },
-  "defense-turrets": { id: "defense-turrets", name: "Defense Turrets", kind: "location", slots: 1, techLevel: 2, cost: 4, copies: 3, desc: "+2 garrison Strength" },
-  factory: { id: "factory", name: "Factory", kind: "location", slots: 1, techLevel: 2, cost: 5, copies: 2, desc: "+2 scrap production" },
-  "logistics-hub": { id: "logistics-hub", name: "Logistics Hub", kind: "location", slots: 2, techLevel: 3, cost: 6, copies: 2, desc: "+1 Action each turn (rare, 2-slot)" },
+  recyclers: { id: "recyclers", name: "Recyclers", kind: "location", slots: 1, techLevel: 1, cost: 3, copies: 3, output: 1, buildCost: 3, loyaltyReq: 0, upgradesTo: "factory", desc: "+1 scrap Output" },
+  "town-hall": { id: "town-hall", name: "Town Hall", kind: "location", slots: 1, techLevel: 1, cost: 3, copies: 3, buildCost: 3, loyaltyReq: 0, desc: "+1 to this location's foothold cap" },
+  "recon-team": { id: "recon-team", name: "Recon Team", kind: "location", slots: 1, techLevel: 1, cost: 3, copies: 2, buildCost: 3, loyaltyReq: 0, desc: "Discard a drawn encounter and draw again" },
+  "training-grounds": { id: "training-grounds", name: "Training Grounds", kind: "location", slots: 1, techLevel: 1, cost: 4, copies: 3, buildCost: 4, loyaltyReq: 0, desc: "Enables recruiting units; +1 unit cap" },
+  labs: { id: "labs", name: "Labs", kind: "location", slots: 1, techLevel: 1, cost: 3, copies: 3, research: 1, buildCost: 3, loyaltyReq: 0, upgradesTo: "advanced-lab", desc: "+1 Research while controlled" },
+  "advanced-lab": { id: "advanced-lab", name: "Advanced Lab", kind: "location", slots: 1, techLevel: 2, cost: 5, copies: 2, research: 2, buildCost: 5, loyaltyReq: 3, upkeep: 1, desc: "+2 Research while controlled (upkeep 1)" },
+  "defense-turrets": { id: "defense-turrets", name: "Defense Turrets", kind: "location", slots: 1, techLevel: 2, cost: 4, copies: 3, garrison: 2, buildCost: 4, loyaltyReq: 3, desc: "+2 garrison Strength" },
+  factory: { id: "factory", name: "Factory", kind: "location", slots: 1, techLevel: 2, cost: 5, copies: 2, output: 2, buildCost: 5, loyaltyReq: 3, desc: "+2 scrap Output" },
+  "logistics-hub": { id: "logistics-hub", name: "Logistics Hub", kind: "location", slots: 2, techLevel: 3, cost: 6, copies: 2, buildCost: 6, loyaltyReq: 6, upkeep: 1, desc: "+1 Action each turn (rare, 2-slot; upkeep 1)" },
 };
 
 // The Capital — a special predefined chip, one per player. Not sold in

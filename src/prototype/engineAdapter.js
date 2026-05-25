@@ -12,6 +12,9 @@ import {
   ABILITIES as ENGINE_ABILITIES,
 } from "../game/content.js";
 import {
+  buildableChips, upgradeOption, slotCapacity, slotsUsed, locationOutput,
+} from "../game/economy.js";
+import {
   LOCATIONS as UI_LOCATIONS,
   UNIT_UPGRADES,
   LOCATION_UPGRADES,
@@ -248,6 +251,10 @@ export function adaptState(state) {
       hex.production = loc.production;
       hex.abilityId = loc.abilityId;
       hex.controller = loc.controller;
+      // §20 Economy & City Development — Output, the guns/butter slider, the
+      // active build, and the §20.6 build menu / upgrade view sets. Computed
+      // only for Locations the controller fully holds (build is theirs alone).
+      hex.economy = loc.controller ? adaptEconomy(state, loc) : null;
     }
     hexes[h.id] = hex;
   }
@@ -271,47 +278,8 @@ export function adaptState(state) {
     };
   }
 
-  // Market — flatten the tier-1 row for the existing MarketRow component.
-  // (Tier 2 / 3 surfaces stay out of scope per the demo plan; see Acquire
-  // panel notes.)
-  const marketTier1 = state.market.tiers[1]?.row || [];
-  const market = marketTier1.map((uid) => engineChipIdToUi(state.chips[uid]?.chipId));
-  const marketChips = marketTier1.map((uid) => ({
-    uid,
-    chipId: engineChipIdToUi(state.chips[uid]?.chipId),
-    engineChipId: state.chips[uid]?.chipId,
-  }));
-  // v0.2 §16.4 — resold chips share the Market display but acquire at full
-  // cost ignoring tech tier (handled in actions.validateAcquire).
-  for (const uid of state.resaleRow || []) {
-    const eng = state.chips[uid]?.chipId;
-    market.push(engineChipIdToUi(eng));
-    marketChips.push({ uid, chipId: engineChipIdToUi(eng), engineChipId: eng, isResale: true });
-  }
-
-  // All market tiers (for the radial Market band). Tier unlock mirrors
-  // actions.unlockedTier — tier 2 @ Tech L3, tier 3 @ L5.
-  const human = state.players[state.humanFactionId];
-  const tierByLevel = CONFIG.tech.marketTierByLevel;
-  const lvl = human?.techLevel || 1;
-  const unlockedMarketTier = lvl >= tierByLevel[3] ? 3 : lvl >= tierByLevel[2] ? 2 : 1;
-  const adaptMarketItem = (uid, extra) => ({
-    uid,
-    chipId: engineChipIdToUi(state.chips[uid]?.chipId),
-    engineChipId: state.chips[uid]?.chipId,
-    ...extra,
-  });
-  const marketTiers = Object.keys(state.market.tiers)
-    .map(Number)
-    .sort((a, b) => a - b)
-    .map((tier) => ({
-      tier,
-      unlocked: tier <= unlockedMarketTier,
-      // tech level that unlocks this tier (tier 1 is always open)
-      unlockLevel: tier === 1 ? 1 : tierByLevel[tier],
-      items: (state.market.tiers[tier]?.row || []).map((uid) => adaptMarketItem(uid)),
-    }));
-  const resaleItems = (state.resaleRow || []).map((uid) => adaptMarketItem(uid, { isResale: true }));
+  // §20.2 — the Market is retired; there is no shared chip catalogue to
+  // surface. Chips are built per-Location (see hex.economy above).
 
   return {
     round: state.round,
@@ -325,11 +293,6 @@ export function adaptState(state) {
     units,
     hexes,
     rows: buildRows(state),
-    market,
-    marketChips,
-    marketTiers,
-    resaleItems,
-    unlockedMarketTier,
     winnerId: state.winnerId,
     // v0.2 §16.5 — in-transit field reinforcements, for board overlay /
     // unit panel ETA display.
@@ -338,6 +301,85 @@ export function adaptState(state) {
     // engine APIs without re-deriving everything.
     engineState: state,
   };
+}
+
+// §20 — the per-Location economy view: Output, the guns/butter slider, the
+// active build, and the §20.6 DISPLAY-CONTRACT sets. APPEND-ONLY exposure.
+//   buildMenu  — only Tech-allowed chips; Loyalty-locked ones carry `locked`
+//                + `reason` (Tech-forbidden chips are omitted entirely).
+//   upgrades   — keyed by installed chip uid: ALWAYS the next tier if one
+//                exists, `locked` when EITHER Tech or Loyalty is short.
+function adaptEconomy(state, loc) {
+  const cap = slotCapacity(loc);
+  const used = slotsUsed(state, loc.chips);
+  const ab = loc.activeBuild;
+
+  const buildMenu = buildableChips(state, loc).map((o) => {
+    const fits = o.def.kind === "unit"
+      ? hasStationedUnitWithBay(state, loc, o.def.slots || 1)
+      : used + (o.def.slots || 1) <= cap;
+    return {
+      chipId: o.chipId,
+      uiChipId: engineChipIdToUi(o.chipId),
+      name: o.def.name,
+      kind: o.def.kind,
+      cost: o.def.buildCost ?? o.def.cost ?? 0,
+      slots: o.def.slots || 1,
+      desc: o.def.desc || "",
+      locked: o.locked,
+      reason: o.locked ? o.reason : (!fits ? (o.def.kind === "unit" ? "no unit stationed here" : "no free slot") : null),
+      buildable: !o.locked && fits,
+    };
+  });
+
+  const upgrades = {};
+  const collect = (chipUid) => {
+    const opt = upgradeOption(state, loc, chipUid);
+    if (opt) {
+      upgrades[chipUid] = {
+        chipId: opt.chipId,
+        uiChipId: engineChipIdToUi(opt.chipId),
+        name: opt.def.name,
+        cost: opt.def.buildCost ?? opt.def.cost ?? 0,
+        desc: opt.def.desc || "",
+        locked: opt.locked,
+        reason: opt.reason,
+      };
+    }
+  };
+  for (const c of loc.chips) collect(c);
+  for (const u of Object.values(state.units)) {
+    if (u.owner === loc.controller && u.node === loc.hexId) for (const c of u.chips) collect(c);
+  }
+
+  return {
+    output: locationOutput(state, loc),
+    slider: loc.buildSlider ?? 0,
+    progress: loc.buildProgress || 0,
+    slotCapacity: cap,
+    slotsUsed: used,
+    activeBuild: ab
+      ? {
+          kind: ab.kind,
+          chipId: ab.chipId,
+          uiChipId: engineChipIdToUi(ab.chipId),
+          name: ENGINE_CHIPS[ab.chipId]?.name || ab.chipId,
+          cost: ab.cost,
+          progress: loc.buildProgress || 0,
+          remaining: Math.max(0, ab.cost - (loc.buildProgress || 0)),
+        }
+      : null,
+    buildMenu,
+    upgrades,
+  };
+}
+
+function hasStationedUnitWithBay(state, loc, slots) {
+  for (const u of Object.values(state.units)) {
+    if (u.owner !== loc.controller || u.node !== loc.hexId) continue;
+    if (slotsUsed(state, u.chips) + slots <= CONFIG.unit.baySlots) return true;
+  }
+  return false;
 }
 
 // v0.2 §16.5 — what a Reinforce action would cost/look like for `unitUid`

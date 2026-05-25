@@ -1,7 +1,7 @@
 // Game setup — builds the initial GameState (mechanical-spec §13.3):
 // the board, players, locations, units, and the tiered Market.
 import { CONFIG } from "./config.js";
-import { FACTIONS, LOCATIONS, CHIPS, CAPITAL, ABILITIES, REACTIVES } from "./content.js";
+import { FACTIONS, LOCATIONS, CAPITAL, ABILITIES, REACTIVES } from "./content.js";
 import { FIELD_ENCOUNTERS } from "./content/index.js";
 import { makeRng } from "./rng.js";
 import { createIdGen } from "./ids.js";
@@ -135,6 +135,13 @@ export function createGame({
       production,
       abilityId,
       strategicValue: def.strategicValue, // surfaced for the DSL controls_count helper
+      // §20.3 City Output + guns/butter slider state. `output` is recomputed
+      // each Upkeep; `buildSlider` f∈[0,1] splits it (bank scrap vs. build);
+      // `activeBuild` is the current construction (null = none).
+      output: production,
+      buildSlider: CONFIG.economy.defaultSlider,
+      buildProgress: 0,
+      activeBuild: null,
     };
   }
 
@@ -158,24 +165,9 @@ export function createGame({
     }
   }
 
-  // --- Market: three tech tiers, each a face-up row + a draw deck ---
-  const market = { tiers: {} };
-  for (const tier of [1, 2, 3]) {
-    const pool = [];
-    for (const chip of Object.values(CHIPS)) {
-      if (chip.techLevel === tier) {
-        for (let i = 0; i < chip.copies; i++) pool.push(mkChip(chip.id));
-      }
-    }
-    const shuffled = rng.shuffle(pool);
-    const rowSize = CONFIG.marketRowSizes[tier];
-    market.tiers[tier] = {
-      tier,
-      rowSize,
-      row: shuffled.slice(0, rowSize),
-      deck: shuffled.slice(rowSize),
-    };
-  }
+  // §20.2 — the Market is retired. Chips are no longer drawn from a shared
+  // pool; they are BUILT at Locations off Output (§20.4) and upgraded in
+  // place (§20.5). No marketDeck / market rows are seeded.
 
   // --- field encounter deck (§15.8). Each authored encounter expands
   // into `copies` entries (id strings — encounters carry no per-instance
@@ -229,10 +221,9 @@ export function createGame({
     locations,
     units,
     chips,
-    market,
     encounterDeck,
     reactiveDeck,
-    discards: { encounter: [], reactive: [], market: [] },
+    discards: { encounter: [], reactive: [] },
     removed: [],
     modifiers: [],
     pendingActionGrants: [],

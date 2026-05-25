@@ -4,13 +4,12 @@
 import { emit } from "./events.js";
 import { recomputeStats, recomputeResearch } from "./stats.js";
 import { reinforcementRoute } from "./board.js";
-import { TECH_NODES, hasTechNode } from "./tech.js";
 import { CONFIG } from "./config.js";
 import { activePlayerId } from "./targeting.js";
 import { sweepDeferred } from "./deferred.js";
 import { evaluateTriggers } from "./triggers.js";
 import { evaluateConditionalBeats } from "./quests.js";
-import { churnMarket } from "./market.js";
+import { applyOutputAndBuilds, chargeChipUpkeep, enforceLoyaltySlotCap } from "./economy.js";
 
 function expireModifiers(state, pid) {
   const own = new Set(
@@ -93,29 +92,6 @@ export function tickLoyalty(state, pid) {
   if (lostControl) recomputeResearch(state);
 }
 
-// Fully-held locations yield their scrap production to the controller
-// (§6.3.1). VP is banked one-shot on capture (see contest.js), not
-// per Upkeep — the per-round drip lived briefly in an earlier demo
-// pass and would have forced the win to land on round-12 regardless
-// of play.
-function collectProduction(state, pid) {
-  // §17.5 Economy entry (Industry): +1 scrap per fully-held Location.
-  const econBonus = hasTechNode(state, pid, "eco-entry")
-    ? TECH_NODES["eco-entry"].effect.amount
-    : 0;
-  let gained = 0;
-  for (const loc of Object.values(state.locations)) {
-    if (loc.controller !== pid) continue;
-    gained += loc.production + econBonus;
-  }
-  if (gained > 0) {
-    state.players[pid].resource += gained;
-    emit(state, "resource_gained", {
-      player: pid, resource: "Resource", amount: gained, source: "production",
-    });
-  }
-}
-
 // v0.2 §16.2 — refresh each owned unit's move budget from its effective
 // Movement, and roll the §16.6 fortify flag (a unit that didn't move on
 // its previous turn is "dug in"). Must run after recomputeStats so
@@ -167,9 +143,16 @@ export function startTurn(state) {
   recomputeStats(state);
   refreshMoveBudget(state, pid);
   tickLoyalty(state, pid);
+  // §20.8 — a Loyalty drop below the bonus-slot rung ejects the chip in that
+  // extra slot (newest-first). Runs right after the Loyalty tick, before the
+  // economy step reads slot capacity.
+  enforceLoyaltySlotCap(state, pid);
   passiveHeal(state, pid);
-  collectProduction(state, pid);
-  churnMarket(state);
+  // §20.3 — Output + guns/butter slider REPLACES the old flat collectProduction:
+  // each held Location banks its butter half as scrap and advances its build.
+  applyOutputAndBuilds(state, pid);
+  // §20.9 — charge per-chip upkeep from banked scrap; the unpaid go dormant.
+  chargeChipUpkeep(state, pid);
 
   // Preparation (the optional stat-buy step) is folded in once Layer 3
   // gives it something to do; for now the turn opens straight into Main.

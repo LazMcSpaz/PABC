@@ -66,6 +66,29 @@ export const CONFIG = {
 
   // Capital chip bonuses (content/config.csv).
   capital: { garrisonBonus: 2, productionBonus: 2 },
+
+  // §20 Economy & City Development — chips are the output of the economy,
+  // built off each Location's Output via the guns/butter slider (the
+  // Market is retired). TBD-in-spec tunables, set here for the demo.
+  // APPEND-ONLY block (distinct key) so a parallel Influence branch never
+  // collides with these economy constants.
+  economy: {
+    // §20.6 Tech-Level build gate: a chip of techLevel T needs player Tech
+    // Level >= buildTechGate[T] — the same §17.2 thresholds, applied to
+    // building instead of shopping ({ 1→1, 2→3, 3→5 }).
+    buildTechGate: { 1: 1, 2: 3, 3: 5 },
+    // §20.6 Loyalty rung that grants the +1 chip slot. A Location at or
+    // above this Loyalty builds/holds one extra chip; dropping below it
+    // ejects the bonus-slot chip newest-first (§20.8).
+    bonusSlotLoyalty: 6,
+    // §20.3 default guns/butter split f∈[0,1]: scrapBank += (1−f)·Output,
+    // buildProgress += f·Output. Starts at 0 (bank everything) so a city
+    // with no active build never wastes Output; the controller raises it.
+    defaultSlider: 0,
+    // §20.7 rush rate — banked scrap per build-point. One rush may finish a
+    // build outright (no cap on a single rush spend).
+    rushScrapPerPoint: 1,
+  },
 };
 
 // Strategic-value ordering helper.

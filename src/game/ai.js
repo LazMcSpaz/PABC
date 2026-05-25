@@ -8,8 +8,9 @@ import { performAction } from "./actions.js";
 import { endTurn } from "./turn.js";
 import { activePlayerId } from "./targeting.js";
 import { bfsDistances } from "./board.js";
-import { CHIPS, LOCATIONS } from "./content.js";
+import { LOCATIONS } from "./content.js";
 import { CONFIG } from "./config.js";
+import { buildableChips, slotCapacity, slotsUsed, stationedUnitWithBay } from "./economy.js";
 
 const SAFETY_CAP = 10; // hard stop if priority loop ever spins
 
@@ -24,6 +25,10 @@ export function takeAITurn(state) {
   ) {
     if (!tryOneAction(state, pid)) break;
   }
+  // §20 — the AI runs its economy every turn regardless of the Action budget:
+  // it sets each city's guns/butter slider and queues builds (units have
+  // settled after the action loop, so unit-chip builds find their garrison).
+  if (!state.winnerId) manageEconomy(state, pid);
   if (!state.winnerId) endTurn(state);
 }
 
@@ -60,14 +65,10 @@ function tryOneAction(state, pid) {
     }
   }
 
-  // 3. Acquire — try the cheapest affordable unit chip into the strongest
-  //    unit's bay; if no unit chip fits, try a location chip on a held loc
-  if (tryAcquire(state, pid)) return true;
-
-  // 4. Recruit — if controls a Training Grounds and below the cap
+  // 3. Recruit — if controls a Training Grounds and below the cap
   if (tryRecruit(state, pid)) return true;
 
-  // 5. Activate any controlled location with a free / cheap ability
+  // 4. Activate any controlled location with a free / cheap ability
   if (tryActivate(state, pid)) return true;
 
   return false;
@@ -123,70 +124,60 @@ function pickMoveTarget(state, pid, unit) {
   return best;
 }
 
-function tryAcquire(state, pid) {
+// §20 — drive each city's economy: set its slider, queue a build into any
+// free slot, and rush when flush with scrap. Runs once per turn, free of
+// Actions (build/upgrade/rush/set-slider all cost 0).
+function manageEconomy(state, pid) {
   const player = state.players[pid];
-  const tiers = unlockedTiers(player);
-  const candidates = [];
-  for (const tier of tiers) {
-    for (const chipUid of state.market.tiers[tier]?.row || []) {
-      const def = CHIPS[state.chips[chipUid]?.chipId];
-      if (!def) continue;
-      if (player.resource < (def.cost || 0)) continue;
-      candidates.push({ chipUid, def, tier });
+  for (const loc of Object.values(state.locations)) {
+    if (loc.controller !== pid) continue;
+
+    if (!loc.activeBuild) pickBuild(state, pid, loc);
+
+    // Lean toward construction when something is queued, but keep banking a
+    // share so the army still gets scrap for recruiting / reinforcing.
+    const wantSlider = loc.activeBuild ? 0.7 : 0;
+    if ((loc.buildSlider ?? 0) !== wantSlider) {
+      performAction(state, "set-slider", { at: loc.hexId, value: wantSlider });
+    }
+
+    // Spend a flush treasury into local construction (rush a few points).
+    if (loc.activeBuild && player.resource > 14) {
+      performAction(state, "rush", { at: loc.hexId, amount: 3 });
     }
   }
-  if (!candidates.length) return false;
+}
 
-  // Prefer unit chips that fit; fall back to location chips on a held loc.
-  const sortedUnits = candidates
-    .filter((c) => c.def.kind === "unit")
-    .sort((a, b) => (b.def.strength || 0) - (a.def.strength || 0));
-  const myUnits = ownUnits(state, pid)
-    .sort((a, b) => b.strength - a.strength);
-  for (const cand of sortedUnits) {
-    for (const u of myUnits) {
-      const slots = slotsUsed(state, u.chips) + cand.def.slots;
-      if (slots > CONFIG.unit.baySlots) continue;
-      const r = performAction(state, "acquire", {
-        chip: cand.chipUid, into: { unit: u.uid },
-      });
-      if (r.ok) return true;
-    }
+// Choose what a city should build next: the highest-value buildable
+// (Tech-allowed, Loyalty-unlocked, slot-fitting) chip. Prefers economy /
+// research / a first Training Grounds; falls back to arming a stationed unit.
+function pickBuild(state, pid, loc) {
+  const options = buildableChips(state, loc).filter((o) => !o.locked);
+  const haveTG = Object.values(state.locations).some(
+    (l) => l.controller === pid && l.chips.some((c) => state.chips[c]?.chipId === "training-grounds"),
+  );
+  const score = (def) => {
+    let s = (def.output || 0) * 3 + (def.research || 0) * 3 + (def.garrison || 0) + (def.strength || 0);
+    if (def.id === "training-grounds" && !haveTG) s += 5;
+    return s - (def.upkeep || 0); // mild aversion to upkeep when poor
+  };
+
+  // Location chips into a free slot first.
+  const locFits = options
+    .filter((o) => o.def.kind === "location" && slotsUsed(state, loc.chips) + (o.def.slots || 1) <= slotCapacity(loc))
+    .sort((a, b) => score(b.def) - score(a.def));
+  if (locFits.length) {
+    return performAction(state, "build", { at: loc.hexId, chipId: locFits[0].chipId }).ok;
   }
 
-  const sortedLocs = candidates
-    .filter((c) => c.def.kind === "location")
-    .sort((a, b) => (a.def.cost || 0) - (b.def.cost || 0));
-  const myLocs = Object.values(state.locations).filter((l) => l.controller === pid);
-  for (const cand of sortedLocs) {
-    for (const loc of myLocs) {
-      const slots = slotsUsed(state, loc.chips) + cand.def.slots;
-      if (slots > loc.chipSlots) continue;
-      const r = performAction(state, "acquire", {
-        chip: cand.chipUid, into: { location: loc.hexId },
-      });
-      if (r.ok) return true;
-    }
+  // Otherwise arm a stationed friendly unit with a strength chip.
+  const unitFits = options
+    .filter((o) => o.def.kind === "unit" && stationedUnitWithBay(state, loc, o.def.slots || 1))
+    .sort((a, b) => score(b.def) - score(a.def));
+  if (unitFits.length) {
+    return performAction(state, "build", { at: loc.hexId, chipId: unitFits[0].chipId }).ok;
   }
   return false;
-}
-
-function slotsUsed(state, chipUids) {
-  let n = 0;
-  for (const c of chipUids) {
-    const id = state.chips[c]?.chipId;
-    if (id === "capital") { n += 1; continue; }
-    n += CHIPS[id]?.slots ?? 1;
-  }
-  return n;
-}
-
-function unlockedTiers(player) {
-  const lvl = player.techLevel || 1;
-  const m = CONFIG.tech.marketTierByLevel;
-  if (lvl >= m[3]) return [1, 2, 3];
-  if (lvl >= m[2]) return [1, 2];
-  return [1];
 }
 
 function tryRecruit(state, pid) {

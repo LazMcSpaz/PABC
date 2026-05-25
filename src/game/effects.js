@@ -19,7 +19,8 @@ function findEntity(state, id) {
   );
 }
 
-// Resolve a zone path (e.g. "hand:versari", "marketRow:2") to its array.
+// Resolve a zone path (e.g. "hand:versari", "discard:reactive") to its array.
+// §20.2 — the marketRow / marketDeck zones are gone with the retired Market.
 function getZone(state, spec) {
   if (!spec) return null;
   const [kind, arg] = String(spec).split(":");
@@ -29,8 +30,6 @@ function getZone(state, spec) {
     case "removed": return state.removed;
     case "hand": return state.players[arg]?.hand;
     case "discard": return state.discards[arg];
-    case "marketRow": return state.market.tiers[arg]?.row;
-    case "marketDeck": return state.market.tiers[arg]?.deck;
     case "unitBay": return state.units[arg]?.chips;
     case "locationSlots": return state.locations[arg]?.chips;
     default: return null;

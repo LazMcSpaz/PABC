@@ -11,7 +11,7 @@ import Inspector from "./Inspector.jsx";
 import UnitCard from "./UnitCard.jsx";
 import ControlMeter from "./ControlMeter.jsx";
 import {
-  ResourceWheel, FactionReadout, MenuOrb, RadialMenu, LocationWindow, TitledWindow, MarketBand, ICON, C as HUD,
+  ResourceWheel, FactionReadout, MenuOrb, RadialMenu, LocationWindow, TitledWindow, ICON, C as HUD,
 } from "./HudChrome.jsx";
 import { createGame } from "../game/setup.js";
 import { startTurn, endTurn } from "../game/turn.js";
@@ -52,11 +52,13 @@ function contestMods(r) {
   return out;
 }
 
+// §20.2 — the Market is retired; chips are built per-Location, so the radial
+// menu drops the Market sector. Building/upgrading happens in the Location
+// window (slot-click build menu + chip-click upgrade view).
 const MENU_ITEMS = [
   { key: "research", icon: ICON.research, label: "Research" },
   { key: "units", icon: ICON.units, label: "Units" },
   { key: "locations", icon: ICON.shield, label: "Locations" },
-  { key: "market", icon: ICON.scrap, label: "Market" },
 ];
 
 // Collapse a selected location hex into the single-window view-model that
@@ -92,6 +94,38 @@ function buildLocView(state, hex, isYourTurn) {
     };
   }
 
+  // §20 — economy view for cities you fully hold: Output, the guns/butter
+  // slider, the active build, the §20.6 build menu and per-chip upgrades.
+  // Chips are shown as occupied/empty slots; clicking an empty slot opens the
+  // build menu, clicking an installed chip opens its upgrade view (host UI).
+  let economy = null;
+  if (youControlHere && hex.economy) {
+    const e = hex.economy;
+    const chipDefs = (control.chipUids || []).map((uid, i) => {
+      const engineId = state.engineState.chips[uid]?.chipId;
+      const def = ENGINE_CHIPS[engineId];
+      return {
+        uid,
+        chipId: engineId,
+        name: def?.name || engineId,
+        disabled: !!state.engineState.chips[uid]?.disabled,
+        upgrade: e.upgrades[uid] || null,
+      };
+    });
+    economy = {
+      output: e.output,
+      slider: e.slider,
+      progress: e.progress,
+      slotCapacity: e.slotCapacity,
+      slotsUsed: e.slotsUsed,
+      activeBuild: e.activeBuild,
+      buildMenu: e.buildMenu,
+      chips: chipDefs,
+      canManage: isYourTurn,
+      scrap: you.scrap,
+    };
+  }
+
   return {
     hexId: hex.id,
     name: (uiLoc.name || hex.locationId).toUpperCase(),
@@ -100,8 +134,9 @@ function buildLocView(state, hex, isYourTurn) {
     vp: uiLoc.vp || 0,
     statusLabel: ctrl ? `Held — ${UI_FACTIONS[ctrl]?.name}` : claimed ? "Contested" : "Uncontrolled",
     sections: control.sections,
-    foothold: control.foothold,
-    footholdCap: control.footholdCap,
+    loyalty: control.loyalty,
+    loyaltyMax: control.loyaltyMax,
+    loyaltyDanger: control.loyaltyDanger,
     garrison: hex.garrison,
     production: hex.production,
     chipSlots: control.chipSlots,
@@ -116,8 +151,9 @@ function buildLocView(state, hex, isYourTurn) {
         : null,
     recruit:
       youControlHere && hasTrainingGrounds
-        ? { cost: 10, canAfford: isYourTurn && you.scrap >= 10 }
+        ? { cost: CONFIG.unitRecruitCost, canAfford: isYourTurn && you.scrap >= CONFIG.unitRecruitCost }
         : null,
+    economy,
     contest,
   };
 }
@@ -461,24 +497,19 @@ export default function Prototype({ config, onNewGame }) {
     const msg = mode === "instant" ? "Unit reinforced." : "Reinforcements dispatched.";
     return runAction("reinforce", { unit: unitUid, mode }, null, msg);
   }
-  function onAcquire(uiChip) {
-    // uiChip is { uid, chipId, engineChipId }. Pick an install target:
-    // unit chip → strongest of your units with bay slots; location chip
-    // → cheapest controlled location with free chip slots.
-    const def = gameRef.current.chips[uiChip.uid];
-    const engineId = def?.chipId;
-    const enginePool = gameRef.current.market.tiers[1]?.row || [];
-    const inResale = (gameRef.current.resaleRow || []).includes(uiChip.uid);
-    if (!enginePool.includes(uiChip.uid) && !inResale) {
-      setToast({ kind: "error", text: "Chip is no longer in the market." });
-      return;
-    }
-    const into = pickAcquireTarget(gameRef.current, state.youId, engineId);
-    if (!into) {
-      setToast({ kind: "error", text: "No legal install target for this chip." });
-      return;
-    }
-    runAction("acquire", { chip: uiChip.uid, into }, null, "Chip installed.");
+  // §20.4–20.7 — economy directives (all free of Actions). Construction
+  // advances at Upkeep off the city's Output via its guns/butter slider.
+  function onBuild(hexId, chipId) {
+    return runAction("build", { at: hexId, chipId }, null, "Build queued.");
+  }
+  function onUpgrade(hexId, chipUid) {
+    return runAction("upgrade", { at: hexId, chip: chipUid }, null, "Upgrade queued.");
+  }
+  function onRush(hexId) {
+    return runAction("rush", { at: hexId }, null, "Build rushed.");
+  }
+  function onSetSlider(hexId, value) {
+    return runAction("set-slider", { at: hexId, value });
   }
 
   function onEndTurn() {
@@ -551,6 +582,10 @@ export default function Prototype({ config, onNewGame }) {
           onClose={() => setSelectedHexId(null)}
           onActivate={(h) => onActivate(h)}
           onRecruit={(h) => onRecruit(h)}
+          onBuild={onBuild}
+          onUpgrade={onUpgrade}
+          onRush={onRush}
+          onSetSlider={onSetSlider}
           onContest={(p) => {
             onContest(p);
             setSelectedHexId(null);
@@ -615,18 +650,6 @@ export default function Prototype({ config, onNewGame }) {
         </TitledWindow>
       )}
 
-      {menuPanel === "market" && (
-        <MarketBand
-          tiers={state.marketTiers}
-          resale={state.resaleItems}
-          scrap={you.scrap}
-          actions={you.actions}
-          isYourTurn={isYourTurn}
-          onAcquire={(item) => onAcquire(item)}
-          onClose={() => setMenuPanel(null)}
-        />
-      )}
-
       {menuPanel === "locations" && (
         <TitledWindow title="Locations" icon={ICON.shield} onClose={() => setMenuPanel(null)}>
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -644,7 +667,7 @@ export default function Prototype({ config, onNewGame }) {
                   onClick={() => { setMenuPanel(null); setSelectedHexId(h.id); }}
                   style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 10px", borderRadius: 8, border: "1px solid rgba(192,124,56,0.3)", background: "rgba(0,0,0,0.25)", color: HUD.text, cursor: "pointer", textAlign: "left" }}
                 >
-                  <ControlMeter sections={h.control.sections} foothold={h.control.foothold} footholdCap={h.control.footholdCap} size={40} />
+                  <ControlMeter sections={h.control.sections} loyalty={h.control.loyalty} danger={h.control.loyaltyDanger} size={40} />
                   <div style={{ display: "flex", flexDirection: "column" }}>
                     <span style={{ fontFamily: HUD.font, fontSize: 16, fontWeight: 700 }}>
                       {UI_LOCATIONS[h.locationId]?.name || h.locationId}
@@ -879,34 +902,3 @@ function TechWheelOverlay({ you, state, onAssign, onClose }) {
   );
 }
 
-// Pick an install target for an Acquire — mirrors the AI's logic so the
-// user doesn't have to navigate a sub-modal for the demo. Returns
-// { unit } or { location } shaped param for performAction("acquire").
-function pickAcquireTarget(game, pid, engineChipId) {
-  const chipDef = ENGINE_CHIPS[engineChipId];
-  if (!chipDef) return null;
-  const slotsUsed = (chipUids) => chipUids.reduce((n, c) => {
-    const id = game.chips[c]?.chipId;
-    if (id === "capital") return n + 1;
-    return n + (ENGINE_CHIPS[id]?.slots ?? 1);
-  }, 0);
-
-  if (chipDef.kind === "unit") {
-    const mine = Object.values(game.units)
-      .filter((u) => u.owner === pid)
-      .sort((a, b) => b.strength - a.strength);
-    for (const u of mine) {
-      if (slotsUsed(u.chips) + chipDef.slots <= CONFIG.unit.baySlots) {
-        return { unit: u.uid };
-      }
-    }
-    return null;
-  }
-  const mine = Object.values(game.locations).filter((l) => l.controller === pid);
-  for (const loc of mine) {
-    if (slotsUsed(loc.chips) + chipDef.slots <= loc.chipSlots) {
-      return { location: loc.hexId };
-    }
-  }
-  return null;
-}
