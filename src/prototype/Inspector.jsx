@@ -79,13 +79,17 @@ function locationModel(state, hex, actions) {
   ).length;
   const you = state.players[state.youId];
 
-  let footholdText;
+  let loyaltyText;
   if (!ctrl) {
-    footholdText = "Inactive — no player holds all three sections.";
+    loyaltyText = "Inactive — no player holds all three sections.";
   } else if (hasCapital) {
-    footholdText = "Capital installed — this location cannot decay.";
+    loyaltyText = "Capital installed — Loyalty is locked at full; this location cannot decay.";
   } else {
-    footholdText = `+${control.foothold} of ${control.footholdCap}. Rises while the holder's unit garrisons here, falls when it leaves.`;
+    const lv = control.loyalty ?? 0;
+    const max = control.loyaltyMax ?? 8;
+    loyaltyText = control.loyaltyDanger
+      ? `Loyalty ${lv} of ${max} — failing. While garrisoned it climbs; left at 0 and neglected, one Control section peels to neutral each Upkeep.`
+      : `Loyalty ${lv} of ${max}. Rises while the holder's unit garrisons here, falls when it leaves; Control only peels once Loyalty hits 0.`;
   }
 
   const tabs = [
@@ -106,8 +110,8 @@ function locationModel(state, hex, actions) {
           <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
             <ControlMeter
               sections={control.sections}
-              foothold={control.foothold}
-              footholdCap={control.footholdCap}
+              loyalty={control.loyalty}
+              danger={control.loyaltyDanger}
               size={96}
             />
             <div style={{ display: "flex", flexDirection: "column", gap: 7, flex: 1 }}>
@@ -116,9 +120,9 @@ function locationModel(state, hex, actions) {
               ))}
             </div>
           </div>
-          <Field label="Foothold">
+          <Field label="Loyalty">
             <div className="pc-prose" style={PROSE}>
-              {footholdText}
+              {loyaltyText}
             </div>
           </Field>
         </div>

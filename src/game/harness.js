@@ -2,7 +2,7 @@
 // runs the turn loop, and exercises the effect library so each engine
 // layer can be verified without the UI.
 import { createGame } from "./setup.js";
-import { startTurn, endTurn } from "./turn.js";
+import { startTurn, endTurn, tickLoyalty } from "./turn.js";
 import { performAction } from "./actions.js";
 import { applyEffect } from "./effects.js";
 import { activePlayerId } from "./targeting.js";
@@ -106,7 +106,7 @@ for (let i = 0; i < 3 && prize.controller !== me; i++) {
   const r = performAction(game, "contest", { unit: champ.uid });
   line(`   roll ${r.initiatorTotal} vs ${r.defenderTotal} -> ${r.won ? "won" : "lost"}; sections [${prize.sections.join(", ")}]`);
 }
-line(`  -> controller ${prize.controller || "neutral"}, foothold ${prize.foothold}`);
+line(`  -> controller ${prize.controller || "neutral"}, loyalty ${prize.loyalty}`);
 
 // Raid: drop an enemy unit on the captured Location (no neutral sections
 // remain, so raids are legal) and contest it directly.
@@ -115,6 +115,56 @@ victim.node = prize.hexId;
 const raid = performAction(game, "contest", { unit: champ.uid, target: victim.uid });
 line(`  raid ${victim.uid} (owner ${victim.owner}): roll ${raid.initiatorTotal} vs ${raid.defenderTotal} -> ${raid.won ? "won" : "lost"}`);
 line(`   ${victim.uid} retreated to ${victim.node}, immobilizedUntil ${victim.immobilizedUntil}`);
+
+// --- §18.2 Loyalty (replaces foothold/decay) ---
+// A fresh game so the scenario is clean: give one player two fresh, non-
+// Capital captures — garrison one, neglect the other — then run Upkeep
+// ticks and watch (a) the garrisoned one climb and hold, (b) the neglected
+// one bleed to Loyalty 0 and peel Control to neutral, and (c) the
+// loyalty_failing warning fire BEFORE the first Control peel.
+line("\nLOYALTY  (§18.2 — 8-slice pie; Control peels only at Loyalty 0)");
+{
+  const lg = createGame({ seed });
+  const pid = activePlayerId(lg);
+  const freebies = Object.values(lg.locations).filter((l) => l.controller == null).slice(0, 2);
+  const [garr, negl] = freebies;
+  const setCaptured = (loc) => {
+    loc.controller = pid;
+    loc.loyaltyOwner = pid;
+    loc.sections = [pid, pid, pid];
+    loc.loyalty = CONFIG.loyalty.start;
+    loc.chips = loc.chips.filter((c) => lg.chips[c]?.chipId !== "capital"); // not inert
+  };
+  setCaptured(garr);
+  setCaptured(negl);
+  // Park every unit `pid` owns on the garrisoned Location; the neglected
+  // one is left with no friendly unit.
+  for (const u of Object.values(lg.units)) if (u.owner === pid) u.node = garr.hexId;
+
+  line(`  captured ${LOCATIONS[garr.locationId].name} (will garrison) and ${LOCATIONS[negl.locationId].name} (will neglect), both at L${CONFIG.loyalty.start}`);
+
+  let firstFailingAt = null;
+  let firstPeelAt = null;
+  for (let t = 1; t <= 12 && negl.loyaltyOwner === pid; t++) {
+    const before = lg.log.length;
+    tickLoyalty(lg, pid);
+    const evs = lg.log.slice(before).map((e) => e.name);
+    if (firstFailingAt == null && evs.includes("loyalty_failing")) firstFailingAt = t;
+    if (firstPeelAt == null && evs.includes("control_peeled")) firstPeelAt = t;
+    const flags = [
+      evs.includes("loyalty_failing") ? "WARN" : "",
+      evs.includes("control_peeled") ? "PEEL" : "",
+    ].filter(Boolean).join("+");
+    line(`   upkeep ${t}: garrison L${garr.loyalty}, neglected L${negl.loyalty == null ? "—" : negl.loyalty} sections [${negl.sections.map((s) => s.slice(0, 3)).join(",")}]${flags ? "  " + flags : ""}`);
+  }
+  const held = garr.controller === pid;
+  const neutralised = negl.controller == null && negl.sections.every((s) => s === "neutral");
+  const warnFirst = firstFailingAt != null && firstPeelAt != null && firstFailingAt < firstPeelAt;
+  line(`  garrisoned ${LOCATIONS[garr.locationId].name}: held=${held}, loyalty=${garr.loyalty} (ceiling ${CONFIG.loyalty.ceiling})`);
+  line(`  neglected ${LOCATIONS[negl.locationId].name}: peeled to neutral=${neutralised}`);
+  line(`  warning first @upkeep ${firstFailingAt}, first peel @upkeep ${firstPeelAt} -> warning precedes peel: ${warnFirst}`);
+  line(`  PASS: ${held && neutralised && warnFirst ? "yes" : "NO"}`);
+}
 
 // --- Layer 3.3 — Acquire + Activate + tech progression ---
 line("\nMARKET / ACQUIRE  (Layer 3.3)");

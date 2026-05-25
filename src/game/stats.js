@@ -31,7 +31,7 @@ export function recomputeStats(state) {
 
 // Tech (§3) is the base start plus one per Labs chip in a player's
 // fully-controlled locations. Called after any change that can shift
-// either side — Acquire, captureLocation, foothold decay — and emits
+// either side — Acquire, captureLocation, Loyalty peel — and emits
 // tech_changed for each player whose total moved.
 export function recomputeTech(state) {
   for (const p of Object.values(state.players)) {
