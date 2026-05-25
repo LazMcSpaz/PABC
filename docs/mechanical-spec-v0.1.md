@@ -96,6 +96,12 @@ with a unique instance id (`uid`). The engine operates on `uid`s.
 
 ### 4.1 The Market and tech tiers
 
+> **Superseded by §20 (v0.2+).** The shared three-row Market is **retired**;
+> chips are no longer acquired from a shared pool but **built locally** at
+> Locations you control, gated by Tech Level × Loyalty. The Tech-Level
+> thresholds below survive, reframed from "which Market row you may shop" to
+> "which chip tier you may build." This text is kept for history.
+
 The Market is **three rows, one per tech tier** — tier 1 shows **5** chips
 face-up, tier 2 shows **4**, tier 3 shows **3**. Each row refills from its
 tier's `marketDeck`.
@@ -1264,6 +1270,9 @@ separate so players never conflate them.
     **permanent** (a floor); Lab Research is **conditional** on holding the Lab.
 - **Market gating moves to Tech *Level*:** tier 2 at L3, tier 3 at L5
   (replaces the old `CONFIG.tech.tier2 = 3` / `tier3 = 6` raw-score gates).
+  **§20 (v0.2+) reframes this again** as chip-*build* gating — the same L3/L5
+  thresholds now gate which chip tier you may **build**, since the Market is
+  retired.
 
 ### 17.3 Losing Research (Labs destroyed/captured) and re-spec
 
@@ -2085,3 +2094,182 @@ reaction window for the surprised side.
 - **AI fog policy** by difficulty — where, if ever, partial reveal kicks in.
 - **Fog-aware pathing** — does a Move **halt on first contact** with a newly
   revealed enemy (interrupt-on-sighting)? Designed later.
+
+## 20. Economy & City Development (v0.2+)
+
+**Supersedes** the Market (§4.1), the **Acquire** action (§8), and the
+market-tier gating of §4.1 / §17.2 — all reframed below as local
+chip-*building*. Builds on **Loyalty** (§18.2) as the city development
+ladder. Where it conflicts with earlier text, §20 wins. **Numeric values
+are TBD.**
+
+### 20.1 Design intent
+
+The economy **is** the chip system. With the shared Market gone, chips
+become the entire output of your territory: every city is a workshop, and
+"developing" a place means **integrating** it (raising Loyalty) so it can
+build better gear and hold more of it. This preserves the slot-scarce,
+salvage/inherit chip lifecycle (§6.3.3, §16.4) and adds the **tall-vs-wide
+investment axis** the flat build system lacked — without a second build
+vocabulary (no buildings tree) and without per-chip research gating (your
+limited wheel stays a *band* gate, §20.6).
+
+### 20.2 The Market is retired
+
+- Remove the three-row tiered Market, the `marketDeck ×3`, the market churn,
+  and the **Acquire** action (§8).
+- Chips are no longer drawn from a shared pool; they are **built** at
+  Locations you control (§20.4) and **upgraded in place** (§20.5).
+- Tech-Level gating **survives**, reframed as build-gating (§20.6).
+
+### 20.3 City Output and the guns/butter slider
+
+- Each controlled Location has an **Output** (a scrap-equivalent per turn):
+  its base production (the §6.3 rolled value) **+** yield from installed
+  economy chips (**+** an optional Loyalty multiplier — TBD).
+- A per-city **build slider** `f ∈ [0,1]`, set by the controller, splits
+  Output at each Upkeep:
+  - `scrapBank += (1 − f) · Output` — **liquid scrap** to the player's pool.
+  - `buildProgress += f · Output` — toward this city's **active build**.
+- This is the whole economic decision: build faster *here* vs. bank liquid
+  scrap to use *anywhere* (§20.10). The slider persists until changed; the
+  AI sets its own.
+
+> **Interaction:** this **replaces the flat production-collection step**
+> (`collectProduction`) of the turn loop — a city's scrap income is now the
+> butter side of its slider, not a separate flat payout.
+
+### 20.4 Building chips (replaces Acquire)
+
+- Click an **empty slot** → a menu of **buildable chips** (§20.6 governs
+  what shows). Selecting one sets the city's `activeBuild`; it consumes the
+  city's construction throughput (§20.3) and may be hurried with scrap
+  (§20.7).
+- A chip carries a **build cost** `B` in the same units as Output. When
+  `buildProgress ≥ B` the chip **completes and installs** into the chosen
+  slot; overflow carries to the next build.
+- **Unit chips** require a **friendly unit stationed at the building
+  Location**; on completion the chip installs into **that unit's Bay**
+  (cities arm the army). **Location chips** install into the Location's own
+  slot.
+- **Salvage** (§16.4) remains a *second* source of chips for units in the
+  field — building is the primary source, salvage the battlefield one.
+
+### 20.5 Upgrading chips in place
+
+- Click an **installed chip** → its **next upgrade tier**, if any (e.g.
+  Lab 1 → Lab 2; the §17 `labs` → `advanced-lab` pair is exactly such a
+  chain). Built off the slider like a fresh chip and **replacing in place**
+  — same slot, so **scarcity is preserved**.
+- Each upgrade tier has its own Tech-Level / Loyalty requirements (§20.6)
+  and its own build cost.
+- For the capture-destruction rule (§6.3.3), a chip's "newest" timestamp =
+  **last built *or* upgraded** (§20.8).
+
+### 20.6 Gating: Tech Level × Loyalty (reframes §4.1 / §17.2)
+
+Two **independent** gates, **both** required, plus a free slot:
+
+- **Tech Level** gates *what exists for you to build at all*: a chip of
+  `techLevel` T needs player Tech Level ≥ `{ 1→1, 2→3, 3→5 }[T]` — the same
+  §17.2 thresholds, now applied to **building** instead of shopping.
+- **Loyalty** gates *what this particular city can build*: rungs on the 0–8
+  Loyalty pie (§18.2) unlock successively more advanced chips, and a high
+  rung grants the **+1 chip slot**. A fresh capture at low Loyalty builds
+  only basics; an integrated city builds the best.
+
+**Display rule (a UI contract — implement exactly):**
+- *Build menu* lists **only** chips your **Tech Level** allows. Among those,
+  any blocked by **Loyalty** appear **greyed** with the reason (e.g. *needs
+  Loyalty 5*). Chips your Tech Level forbids are **not shown at all**.
+- *Upgrade view* **always** shows the next tier (so the evolution path is
+  visible even early), **greyed** if **either** Tech Level **or** Loyalty is
+  short, with the reason.
+
+### 20.7 Rush-building
+
+- A player may spend **banked scrap** to add to (or complete) a city's
+  `buildProgress` immediately — the bridge that makes the slider **two-way**:
+  hoarded scrap is stored construction potential, dumped when speed matters
+  ("I need that fortress chip *this* turn"). *(Rush rate — scrap per
+  build-point — and whether a single rush can fully complete a build: TBD.)*
+
+### 20.8 Capture, loss, and Loyalty drops
+
+- **On capture** (§6.3.3, unchanged in spirit): the captor inherits the
+  Location's chips **at their current upgrade tier**, minus the **newest**
+  (last built/upgraded), which is destroyed.
+- **In-progress construction** at capture is **forfeited** (progress lost).
+  *(Reasonable default; confirm.)*
+- **Loyalty drop below an unlock rung:** already-built chips **stay**, but
+  you **cannot build** anything above the current rung until re-integrated.
+  If Loyalty falls below the **bonus-slot** rung, the chip occupying that
+  slot is **at risk** — ejected/destroyed **newest-first**, mirroring the
+  tech-wheel LIFO peel (§17.3).
+
+### 20.9 Chip upkeep (selective, thematic)
+
+- Most chips run free. **Certain powerful chips carry an authored
+  `upkeep`** (scrap/turn) — a steady supply their flavor demands (a reactor
+  needs fuel). Charged from the controller's scrap at Upkeep.
+- **If unpaid** (insufficient scrap), the chip goes **dormant** — the
+  `disabled` flag (§12.5) suppresses its passives — and **reactivates** when
+  the controller can pay again. It is **not** destroyed.
+- This is the **opt-in, content-driven** alternative to blanket empire
+  upkeep: the scrap drain scales with how much heavy gear you run, gives
+  powerful chips a real ongoing cost, and needs no global bookkeeping tax.
+
+### 20.10 What scrap is for (the liquid half)
+
+Construction is **sticky and local**; **scrap is liquid and global** — its
+whole value is that it goes *anywhere*:
+- **Army logistics** — Recruit (§16.3), reinforce / heal (§16.5).
+- **Diplomacy** — the entire §18 deal economy: gifts, tribute, trade-route
+  flows, funding an ally. **The diplomacy victory runs on scrap.**
+- **Tempo** — Preparation modifiers (§7), activated abilities / `CONVERT`
+  (§12.7), covert ops (§19.8), and **rush-building** (§20.7).
+- **Chip upkeep** (§20.9).
+- **Narrative sinks** — encounters / quests (§15) may demand or grant scrap.
+
+So the slider **expresses strategy**: a builder leans construction
+(permanent local power), a diplomat leans scrap (liquid power to buy the
+board and rush Recognition), and a warmonger can't neglect either — the army
+needs scrap *and* its gear needs construction.
+
+### 20.11 Engine mapping (design only, not yet built)
+
+- **Location state:** add `output` (derived), `buildSlider` (`f`),
+  `buildProgress`, and `activeBuild { kind: build|upgrade, chipId,
+  costRemaining, targetSlot, targetUnit? }`.
+- **Chip schema:** add `buildCost`, `upgradesTo?` (next-tier chip id),
+  `loyaltyReq`, and optional `upkeep` (keep existing `techLevel`).
+- **Player state:** `scrap` (was `resource`) unchanged; chip `upkeep` is
+  summed and charged at Upkeep, disabling unpaid chips.
+- **Remove:** `marketDeck ×3`, the Market-row state, `churnMarket`
+  (turn.js), and the Acquire action handler.
+- **Turn-loop Upkeep order:** compute `output` → apply slider (bank scrap +
+  advance `buildProgress`) → complete any finished build/upgrade → charge
+  chip upkeep (disable the unpaid) — this **replaces** `collectProduction`,
+  and runs alongside the existing foothold/Loyalty resolution (§18.2).
+- **New effects:** `START_BUILD`, `UPGRADE_CHIP`, `RUSH_BUILD`,
+  `SET_BUILD_SLIDER`.
+- **New events:** `build_started`, `build_completed`, `chip_upgraded`,
+  `chip_dormant` / `chip_reactivated`, `slider_changed`.
+- **UI contract:** the slot-click build menu and chip-click upgrade view,
+  per the §20.6 display rule.
+
+### 20.12 Open questions / tables to fill
+
+- **Output** base and any Loyalty multiplier; per-chip `buildCost`; the
+  `loyaltyReq` rungs and which rung grants the **+1 slot**.
+- **Rush rate** (scrap per build-point) and whether one rush can fully
+  finish a build.
+- **Build queue depth** — one active build per city, or a short queue?
+- **Chip upkeep** values, which chips carry them, and dormant↔active
+  hysteresis.
+- **Unit-chip build interrupted** — if the stationed unit leaves mid-build,
+  pause or forfeit?
+- **Tech-Level *loss*** (the wheel peel, §17.3) vs. already-built
+  higher-tier chips — parallel the Loyalty-drop rule, or leave built chips
+  safe?
+- **In-progress build on capture** — forfeit assumed; confirm.
