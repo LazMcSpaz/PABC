@@ -12,6 +12,7 @@ import { sweepDeferred } from "./deferred.js";
 import { evaluateTriggers } from "./triggers.js";
 import { evaluateConditionalBeats } from "./quests.js";
 import { applyOutputAndBuilds, chargeChipUpkeep, enforceLoyaltySlotCap } from "./economy.js";
+import { runDiplomacyRound } from "./diplomacy.js";
 
 function expireModifiers(state, pid) {
   const own = new Set(
@@ -197,6 +198,10 @@ function runRoundEnd(state) {
   evaluateConditionalBeats(state);
   expirePlacementMarkers(state);
   decayWorldCounters(state);
+  // §18.8/§18.12 — the diplomacy round cadence: Menace decay, Standing
+  // drift, flows, AI-to-AI politics, vassal tick, coalitions, then the
+  // Recognition win check (sets winnerId if a peaceful victory has landed).
+  runDiplomacyRound(state);
 }
 
 // v0.2 §16.5 — advance in-transit field reinforcements. Each round the

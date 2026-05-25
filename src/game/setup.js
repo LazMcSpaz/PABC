@@ -1,13 +1,14 @@
 // Game setup — builds the initial GameState (mechanical-spec §13.3):
 // the board, players, locations, units, and the tiered Market.
 import { CONFIG } from "./config.js";
-import { FACTIONS, LOCATIONS, CAPITAL, ABILITIES, REACTIVES } from "./content.js";
+import { FACTIONS, MINOR_FACTIONS, LOCATIONS, CAPITAL, ABILITIES, REACTIVES, factionDef } from "./content.js";
 import { FIELD_ENCOUNTERS } from "./content/index.js";
 import { makeRng } from "./rng.js";
 import { createIdGen } from "./ids.js";
-import { buildHexGrid, generateLayout, assignTerrainFeatures } from "./board.js";
+import { buildHexGrid, generateLayout, assignTerrainFeatures, bfsDistances } from "./board.js";
 import { recomputeInfluence } from "./influence.js";
 import { recomputeVisibility } from "./visibility.js";
+import { ensureDiplomacy, seedStanding } from "./diplomacy.js";
 
 // A fresh unit with the full v0.2 field set (§16.3 / plan). `moveRemaining`
 // seeds to base Movement; the owner's Upkeep refreshes it from effective.
@@ -36,10 +37,15 @@ export function createGame({
   seed = Date.now() & 0xffffffff,
   factionIds,
   humanFactionId = null,
+  minors = [], // §18.4.1 — a VARIABLE subset of minor faction ids to seed
 } = {}) {
   const rng = makeRng(seed);
   const uid = createIdGen();
-  const playing = factionIds || Object.keys(FACTIONS); // v0.1: default all four
+  const majors = factionIds || Object.keys(FACTIONS); // v0.1: default all four
+  // §18.4.1 minors join as full factions (players) with a seat + unit. The
+  // default headless game passes none, so it is byte-for-byte unchanged.
+  const seededMinors = (minors || []).filter((m) => MINOR_FACTIONS[m]);
+  const playing = [...majors, ...seededMinors];
 
   const grid = buildHexGrid(CONFIG.testMap);
   const layout = generateLayout(rng, grid, FACTIONS, LOCATIONS);
@@ -71,6 +77,12 @@ export function createGame({
       id: fid,
       factionId: fid,
       isAI: humanFactionId != null && humanFactionId !== fid,
+      // §18.4.1 minors are never the human (playable:false).
+      isMinor: !!MINOR_FACTIONS[fid],
+      // §18.5 global reputations — Menace (unjustified aggression) and Honor
+      // (keeping your word). Tolerance / trust-floor are DERIVED, not stored.
+      menace: 0,
+      honor: CONFIG.diplomacy.honor.start,
       resource: 0,
       vp: 0,
       tech: CONFIG.tech.start,
@@ -151,9 +163,29 @@ export function createGame({
     };
   }
 
+  // §18.4.1 — give each seeded minor a SEAT: it takes a free neutral
+  // Location nearest its associated major (so it sits as a regional power
+  // near its kin/rival/foil). Landless minors (no free seat) stay political-
+  // only actors. Done before units so the seat can host the minor's unit.
+  const minorSeat = {}; // minor fid -> hexId
+  for (const fid of seededMinors) {
+    const major = MINOR_FACTIONS[fid].associatedMajor;
+    const majorStart = layout.factionStart[major];
+    const free = Object.values(locations).filter((l) => !l.controller && !Object.values(minorSeat).includes(l.hexId));
+    if (!free.length) continue;
+    const dist = majorStart ? bfsDistances(grid.adjacency, majorStart) : {};
+    free.sort((a, b) => (dist[a.hexId] ?? 99) - (dist[b.hexId] ?? 99));
+    const seat = free[0];
+    seat.controller = fid;
+    seat.loyaltyOwner = fid;
+    seat.sections = [fid, fid, fid];
+    seat.loyalty = CONFIG.loyalty.ceiling;
+    minorSeat[fid] = seat.hexId;
+  }
+
   // --- units: CONFIG.startingUnits per faction (§16.3), on/near start ---
   const units = {};
-  for (const fid of playing) {
+  for (const fid of majors) {
     const start = layout.factionStart[fid];
     for (let i = 0; i < (CONFIG.startingUnits || 1); i++) {
       // First unit on the start Location; extras on an adjacent
@@ -169,6 +201,12 @@ export function createGame({
       const u = uid("unit");
       units[u] = makeUnit(u, fid, node, FACTIONS[fid].name);
     }
+  }
+  // §18.4.1 — one defending unit on each seated minor's seat.
+  for (const fid of seededMinors) {
+    if (!minorSeat[fid]) continue;
+    const u = uid("unit");
+    units[u] = makeUnit(u, fid, minorSeat[fid], factionDef(fid).name);
   }
 
   // §20.2 — the Market is retired. Chips are no longer drawn from a shared
@@ -271,5 +309,11 @@ export function createGame({
   // Capital + ZoC). Quietly: no spot/explore events at game creation.
   state.visibility = {};
   for (const fid of playing) recomputeVisibility(state, fid, { emitEvents: false });
+  // §18.4–§18.5 — init the diplomacy layer + global reputations, then seed
+  // faction↔faction Standing from temperament compatibility + relationship
+  // + a PER-SEED jitter (alliance variety). The jitter uses an ISOLATED rng
+  // so the main contest stream is untouched; human rows start neutral.
+  ensureDiplomacy(state);
+  seedStanding(state, makeRng((seed ^ 0x517cc1b7) >>> 0));
   return state;
 }

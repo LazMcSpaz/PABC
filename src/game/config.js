@@ -109,6 +109,68 @@ export const CONFIG = {
     intelDetection: 1, // §19.8 Intelligence vision-branch detection
     terrainSeedDensity: { elevation: 0.18, cover: 0.22 }, // §19.4 share of terrain hexes
   },
+
+  // §18.4–§18.13 Diplomacy. Standing is pairwise (numeric); Menace/Honor are
+  // global player reputations; Tolerance & the trust floor are DERIVED gates.
+  // All TBD-in-spec, inline here and tunable.
+  diplomacy: {
+    // §18.5 Standing tiers (numeric thresholds). Vassal is a separate flag.
+    standingMin: -10, standingMax: 12,
+    tiers: { hostile: -6, wary: -3, neutral: -1, friendly: 5, allied: 8 }, // value >= → tier (0 = Neutral)
+    pactStandingReq: 6, // §18.7 Standing needed to form a pact (Friendly+)
+    driftPerRound: 1, // §18.5 Standing drifts toward Neutral when unreinforced…
+    grudgeDriftScale: 1, // …modulated by the faction's grudge (high grudge → slower fade)
+    seedJitter: 3, // §18.4.1 per-seed jitter on seeded faction↔faction standing
+
+    // §18.5 Menace — reputation for UNJUSTIFIED aggression, scored vs target.
+    menace: {
+      base: 3, // magnitude of a single attack's Menace swing
+      decayPerRound: 1, // slow decay with clean play / time
+      min: 0, max: 24,
+    },
+    // §18.5 Honor — reputation for keeping your word (global).
+    honor: {
+      start: 4, min: -12, max: 12,
+      keepGain: 1, // honoring a pact/deal to term
+      breakLoss: 5, // breaking a pact call / treaty / promise (sharp)
+      mediateGain: 2, // §18.7 peacemaker reputation
+      decayToward: 0, decayPerRound: 0, // no passive decay by default
+    },
+    // §18.5 Tolerance = base + standing·perStanding, ± by the faction's
+    // aggression (a warlord tolerates a bloodier ally than a pacifist).
+    tolerance: { base: 5, perStanding: 0.6, aggressionScale: 8 },
+    // §18.5 trust floor: Honor must exceed this to deepen — liars hit a wall.
+    trustFloor: { base: -2, distrustScale: 6 }, // higher faction.trust → higher floor
+
+    // §18.8 Coalition — threat(player)=wM·Menace + wP·powerLead. Forms past
+    // `threshold`, dissolves below `dissolve` (hysteresis).
+    coalition: { wM: 1, wP: 2, threshold: 16, dissolve: 11, vpWeight: 1.5, territoryWeight: 1, standingHit: 4 },
+
+    // §18.10 Recognition victory — Allied=1, Vassal=2; win at threshold while
+    // Menace < each contributor's Tolerance and Honor > its floor. Threshold
+    // ≈ a majority of the field's worth of acknowledgement (e.g. 3 vassals,
+    // or 2 vassals + 2 allies) so the peaceful win is earned, not trivial.
+    recognition: { alliedWeight: 1, vassalWeight: 2, threshold: 6 },
+
+    // §18.9 Vassalage.
+    vassal: {
+      tributeScrap: 2, // tribute flow per round to the lord
+      tributeResearch: 0,
+      resentmentPerRound: 1, // base autonomy/resentment growth
+      rebellionThreshold: 10, // resentment past this → rebel
+      lordWeaknessScale: 2, // a weak lord raises resentment faster
+    },
+
+    // §18.8 AI valuation / cadence dials.
+    ai: {
+      relationshipBiasPerStanding: 0.5, // bias in wouldAccept, scales with Standing
+      sociabilityScale: 4, // eagerness to seek pacts
+      localityRadius: 3, // §18.4.1 scope:"local" minors only engage within this hop radius
+      giftStandingPerScrap: 0.5, // Standing bought per scrap gifted
+      warGrudgeThreshold: -5, // AI declares war when Standing falls to/below this (+ aggression)
+      vassalPowerRatio: 0.4, // offer/accept vassalage when weak side power < ratio·strong side
+    },
+  },
 };
 
 // Strategic-value ordering helper.

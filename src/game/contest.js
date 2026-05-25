@@ -7,11 +7,12 @@
 import { emit } from "./events.js";
 import { openReactionWindow } from "./reactions.js";
 import { CONFIG } from "./config.js";
-import { CHIPS, LOCATIONS, FACTIONS } from "./content.js";
+import { CHIPS, LOCATIONS, FACTIONS, factionDef } from "./content.js";
 import { recomputeStats, recomputeResearch } from "./stats.js";
 import { recomputeInfluence } from "./influence.js";
 import { recomputeVisibility, recomputeVisibilityFor, isUnitVisibleTo } from "./visibility.js";
 import { onLocationCaptured, onRaidWon } from "./standing.js";
+import { onAttack } from "./diplomacy.js";
 import { makeUnit } from "./setup.js";
 import { TECH_NODES, hasTechNode } from "./tech.js";
 
@@ -223,7 +224,7 @@ function strandReinforcementsFrom(state, capturedHex) {
     const target = state.units[r.targetUnit];
     const node = target ? target.node : capturedHex;
     const u = state.nextId("unit");
-    state.units[u] = makeUnit(u, r.owner, node, FACTIONS[r.owner].name);
+    state.units[u] = makeUnit(u, r.owner, node, factionDef(r.owner)?.name || r.owner);
     state.units[u].baseStrength = Math.min(CONFIG.unit.baseStrengthCap, r.amount);
     recomputeStats(state);
     emit(state, "reinforcement_arrived", { player: r.owner, unit: u, stranded: true });
@@ -631,6 +632,11 @@ export function runContest(state, { pid, params, ctx = {} }) {
   if (won && t.kind === "raid" && loserUid && state.units[loserUid]) {
     offerRetreat(state, state.units[loserUid], ctx, params.retreatTo);
   }
+
+  // §18.5/§18.7 — feed the political layer: the attacker takes a Menace
+  // swing vs the target's temperament, breaks any pact/promise with them,
+  // and establishes the war-state. (The combat math above is untouched.)
+  if (ambushDefOwner) onAttack(state, pid, ambushDefOwner);
 
   // §16.6 veterancy — credit survivors and the winning unit, then promote.
   tickVeterancy(state, [attackerUnit, defenderUnit], winnerUnit?.uid ?? null);

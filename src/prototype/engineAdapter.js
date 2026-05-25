@@ -15,6 +15,11 @@ import {
   buildableChips, upgradeOption, slotCapacity, slotsUsed, locationOutput,
 } from "../game/economy.js";
 import { isUnitVisibleTo } from "../game/visibility.js";
+import { factionDef } from "../game/content.js";
+import {
+  recognitionScore, threatScore, tolerance, trustFloor, standingTier, getStanding,
+  arePacted, atWar, vassalLord, coalitionAgainst, factionIds,
+} from "../game/diplomacy.js";
 import {
   LOCATIONS as UI_LOCATIONS,
   UNIT_UPGRADES,
@@ -319,8 +324,12 @@ export function adaptState(state) {
       actions: { ...p.actions },
       unitCap: CONFIG.baseUnitCap + countTrainingGrounds(state, pid),
       isAI: !!p.isAI,
+      isMinor: !!p.isMinor,
       hand: [...p.hand],
       handChips: adaptChipsWithUids(state, p.hand),
+      // §18.5 global reputations (public).
+      menace: p.menace || 0,
+      honor: p.honor == null ? CONFIG.diplomacy.honor.start : p.honor,
     };
   }
 
@@ -353,6 +362,9 @@ export function adaptState(state) {
     fog: vis
       ? { explored: [...vis.explored], visible: [...vis.visible] }
       : null,
+    // §18 — the political layer for the Diplomacy screen. Standing &
+    // reputation are PUBLIC (fog limits positions, not politics).
+    diplomacy: adaptDiplomacy(state, viewer),
     // Surface the raw engine state so Phase-4 action handlers can reach
     // engine APIs without re-deriving everything.
     engineState: state,
@@ -428,6 +440,69 @@ function adaptEconomy(state, loc) {
     buildMenu,
     upgrades,
   };
+}
+
+// §18 — the Diplomacy screen view from `viewer`'s seat: its global
+// reputations + Recognition progress, and a row per other faction with
+// Standing, relation, the derived gates, and a courtship hint.
+function adaptDiplomacy(state, viewer) {
+  if (!state.diplomacy || !viewer) return null;
+  const dip = state.diplomacy;
+  const me = state.players[viewer];
+  const rec = recognitionScore(state, viewer);
+  const factions = factionIds(state).filter((f) => f !== viewer).map((f) => {
+    const def = factionDef(f) || {};
+    const sToward = getStanding(state, f, viewer); // their Standing toward you
+    const sFrom = getStanding(state, viewer, f); // yours toward them
+    const vof = vassalLord(state, f);
+    return {
+      id: f,
+      name: def.name || f,
+      color: def.color || "#888",
+      tier: def.tier || "major",
+      temperament: def.temperament,
+      scope: def.scope,
+      standing: sToward,
+      standingTier: standingTier(sToward),
+      yourStanding: sFrom,
+      pacted: arePacted(state, f, viewer),
+      atWar: atWar(state, f, viewer),
+      vassalOfYou: vof === viewer,
+      lordOfYou: vassalLord(state, viewer) === f,
+      inCoalition: (coalitionAgainst(state, viewer)?.members || []).includes(f),
+      menace: state.players[f]?.menace || 0,
+      honor: state.players[f]?.honor ?? CONFIG.diplomacy.honor.start,
+      tolerance: Math.round(tolerance(state, f, viewer) * 10) / 10, // their Menace tolerance of you
+      trustFloor: Math.round(trustFloor(state, f) * 10) / 10, // Honor they require
+      threat: Math.round(threatScore(state, f) * 10) / 10,
+      wants: factionWants(def),
+    };
+  });
+  return {
+    youId: viewer,
+    menace: me?.menace || 0,
+    honor: me?.honor ?? CONFIG.diplomacy.honor.start,
+    threat: Math.round(threatScore(state, viewer) * 10) / 10,
+    recognition: { score: rec.total, threshold: CONFIG.diplomacy.recognition.threshold, contributors: rec.contributors, met: rec.total >= CONFIG.diplomacy.recognition.threshold },
+    coalitionAgainstYou: coalitionAgainst(state, viewer)?.members || null,
+    factions,
+    pacts: dip.pacts.map((p) => ({ a: p.a, b: p.b, vassal: !!p.vassal })),
+    wars: dip.wars.map((w) => ({ a: w.a, b: w.b })),
+    coalitions: dip.coalitions.map((c) => ({ target: c.target, members: c.members })),
+    vassals: { ...dip.vassals },
+  };
+}
+
+// §18.8 — what a faction values, surfaced as a courtship hint.
+function factionWants(def) {
+  switch (def.temperament) {
+    case "warlord": return "joint wars & targets";
+    case "pacifist": return "trade routes, open borders, your Honor";
+    case "opportunist": return "back the leader — routes & favourable deals";
+    case "schemer": return "intel, leverage, useful allies";
+    case "honorable": return "honest dealings & a clean record";
+    default: return "good relations";
+  }
 }
 
 function hasStationedUnitWithBay(state, loc, slots) {

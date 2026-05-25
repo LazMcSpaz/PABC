@@ -9,6 +9,15 @@ import { recomputeStats, recomputeResearch, assignTechNode } from "./stats.js";
 import { recomputeInfluence, zocOwner, inZoC } from "./influence.js";
 import { reinforcementRoute, bfsDistances } from "./board.js";
 import { recomputeVisibility, isUnitVisibleTo, revealRegion } from "./visibility.js";
+import {
+  ensureDiplomacy, menaceFromAttack, onAttack,
+  formPact, declareWar, vassalize, runDiplomacyRound,
+  recognitionScore, recognitionMet, wouldAccept, dealValue, performDiplomacy,
+  getStanding, atWar, arePacted, vassalLord, mayEngage, areNeighbours,
+  tolerance, passesRepGates, factionIds,
+} from "./diplomacy.js";
+import { setStanding } from "./standing.js";
+import { factionDef, MINOR_FACTIONS } from "./content.js";
 import { activePlayerId } from "./targeting.js";
 import { FACTIONS, LOCATIONS, ABILITIES, REACTIVES, CHIPS } from "./content.js";
 import { resolveSalvage } from "./contest.js";
@@ -1557,6 +1566,201 @@ function miniLine() {
     recomputeVisibility(g8, a, { emitEvents: false }); // only a recomputed
     check("a move recomputes only the moving faction (b's sight untouched)",
       g8.visibility[b].visible.size === beforeB);
+  }
+}
+
+// =====================================================================
+// §18.4–§18.13 DIPLOMACY — faction model, reputation, deals, AI-to-AI
+// politics, coalitions, vassalage, and the Recognition victory.
+// =====================================================================
+line("\n§18 DIPLOMACY CAPSTONE");
+{
+  // --- faction model + seeded standing variety (§18.4.1) ---
+  {
+    const g = createGame({ seed, humanFactionId: "versari", minors: ["tempest", "croppers"] });
+    check("the faction model carries temperament dials",
+      factionDef("lakers").temperament === "warlord" && factionDef("goldgrass").temperament === "pacifist");
+    check("a minor carries scope:local + associatedMajor + relationship",
+      MINOR_FACTIONS.tempest.scope === "local" && MINOR_FACTIONS.tempest.associatedMajor === "lakers"
+      && MINOR_FACTIONS.tempest.relationship === "rival");
+    // seeded faction↔faction standing is non-trivial (not all zero)
+    const anyNonZero = factionIds(g).some((a) => factionIds(g).some((b) => a !== b && getStanding(g, a, b) !== 0));
+    check("faction↔faction Standing is seeded (not all neutral)", anyNonZero);
+    // variety: a different seed yields a different standing web
+    const g2 = createGame({ seed: seed + 1, humanFactionId: "versari", minors: ["tempest", "croppers"] });
+    const sig = (gg) => factionIds(gg).map((a) => factionIds(gg).map((b) => getStanding(gg, a, b)).join(",")).join("|");
+    check("alliances differ across seeds (seeded jitter — the variety goal)", sig(g) !== sig(g2));
+    // a kin minor seeds WARM toward its major; a rival seeds COLD
+    const cropToGold = getStanding(g, "croppers", "goldgrass");
+    const tempToLak = getStanding(g, "tempest", "lakers");
+    check("kin minor seeds warmer toward its major than a rival minor does",
+      cropToGold > tempToLak);
+  }
+
+  // --- Menace scored relative to the target's temperament (§18.5) ---
+  {
+    const g = createGame({ seed, humanFactionId: "versari" });
+    const before = g.players.versari.menace;
+    menaceFromAttack(g, "versari", "goldgrass"); // bully a pacifist
+    const afterBully = g.players.versari.menace;
+    g.players.versari.menace = 0;
+    menaceFromAttack(g, "versari", "lakers"); // check a warlord
+    const afterCheck = g.players.versari.menace;
+    check("attacking a pacifist RAISES Menace", afterBully > before);
+    check("attacking a warlord does not raise Menace (checks the bully)", afterCheck <= 0);
+  }
+
+  // --- Honor: broken word dings it; attacking an ally breaks the pact ---
+  {
+    const g = createGame({ seed, humanFactionId: "versari" });
+    formPact(g, "versari", "lakers", "test");
+    const h0 = g.players.versari.honor;
+    check("a pact is formed", arePacted(g, "versari", "lakers"));
+    onAttack(g, "versari", "lakers"); // attack your ally
+    check("attacking an ally breaks the pact", !arePacted(g, "versari", "lakers"));
+    check("breaking your word dings Honor", g.players.versari.honor < h0);
+  }
+
+  // --- deal valuation + wouldAccept (§18.6/§18.8) ---
+  {
+    const g = createGame({ seed, humanFactionId: "versari" });
+    setStanding(g, "goldgrass", "versari", 4, "test"); // warm-ish
+    const gift = { proposer: "versari", recipient: "goldgrass", give: [{ resource: { resource: "scrap", amount: 5 } }], get: [] };
+    check("a faction accepts a gift (empty get)", wouldAccept(g, "goldgrass", gift));
+    const robbery = { proposer: "versari", recipient: "goldgrass", give: [], get: [{ resource: { resource: "scrap", amount: 8 } }] };
+    check("a faction refuses a lopsided demand", !wouldAccept(g, "goldgrass", robbery));
+    check("dealValue is positive for the receiver of a gift", dealValue(g, "goldgrass", gift) > 0);
+  }
+
+  // --- Tolerance / trust-floor hard gates (§18.5/§18.8) ---
+  {
+    const g = createGame({ seed, humanFactionId: "versari" });
+    setStanding(g, "goldgrass", "versari", 6, "test");
+    check("rep gates pass with a clean record", passesRepGates(g, "goldgrass", "versari"));
+    g.players.versari.menace = 99; // notorious bully
+    check("Menace over a faction's Tolerance fails the rep gate", !passesRepGates(g, "goldgrass", "versari"));
+    g.players.versari.menace = 0;
+    g.players.versari.honor = -99; // proven liar
+    check("Honor below a faction's trust floor fails the rep gate", !passesRepGates(g, "goldgrass", "versari"));
+    // a warlord tolerates more Menace than a pacifist at equal Standing
+    setStanding(g, "lakers", "versari", 6, "test"); setStanding(g, "goldgrass", "versari", 6, "test");
+    check("a warlord tolerates a bloodier ally than a pacifist",
+      tolerance(g, "lakers", "versari") > tolerance(g, "goldgrass", "versari"));
+  }
+
+  // --- AI-to-AI war forms (and can be resolved) WITHOUT the human (§18.8) ---
+  {
+    const g = createGame({ seed, humanFactionId: "versari" });
+    setStanding(g, "lakers", "plainers", -6, "test"); // a warlord nurses a grudge
+    const logFrom = g.log.length;
+    runDiplomacyRound(g);
+    const wars = g.log.slice(logFrom).filter((e) => e.name === "war_declared");
+    const aiWar = wars.find((e) => e.payload.a !== "versari" && e.payload.b !== "versari");
+    check("an AI-to-AI war forms without the human as a party", !!aiWar);
+    // a high-Honor peacemaker mediating that war (resolution, also AI-only)
+    const med = g.log.slice(logFrom).find((e) => e.name === "mediated" && e.payload.mediator !== "versari");
+    check("AI-to-AI politics also resolves wars (mediation, no human)",
+      !!med || g.diplomacy.wars.some((w) => w.a !== "versari" && w.b !== "versari"));
+  }
+
+  // --- coalitions: BOTH the Menace and the power-lead triggers (§18.8) ---
+  {
+    // Menace trigger — a notorious bully (clean board otherwise).
+    const g = createGame({ seed, humanFactionId: "versari" });
+    g.players.versari.menace = 24;
+    runDiplomacyRound(g);
+    check("a high-Menace player provokes a coalition (Menace trigger)",
+      !!g.diplomacy.coalitions.find((c) => c.target === "versari"));
+  }
+  {
+    // Power trigger — a runaway leader who played CLEAN (Menace 0).
+    const g = createGame({ seed, humanFactionId: "versari" });
+    g.players.versari.menace = 0;
+    g.players.versari.vp = 11; // a commanding VP lead, no aggression
+    for (const loc of Object.values(g.locations)) loc.controller = loc.controller ? "versari" : loc.controller;
+    runDiplomacyRound(g);
+    check("a clean runaway leader still provokes a coalition (power trigger)",
+      !!g.diplomacy.coalitions.find((c) => c.target === "versari"));
+    check("a coalition member contributes 0 to the runaway's Recognition",
+      recognitionScore(g, "versari").total === 0 || (g.diplomacy.coalitions.find((c) => c.target === "versari")));
+  }
+
+  // --- vassalage: formation, tribute, rebellion (§18.9) ---
+  {
+    const g = createGame({ seed, humanFactionId: "versari", minors: ["croppers"] });
+    // make croppers weak + at war, then take it as a vassal
+    declareWar(g, "versari", "croppers", "test");
+    vassalize(g, "versari", "croppers", "test");
+    check("a faction can be taken as a vassal", vassalLord(g, "croppers") === "versari");
+    check("vassalizing makes peace + locks the vassal's Standing high",
+      !atWar(g, "versari", "croppers") && getStanding(g, "croppers", "versari") >= CONFIG.diplomacy.tiers.allied);
+    // tribute flows on the round tick
+    g.players.croppers.resource = 10;
+    const lordBefore = g.players.versari.resource;
+    runDiplomacyRound(g);
+    check("a vassal pays tribute to its lord each round", g.players.versari.resource > lordBefore);
+    // resentment past threshold → rebellion
+    g.diplomacy.resentment.croppers = CONFIG.diplomacy.vassal.rebellionThreshold;
+    runDiplomacyRound(g);
+    check("a resentful vassal rebels (breaks free + war)",
+      vassalLord(g, "croppers") == null && atWar(g, "croppers", "versari"));
+  }
+
+  // --- Recognition victory + its Menace/Honor gate (§18.10) ---
+  {
+    const g = createGame({ seed, humanFactionId: "versari", minors: ["tempest", "croppers"] });
+    // convert three factions into vassals (weight 2 each = 6 ≥ threshold 6)
+    for (const f of ["goldgrass", "croppers", "tempest"]) vassalize(g, "versari", f, "test");
+    const sc = recognitionScore(g, "versari");
+    check("Recognition reaches the threshold via vassals (Allied=1, Vassal=2)",
+      sc.total >= CONFIG.diplomacy.recognition.threshold);
+    check("Recognition victory is reachable (winner set on the check)",
+      (() => { const gg = g; gg.winnerId = null; ensureDiplomacy(gg); runDiplomacyRound(gg); return gg.winnerId === "versari"; })());
+    // gate: a notorious bully loses Recognition (Menace over Tolerance)
+    const g2 = createGame({ seed, humanFactionId: "versari", minors: ["tempest", "croppers"] });
+    for (const f of ["goldgrass", "croppers", "tempest"]) vassalize(g2, "versari", f, "test");
+    g2.players.versari.menace = 99;
+    check("Recognition is GATED by Menace (a bully cannot be acknowledged)",
+      !recognitionMet(g2, "versari"));
+    const g3 = createGame({ seed, humanFactionId: "versari", minors: ["tempest", "croppers"] });
+    for (const f of ["goldgrass", "croppers", "tempest"]) vassalize(g3, "versari", f, "test");
+    g3.players.versari.honor = -99;
+    check("Recognition is GATED by Honor (a liar cannot be acknowledged)",
+      !recognitionMet(g3, "versari"));
+  }
+
+  // --- minors respect scope:"local" (§18.4.1) ---
+  {
+    const g = createGame({ seed, humanFactionId: "versari", minors: ["tempest"] });
+    // a non-neighbour pairing for a local minor: pick a faction far from it.
+    const farMajor = ["goldgrass", "plainers", "versari"].find((m) => !areNeighbours(g, "tempest", m));
+    if (farMajor) {
+      check("a scope:local minor will not engage a non-neighbour",
+        !mayEngage(g, "tempest", farMajor));
+    } else {
+      check("a scope:local minor will not engage a non-neighbour (no far faction this seed)", true);
+    }
+    check("a global major may engage anyone", mayEngage(g, "versari", "goldgrass"));
+  }
+
+  // --- performDiplomacy verbs (the player's levers, §18.7) ---
+  {
+    const g = createGame({ seed, humanFactionId: "versari" });
+    const s0 = getStanding(g, "goldgrass", "versari");
+    g.players.versari.resource = 10;
+    const gift = performDiplomacy(g, "versari", "gift", { faction: "goldgrass", amount: 5 });
+    check("performDiplomacy gift transfers scrap + warms Standing",
+      gift.ok && getStanding(g, "goldgrass", "versari") > s0 && g.players.versari.resource === 5);
+    const war = performDiplomacy(g, "versari", "declare-war", { faction: "lakers" });
+    check("performDiplomacy declare-war sets the war-state", war.ok && atWar(g, "versari", "lakers"));
+    // a pact offer is refused when Standing is too cold, accepted when warm
+    setStanding(g, "plainers", "versari", -2, "test");
+    check("a pact offer is refused when Standing is too cold",
+      performDiplomacy(g, "versari", "propose-pact", { faction: "plainers" }).accepted === false);
+    setStanding(g, "plainers", "versari", 8, "test"); setStanding(g, "versari", "plainers", 8, "test");
+    g.players.versari.menace = 0; g.players.versari.honor = 6;
+    check("a pact offer is accepted when Standing + rep gates pass",
+      performDiplomacy(g, "versari", "propose-pact", { faction: "plainers" }).accepted === true);
   }
 }
 

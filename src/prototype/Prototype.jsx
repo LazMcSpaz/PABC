@@ -28,6 +28,8 @@ import { evalCond } from "../game/dsl.js";
 import { adaptState, reinforcePreview, engineChipIdToUi, previewLocationContest, previewAttackerStrength } from "./engineAdapter.js";
 import { resolveSalvage } from "../game/contest.js";
 import { assignTechNode } from "../game/stats.js";
+import { performDiplomacy } from "../game/diplomacy.js";
+import DiplomacyScreen from "./DiplomacyScreen.jsx";
 import EncounterModal from "./EncounterModal.jsx";
 import TechWheel from "./TechWheel.jsx";
 import EventFeed from "./EventFeed.jsx";
@@ -59,6 +61,7 @@ const MENU_ITEMS = [
   { key: "research", icon: ICON.research, label: "Research" },
   { key: "units", icon: ICON.units, label: "Units" },
   { key: "locations", icon: ICON.shield, label: "Locations" },
+  { key: "diplomacy", icon: ICON.shield, label: "Diplomacy" },
 ];
 
 // Collapse a selected location hex into the single-window view-model that
@@ -158,8 +161,12 @@ function buildLocView(state, hex, isYourTurn) {
   };
 }
 
+// §18.4.1 — field a VARIABLE subset of minors per game so no two casts (and
+// therefore no two political webs) recur. Two distinct minors chosen by seed.
+const MINOR_POOL = ["tempest", "croppers", "steeltraders", "dambarans"];
 function bootGame(seed, humanFactionId) {
-  const game = createGame({ seed, humanFactionId });
+  const minors = [MINOR_POOL[seed % 4], MINOR_POOL[(seed + 2) % 4]];
+  const game = createGame({ seed, humanFactionId, minors });
   startTurn(game);
   driveAIsThroughHumanTurn(game);
   return game;
@@ -203,6 +210,8 @@ export default function Prototype({ config, onNewGame }) {
   const [contestViz, setContestViz] = useState(null); // contest replay overlay
   const [salvagePrompt, setSalvagePrompt] = useState(null); // interactive salvage
   const [showTechWheel, setShowTechWheel] = useState(false); // §17 wheel overlay
+  const [showDiplomacy, setShowDiplomacy] = useState(false); // §18 diplomacy screen
+  const [diploResult, setDiploResult] = useState(null); // last action feedback
   const [menuOpen, setMenuOpen] = useState(false); // radial menu visible
   const [menuPanel, setMenuPanel] = useState(null); // "units"|"market"|"locations"|"settings"
   const you = state.players[state.youId];
@@ -526,7 +535,25 @@ export default function Prototype({ config, onNewGame }) {
       setShowTechWheel(true);
       return;
     }
+    if (key === "diplomacy") {
+      setShowDiplomacy(true);
+      return;
+    }
     setMenuPanel(key);
+  }
+
+  // §18.7 — issue a diplomatic verb (free of the Action budget). Surfaces a
+  // short accept/decline result, then refreshes the screen.
+  function onDiplomacy(action, params) {
+    const r = performDiplomacy(gameRef.current, state.youId, action, params || {});
+    const name = state.players[params?.faction] ? (UI_FACTIONS[params.faction]?.name || params.faction) : params?.faction;
+    let msg = "";
+    if (!r.ok) msg = r.reason || "no effect";
+    else if (r.accepted === false) msg = `${name} declines — ${r.reason || ""}`;
+    else if (r.accepted === true) msg = `${name} agrees.`;
+    else msg = `Done${name ? ` — ${name}` : ""}.`;
+    setDiploResult({ ...r, msg });
+    bumpTick();
   }
 
   return (
@@ -766,6 +793,15 @@ export default function Prototype({ config, onNewGame }) {
           state={state}
           onAssign={onAssignTech}
           onClose={() => setShowTechWheel(false)}
+        />
+      )}
+
+      {showDiplomacy && (
+        <DiplomacyScreen
+          dip={state.diplomacy}
+          lastResult={diploResult}
+          onAction={onDiplomacy}
+          onClose={() => { setShowDiplomacy(false); setDiploResult(null); }}
         />
       )}
 

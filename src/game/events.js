@@ -40,6 +40,13 @@ export const EVENT_NAMES = new Set([
   "chip_dormant", "chip_reactivated", "slider_changed",
   // §19 Exploration, Vision & Fog of War (APPEND-ONLY — distinct keys).
   "hex_explored", "unit_spotted", "unit_lost_sight", "ambush_triggered",
+  // §18.4–§18.13 Diplomacy (APPEND-ONLY — distinct keys).
+  "menace_changed", "honor_changed", "deal_struck", "deal_proposed",
+  "war_declared", "peace_made",
+  "pact_formed", "pact_called", "pact_broken",
+  "coalition_formed", "coalition_dissolved",
+  "vassal_established", "vassal_rebelled", "tribute_paid",
+  "denounced", "mediated", "recognition_changed",
 ]);
 
 // Resolve a chip / card instance uid to its content def. Covers Market

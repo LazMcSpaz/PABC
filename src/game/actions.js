@@ -6,7 +6,7 @@ import { emit } from "./events.js";
 import { activePlayerId } from "./targeting.js";
 import { bfsDistances, reinforcementRoute } from "./board.js";
 import { CONFIG } from "./config.js";
-import { FACTIONS, CHIPS, ABILITIES, chipDefOf } from "./content.js";
+import { FACTIONS, CHIPS, ABILITIES, chipDefOf, factionDef } from "./content.js";
 import { validateContest, runContest } from "./contest.js";
 import { recomputeStats } from "./stats.js";
 import { recomputeVisibility } from "./visibility.js";
@@ -145,7 +145,7 @@ function runRecruit(state, { pid, player, params }) {
 
   const loc = state.locations[params.at];
   const u = state.nextId("unit");
-  state.units[u] = makeUnit(u, pid, loc.hexId, FACTIONS[pid].name);
+  state.units[u] = makeUnit(u, pid, loc.hexId, factionDef(pid)?.name || pid);
   emit(state, "unit_recruited", { unit: u, player: pid, hex: loc.hexId });
   recomputeVisibility(state, pid); // §19 — a new unit is a new Vision source
   return { unit: u };

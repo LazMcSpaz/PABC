@@ -3,12 +3,83 @@
 // production ranges) are PROVISIONAL stubs here, flagged inline. The
 // engine never branches on these ids — they are plain data.
 
+// §18.4 Faction model — factions are no longer cosmetic. Each carries the
+// authored diplomatic characteristics the AI pursues and others judge it by
+// (temperament/aggression, trust, grudge, sociability, victory lean,
+// expansion appetite). These are the §18.4.2 starter-roster dials, inline
+// here in the engine registry (NEVER content/) and tunable. `aggression`
+// 0..1 is the numeric spine of Menace scoring and Tolerance.
 export const FACTIONS = {
-  versari: { id: "versari", name: "Versari Korad", color: "#3a7d44", affiliatedLocations: ["korad", "dambar"] },
-  goldgrass: { id: "goldgrass", name: "Goldgrass Coalition", color: "#d8a72b", affiliatedLocations: ["kansit", "omara"] },
-  lakers: { id: "lakers", name: "Grand Lakers", color: "#21406e", affiliatedLocations: ["chigan", "droit"] },
-  plainers: { id: "plainers", name: "Free Plainers", color: "#c43b35", affiliatedLocations: ["the-shelf", "tin-town"] },
+  versari: {
+    id: "versari", name: "Versari Korad", color: "#3a7d44", affiliatedLocations: ["korad", "dambar"],
+    tier: "major", scope: "global", playable: true,
+    temperament: "schemer", aggression: 0.4, trust: 0.55, grudge: 0.4, sociability: 0.8,
+    victoryLean: "diplomacy", expansion: 0.5,
+  },
+  goldgrass: {
+    id: "goldgrass", name: "Goldgrass Coalition", color: "#d8a72b", affiliatedLocations: ["kansit", "omara"],
+    tier: "major", scope: "global", playable: true,
+    temperament: "pacifist", aggression: 0.1, trust: 0.9, grudge: 0.25, sociability: 0.95,
+    victoryLean: "diplomacy", expansion: 0.3,
+  },
+  lakers: {
+    id: "lakers", name: "Grand Lakers", color: "#21406e", affiliatedLocations: ["chigan", "droit"],
+    tier: "major", scope: "global", playable: true,
+    temperament: "warlord", aggression: 0.9, trust: 0.6, grudge: 0.7, sociability: 0.2,
+    victoryLean: "conquest", expansion: 0.9,
+  },
+  plainers: {
+    id: "plainers", name: "Free Plainers", color: "#c43b35", affiliatedLocations: ["the-shelf", "tin-town"],
+    tier: "major", scope: "global", playable: true,
+    temperament: "opportunist", aggression: 0.5, trust: 0.3, grudge: 0.3, sociability: 0.65,
+    victoryLean: "opportunist", expansion: 0.6,
+  },
 };
+
+// §18.4.1/§18.4.2 — minor factions: the SAME model plus three fields
+// (playable:false, scope:"local", associatedMajor+relationship). They
+// populate the political landscape; a variable subset is seeded per game
+// (setup.js) so no two games field the same cast. relationship ∈
+// kin (warm) | rival (cold) | foil (wary) seeds default standing toward
+// the associated major. Not added to FACTIONS so the default 4-major
+// headless game (Object.keys(FACTIONS)) is unchanged.
+export const MINOR_FACTIONS = {
+  tempest: {
+    id: "tempest", name: "Clan Tempest", color: "#4a6fa5",
+    tier: "minor", scope: "local", playable: false,
+    associatedMajor: "lakers", relationship: "rival",
+    temperament: "warlord", aggression: 0.8, trust: 0.6, grudge: 0.7, sociability: 0.2,
+    victoryLean: "conquest", expansion: 0.55,
+  },
+  croppers: {
+    id: "croppers", name: "The Croppers", color: "#c9b24e",
+    tier: "minor", scope: "local", playable: false,
+    associatedMajor: "goldgrass", relationship: "kin",
+    temperament: "pacifist", aggression: 0.12, trust: 0.85, grudge: 0.25, sociability: 0.8,
+    victoryLean: "economy", expansion: 0.3,
+  },
+  steeltraders: {
+    id: "steeltraders", name: "The Steel Traders", color: "#a8584f",
+    tier: "minor", scope: "local", playable: false,
+    associatedMajor: "plainers", relationship: "rival",
+    temperament: "opportunist", aggression: 0.55, trust: 0.3, grudge: 0.35, sociability: 0.5,
+    victoryLean: "conquest", expansion: 0.5,
+  },
+  dambarans: {
+    id: "dambarans", name: "The Dambarans", color: "#5fa06e",
+    tier: "minor", scope: "local", playable: false,
+    associatedMajor: "versari", relationship: "foil",
+    temperament: "honorable", aggression: 0.45, trust: 0.92, grudge: 0.5, sociability: 0.5,
+    victoryLean: "conquest", expansion: 0.4,
+  },
+};
+
+// Combined faction lookup — resolves a faction id to its def whether major
+// or minor. The diplomacy layer (standing, valuation, AI) reads through
+// this so it never has to branch on tier.
+export function factionDef(fid) {
+  return FACTIONS[fid] || MINOR_FACTIONS[fid] || null;
+}
 
 // strategicValue drives garrison Strength and chip slots (see config).
 // affiliation: a faction id, or null for unaffiliated.

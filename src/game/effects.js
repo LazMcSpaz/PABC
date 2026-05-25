@@ -7,6 +7,7 @@ import { recomputeStats, recomputeResearch } from "./stats.js";
 import { destroyUnit } from "./contest.js";
 import { bfsDistances } from "./board.js";
 import { revealRegion, plantFalseGhost, ensureVisibility } from "./visibility.js";
+import * as diplo from "./diplomacy.js";
 
 // Headless default for interactive effects — pick the first option.
 export function autoInteract(request) {
@@ -294,6 +295,73 @@ const EFFECTS = {
     for (const fid of resolveTargets(state, e.target, ctx)) {
       ensureVisibility(state, fid);
       plantFalseGhost(state, fid, hex, { owner: e.owner || null, strength: e.strength ?? 0, unitId: e.unitId });
+    }
+  },
+
+  // --- §18 Diplomacy (additive handlers; delegate to diplomacy.js) ---
+
+  ADJUST_MENACE(state, e, ctx) {
+    for (const pid of resolveTargets(state, e.target, ctx)) diplo.adjustMenace(state, pid, e.amount || 0, e.cause);
+  },
+  ADJUST_HONOR(state, e, ctx) {
+    for (const pid of resolveTargets(state, e.target, ctx)) diplo.adjustHonor(state, pid, e.amount || 0, e.cause);
+  },
+  DECLARE_WAR(state, e, ctx) {
+    const a = resolveTargets(state, e.actor || "active", ctx)[0];
+    diplo.declareWar(state, a, e.faction, e.cause);
+  },
+  MAKE_PEACE(state, e, ctx) {
+    const a = resolveTargets(state, e.actor || "active", ctx)[0];
+    diplo.makePeace(state, a, e.faction, e.cause);
+  },
+  FORM_PACT(state, e, ctx) {
+    const a = resolveTargets(state, e.actor || "active", ctx)[0];
+    diplo.formPact(state, a, e.faction, e.cause);
+    diplo.checkRecognitionVictory(state);
+  },
+  BREAK_PACT(state, e, ctx) {
+    const a = resolveTargets(state, e.actor || "active", ctx)[0];
+    diplo.breakPact(state, a, e.faction, e.cause);
+  },
+  CALL_PACT(state, e, ctx) {
+    const caller = resolveTargets(state, e.actor || "active", ctx)[0];
+    diplo.resolvePactCall(state, caller, e.ally, e.target, e.honored !== false);
+  },
+  DENOUNCE(state, e, ctx) {
+    const a = resolveTargets(state, e.actor || "active", ctx)[0];
+    diplo.denounce(state, a, e.faction);
+  },
+  MEDIATE(state, e, ctx) {
+    const m = resolveTargets(state, e.actor || "active", ctx)[0];
+    diplo.mediate(state, m, e.a, e.b);
+  },
+  VASSALIZE(state, e, ctx) {
+    const lord = resolveTargets(state, e.actor || "active", ctx)[0];
+    diplo.vassalize(state, lord, e.faction, e.cause);
+    diplo.checkRecognitionVictory(state);
+  },
+  RELEASE_VASSAL(state, e, ctx) {
+    diplo.releaseVassal(state, e.faction, e.cause);
+  },
+  // A resolved deal (accept). `e.deal` is the {proposer,recipient,give,get}.
+  RESOLVE_DEAL(state, e, ctx) {
+    if (e.accept === false || !e.deal) return;
+    diplo.applyDeal(state, e.deal, e.cause || "deal");
+    diplo.checkRecognitionVictory(state);
+  },
+  // Deliver a proposal to a human recipient as a §15.5 private encounter,
+  // or (AI recipient) evaluate immediately via the valuation engine.
+  PROPOSE_DEAL(state, e, ctx) {
+    const deal = e.deal;
+    if (!deal) return;
+    emit(state, "deal_proposed", { proposer: deal.proposer, recipient: deal.recipient });
+    if (state.players[deal.recipient]?.isAI === false && deal.recipient === state.humanFactionId) {
+      // human — deliver as a private encounter (handled by encounters.js)
+      return;
+    }
+    if (diplo.wouldAccept(state, deal.recipient, deal)) {
+      diplo.applyDeal(state, deal, "ai-accept");
+      diplo.checkRecognitionVictory(state);
     }
   },
 

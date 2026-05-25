@@ -12,6 +12,11 @@ import { LOCATIONS } from "./content.js";
 import { CONFIG } from "./config.js";
 import { buildableChips, slotCapacity, slotsUsed, stationedUnitWithBay } from "./economy.js";
 import { isUnitVisibleTo } from "./visibility.js";
+import { factionDef } from "./content.js";
+import {
+  factionIds, powerOf, arePacted, atWar, vassalLord, mayEngage,
+  getStanding, passesRepGates, formPact, vassalize, applyDeal, checkRecognitionVictory,
+} from "./diplomacy.js";
 
 const SAFETY_CAP = 10; // hard stop if priority loop ever spins
 
@@ -30,6 +35,9 @@ export function takeAITurn(state) {
   // it sets each city's guns/butter slider and queues builds (units have
   // settled after the action loop, so unit-chip builds find their garrison).
   if (!state.winnerId) manageEconomy(state, pid);
+  // §18.8 — the AI actively works the political layer (gifts, pacts,
+  // vassalage). Without this the whole diplomacy layer is inert.
+  if (!state.winnerId) manageDiplomacy(state, pid);
   if (!state.winnerId) endTurn(state);
 }
 
@@ -97,18 +105,79 @@ function isImmobilized(state, unit) {
 // unknown — it must scout to find them. No global-truth reads here.
 function knownGoalHexes(state, pid) {
   const vis = state.visibility?.[pid];
+  // §18.4.1 — a scope:"local" minor only pursues goals near its own turf.
+  const local = factionDef(pid)?.scope === "local";
   const goals = [];
   for (const loc of Object.values(state.locations)) {
     const hex = loc.hexId;
-    if (!vis) { if (loc.controller !== pid) goals.push(hex); continue; }
-    if (vis.visible.has(hex)) {
-      if (loc.controller !== pid) goals.push(hex); // live truth
-    } else if (vis.explored.has(hex)) {
-      // remembered: act on the last-known controller (may be stale).
-      if (vis.memory[hex]?.location?.controller !== pid) goals.push(hex);
-    }
+    if (loc.controller === pid) continue;
+    if (local && !nearOwnTerritory(state, pid, hex)) continue;
+    if (!vis) { goals.push(hex); continue; }
+    if (vis.visible.has(hex)) goals.push(hex); // live truth
+    else if (vis.explored.has(hex) && vis.memory[hex]?.location?.controller !== pid) goals.push(hex);
   }
   return goals;
+}
+
+// §18.4.1 — is `hex` within the locality radius of any of pid's Locations?
+function nearOwnTerritory(state, pid, hex) {
+  const r = CONFIG.diplomacy.ai.localityRadius;
+  const own = Object.values(state.locations).filter((l) => l.controller === pid).map((l) => l.hexId);
+  if (!own.length) return true; // landless — don't over-restrict
+  for (const o of own) {
+    const d = bfsDistances(state.board.adjacency, o)[hex];
+    if (d !== undefined && d <= r) return true;
+  }
+  return false;
+}
+
+// §18.8 — the AI works the political layer once per turn (free of Actions):
+// vassalize a cornered weakling, form a pact with a warm compatible
+// neighbour, or gift to warm a promising relationship. Bounded: one move.
+function manageDiplomacy(state, pid) {
+  const me = factionDef(pid) || {};
+  const human = state.humanFactionId;
+  const others = factionIds(state).filter((f) => f !== pid);
+  const tiers = CONFIG.diplomacy.tiers;
+  const ai = CONFIG.diplomacy.ai;
+
+  // 1) Vassalize a much-weaker, cornered, engageable faction (recognition
+  //    runs through converting weak factions, §18.9). Lords only.
+  if (!vassalLord(state, pid) && (me.victoryLean === "diplomacy" || (me.aggression ?? 0) >= 0.7)) {
+    for (const f of others) {
+      if (f === human || vassalLord(state, f) || !mayEngage(state, pid, f)) continue;
+      const ratio = powerOf(state, f) / Math.max(1, powerOf(state, pid));
+      // Subjugation follows a beating: only vassalize a faction you are at
+      // war with (cornered), and only when it is much weaker (§18.9).
+      const cornered = atWar(state, pid, f);
+      if (ratio <= ai.vassalPowerRatio && cornered) {
+        vassalize(state, pid, f, "ai-vassalize");
+        checkRecognitionVictory(state);
+        return;
+      }
+    }
+  }
+
+  // 2) Proactive pact with a warm, compatible, engageable faction; or a gift
+  //    to warm one up (diplomacy-lean factions buy Standing toward a pact).
+  if ((me.sociability ?? 0) >= 0.5) {
+    for (const f of others) {
+      if (arePacted(state, pid, f) || atWar(state, pid, f) || vassalLord(state, f) === pid) continue;
+      if (!mayEngage(state, pid, f)) continue;
+      const sFwd = getStanding(state, pid, f), sBack = getStanding(state, f, pid);
+      if (sFwd >= CONFIG.diplomacy.pactStandingReq && sBack >= CONFIG.diplomacy.pactStandingReq
+        && passesRepGates(state, pid, f) && passesRepGates(state, f, pid)) {
+        formPact(state, pid, f, "ai-offer");
+        checkRecognitionVictory(state);
+        return;
+      }
+      if (me.victoryLean === "diplomacy" && (state.players[pid].resource || 0) >= 4
+        && sFwd >= tiers.neutral && sFwd < CONFIG.diplomacy.pactStandingReq && f !== human) {
+        applyDeal(state, { proposer: pid, recipient: f, give: [{ resource: { resource: "scrap", amount: 3 } }], get: [] }, "gift");
+        return;
+      }
+    }
+  }
 }
 
 // Stale-intel hooks: hexes where the AI last saw an enemy (ghosts). It may
