@@ -21,7 +21,10 @@ const fail = (reason) => ({ ok: false, reason });
 // the hook is here for the content batch (e.g. Defense Turrets).
 function chipGarrison(state, loc) {
   let g = 0;
-  for (const c of loc.chips) g += CHIPS[state.chips[c]?.chipId]?.garrison || 0;
+  for (const c of loc.chips) {
+    if (state.chips[c]?.disabled) continue; // §20.9 dormant — no garrison bonus
+    g += CHIPS[state.chips[c]?.chipId]?.garrison || 0;
+  }
   return g;
 }
 
@@ -164,6 +167,12 @@ function captureLocation(state, loc, victor) {
   loc.controller = victor;
   loc.loyaltyOwner = victor;
   loc.loyalty = CONFIG.loyalty.start; // §18.2 — Loyalty initialises low on capture
+  // §20.8 — in-progress construction is forfeited on capture (the workshop
+  // changed hands mid-build); the slider resets to bank everything until the
+  // new controller chooses what to build at this freshly-taken, low-Loyalty city.
+  loc.activeBuild = null;
+  loc.buildProgress = 0;
+  loc.buildSlider = CONFIG.economy.defaultSlider;
   emit(state, "location_captured", { hex: loc.hexId, controller: victor, from });
 
   // §16.5 severed supply — any in-transit reinforcement whose origin was

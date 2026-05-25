@@ -8,11 +8,14 @@ import { bfsDistances, reinforcementRoute } from "./board.js";
 import { CONFIG } from "./config.js";
 import { FACTIONS, CHIPS, ABILITIES, chipDefOf } from "./content.js";
 import { validateContest, runContest } from "./contest.js";
-import { recomputeStats, recomputeResearch } from "./stats.js";
-import { recomputeInfluence } from "./influence.js";
+import { recomputeStats } from "./stats.js";
 import { applyEffects } from "./effects.js";
 import { drawFieldEncounter, resolveMarkerOnHex } from "./encounters.js";
 import { makeUnit } from "./setup.js";
+import {
+  meetsTech, meetsLoyalty, slotCapacity, slotsUsed, stationedUnitWithBay,
+  techLevelReqFor, upgradeOption, completeBuildIfDone,
+} from "./economy.js";
 
 const fail = (reason) => ({ ok: false, reason });
 
@@ -207,96 +210,135 @@ function runReinforce(state, { pid, player, params }) {
   return { mode, eta: route.dist, originHex: route.originHex };
 }
 
-// --- Acquire ---------------------------------------------------------
-// Buy a face-up Market chip and install it on one of your units (kind
-// `unit`) or a location you fully control (kind `location`). The chip's
-// `techLevel` must be at or below the player's unlocked Market tier
-// (§4.1). The vacated row refills from the tier deck.
-// §17.2 — Market tier unlock keys off Tech *Level* now (tier 2 @ L3,
-// tier 3 @ L5), not a raw research score.
-function unlockedTier(player) {
-  const lvl = player.techLevel || 1;
-  const m = CONFIG.tech.marketTierByLevel;
-  if (lvl >= m[3]) return 3;
-  if (lvl >= m[2]) return 2;
-  return 1;
-}
+// --- Build / Upgrade / Rush / Slider (§20.4–20.7, replaces Acquire) ---
+// Chips are no longer bought from a shared Market — they are BUILT at a
+// Location you control, off its Output via the guns/butter slider. These
+// four directives cost no Actions (the economic decision is the slider, not
+// the action economy); construction itself advances at Upkeep (economy.js).
 
-function findInMarket(state, chipUid) {
-  for (const [tierKey, t] of Object.entries(state.market.tiers)) {
-    if (t.row.includes(chipUid)) return { tier: Number(tierKey), row: t.row, deck: t.deck };
-  }
-  return null;
-}
-
-function slotsUsed(state, chipUids) {
-  let n = 0;
-  for (const c of chipUids) n += chipDefOf(state, c)?.slots ?? 1;
-  return n;
-}
-
-function validateAcquire(state, { pid, player, params }) {
-  if (!params.chip) return fail("specify which chip to acquire (params.chip)");
-  const inResale = state.resaleRow?.includes(params.chip);
-  const found = inResale ? null : findInMarket(state, params.chip);
-  if (!inResale && !found) return fail("that chip is not in any market row");
-  // Resale chips ignore tech tier — they're used goods.
-  if (found && found.tier > unlockedTier(player))
-    return fail(`tier ${found.tier} requires a higher Tech Level`);
-
-  const def = CHIPS[state.chips[params.chip]?.chipId];
+// §20.4 — queue a fresh chip into a Location. Two gates, both required
+// (§20.6): the player's Tech Level must allow the chip at all, and the city's
+// Loyalty must clear its rung. Unit chips need a friendly unit stationed here
+// (the city arms the army); the chip installs on completion (turn.js Upkeep).
+function validateBuild(state, { pid, player, params }) {
+  const loc = state.locations[params.at];
+  if (!loc) return fail("no such location");
+  if (loc.controller !== pid) return fail("you do not fully control that location");
+  const def = CHIPS[params.chipId];
   if (!def) return fail("unknown chip");
-  if (player.resource < (def.cost || 0)) return fail("not enough scrap");
-
-  const into = params.into || {};
+  if (!meetsTech(player, def)) return fail(`needs Tech Level ${techLevelReqFor(def.techLevel || 1)}`);
+  if (!meetsLoyalty(loc, def)) return fail(`needs Loyalty ${def.loyaltyReq}`);
   if (def.kind === "unit") {
-    const unit = state.units[into.unit];
-    if (!unit) return fail("specify a unit to install into (params.into.unit)");
-    if (unit.owner !== pid) return fail("not your unit");
-    if (slotsUsed(state, unit.chips) + def.slots > CONFIG.unit.baySlots)
-      return fail("not enough Bay slots");
-  } else {
-    const loc = state.locations[into.location];
-    if (!loc) return fail("specify a location to install into (params.into.location)");
-    if (loc.controller !== pid) return fail("you do not fully control that location");
-    if (slotsUsed(state, loc.chips) + def.slots > loc.chipSlots)
-      return fail("not enough Location slots");
+    if (!stationedUnitWithBay(state, loc, def.slots || 1))
+      return fail("needs a friendly unit stationed here with bay space");
+  } else if (slotsUsed(state, loc.chips) + (def.slots || 1) > slotCapacity(loc)) {
+    return fail("not enough chip slots");
   }
   return { ok: true };
 }
 
-function runAcquire(state, { pid, player, params }) {
-  const inResale = state.resaleRow?.includes(params.chip);
-  let chipUid, tier;
-  if (inResale) {
-    chipUid = state.resaleRow.splice(state.resaleRow.indexOf(params.chip), 1)[0];
-    tier = CHIPS[state.chips[chipUid]?.chipId]?.techLevel ?? null;
-  } else {
-    const found = findInMarket(state, params.chip);
-    chipUid = found.row.splice(found.row.indexOf(params.chip), 1)[0];
-    if (found.deck.length) found.row.push(found.deck.shift());
-    tier = found.tier;
+function runBuild(state, { params }) {
+  const loc = state.locations[params.at];
+  const def = CHIPS[params.chipId];
+  const targetUnit = def.kind === "unit"
+    ? (params.into?.unit && state.units[params.into.unit]?.node === loc.hexId
+        ? params.into.unit
+        : stationedUnitWithBay(state, loc, def.slots || 1)?.uid)
+    : null;
+  loc.activeBuild = {
+    kind: "build", chipId: def.id, cost: def.buildCost ?? def.cost ?? 0,
+    targetSlot: loc.chips.length, targetUnit,
+  };
+  emit(state, "build_started", { hex: loc.hexId, chipId: def.id, kind: "build", cost: loc.activeBuild.cost });
+  completeBuildIfDone(state, loc); // carried-over progress may finish it at once
+  return { hex: loc.hexId, chipId: def.id };
+}
+
+// §20.5 — upgrade an installed chip in place to its next tier. Always offered
+// if a tier exists (the upgrade view shows it greyed when gated); building it
+// replaces the chip in its own slot, so scarcity is preserved.
+function validateUpgrade(state, { pid, params }) {
+  const loc = state.locations[params.at];
+  if (!loc) return fail("no such location");
+  if (loc.controller !== pid) return fail("you do not fully control that location");
+  // The chip may sit in the Location's slots or in a friendly unit's bay here.
+  const holder = findChipHolder(state, loc, params.chip, pid);
+  if (!holder) return fail("that chip is not installed at this location");
+  const opt = upgradeOption(state, loc, params.chip);
+  if (!opt) return fail("this chip has no upgrade");
+  if (opt.locked) return fail(opt.reason || "upgrade is gated");
+  return { ok: true };
+}
+
+function runUpgrade(state, { pid, params }) {
+  const loc = state.locations[params.at];
+  const opt = upgradeOption(state, loc, params.chip);
+  const holder = findChipHolder(state, loc, params.chip, pid);
+  loc.activeBuild = {
+    kind: "upgrade", chipId: opt.chipId, cost: opt.def.buildCost ?? opt.def.cost ?? 0,
+    targetChipUid: params.chip,
+    targetUnit: holder.kind === "unit" ? holder.uid : null,
+  };
+  emit(state, "build_started", { hex: loc.hexId, chipId: opt.chipId, kind: "upgrade", cost: loc.activeBuild.cost });
+  completeBuildIfDone(state, loc);
+  return { hex: loc.hexId, chipId: opt.chipId };
+}
+
+// Locate an installed chip either in the Location's own slots or in a friendly
+// unit's bay on this hex. Returns { kind:"location" } or { kind:"unit", uid }.
+function findChipHolder(state, loc, chipUid, pid) {
+  if (loc.chips.includes(chipUid)) return { kind: "location" };
+  for (const u of Object.values(state.units)) {
+    if (u.owner === pid && u.node === loc.hexId && u.chips.includes(chipUid)) {
+      return { kind: "unit", uid: u.uid };
+    }
   }
+  return null;
+}
 
-  const def = CHIPS[state.chips[chipUid].chipId];
-  player.resource -= def.cost || 0;
-  emit(state, "resource_spent", {
-    player: pid, resource: "Resource", amount: -(def.cost || 0),
-  });
+// §20.7 — spend banked scrap to add build-points to a Location's active build
+// immediately (the bridge that makes the slider two-way: hoarded scrap is
+// stored construction potential). `params.amount` build-points, default:
+// enough to finish; clamped by affordable scrap.
+function validateRush(state, { player, params }) {
+  const loc = state.locations[params.at];
+  if (!loc) return fail("no such location");
+  if (loc.controller !== player.id) return fail("you do not fully control that location");
+  if (!loc.activeBuild) return fail("nothing is being built here");
+  if (player.resource < CONFIG.economy.rushScrapPerPoint) return fail("not enough scrap to rush");
+  return { ok: true };
+}
 
-  if (def.kind === "unit") {
-    state.units[params.into.unit].chips.push(chipUid);
-    recomputeStats(state);
-  } else {
-    state.locations[params.into.location].chips.push(chipUid);
-    recomputeInfluence(state); // §18.3 — an influence chip shifts the field/ZoC
-  }
+function runRush(state, { pid, player, params }) {
+  const loc = state.locations[params.at];
+  const rate = CONFIG.economy.rushScrapPerPoint;
+  const need = Math.max(0, loc.activeBuild.cost - (loc.buildProgress || 0));
+  const want = params.amount != null ? params.amount : need;
+  const affordablePoints = Math.floor(player.resource / rate);
+  const points = Math.max(0, Math.min(want, affordablePoints));
+  if (points <= 0) return fail("not enough scrap to rush");
+  const spend = points * rate;
+  player.resource -= spend;
+  emit(state, "resource_spent", { player: pid, resource: "Resource", amount: -spend, source: "rush" });
+  loc.buildProgress = (loc.buildProgress || 0) + points;
+  completeBuildIfDone(state, loc);
+  return { hex: loc.hexId, points, spent: spend };
+}
 
-  emit(state, "card_acquired", {
-    player: pid, chip: chipUid, chipId: def.id, tier,
-  });
-  recomputeResearch(state); // a fresh Lab may have moved the player's Research
-  return { chip: chipUid, chipId: def.id, tier };
+// §20.3 — set this city's guns/butter slider f∈[0,1]. Persists until changed.
+function validateSetSlider(state, { pid, params }) {
+  const loc = state.locations[params.at];
+  if (!loc) return fail("no such location");
+  if (loc.controller !== pid) return fail("you do not fully control that location");
+  if (typeof params.value !== "number") return fail("slider value must be a number 0..1");
+  return { ok: true };
+}
+
+function runSetSlider(state, { params }) {
+  const loc = state.locations[params.at];
+  loc.buildSlider = Math.max(0, Math.min(1, params.value));
+  emit(state, "slider_changed", { hex: loc.hexId, value: loc.buildSlider });
+  return { hex: loc.hexId, value: loc.buildSlider };
 }
 
 // --- Activate --------------------------------------------------------
@@ -351,7 +393,12 @@ const ACTIONS = {
   recruit: { cost: 1, validate: validateRecruit, run: runRecruit },
   reinforce: { cost: 1, validate: validateReinforce, run: runReinforce },
   contest: { cost: 1, validate: validateContest, run: runContest },
-  acquire: { cost: 1, validate: validateAcquire, run: runAcquire },
+  // §20.4–20.7 — economic directives, free of the Action budget (the
+  // strategic cost is the slider split + scrap, not an Action).
+  build: { cost: 0, validate: validateBuild, run: runBuild },
+  upgrade: { cost: 0, validate: validateUpgrade, run: runUpgrade },
+  rush: { cost: 0, validate: validateRush, run: runRush },
+  "set-slider": { cost: 0, validate: validateSetSlider, run: runSetSlider },
   activate: { cost: activateActionCost, validate: validateActivate, run: runActivate },
 };
 

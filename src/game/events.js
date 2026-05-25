@@ -33,7 +33,11 @@ export const EVENT_NAMES = new Set([
   "encounter_delivered", "trigger_fired",
   "quest_started", "quest_advanced", "quest_completed",
   "standing_changed", "track_changed", "deferred_resolved",
-  "market_churned",
+  // §20 Economy & City Development (APPEND-ONLY — distinct keys so a parallel
+  // Influence branch never collides). The Market is retired, so `market_churned`
+  // is dropped with it.
+  "build_started", "build_completed", "chip_upgraded",
+  "chip_dormant", "chip_reactivated", "slider_changed",
 ]);
 
 // Resolve a chip / card instance uid to its content def. Covers Market
@@ -65,6 +69,7 @@ export function collectTriggers(state, eventName) {
   for (const loc of Object.values(state.locations)) {
     addFrom(loc, { kind: "location", uid: loc.hexId, owner: loc.controller });
     for (const chipUid of loc.chips) {
+      if (state.chips[chipUid]?.disabled) continue; // §20.9 dormant — passives suppressed
       const def = defOf(state, chipUid);
       if (def?.triggers) {
         addFrom(def, { kind: "location-chip", uid: chipUid, owner: loc.controller, hexId: loc.hexId });
@@ -80,6 +85,7 @@ export function collectTriggers(state, eventName) {
 
   for (const unit of Object.values(state.units)) {
     for (const chipUid of unit.chips) {
+      if (state.chips[chipUid]?.disabled) continue; // §20.9 dormant — passives suppressed
       const def = defOf(state, chipUid);
       if (def?.triggers) {
         addFrom(def, { kind: "unit-chip", uid: chipUid, owner: unit.owner, unitUid: unit.uid });

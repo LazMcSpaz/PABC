@@ -110,11 +110,22 @@ function formatEvent(ev, engineState) {
         color: factionColor(p.player),
         text: `${who(p.player)} played ${p.cardId}`,
       };
-    case "card_acquired":
-      return {
-        color: factionColor(p.player),
-        text: `${who(p.player)} acquired ${p.chipId}`,
-      };
+    // §20 Economy & City Development
+    case "build_completed": {
+      const ctrl = engineState.locations[p.hex]?.controller;
+      return { color: factionColor(ctrl), text: `${who(ctrl)} built ${p.chipId}` };
+    }
+    case "chip_upgraded": {
+      const ctrl = engineState.locations[p.hex]?.controller;
+      return { color: theme.good, text: `${who(ctrl)} upgraded → ${p.chipId}` };
+    }
+    case "chip_dormant":
+      return { color: theme.accent2, text: `${p.chipId} ${p.ejected ? "ejected (Loyalty)" : "went dormant (upkeep)"}` };
+    case "chip_reactivated":
+      return { color: theme.good, text: `${p.chipId} reactivated` };
+    case "build_started":
+    case "slider_changed":
+      return null; // directives, not noteworthy outcomes
     case "encounter_delivered":
       return {
         color: factionColor(p.recipient),
@@ -162,8 +173,6 @@ function formatEvent(ev, engineState) {
       return { color: theme.accent, text: ev.name.replace("_", " ") };
     case "deferred_resolved":
       return { color: theme.textDim, text: "Deferred packet fired" };
-    case "market_churned":
-      return null; // too noisy if surfaced every turn — it just is
     case "round_ended":
       return { color: theme.textFaint, text: `— round ${p.round} ended —` };
     case "turn_ended":

@@ -12,6 +12,7 @@ export function recomputeStats(state) {
 
     for (const chipUid of unit.chips) {
       const inst = state.chips[chipUid];
+      if (inst?.disabled) continue; // §20.9 dormant chip — passives suppressed
       const def = inst && CHIPS[inst.chipId];
       if (def) {
         strength += def.strength || 0;
@@ -53,7 +54,10 @@ export function recomputeResearch(state) {
     let labResearch = 0;
     for (const loc of Object.values(state.locations)) {
       if (loc.controller !== p.id) continue;
-      for (const c of loc.chips) labResearch += CHIPS[state.chips[c]?.chipId]?.research || 0;
+      for (const c of loc.chips) {
+        if (state.chips[c]?.disabled) continue; // §20.9 dormant Lab — no Research
+        labResearch += CHIPS[state.chips[c]?.chipId]?.research || 0;
+      }
     }
     const research = (p.permanentResearch || 0) + labResearch;
     if (research !== p.research) {
