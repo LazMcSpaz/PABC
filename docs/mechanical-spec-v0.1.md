@@ -1525,6 +1525,68 @@ numbers; the per-faction tables get authored later.
   unit or chip, asymmetric starting position. Flavorful but not required
   for the diplomacy victory to function.
 
+#### 18.4.1 Major and minor factions
+
+Factions come in two tiers sharing the **same model** — minors are not a
+special engine case, just a faction record with three extra fields:
+
+- **`playable: false`** — minors are never controlled by the human; they
+  populate the political landscape with more actors to court, exploit, or
+  eliminate.
+- **`scope: "local"`** — a **constant for all minors**: the AI pursues goals
+  only within its **immediate map area** (it expands, raids, and allies
+  among its neighbours rather than projecting across the board). Majors are
+  `scope: "global"`. This one flag makes minors *feel* like regional powers
+  without bespoke AI.
+- **`associatedMajor` + `relationship`** — every minor is tied to one major
+  by a relationship of **`kin` | `rival` | `foil`**:
+  - **kin** — a smaller version of the same culture; a natural ally.
+  - **rival** — the same niche fighting over the same turf; a natural enemy
+    the player can turn against its major.
+  - **foil** — a thematic opposite (honest warriors vs. schemers); a natural
+    tension.
+  The relationship **seeds the default Standing** between the minor and its
+  major (kin → warm, rival → cold, foil → wary) — the player's exploitation
+  hook.
+
+**Roster per game.** A game seeds the human + a few **major** AIs + a
+**variable subset of minors** drawn from the pool, so no two games field the
+same cast — and therefore not the same politics.
+
+**Alliance variety (a design goal).** The `associatedMajor` link is a *thumb
+on the scale, not destiny* — the same alliances must not recur every game.
+Variety comes from three sources already in the engine:
+1. **Seeded standing** — default minor↔major (and faction↔faction) Standing
+   = temperament compatibility + relationship type **+ a per-seed jitter**.
+2. **Map proximity** — `scope: "local"` minors bond/war with whoever the
+   generated map places **adjacent**, reshuffling the web each game.
+3. **The dynamic engine + the player** — §18.8 AI-to-AI diplomacy evolves it,
+   and the player can court a minor away from its major or provoke it. So an
+   associated alliance is *likely*, never *guaranteed*.
+
+#### 18.4.2 The v0.2 starter roster
+
+Four major (playable) cultures, each with one associated minor. Dials are
+**starting defaults** (TBD-tunable); temperament and behaviour drift in play.
+
+| Faction | Tier | Scope | Temperament | Trust/Honor | Sociability | Victory lean | Assoc. (relationship) |
+|---|---|---|---|---|---|---|---|
+| **Grand Lakers** | Major | global | Warlord — might = right, self-reliant | Mid (proud; keeps word, rarely deals) | Low | Conquest | — |
+| **Clan Tempest** | minor | local | Warlord, parochial | Mid | Low | Conquest | Grand Lakers — **rival** |
+| **Goldgrass Coalition** | Major | global | Pacifist farmer | High | Very high (allies early, by trust) | Diplomacy / Economy | — |
+| **The Croppers** | minor | local | Pacifist farmer | High | High | Economy | Goldgrass — **kin** |
+| **Free Plainers** | Major | global | Opportunist — equal war & trade | Low (alliances shift easily) | Mid–high (fickle) | Opportunist | — |
+| **The Steel Traders** | minor | local | Opportunist + intrigue / warfare | Low | Mid | Conquest / intrigue | Free Plainers — **rival** |
+| **Versari Korad** | Major | global | Schemer — intrigue, diplomacy, economy | Mid (fair if you're useful) | High | Diplomacy / Economy | — |
+| **The Dambarans** | minor | local | Honourable warrior — strength & honour, intrigue last; not bullies | High | Mid | Conquest | Versari Korad — **foil** |
+
+Flavour (cosmetic, separable per §2): the Grand Lakers are a hardy, warring
+Great-Lakes people and Clan Tempest a rival lake clan; the Goldgrass
+Coalition and Croppers are farmers trading their harvest for peace; the Free
+Plainers and Steel Traders are pirate bands centred on strong leaders; the
+Versari Korad rule by manipulation while their Dambaran foils win by honest
+force.
+
 ### 18.5 Reputation & relationship state
 
 This is the data every diplomatic decision reads. All values are runtime,
