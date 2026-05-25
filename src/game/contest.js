@@ -10,6 +10,7 @@ import { CONFIG } from "./config.js";
 import { CHIPS, LOCATIONS, FACTIONS } from "./content.js";
 import { recomputeStats, recomputeResearch } from "./stats.js";
 import { recomputeInfluence } from "./influence.js";
+import { recomputeVisibility, recomputeVisibilityFor, isUnitVisibleTo } from "./visibility.js";
 import { onLocationCaptured, onRaidWon } from "./standing.js";
 import { makeUnit } from "./setup.js";
 import { TECH_NODES, hasTechNode } from "./tech.js";
@@ -205,6 +206,8 @@ function captureLocation(state, loc, victor) {
   recomputeResearch(state);
   // §18.3 — control changed hands; recompute the Influence field + ZoC.
   recomputeInfluence(state);
+  // §19 — a captured Location is a new/lost Vision source for both sides.
+  recomputeVisibilityFor(state, [victor, from], { emitEvents: false });
   // §15.3 — the affiliated faction (if any) loses standing toward
   // the new controller.
   onLocationCaptured(state, loc.hexId, victor, from);
@@ -276,6 +279,8 @@ export function destroyUnit(state, unitUid, killerUid, ctx = {}) {
   const chips = dead.chips.filter((c) => state.chips[c]?.chipId !== "capital");
   delete state.units[unitUid];
   emit(state, "unit_destroyed", { unit: unitUid, owner: dead.owner, killer: killerUid || null });
+  // §19 — the owner just lost a Vision source; refresh its sight quietly.
+  if (state.visibility?.[dead.owner]) recomputeVisibility(state, dead.owner, { emitEvents: false });
 
   // This unit may itself have been a pending salvage claimant (e.g. it won
   // a contest then died to its own pyrrhic loss). Its unclaimed loot spills
@@ -468,9 +473,26 @@ export function runContest(state, { pid, params, ctx = {} }) {
   // emit lands and can modify stats before the roll (e.g. a defender
   // boost via MODIFY_STAT this_contest).
   const defUnit = t.kind === "raid" ? t.unit : (t.loc ? defendingUnit(state, t.loc) : null);
+
+  // §19.5 ambush — recompute both sides' fog from current positions (the
+  // harness may have repositioned units directly), then test surprise:
+  //   attacker ambush — the attacker is concealed / unseen by the defender
+  //     at declaration → defender LOSES its §10 reaction window + a roll edge.
+  //   defender ambush — a hidden defending unit the attacker can't see → a
+  //     roll edge against the attacker.
+  // A unit in CONTACT (own unit on the hex) reveals non-stealth foes, so a
+  // vanilla §16 contest (no stealth/cover) never triggers an ambush.
+  const ambushDefOwner = t.kind === "raid" ? t.unit.owner : (t.loc ? t.loc.controller : null);
+  recomputeVisibility(state, pid, { emitEvents: false });
+  if (ambushDefOwner && ambushDefOwner !== pid) recomputeVisibility(state, ambushDefOwner, { emitEvents: false });
+  const attackerAmbush = !!(ambushDefOwner && ambushDefOwner !== pid && !isUnitVisibleTo(state, ambushDefOwner, unit));
+  const defenderAmbush = !!(defUnit && defUnit.owner !== pid && !isUnitVisibleTo(state, pid, defUnit));
+
   const opened = openReactionWindow(state, "contest_declared", {
     initiator: unit.uid, player: pid, kind: t.kind, hex: unit.node,
     target: t.kind === "raid" ? t.unit.uid : unit.node,
+    // §19.5 — the surprised defender loses its reaction window.
+    noReaction: attackerAmbush || undefined,
   }, { ...ctx, contest: { defendingUnit: defUnit?.uid ?? null } });
 
   if (!opened) {
@@ -529,12 +551,24 @@ export function runContest(state, { pid, params, ctx = {} }) {
 
   // House rule (departs from spec §9): a Location defended purely by its
   // garrison — no defending unit — does NOT roll a d6.
+  // §19.5 — the ambush edge: the surpriser adds a flat bonus to its total.
+  const atkAmbush = attackerAmbush ? CONFIG.fog.ambushBonus : 0;
+  const defAmbush = defenderAmbush ? CONFIG.fog.ambushBonus : 0;
+  if (attackerAmbush || defenderAmbush) {
+    emit(state, "ambush_triggered", {
+      hex: unit.node,
+      side: attackerAmbush ? "attacker" : "defender",
+      attackerAmbush, defenderAmbush,
+      reactionSuppressed: attackerAmbush,
+    });
+  }
+
   const defenderRollsDie = t.kind === "raid" || (t.kind === "location" && !!defenderUnit);
   const initiatorRoll = state.rng.roll(CONFIG.contestDieSides);
   const defenderRoll = defenderRollsDie ? state.rng.roll(CONFIG.contestDieSides) : 0;
-  const initiatorTotal = atkStrength + atkConcentration + atkVeteran + atkMilitary + initiatorRoll;
+  const initiatorTotal = atkStrength + atkConcentration + atkVeteran + atkMilitary + atkAmbush + initiatorRoll;
   const defenderTotal =
-    defValue + defConcentration + defMountain + defFortify + defVeteran + defMilitary + defenderRoll;
+    defValue + defConcentration + defMountain + defFortify + defVeteran + defMilitary + defAmbush + defenderRoll;
   const won = initiatorTotal > defenderTotal;
 
   const detail = {
@@ -547,6 +581,8 @@ export function runContest(state, { pid, params, ctx = {} }) {
     defenderConcentration: defConcentration, defenderMountain: defMountain,
     defenderFortify: defFortify, defenderVeteran: defVeteran,
     defenderAllies: defAllies, defenderMilitary: defMilitary,
+    // §19.5 ambush
+    attackerAmbush, defenderAmbush, attackerAmbushBonus: atkAmbush, defenderAmbushBonus: defAmbush,
   };
   const winnerUnit = won ? attackerUnit : defenderUnit;
   const loserUnit = won ? defenderUnit : attackerUnit;

@@ -38,6 +38,8 @@ export const EVENT_NAMES = new Set([
   // is dropped with it.
   "build_started", "build_completed", "chip_upgraded",
   "chip_dormant", "chip_reactivated", "slider_changed",
+  // §19 Exploration, Vision & Fog of War (APPEND-ONLY — distinct keys).
+  "hex_explored", "unit_spotted", "unit_lost_sight", "ambush_triggered",
 ]);
 
 // Resolve a chip / card instance uid to its content def. Covers Market

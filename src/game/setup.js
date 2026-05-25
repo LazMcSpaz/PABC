@@ -5,8 +5,9 @@ import { FACTIONS, LOCATIONS, CAPITAL, ABILITIES, REACTIVES } from "./content.js
 import { FIELD_ENCOUNTERS } from "./content/index.js";
 import { makeRng } from "./rng.js";
 import { createIdGen } from "./ids.js";
-import { buildHexGrid, generateLayout } from "./board.js";
+import { buildHexGrid, generateLayout, assignTerrainFeatures } from "./board.js";
 import { recomputeInfluence } from "./influence.js";
+import { recomputeVisibility } from "./visibility.js";
 
 // A fresh unit with the full v0.2 field set (§16.3 / plan). `moveRemaining`
 // seeds to base Movement; the owner's Upkeep refreshes it from effective.
@@ -55,9 +56,13 @@ export function createGame({
   const hexes = {};
   for (const [id, hex] of Object.entries(grid.hexes)) {
     // v0.2 §16.6 — `terrain` is null for now; "mountain" gives defenders
-    // +1. Full terrain generation is deferred; harness/tests may set it.
-    hexes[id] = { id, row: hex.row, col: hex.col, type: layout.type[id], terrain: null };
+    // +1. §19.4 adds `elevation` / `cover` flags (stamped below).
+    hexes[id] = { id, row: hex.row, col: hex.col, type: layout.type[id], terrain: null, elevation: false, cover: false };
   }
+  // §19.4 — stamp deterministic elevation / cover onto terrain hexes. Uses
+  // an ISOLATED rng (derived from seed) so the main rng stream — and every
+  // existing seed-dependent test — is byte-for-byte unchanged.
+  assignTerrainFeatures(makeRng((seed ^ 0x9e3779b9) >>> 0), hexes);
 
   // --- players ---
   const players = {};
@@ -262,5 +267,9 @@ export function createGame({
   // §18.3 — establish the starting Influence field + ZoC owner map so the
   // HUD and routing have them before the first turn.
   recomputeInfluence(state);
+  // §19 — seed each faction's fog from its starting sources (units + its
+  // Capital + ZoC). Quietly: no spot/explore events at game creation.
+  state.visibility = {};
+  for (const fid of playing) recomputeVisibility(state, fid, { emitEvents: false });
   return state;
 }

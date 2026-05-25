@@ -89,6 +89,26 @@ export const CONFIG = {
     // §20.7 rush rate — banked scrap per build-point.
     rushScrapPerPoint: 1,
   },
+
+  // §19 Exploration, Vision & Fog of War. Per-faction sight; LoS over
+  // elevation/cover; concealment + ambush. All TBD-in-spec; demo defaults
+  // here. Built for a larger map — nothing keys off the 30-hex field.
+  fog: {
+    unitVision: 2, // §19.3 base sight radius of a unit
+    unitDetection: 0, // §19.5 a plain unit has NO Detection — concealment hides
+                      // even point-blank; Detection comes from scout/recon/
+                      // watchtower chips + the Intelligence vision path (§19.7).
+    locationVisionBase: 1, // §19.3 a controlled Location's base sight
+    locationVisionPerLoyalty: 0.25, // + floor(loyalty × this): a loyal core sees farther
+    zocVision: 0, // §19.3 ZoC-owned hexes contribute sight at this radius (0 = the hex itself)
+    elevationVisionBonus: 1, // §19.4 a source on elevation sees +this (and over ridges)
+    coverSightCost: 1, // §19.4 extra sight cost to see INTO a cover hex
+    ambushBonus: 2, // §19.5 ambush edge added to the surpriser's contest total
+    ghostMaxAge: null, // §19.11 ghost aging (TBD) — null = ghosts never expire
+    intelVisionBonus: 1, // §19.8 Intelligence vision-branch faction-wide sight bonus
+    intelDetection: 1, // §19.8 Intelligence vision-branch detection
+    terrainSeedDensity: { elevation: 0.18, cover: 0.22 }, // §19.4 share of terrain hexes
+  },
 };
 
 // Strategic-value ordering helper.

@@ -87,16 +87,20 @@ function Plaque({ children }) {
 }
 
 export default function Hex({ hex, units, selected, reachable, selectedUnitId, onClick, onUnitClick }) {
-  const isLocation = hex.type === "location";
+  // §19 fog state — "visible" (live) | "explored" (remembered, dimmed) |
+  // "unexplored" (black). Drives whether live details render at all.
+  const fog = hex.fog || "visible";
+  const isUnexplored = fog === "unexplored";
+  const isExplored = fog === "explored";
+  const isLocation = hex.type === "location" && !isUnexplored;
   const loc = isLocation ? LOCATIONS[hex.locationId] : null;
   const ctrl = isLocation ? fullController(hex.control?.sections) : null;
-  // §18.3 — soft ZoC tint: the faction whose Influence dominates this hex
-  // (may differ from who holds the Location's Control ring). Projected
-  // territory, not ownership — kept faint so the Control rim still reads.
+  // §18.3 — soft ZoC tint (only present on visible hexes via the adapter).
   const zocColor = hex.zocOwner ? ownerColor(hex.zocOwner) : null;
 
   let rim = "#4a4231";
-  if (hex.type === "encounter") rim = "#3c5b65";
+  if (isUnexplored) rim = "#1b1813";
+  else if (hex.type === "encounter") rim = "#3c5b65";
   else if (isLocation) rim = ctrl ? ownerColor(ctrl) : "#5a5040";
   if (reachable) rim = theme.good;
   if (selected) rim = theme.accent;
@@ -107,6 +111,9 @@ export default function Hex({ hex, units, selected, reachable, selectedUnitId, o
   else if (ctrl) filter = `drop-shadow(0 0 6px ${ownerColor(ctrl)}88) ` + filter;
 
   const cursor = reachable ? "pointer" : undefined;
+  // Dim everything inside an explored-but-not-visible hex; black out the
+  // unexplored. Live hexes render at full strength.
+  const contentOpacity = isUnexplored ? 0 : isExplored ? 0.5 : 1;
 
   return (
     <div
@@ -130,12 +137,17 @@ export default function Hex({ hex, units, selected, reachable, selectedUnitId, o
         style={{
           position: "absolute",
           inset: selected ? 4 : 3,
-          background: FILLS[hex.type],
+          background: isUnexplored ? "linear-gradient(165deg, #0d0b08 0%, #060504 100%)" : FILLS[hex.type],
           display: "flex",
           flexDirection: "column",
           alignItems: "center",
           justifyContent: "center",
           gap: 5,
+          // Dim explored hexes; the unexplored keep their opaque black fill
+          // but render no inner detail (gated below).
+          opacity: isExplored ? contentOpacity : 1,
+          // §19.4 — a faint texture cue for known terrain features.
+          filter: hex.elevation ? "brightness(1.15) contrast(1.1)" : hex.cover ? "saturate(1.4) brightness(0.92)" : undefined,
         }}
       >
         {isLocation && (
@@ -156,7 +168,7 @@ export default function Hex({ hex, units, selected, reachable, selectedUnitId, o
             />
           </>
         )}
-        {hex.type === "encounter" && (
+        {hex.type === "encounter" && !isUnexplored && (
           <>
             <div
               style={{
@@ -183,7 +195,7 @@ export default function Hex({ hex, units, selected, reachable, selectedUnitId, o
             </div>
           </>
         )}
-        {hex.type === "terrain" && (
+        {hex.type === "terrain" && !isUnexplored && (
           <div
             style={{
               fontSize: 9,
@@ -222,7 +234,66 @@ export default function Hex({ hex, units, selected, reachable, selectedUnitId, o
           onClick={onUnitClick}
         />
       ))}
+      {/* §19.2 ghosts — dimmed last-known enemy markers (stale intel). */}
+      {(hex.ghosts || []).map((g, i) => (
+        <GhostToken key={`ghost-${i}`} ghost={g} slot={i} />
+      ))}
+      {/* §19.4 terrain feature badge on known hexes. */}
+      {!isUnexplored && (hex.elevation || hex.cover) && (
+        <TerrainBadge elevation={hex.elevation} cover={hex.cover} />
+      )}
       {hex.loot > 0 && <LootMarker count={hex.loot} />}
+    </div>
+  );
+}
+
+// A dimmed marker for an enemy unit last seen here — frozen at its
+// last-known strength and round, so it reads as stale intel (§19.2).
+function GhostToken({ ghost, slot = 0 }) {
+  const color = ownerColor(ghost.owner);
+  const pos = TOKEN_SLOTS[Math.min(slot, TOKEN_SLOTS.length - 1)];
+  return (
+    <div
+      title={`Last seen: ${FACTIONS[ghost.owner]?.name || ghost.owner} (Str ${ghost.strength}, round ${ghost.round})${ghost.false ? " — unverified" : " — may have moved"}`}
+      style={{
+        position: "absolute",
+        top: pos.top,
+        left: pos.left,
+        transform: "translate(-50%, -50%)",
+        width: 26,
+        height: 26,
+        borderRadius: "50%",
+        background: `radial-gradient(circle at 36% 30%, ${color}66, #14110c 150%)`,
+        border: `2px dashed ${color}aa`,
+        opacity: 0.55,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        zIndex: 3,
+        filter: "grayscale(0.3)",
+      }}
+    >
+      <span style={{ fontFamily: theme.fontDisplay, fontSize: 12, fontWeight: 700, color: "#e8e2d4" }}>?</span>
+    </div>
+  );
+}
+
+function TerrainBadge({ elevation, cover }) {
+  return (
+    <div
+      title={elevation ? "High ground — extends sight, blocks line of sight behind it" : "Cover — reduces sight, conceals units"}
+      style={{
+        position: "absolute",
+        top: "8%",
+        left: "12%",
+        fontSize: 13,
+        lineHeight: 1,
+        zIndex: 4,
+        textShadow: "0 1px 2px rgba(0,0,0,0.8)",
+        pointerEvents: "none",
+      }}
+    >
+      {elevation ? "▲" : "🌲"}
     </div>
   );
 }

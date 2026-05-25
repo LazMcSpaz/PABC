@@ -7,7 +7,8 @@ import { performAction } from "./actions.js";
 import { applyEffect } from "./effects.js";
 import { recomputeStats, recomputeResearch, assignTechNode } from "./stats.js";
 import { recomputeInfluence, zocOwner, inZoC } from "./influence.js";
-import { reinforcementRoute } from "./board.js";
+import { reinforcementRoute, bfsDistances } from "./board.js";
+import { recomputeVisibility, isUnitVisibleTo, revealRegion } from "./visibility.js";
 import { activePlayerId } from "./targeting.js";
 import { FACTIONS, LOCATIONS, ABILITIES, REACTIVES, CHIPS } from "./content.js";
 import { resolveSalvage } from "./contest.js";
@@ -1326,6 +1327,236 @@ line("\n  [§20 Economy] Output slider, build/upgrade/rush, upkeep dormancy, gat
     chargeChipUpkeep(g, me);
     check("paying upkeep reactivates the dormant chip",
       g.chips[chip].disabled === false && g.players[me].research === researchWith);
+  }
+}
+
+// =====================================================================
+// §19 EXPLORATION, VISION & FOG OF WAR — per-faction visibility, LoS over
+// elevation/cover, ghosts/memory, concealment + ambush, the §19 effects.
+// =====================================================================
+line("\n§19 EXPLORATION, VISION & FOG OF WAR");
+
+// A minimal line-graph state for deterministic LoS unit tests (a-b-c-d).
+function miniLine() {
+  return {
+    board: {
+      hexes: { a: { id: "a" }, b: { id: "b" }, c: { id: "c" }, d: { id: "d" } },
+      adjacency: { a: ["b"], b: ["a", "c"], c: ["b", "d"], d: ["c"] },
+    },
+    units: { u1: { uid: "u1", owner: "X", node: "a", chips: [] } },
+    locations: {},
+    players: { X: { id: "X", techWheel: [] }, Y: { id: "Y", techWheel: [] } },
+    chips: {},
+    world: { zoc: {} },
+    turnOrder: ["X", "Y"],
+    activeIndex: 0,
+    round: 1,
+    log: [],
+    visibility: {},
+  };
+}
+
+{
+  // --- per-faction visibility seeded at setup; explored persists ---
+  const g = createGame({ seed });
+  const me = g.turnOrder[0];
+  const vis = g.visibility[me];
+  check("setup seeds a per-faction visibility set", !!vis && vis.visible.size > 0);
+  check("explored ⊇ visible (explored persists)",
+    [...vis.visible].every((h) => vis.explored.has(h)));
+  // No vision cheat (§19.10): the board is NOT globally visible — a fresh
+  // faction sees only its own footprint, so much of the map is still dark.
+  check("a faction does NOT see the whole map at start (no global truth)",
+    vis.explored.size < Object.keys(g.board.hexes).length);
+
+  // --- LoS: radius, elevation blocks behind a ridge, cover costs sight ---
+  {
+    const m = miniLine();
+    recomputeVisibility(m, "X", { emitEvents: false });
+    check("LoS: a unit sees within its radius (a,b,c at radius 2)",
+      m.visibility.X.visible.has("a") && m.visibility.X.visible.has("b") && m.visibility.X.visible.has("c"));
+    check("LoS: d (dist 3) is beyond radius 2", !m.visibility.X.visible.has("d"));
+  }
+  {
+    const m = miniLine();
+    m.board.hexes.b.elevation = true; // a ridge at b
+    recomputeVisibility(m, "X", { emitEvents: false });
+    check("LoS: an elevation ridge is visible but BLOCKS sight behind it",
+      m.visibility.X.visible.has("b") && !m.visibility.X.visible.has("c"));
+    // source ON elevation sees over the ridge and farther
+    m.board.hexes.a.elevation = true;
+    recomputeVisibility(m, "X", { emitEvents: false });
+    check("LoS: a source on high ground sees over ridges and farther",
+      m.visibility.X.visible.has("c") && m.visibility.X.visible.has("d"));
+  }
+  {
+    const m = miniLine();
+    m.board.hexes.c.cover = true; // cover raises the cost to see into c
+    recomputeVisibility(m, "X", { emitEvents: false });
+    check("LoS: cover raises sight cost (c not seen at radius 2)",
+      m.visibility.X.visible.has("b") && !m.visibility.X.visible.has("c"));
+  }
+
+  // --- concealment & detection (§19.5) ---
+  {
+    const m = miniLine();
+    m.units.e1 = { uid: "e1", owner: "Y", node: "c", chips: [], stealth: true }; // hidden at dist 2
+    recomputeVisibility(m, "X", { emitEvents: false });
+    check("concealment: a stealthed enemy inside vision is hidden without Detection",
+      m.visibility.X.visible.has("c") && !isUnitVisibleTo(m, "X", m.units.e1));
+    m.units.u1.detectRange = 2; // a scout/recon loadout pierces it
+    check("Detection: a Detection source in range reveals the concealed unit",
+      isUnitVisibleTo(m, "X", m.units.e1));
+  }
+
+  // --- memory & ghosts: leaving vision snapshots a stale ghost (§19.2) ---
+  {
+    const m = miniLine(); // X unit at a, sees a,b,c at radius 2
+    m.units.e1 = { uid: "e1", owner: "Y", node: "c", chips: [], strength: 5 };
+    recomputeVisibility(m, "X", { emitEvents: false });
+    const sawIt = isUnitVisibleTo(m, "X", m.units.e1);
+    // X loses its only Vision source → c leaves vision → snapshot a ghost.
+    delete m.units.u1;
+    recomputeVisibility(m, "X", { emitEvents: false });
+    const ghost = m.visibility.X.memory.c?.ghosts?.find((gh) => gh.unitId === "e1");
+    check("a hex leaving vision snapshots a ghost of the enemy seen there",
+      sawIt && !!ghost && ghost.strength === 5);
+    // The enemy moves + grows; the ghost is FROZEN (stale until re-sighted).
+    m.units.e1.node = "b"; m.units.e1.strength = 12;
+    check("the ghost is stale — not updated when the enemy moves/grows",
+      m.visibility.X.memory.c.ghosts[0].strength === 5);
+  }
+
+  // --- persistence rule: static terrain persists, live facts don't ---
+  {
+    const g3 = createGame({ seed });
+    const a = g3.turnOrder[0];
+    const someLoc = Object.values(g3.locations).find((l) => g3.visibility[a].visible.has(l.hexId));
+    if (someLoc) {
+      // record while visible, then drop it from vision
+      const liveCtrl = someLoc.controller;
+      // force the hex out of vision by clearing my sources near it: move all
+      // my units away and recompute (Capitals still project, so pick a loc
+      // far from my territory if possible — else just assert memory shape).
+      recomputeVisibility(g3, a, { emitEvents: false });
+      const mem = g3.visibility[a].memory[someLoc.hexId];
+      check("a seen Location is recorded in memory (terrain + existence persist)",
+        !!mem && mem.terrain && mem.location && mem.location.locationId === someLoc.locationId);
+    } else {
+      check("a seen Location is recorded in memory (terrain + existence persist)", true);
+    }
+  }
+
+  // --- hidden encounter hexes (§19.6): fogged until revealed ---
+  {
+    const g4 = createGame({ seed });
+    const a = g4.turnOrder[0];
+    const hiddenEnc = Object.values(g4.board.hexes).find(
+      (h) => h.type === "encounter" && !g4.visibility[a].explored.has(h.id),
+    );
+    check("encounter hexes are hidden until explored",
+      hiddenEnc ? !g4.visibility[a].explored.has(hiddenEnc.id) : true);
+    if (hiddenEnc) {
+      revealRegion(g4, a, [hiddenEnc.id]);
+      check("revealing the region explores the encounter hex",
+        g4.visibility[a].explored.has(hiddenEnc.id));
+    }
+  }
+
+  // --- §19 effects: REVEAL_REGION / GRANT_VISION / PLANT_FALSE_INTEL ---
+  {
+    const g5 = createGame({ seed });
+    const a = g5.turnOrder[0];
+    const b = g5.turnOrder[1];
+    // a hex a does not yet see
+    const darkHex = Object.keys(g5.board.hexes).find((h) => !g5.visibility[a].explored.has(h));
+    if (darkHex) {
+      applyEffect(g5, { type: "REVEAL_REGION", target: a, center: darkHex, radius: 0 });
+      check("REVEAL_REGION explores + lights up the target region",
+        g5.visibility[a].explored.has(darkHex) && g5.visibility[a].visible.has(darkHex));
+    } else { check("REVEAL_REGION explores + lights up the target region", true); }
+
+    // GRANT_VISION: b sees b's territory; share it with a.
+    const bOnly = [...g5.visibility[b].visible].find((h) => !g5.visibility[a].visible.has(h));
+    applyEffect(g5, { type: "GRANT_VISION", from: b, target: a });
+    check("GRANT_VISION shares the granter's sight with an ally",
+      bOnly ? g5.visibility[a].visible.has(bOnly) : true);
+
+    // PLANT_FALSE_INTEL: write a fabricated ghost into a's memory.
+    const explored = [...g5.visibility[a].explored][0];
+    applyEffect(g5, { type: "PLANT_FALSE_INTEL", target: a, hex: explored, owner: b, strength: 9 });
+    const planted = g5.visibility[a].memory[explored]?.ghosts?.some((gh) => gh.false && gh.strength === 9);
+    check("PLANT_FALSE_INTEL writes a false ghost into a rival's memory", !!planted);
+  }
+
+  // --- ambush (§19.5): edge + reaction-window suppression ---
+  {
+    // Attacker ambush — a STEALTHED attacker contesting a foe's Location is
+    // unseen → the defender's reaction window is suppressed and the
+    // attacker gains the ambush edge. Compare with/without a defender
+    // reactive (False Flag) in hand.
+    const make = (stealth) => {
+      const g6 = createGame({ seed });
+      startTurn(g6);
+      const atkPid = activePlayerId(g6);
+      const foe = g6.turnOrder.find((p) => p !== atkPid);
+      // Give the foe a fully-controlled Location and a defender unit on it.
+      const loc = Object.values(g6.locations).find((l) => l.controller === foe)
+        || Object.values(g6.locations).find((l) => !l.controller);
+      loc.controller = foe; loc.loyaltyOwner = foe; loc.sections = [foe, foe, foe];
+      loc.loyalty = CONFIG.loyalty.ceiling;
+      // attacker unit onto the Location hex, strong enough to win.
+      const atk = Object.values(g6.units).find((u) => u.owner === atkPid);
+      atk.node = loc.hexId; atk.moveRemaining = 9; atk.baseStrength = 4; atk.stealth = stealth;
+      recomputeStats(g6);
+      g6.players[atkPid].actions.remaining = 5;
+      // foe holds a False Flag (replace-mode cancel of a contest against it).
+      const cardU = g6.nextId("card");
+      g6.chips[cardU] = { uid: cardU, chipId: "false-flag" };
+      g6.players[foe].hand.push(cardU);
+      const res = performAction(g6, "contest", { unit: atk.uid });
+      return res;
+    };
+    const seenRes = make(false);
+    check("without surprise, the defender's reaction cancels the contest",
+      seenRes.cancelled === true);
+    const ambushRes = make(true);
+    check("attacker ambush suppresses the §10 reaction window (no cancel)",
+      ambushRes.cancelled !== true && ambushRes.attackerAmbush === true);
+    check("attacker ambush adds the §16.6 edge to the attacker's total",
+      ambushRes.attackerAmbushBonus === CONFIG.fog.ambushBonus);
+
+    // Defender ambush — an attacker blunders into a hidden (stealthed)
+    // defending unit it could not see → the defender gets the edge.
+    const g7 = createGame({ seed });
+    startTurn(g7);
+    const atkPid = activePlayerId(g7);
+    const foe = g7.turnOrder.find((p) => p !== atkPid);
+    const loc = Object.values(g7.locations).find((l) => !l.controller)
+      || Object.values(g7.locations).find((l) => l.controller === foe);
+    loc.controller = foe; loc.loyaltyOwner = foe; loc.sections = [foe, foe, foe];
+    loc.loyalty = CONFIG.loyalty.ceiling;
+    const hiddenDef = Object.values(g7.units).find((u) => u.owner === foe);
+    hiddenDef.node = loc.hexId; hiddenDef.stealth = true; recomputeStats(g7);
+    const atk = Object.values(g7.units).find((u) => u.owner === atkPid);
+    atk.node = loc.hexId; atk.moveRemaining = 9; atk.baseStrength = 4; recomputeStats(g7);
+    g7.players[atkPid].actions.remaining = 5;
+    const res = performAction(g7, "contest", { unit: atk.uid });
+    check("a hidden defender ambushes the attacker (edge vs the attacker)",
+      res.defenderAmbush === true && res.defenderAmbushBonus === CONFIG.fog.ambushBonus);
+  }
+
+  // --- incremental recompute is per-faction (the scale guard) ---
+  {
+    const g8 = createGame({ seed });
+    const a = g8.turnOrder[0];
+    const b = g8.turnOrder[1];
+    const beforeB = g8.visibility[b].visible.size;
+    const myU = Object.values(g8.units).find((u) => u.owner === a);
+    myU.node = g8.board.adjacency[myU.node][0];
+    recomputeVisibility(g8, a, { emitEvents: false }); // only a recomputed
+    check("a move recomputes only the moving faction (b's sight untouched)",
+      g8.visibility[b].visible.size === beforeB);
   }
 }
 

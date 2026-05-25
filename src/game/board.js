@@ -91,6 +91,35 @@ export function reinforcementRoute(state, pid, targetNode) {
   return { dist: dist[targetNode], originHex: origin[targetNode] };
 }
 
+// §19.4 terrain LoS predicates. Two new roles beyond the §16.6 combat +1:
+// `elevation` extends a source's sight and BLOCKS line of sight to hexes
+// behind it (ridgelines = sight-walls); `cover` raises the sight cost to
+// see into a hex and CONCEALS units standing in it from distant eyes.
+// Stored as plain hex flags so the recompute and the UI read one shape.
+export function isElevation(hex) {
+  return !!(hex && (hex.elevation || hex.terrain === "mountain"));
+}
+export function isCover(hex) {
+  return !!(hex && hex.cover);
+}
+
+// §19.4 — stamp deterministic elevation / cover features onto the board.
+// Only terrain ("wasteland") hexes are eligible: Locations stay
+// feature-free (so a contested Location hex never silently conceals an
+// attacker) and encounter hexes stay readable. Built off the seeded rng so
+// a given seed always yields the same ridges and forests. Designed for the
+// larger map; on the 30-hex field it just sprinkles a few of each.
+export function assignTerrainFeatures(rng, hexes) {
+  const cfg = CONFIG.fog.terrainSeedDensity;
+  const terrainHexes = Object.values(hexes).filter((h) => h.type === "terrain");
+  const shuffled = rng.shuffle(terrainHexes.map((h) => h.id));
+  const nElev = Math.round(shuffled.length * (cfg.elevation || 0));
+  const nCover = Math.round(shuffled.length * (cfg.cover || 0));
+  let i = 0;
+  for (; i < nElev && i < shuffled.length; i++) hexes[shuffled[i]].elevation = true;
+  for (let j = 0; j < nCover && i + j < shuffled.length; j++) hexes[shuffled[i + j]].cover = true;
+}
+
 // Constrained-random layout: place the 10 Locations, then fill the rest
 // with encounter / terrain tiles. Each faction's two affiliated Locations
 // land within 2 hexes of each other; the four start areas are spread.

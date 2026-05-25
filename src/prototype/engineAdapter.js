@@ -14,6 +14,7 @@ import {
 import {
   buildableChips, upgradeOption, slotCapacity, slotsUsed, locationOutput,
 } from "../game/economy.js";
+import { isUnitVisibleTo } from "../game/visibility.js";
 import {
   LOCATIONS as UI_LOCATIONS,
   UNIT_UPGRADES,
@@ -163,12 +164,24 @@ function isImmobilized(state, unit) {
 export function adaptState(state) {
   ensureUiConstantsSynced();
 
-  // hex → ordered list of unit uids. Multiple tokens render per hex (in
-  // arc slots), so we keep the full list. The human's units come first
-  // so the player's own unit takes the prime slot and is what the
-  // Inspector's single-unit Contest path keys off.
+  // §19 — the adapter now serves ONLY the viewing player's fog. `viewer` is
+  // the human faction; `vis` is its per-faction visibility (or null in any
+  // pre-fog/headless path, in which case everything is shown — back-compat).
+  const viewer = state.humanFactionId;
+  const vis = viewer ? state.visibility?.[viewer] : null;
+  const fogOf = (id) =>
+    !vis ? "visible" : vis.visible.has(id) ? "visible" : vis.explored.has(id) ? "explored" : "unexplored";
+  // A unit is shown only if the viewer can actually see it (live sight +
+  // concealment/detection); own units always show. Hidden enemies are
+  // omitted entirely — the human reads the same fog the AI does.
+  const canSeeUnit = (u) => !vis || isUnitVisibleTo(state, viewer, u);
+
+  // hex → ordered list of VISIBLE unit uids. Multiple tokens render per hex
+  // (arc slots). The human's units come first so the player's own unit
+  // takes the prime slot and is what the Inspector's Contest path keys off.
   const unitsByHex = {};
   for (const u of Object.values(state.units)) {
+    if (!canSeeUnit(u)) continue;
     (unitsByHex[u.node] ||= []).push(u);
   }
   const unitIdsAt = {};
@@ -186,6 +199,7 @@ export function adaptState(state) {
 
   const units = {};
   for (const u of Object.values(state.units)) {
+    if (!canSeeUnit(u)) continue; // §19 — don't leak hidden enemies to the UI
     units[u.uid] = {
       id: u.uid,
       uid: u.uid,
@@ -210,55 +224,83 @@ export function adaptState(state) {
   const zoc = state.world?.zoc || {};
   const hexes = {};
   for (const h of Object.values(state.board.hexes)) {
+    const fog = fogOf(h.id);
+    const live = fog === "visible";
+    const mem = vis?.memory?.[h.id] || null;
     const hex = {
       id: h.id,
       type: h.type,
       row: h.row,
       col: h.col,
-      // §18.3 — the faction whose ZoC contains this hex (null = contested
-      // / neutral). Drives the board's ZoC overlay tint.
-      zocOwner: zoc[h.id] || null,
+      // §19 three-state fog: "visible" | "explored" | "unexplored".
+      fog,
+      // §19.4 terrain features (known once explored) — drive LoS + UI texture.
+      elevation: fog === "unexplored" ? false : !!h.elevation,
+      cover: fog === "unexplored" ? false : !!h.cover,
+      // §18.3 ZoC tint — only where the viewer has live sight (it's live info).
+      zocOwner: live ? zoc[h.id] || null : null,
     };
-    if (unitAt[h.id]) hex.unitId = unitAt[h.id];
-    if (unitIdsAt[h.id]) hex.unitIds = unitIdsAt[h.id];
+    // Live unit tokens only on visible hexes.
+    if (live && unitAt[h.id]) hex.unitId = unitAt[h.id];
+    if (live && unitIdsAt[h.id]) hex.unitIds = unitIdsAt[h.id];
+    // §19.2 ghosts — dimmed last-known enemy markers on explored-but-not-
+    // visible hexes, read from the viewer's frozen memory snapshot.
+    if (!live && mem?.ghosts?.length) {
+      hex.ghosts = mem.ghosts.map((g) => ({
+        owner: g.owner, strength: g.strength, round: g.round, stale: true, false: !!g.false,
+      }));
+    }
     const loot = state.hexLoot?.[h.id];
-    if (loot?.length) {
+    if (live && loot?.length) {
       hex.loot = loot.length;
       hex.lootChips = loot.map((uid) => engineChipIdToUi(state.chips[uid]?.chipId));
     }
-    if (h.type === "location") {
+    if (h.type === "location" && fog !== "unexplored") {
       const loc = state.locations[h.id];
       hex.locationId = engineLocationIdToUi(loc.locationId);
       hex.engineLocationId = loc.locationId;
-      hex.control = {
-        sections: [...loc.sections],
-        // §18.2 Loyalty — the 8-slice centre pie (replaces foothold/decay).
-        // `loyalty` is null until a player holds full Control; `loyaltyDanger`
-        // mirrors the engine's `loyalty_failing` threshold so the UI can warn
-        // before any Control peels.
-        loyalty: loc.loyalty,
-        loyaltyMax: CONFIG.loyalty.ceiling,
-        loyaltyDanger:
-          loc.loyalty != null && loc.loyalty <= CONFIG.loyalty.dangerThreshold,
-        chips: adaptChips(state, loc.chips),
-        chipUids: [...loc.chips],
-        // Engine-derived: the ability eats one base slot, so this is
-        // lower than the UI's static LOCATIONS[id].chipSlots whenever
-        // a Location carries an ability (§6.3).
-        chipSlots: loc.chipSlots,
-        abilityId: loc.abilityId,
-        ability: loc.abilityId ? describeAbility(loc.abilityId) : null,
-        abilityUsedThisTurn:
-          loc.abilityActivatedTurn === state.round * state.turnOrder.length + state.activeIndex,
-      };
-      hex.garrison = loc.garrison; // engine's live garrison (incl. capital bonus)
-      hex.production = loc.production;
-      hex.abilityId = loc.abilityId;
-      hex.controller = loc.controller;
-      // §20 Economy & City Development — Output, the guns/butter slider, the
-      // active build, and the §20.6 build menu / upgrade view sets. Computed
-      // only for Locations the controller fully holds (build is theirs alone).
-      hex.economy = loc.controller ? adaptEconomy(state, loc) : null;
+      if (live) {
+        // Visible — real-time truth (§19.2).
+        hex.control = {
+          sections: [...loc.sections],
+          loyalty: loc.loyalty,
+          loyaltyMax: CONFIG.loyalty.ceiling,
+          loyaltyDanger: loc.loyalty != null && loc.loyalty <= CONFIG.loyalty.dangerThreshold,
+          chips: adaptChips(state, loc.chips),
+          chipUids: [...loc.chips],
+          chipSlots: loc.chipSlots,
+          abilityId: loc.abilityId,
+          ability: loc.abilityId ? describeAbility(loc.abilityId) : null,
+          abilityUsedThisTurn:
+            loc.abilityActivatedTurn === state.round * state.turnOrder.length + state.activeIndex,
+        };
+        hex.garrison = loc.garrison;
+        hex.production = loc.production;
+        hex.abilityId = loc.abilityId;
+        hex.controller = loc.controller;
+        hex.economy = loc.controller ? adaptEconomy(state, loc) : null;
+      } else {
+        // Explored — LAST-KNOWN snapshot only (§19.2); dimmed, possibly stale.
+        // Build is the controller's private business — never shown when fogged.
+        const ml = mem?.location || {};
+        hex.stale = true;
+        hex.control = {
+          sections: ml.sections ? [...ml.sections] : [...loc.sections].map(() => "neutral"),
+          loyalty: ml.loyalty ?? null,
+          loyaltyMax: CONFIG.loyalty.ceiling,
+          loyaltyDanger: false,
+          chips: [],
+          chipUids: [],
+          chipSlots: loc.chipSlots,
+          abilityId: null,
+          ability: null,
+          abilityUsedThisTurn: false,
+        };
+        hex.garrison = ml.garrison ?? null;
+        hex.production = null;
+        hex.controller = ml.controller ?? null;
+        hex.economy = null;
+      }
     }
     hexes[h.id] = hex;
   }
@@ -301,11 +343,16 @@ export function adaptState(state) {
     // v0.2 §16.5 — in-transit field reinforcements, for board overlay /
     // unit panel ETA display.
     reinforcements: (state.reinforcements || []).map((r) => ({ ...r })),
-    // §18.3 — the derived ZoC owner map (hexId -> fid|null) and the
-    // per-faction Influence scalar field (fid -> hexId -> number), for the
-    // board's ZoC overlay and any influence read-out.
-    zoc: { ...zoc },
-    influence: state.world?.influence || {},
+    // §18.3 / §19 — the ZoC owner map, FOGGED to where the viewer has live
+    // sight (ZoC is live info), and the viewer's OWN Influence field only.
+    zoc: vis
+      ? Object.fromEntries(Object.entries(zoc).filter(([h]) => vis.visible.has(h)))
+      : { ...zoc },
+    influence: viewer ? { [viewer]: state.world?.influence?.[viewer] || {} } : (state.world?.influence || {}),
+    // §19 — the viewer's fog summary, for HUD legends / minimap.
+    fog: vis
+      ? { explored: [...vis.explored], visible: [...vis.visible] }
+      : null,
     // Surface the raw engine state so Phase-4 action handlers can reach
     // engine APIs without re-deriving everything.
     engineState: state,

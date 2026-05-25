@@ -9,6 +9,7 @@ import { CONFIG } from "./config.js";
 import { FACTIONS, CHIPS, ABILITIES, chipDefOf } from "./content.js";
 import { validateContest, runContest } from "./contest.js";
 import { recomputeStats } from "./stats.js";
+import { recomputeVisibility } from "./visibility.js";
 import { applyEffects } from "./effects.js";
 import { drawFieldEncounter, resolveMarkerOnHex } from "./encounters.js";
 import { makeUnit } from "./setup.js";
@@ -55,6 +56,13 @@ function runMove(state, { params, ctx }) {
   unit.moveRemaining = Math.max(0, unit.moveRemaining - dist);
   unit.movedSinceUpkeep = true; // §16.6 fortify — moving voids "dug in"
   emit(state, "unit_moved", { unit: unit.uid, from, to: params.to });
+
+  // §19.11 — INCREMENTAL recompute (the scale guard): a move only changes
+  // the MOVER's own sight footprint, so we refresh that one faction's
+  // visibility, not the whole board. Whether other factions can now see
+  // this unit is a render/query-time concealment check, not a stored-set
+  // change — so no all-faction recompute is needed here.
+  recomputeVisibility(state, unit.owner);
 
   // §15.5 placement markers take precedence — they're authored to land
   // on a specific hex and one-shot when discovered.
@@ -139,6 +147,7 @@ function runRecruit(state, { pid, player, params }) {
   const u = state.nextId("unit");
   state.units[u] = makeUnit(u, pid, loc.hexId, FACTIONS[pid].name);
   emit(state, "unit_recruited", { unit: u, player: pid, hex: loc.hexId });
+  recomputeVisibility(state, pid); // §19 — a new unit is a new Vision source
   return { unit: u };
 }
 

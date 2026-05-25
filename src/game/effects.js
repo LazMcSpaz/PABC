@@ -5,6 +5,8 @@ import { emit } from "./events.js";
 import { resolveTargets } from "./targeting.js";
 import { recomputeStats, recomputeResearch } from "./stats.js";
 import { destroyUnit } from "./contest.js";
+import { bfsDistances } from "./board.js";
+import { revealRegion, plantFalseGhost, ensureVisibility } from "./visibility.js";
 
 // Headless default for interactive effects — pick the first option.
 export function autoInteract(request) {
@@ -255,6 +257,44 @@ const EFFECTS = {
       originalActive: active,
       queuedAt: state.round,
     });
+  },
+
+  // --- §19 Fog of War (additive handlers) ---
+
+  // §19.8 reveal-region pulse: explore + light up a radius of hexes for the
+  // target faction(s). `center` defaults to the source hex (ctx) / the
+  // target's location; `radius` in hops.
+  REVEAL_REGION(state, e, ctx) {
+    const center = e.center || ctx.event?.payload?.hex || ctx.source?.hexId || ctx.source?.node;
+    if (!center || !state.board.hexes[center]) return;
+    const dist = bfsDistances(state.board.adjacency, center);
+    const region = Object.keys(dist).filter((h) => dist[h] <= (e.radius ?? 1));
+    for (const fid of resolveTargets(state, e.target || "active", ctx)) {
+      if (state.players[fid]) revealRegion(state, fid, region);
+    }
+  },
+
+  // §18.6 / §19.9 shared (ally) vision: the recipient faction receives the
+  // granter's currently-visible hexes (see through a friend's eyes). The
+  // granter defaults to the active / source player.
+  GRANT_VISION(state, e, ctx) {
+    const fromFid = resolveTargets(state, e.from || "active", ctx)[0];
+    const fromVis = state.visibility?.[fromFid];
+    if (!fromVis) return;
+    const region = [...fromVis.visible];
+    for (const fid of resolveTargets(state, e.target, ctx)) {
+      if (fid !== fromFid && state.players[fid]) revealRegion(state, fid, region);
+    }
+  },
+
+  // §19.8 espionage / sabotage: write a fabricated ghost into a rival's
+  // memory at an explored hex (the false-intel play).
+  PLANT_FALSE_INTEL(state, e, ctx) {
+    const hex = e.hex || ctx.event?.payload?.hex;
+    for (const fid of resolveTargets(state, e.target, ctx)) {
+      ensureVisibility(state, fid);
+      plantFalseGhost(state, fid, hex, { owner: e.owner || null, strength: e.strength ?? 0, unitId: e.unitId });
+    }
   },
 
   // --- replacement mode — only meaningful inside a reaction window ---

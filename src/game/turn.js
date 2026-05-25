@@ -4,6 +4,7 @@
 import { emit } from "./events.js";
 import { recomputeStats, recomputeResearch } from "./stats.js";
 import { recomputeInfluence } from "./influence.js";
+import { recomputeVisibility } from "./visibility.js";
 import { reinforcementRoute } from "./board.js";
 import { CONFIG } from "./config.js";
 import { activePlayerId } from "./targeting.js";
@@ -94,6 +95,9 @@ export function tickLoyalty(state, pid) {
   // §18.3 — Loyalty rises/decays and any peel shift this faction's
   // Influence; recompute the field + ZoC once after the tick.
   recomputeInfluence(state);
+  // §19 — Location sight scales with Loyalty and a peel can drop a source,
+  // so refresh this faction's fog after the tick (and the ZoC it draws on).
+  recomputeVisibility(state, pid, { emitEvents: false });
 }
 
 // v0.2 §16.2 — refresh each owned unit's move budget from its effective

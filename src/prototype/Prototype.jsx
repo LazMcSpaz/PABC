@@ -576,7 +576,8 @@ export default function Prototype({ config, onNewGame }) {
 
       {/* HEX DETAIL — locations open the single-window Location view;
           encounter / terrain hexes keep the tabbed Inspector. */}
-      {selectedHexId && state.hexes[selectedHexId]?.type === "location" && (
+      {selectedHexId && state.hexes[selectedHexId]?.type === "location" &&
+        state.hexes[selectedHexId]?.fog === "visible" && (
         <LocationWindow
           view={buildLocView(state, state.hexes[selectedHexId], isYourTurn)}
           onClose={() => setSelectedHexId(null)}

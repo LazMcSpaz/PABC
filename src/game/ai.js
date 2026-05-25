@@ -11,6 +11,7 @@ import { bfsDistances } from "./board.js";
 import { LOCATIONS } from "./content.js";
 import { CONFIG } from "./config.js";
 import { buildableChips, slotCapacity, slotsUsed, stationedUnitWithBay } from "./economy.js";
+import { isUnitVisibleTo } from "./visibility.js";
 
 const SAFETY_CAP = 10; // hard stop if priority loop ever spins
 
@@ -44,8 +45,12 @@ function tryOneAction(state, pid) {
       const r = performAction(state, "contest", { unit: unit.uid });
       if (r.ok) return true;
     }
+    // §19.10 — only raid an enemy the AI can actually SEE. A concealed
+    // enemy on this hex isn't targeted explicitly; if the AI contests the
+    // Location instead it may blunder into them (a defender ambush) — fair
+    // fog, no cheats.
     const enemyHere = Object.values(state.units).find(
-      (u) => u.node === unit.node && u.owner !== pid,
+      (u) => u.node === unit.node && u.owner !== pid && isUnitVisibleTo(state, pid, u),
     );
     if (enemyHere && (!loc || !loc.sections.includes("neutral"))) {
       const r = performAction(state, "contest", {
@@ -86,6 +91,53 @@ function isImmobilized(state, unit) {
   return ord <= unit.immobilizedUntil;
 }
 
+// §19.10 — the AI plans on its OWN fog: it knows a Location is a target
+// only once it has explored that hex (live controller while visible, else
+// the possibly-stale memory snapshot). Locations it has never seen are
+// unknown — it must scout to find them. No global-truth reads here.
+function knownGoalHexes(state, pid) {
+  const vis = state.visibility?.[pid];
+  const goals = [];
+  for (const loc of Object.values(state.locations)) {
+    const hex = loc.hexId;
+    if (!vis) { if (loc.controller !== pid) goals.push(hex); continue; }
+    if (vis.visible.has(hex)) {
+      if (loc.controller !== pid) goals.push(hex); // live truth
+    } else if (vis.explored.has(hex)) {
+      // remembered: act on the last-known controller (may be stale).
+      if (vis.memory[hex]?.location?.controller !== pid) goals.push(hex);
+    }
+  }
+  return goals;
+}
+
+// Stale-intel hooks: hexes where the AI last saw an enemy (ghosts). It may
+// commit toward these even though the foe has since moved — expected fog
+// behavior (§19.10), not a bug.
+function ghostHexes(state, pid) {
+  const vis = state.visibility?.[pid];
+  if (!vis) return [];
+  const out = [];
+  for (const hex in vis.memory) {
+    if (!vis.visible.has(hex) && (vis.memory[hex].ghosts || []).length) out.push(hex);
+  }
+  return out;
+}
+
+// The frontier: the nearest reachable hex that is unexplored or borders the
+// dark. Pulls the AI into the fog so it actually scouts.
+function nearestFrontier(state, pid, reachable) {
+  const vis = state.visibility?.[pid];
+  if (!vis) return null;
+  let best = null, bestD = Infinity;
+  for (const [hex, d] of reachable) {
+    const unexplored = !vis.explored.has(hex);
+    const bordersDark = (state.board.adjacency[hex] || []).some((n) => !vis.explored.has(n));
+    if ((unexplored || bordersDark) && d < bestD) { bestD = d; best = hex; }
+  }
+  return best;
+}
+
 function pickMoveTarget(state, pid, unit) {
   const dists = bfsDistances(state.board.adjacency, unit.node);
   const budget = unit.moveRemaining ?? unit.movement;
@@ -93,27 +145,29 @@ function pickMoveTarget(state, pid, unit) {
     .filter(([hex, d]) => d > 0 && d <= budget && hex !== unit.node);
   if (!reachable.length) return null;
 
-  // Score each hex: prefer landing directly on a contestable Location.
-  // Otherwise prefer the hex closest to one we don't control.
-  const goals = Object.values(state.locations)
-    .filter((l) => l.controller !== pid)
-    .map((l) => l.hexId);
-  if (!goals.length) return reachable[0][0];
+  const goals = knownGoalHexes(state, pid);
+  const ghosts = ghostHexes(state, pid);
+  const targets = goals.length ? goals : ghosts; // chase ghosts only if no known goal
 
-  // Project each reachable hex's value off the closest goal Location.
+  // No known objective at all → scout into the dark.
+  if (!targets.length) {
+    return nearestFrontier(state, pid, reachable) || reachable[0][0];
+  }
+
+  // Score each reachable hex: prefer landing directly on a known goal
+  // (favouring higher-VP targets — vpReward is static map data), else step
+  // toward the nearest target.
   let best = null;
   let bestScore = -Infinity;
   for (const [hex, d] of reachable) {
-    const loc = state.locations[hex];
     let score = 0;
-    if (loc && loc.controller !== pid) {
-      // Direct landing — favour higher-VP / higher-value targets
+    if (goals.includes(hex)) {
+      const loc = state.locations[hex];
       const def = LOCATIONS[loc.locationId];
-      score += 1000 + (def?.vpReward || 0) * 100 + (loc.production || 0) * 10;
+      score += 1000 + (def?.vpReward || 0) * 100;
     } else {
-      // Indirect — pick the hex nearest a goal
       let nearest = Infinity;
-      for (const g of goals) {
+      for (const g of targets) {
         const gd = bfsDistances(state.board.adjacency, hex)[g];
         if (gd !== undefined && gd < nearest) nearest = gd;
       }
@@ -121,7 +175,8 @@ function pickMoveTarget(state, pid, unit) {
     }
     if (score > bestScore) { bestScore = score; best = hex; }
   }
-  return best;
+  // If stepping toward targets makes no progress, scout instead.
+  return best ?? (nearestFrontier(state, pid, reachable) || reachable[0][0]);
 }
 
 // §20 — drive each city's economy: set its slider, queue a build into any
