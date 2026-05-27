@@ -3,6 +3,7 @@
 // props so the same chrome drives both the live game (Prototype.jsx) and
 // the static look-pass (HudShowcase.jsx).
 import { useEffect, useState } from "react";
+import { motion } from "framer-motion";
 import ControlMeter from "./ControlMeter.jsx";
 
 // Close the active modal on Escape.
@@ -254,21 +255,61 @@ export function MenuOrb({ onOpen }) {
   );
 }
 
+// A slowly-rotating ticked instrument ring with a brighter sweeping arc —
+// idle motion that makes a radial surface feel "live" (refs: the tick rings
+// around the HUD dials). Decorative only; never intercepts clicks.
+function ScannerRing({ size, accent = C.holo, hi = C.holoHi }) {
+  const c = size / 2, r = c - 10, ticks = 72;
+  return (
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}
+      style={{ position: "absolute", inset: 0, overflow: "visible", pointerEvents: "none" }}>
+      <circle cx={c} cy={c} r={r} fill="none" stroke={accent} strokeWidth="1" opacity="0.22" />
+      <motion.g style={{ transformOrigin: `${c}px ${c}px` }}
+        animate={{ rotate: 360 }} transition={{ duration: 30, ease: "linear", repeat: Infinity }}>
+        {Array.from({ length: ticks }).map((_, i) => {
+          const a = (i / ticks) * Math.PI * 2, long = i % 6 === 0;
+          const r1 = r - (long ? 8 : 3.5);
+          return (
+            <line key={i}
+              x1={c + r1 * Math.cos(a)} y1={c + r1 * Math.sin(a)}
+              x2={c + r * Math.cos(a)} y2={c + r * Math.sin(a)}
+              stroke={accent} strokeWidth={long ? 1.4 : 0.8} opacity={long ? 0.6 : 0.3} />
+          );
+        })}
+      </motion.g>
+      <motion.g style={{ transformOrigin: `${c}px ${c}px` }}
+        animate={{ rotate: -360 }} transition={{ duration: 14, ease: "linear", repeat: Infinity }}>
+        <path d={arc(c, c, r, -26, 26)} fill="none" stroke={hi} strokeWidth="2.4" strokeLinecap="round"
+          opacity="0.9" style={{ filter: `drop-shadow(0 0 6px ${accent})` }} />
+        <path d={arc(c, c, r, 150, 168)} fill="none" stroke={hi} strokeWidth="2.4" strokeLinecap="round"
+          opacity="0.7" style={{ filter: `drop-shadow(0 0 6px ${accent})` }} />
+      </motion.g>
+    </svg>
+  );
+}
+
 export function RadialMenu({ items, onPick, onClose }) {
   useEscClose(onClose);
   const S = 460, c = S / 2, ri = 84, ro = 208, gap = 4;
   const span = 360 / items.length;
   const seg = (i) => ({ a0: -span / 2 + i * span + gap / 2, a1: -span / 2 + (i + 1) * span - gap / 2 });
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 60, background: "rgba(4,8,8,0.62)", backdropFilter: "blur(2px)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-      <div onClick={(e) => e.stopPropagation()} style={{ position: "relative", width: S, height: S }}>
+    <motion.div onClick={onClose}
+      initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.18, ease: "easeOut" }}
+      style={{ position: "fixed", inset: 0, zIndex: 60, background: "rgba(4,8,8,0.62)", backdropFilter: "blur(2px)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <motion.div onClick={(e) => e.stopPropagation()}
+        initial={{ scale: 0.84, rotate: -7, opacity: 0 }}
+        animate={{ scale: 1, rotate: 0, opacity: 1 }}
+        transition={{ type: "spring", stiffness: 240, damping: 20, mass: 0.7 }}
+        style={{ position: "relative", width: S, height: S }}>
+        <ScannerRing size={S} />
         <HoloSegments svgW={S} svgH={S} cx={c} cy={c} ri={ri} ro={ro} accent={C.holo} prominent
           segments={items.map((it, i) => ({ ...seg(i), icon: it.icon, iconSize: 40, label: it.label, onClick: () => onPick(it.key) }))}
           hub={<span style={{ display: "flex", flexDirection: "column", alignItems: "center", color: C.holoHi }}><span style={{ fontFamily: C.font, fontSize: 13, fontWeight: 700, letterSpacing: 3 }}>SELECT</span><span style={{ fontSize: 9, letterSpacing: 1.5, color: C.textFaint }}>tap a sector</span></span>}
         />
         <CloseX onClose={onClose} style={{ position: "absolute", top: -6, right: -6 }} />
-      </div>
-    </div>
+      </motion.div>
+    </motion.div>
   );
 }
 

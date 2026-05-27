@@ -8,7 +8,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "shots": "node scripts/shoot.mjs"
+    "shots": "node scripts/shoot.mjs",
+    "motion": "node scripts/motion.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.30.1",
