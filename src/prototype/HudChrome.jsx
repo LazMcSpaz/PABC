@@ -52,12 +52,20 @@ function pt(cx, cy, r, deg) {
   const a = (deg * Math.PI) / 180;
   return [cx + r * Math.sin(a), cy - r * Math.cos(a)];
 }
-function donut(cx, cy, ri, ro, a0, a1) {
-  const [ox0, oy0] = pt(cx, cy, ro, a0);
-  const [ox1, oy1] = pt(cx, cy, ro, a1);
-  const [ix1, iy1] = pt(cx, cy, ri, a1);
-  const [ix0, iy0] = pt(cx, cy, ri, a0);
-  const large = (a1 - a0 + 360) % 360 > 180 ? 1 : 0;
+// `gapPx` insets each radial edge by a constant *linear* distance, so the gap
+// between adjacent segments is the same width at every radius instead of
+// tapering toward the center. A linear inset maps to a different angle at each
+// radius: halfAngle(r) = (gapPx / 2) / r (radians).
+function donut(cx, cy, ri, ro, a0, a1, gapPx = 0) {
+  const degO = gapPx ? ((gapPx / 2 / ro) * 180) / Math.PI : 0;
+  const degI = gapPx ? ((gapPx / 2 / ri) * 180) / Math.PI : 0;
+  const oa0 = a0 + degO, oa1 = a1 - degO;
+  const ia0 = a0 + degI, ia1 = a1 - degI;
+  const [ox0, oy0] = pt(cx, cy, ro, oa0);
+  const [ox1, oy1] = pt(cx, cy, ro, oa1);
+  const [ix1, iy1] = pt(cx, cy, ri, ia1);
+  const [ix0, iy0] = pt(cx, cy, ri, ia0);
+  const large = (oa1 - oa0 + 360) % 360 > 180 ? 1 : 0;
   return (
     `M ${ox0.toFixed(2)} ${oy0.toFixed(2)} ` +
     `A ${ro} ${ro} 0 ${large} 1 ${ox1.toFixed(2)} ${oy1.toFixed(2)} ` +
@@ -75,7 +83,7 @@ function arc(cx, cy, r, a0, a1) {
 // =======================================================================
 // HoloSegments — translucent holographic donut slices sharing a center.
 // =======================================================================
-function HoloSegments({ svgW, svgH, cx, cy, ri, ro, accent = C.holo, segments, prominent = false, hub, offset = { left: 0, top: 0 } }) {
+function HoloSegments({ svgW, svgH, cx, cy, ri, ro, accent = C.holo, segments, prominent = false, hub, offset = { left: 0, top: 0 }, gapPx = 8 }) {
   const [hover, setHover] = useState(-1);
   const edge = prominent ? 2 : 1.4;
   const glow = prominent ? 9 : 4;
@@ -95,12 +103,12 @@ function HoloSegments({ svgW, svgH, cx, cy, ri, ro, accent = C.holo, segments, p
           return (
             <path
               key={i}
-              d={donut(cx, cy, ri, ro, s.a0, s.a1)}
+              d={donut(cx, cy, ri, ro, s.a0, s.a1, gapPx)}
               fill={`url(#${gid})`}
               stroke={accent}
               strokeWidth={edge}
               opacity={on ? 1 : 0.85}
-              style={{ cursor: s.onClick ? "pointer" : "default", filter: `drop-shadow(0 0 ${on ? glow + 5 : glow}px ${accent}${prominent ? "" : "88"})`, transition: "opacity .12s ease, filter .12s ease" }}
+              style={{ cursor: s.onClick ? "pointer" : "default", filter: prominent ? `drop-shadow(0 0 ${on ? glow + 7 : glow}px ${accent}) drop-shadow(0 0 ${on ? 26 : 16}px ${accent}99)` : `drop-shadow(0 0 ${on ? glow + 5 : glow}px ${accent}88)`, transition: "opacity .12s ease, filter .12s ease" }}
               onMouseEnter={() => setHover(i)}
               onMouseLeave={() => setHover((h) => (h === i ? -1 : h))}
               onClick={s.onClick}
@@ -147,8 +155,8 @@ function SettingsHub({ onClick }) {
 // Top-left holographic half-wheel: Units / Tech / Scrap around settings.
 export function ResourceWheel({ scrap, units, tech, onSettings }) {
   const off = { left: -34, top: -34 };
-  const cx = 110, cy = 110, ri = 54, ro = 150, gap = 4;
-  const seg = (i) => ({ a0: 45 + i * 60 + gap / 2, a1: 45 + (i + 1) * 60 - gap / 2 });
+  const cx = 110, cy = 110, ri = 54, ro = 150;
+  const seg = (i) => ({ a0: 45 + i * 60, a1: 45 + (i + 1) * 60 });
   return (
     <div style={{ position: "absolute", top: 0, left: 0, zIndex: 30 }}>
       <HoloSegments
@@ -290,9 +298,9 @@ function ScannerRing({ size, accent = C.holo, hi = C.holoHi }) {
 
 export function RadialMenu({ items, onPick, onClose }) {
   useEscClose(onClose);
-  const S = 460, c = S / 2, ri = 84, ro = 208, gap = 4;
+  const S = 460, c = S / 2, ri = 84, ro = 208;
   const span = 360 / items.length;
-  const seg = (i) => ({ a0: -span / 2 + i * span + gap / 2, a1: -span / 2 + (i + 1) * span - gap / 2 });
+  const seg = (i) => ({ a0: -span / 2 + i * span, a1: -span / 2 + (i + 1) * span });
   return (
     <motion.div onClick={onClose}
       initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.18, ease: "easeOut" }}
@@ -302,11 +310,14 @@ export function RadialMenu({ items, onPick, onClose }) {
         animate={{ scale: 1, rotate: 0, opacity: 1 }}
         transition={{ type: "spring", stiffness: 240, damping: 20, mass: 0.7 }}
         style={{ position: "relative", width: S, height: S }}>
-        <ScannerRing size={S} />
-        <HoloSegments svgW={S} svgH={S} cx={c} cy={c} ri={ri} ro={ro} accent={C.holo} prominent
-          segments={items.map((it, i) => ({ ...seg(i), icon: it.icon, iconSize: 40, label: it.label, onClick: () => onPick(it.key) }))}
-          hub={<span style={{ display: "flex", flexDirection: "column", alignItems: "center", color: C.holoHi }}><span style={{ fontFamily: C.font, fontSize: 13, fontWeight: 700, letterSpacing: 3 }}>SELECT</span><span style={{ fontSize: 9, letterSpacing: 1.5, color: C.textFaint }}>tap a sector</span></span>}
-        />
+        <div className="hud-glitch" style={{ position: "absolute", inset: 0 }}>
+          <ScannerRing size={S} />
+          <HoloSegments svgW={S} svgH={S} cx={c} cy={c} ri={ri} ro={ro} accent={C.holo} prominent gapPx={10}
+            segments={items.map((it, i) => ({ ...seg(i), icon: it.icon, iconSize: 40, label: it.label, onClick: () => onPick(it.key) }))}
+            hub={<span style={{ display: "flex", flexDirection: "column", alignItems: "center", color: C.holoHi }}><span style={{ fontFamily: C.font, fontSize: 13, fontWeight: 700, letterSpacing: 3 }}>SELECT</span><span style={{ fontSize: 9, letterSpacing: 1.5, color: C.textFaint }}>tap a sector</span></span>}
+          />
+          <div className="hud-scanlines" style={{ position: "absolute", left: c - ro, top: c - ro, width: ro * 2, height: ro * 2, borderRadius: "50%" }} />
+        </div>
         <CloseX onClose={onClose} style={{ position: "absolute", top: -6, right: -6 }} />
       </motion.div>
     </motion.div>

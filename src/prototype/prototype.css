@@ -247,3 +247,52 @@
   transform: rotate(180deg);
   letter-spacing: 2.4px;
 }
+
+/* Holographic scanlines — a faint horizontal raster over a holo surface that
+ * slowly drifts. Give the element a border-radius to clip the raster to a
+ * disc (e.g. a circular menu). Decorative; never intercepts clicks. */
+.hud-scanlines {
+  pointer-events: none;
+  overflow: hidden;
+}
+.hud-scanlines::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: repeating-linear-gradient(
+    0deg,
+    rgba(0, 0, 0, 0.16) 0px,
+    rgba(0, 0, 0, 0.16) 1px,
+    transparent 1px,
+    transparent 3px
+  );
+  opacity: 0.45;
+  animation: hud-scan-drift 5s linear infinite;
+}
+@keyframes hud-scan-drift {
+  from { background-position-y: 0; }
+  to { background-position-y: 6px; }
+}
+
+/* Occasional holographic glitch — a quick RGB-split + jitter every several
+ * seconds, otherwise dead idle. The steps() timing makes the displacement
+ * snap like a digital tear rather than slide. Put this on a wrapper INSIDE
+ * any Framer-controlled transform so the two transforms compose. */
+@keyframes hud-glitch {
+  0%, 82%, 100% { transform: translate(0, 0) skewX(0); filter: none; opacity: 1; }
+  83% { transform: translate(-5px, 2px) skewX(-1.4deg); filter: drop-shadow(5px 0 rgba(255, 48, 72, 0.55)) drop-shadow(-5px 0 rgba(72, 224, 255, 0.55)); }
+  85% { transform: translate(5px, -2px) skewX(1deg); filter: drop-shadow(-5px 0 rgba(255, 48, 72, 0.55)) drop-shadow(5px 0 rgba(72, 224, 255, 0.55)); opacity: 0.8; }
+  86% { transform: translate(-2px, 0) skewX(0); filter: none; opacity: 1; }
+  87% { transform: translate(4px, 1px); filter: drop-shadow(4px 0 rgba(255, 48, 72, 0.5)) drop-shadow(-4px 0 rgba(72, 224, 255, 0.5)); }
+  89% { transform: translate(0, 0) skewX(0); filter: none; opacity: 1; }
+}
+.hud-glitch {
+  animation: hud-glitch 5.5s steps(1, end) infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .hud-scanlines::after,
+  .hud-glitch {
+    animation: none;
+  }
+}
