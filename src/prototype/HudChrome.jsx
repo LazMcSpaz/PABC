@@ -35,7 +35,7 @@ export const C = {
 
 const A = import.meta.env.BASE_URL;
 export const ICON = {
-  scrap: `${A}assets/ui/icons/resources/player_scrap_resource_icon.png`,
+  scrap: `${A}assets/ui/icons/resources/scrap_icon.png`,
   research: `${A}assets/ui/icons/resources/research_icon.png`,
   units: `${A}assets/ui/icons/resources/unit_icon.png`,
   vp: `${A}assets/ui/icons/resources/player_victory_points_icon.png`,
@@ -153,51 +153,83 @@ const RES = {
   tech: { color: C.holo, icon: ICON.research },
 };
 
-// Top-left resource readout — a swept "wing": angled, colour-coded slats
-// nested against a glowing arc spine (icon node + value + label per slat).
-export function ResourceWheel({ scrap, units, tech, onSettings }) {
-  const W = 362, H = 216;
-  const cxA = 150, cyA = 108, R = 132, sk = 15, hh = 21;
-  const arcX = (y) => cxA - Math.sqrt(Math.max(0, R * R - (y - cyA) ** 2));
-  const ang = (d) => [cxA + R * Math.cos((d * Math.PI) / 180), cyA + R * Math.sin((d * Math.PI) / 180)];
-  const [tx, ty] = ang(232), [bx, by] = ang(128);
-  const arcD = `M ${tx.toFixed(1)} ${ty.toFixed(1)} A ${R} ${R} 0 0 0 ${bx.toFixed(1)} ${by.toFixed(1)}`;
-  const slats = [
-    { key: "tech", cy: 56, rx: 332, ...RES.tech, value: `L${tech.level}`, label: tech.label },
-    { key: "units", cy: 110, rx: 300, ...RES.units, value: `${units.n}/${units.cap}`, label: "Units" },
-    { key: "scrap", cy: 164, rx: 268, ...RES.scrap, value: `${scrap}`, label: "Scrap" },
-  ];
-  const poly = (lx, rx, cy) => `${lx + sk},${cy - hh} ${rx + sk},${cy - hh} ${rx},${cy + hh} ${lx},${cy + hh}`;
-
+// A compact resource readout: glowing colour-coded icon node + value + label.
+function ResourceCell({ icon, value, label, color }) {
   return (
-    <div style={{ position: "absolute", top: 12, left: 8, zIndex: 30, width: W, height: H, pointerEvents: "none" }}>
-      <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} style={{ position: "absolute", inset: 0, overflow: "visible" }}>
-        <path d={arcD} fill="none" stroke={C.holo} strokeWidth="2.5" style={{ filter: `drop-shadow(0 0 7px ${C.holo})` }} />
-        <path d={arcD} fill="none" stroke={C.holoHi} strokeWidth="0.8" opacity="0.6" />
-        {slats.map((sl) => {
-          const lx = arcX(sl.cy) + 6;
-          return (
-            <polygon key={sl.key} points={poly(lx, sl.rx, sl.cy)}
-              fill={sl.color} fillOpacity="0.10" stroke={sl.color} strokeWidth="1.6"
-              strokeLinejoin="round" style={{ filter: `drop-shadow(0 0 6px ${sl.color}aa)` }} />
-          );
-        })}
+    <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+      <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 30, height: 30, borderRadius: "50%", background: "radial-gradient(circle at 50% 40%, rgba(19,42,44,0.95), rgba(4,10,11,0.96))", border: `1px solid ${color}`, boxShadow: `0 0 8px ${color}77, inset 0 0 6px rgba(0,0,0,0.5)`, flexShrink: 0 }}>
+        <img src={icon} alt="" style={{ width: 18, height: 18, objectFit: "contain", filter: "brightness(1.12)" }} />
+      </span>
+      <div style={{ display: "flex", flexDirection: "column", lineHeight: 1 }}>
+        <span style={{ fontFamily: C.font, fontWeight: 700, fontSize: 16, color: "#f4efe2", textShadow: `0 0 8px ${color}` }}>{value}</span>
+        <span style={{ fontFamily: C.font, fontSize: 8, letterSpacing: 1.4, textTransform: "uppercase", color, fontWeight: 600, marginTop: 2 }}>{label}</span>
+      </div>
+    </div>
+  );
+}
+
+// A dial paired with a small caption below — the right-side VP / Actions cells.
+function DialCell({ label, children }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
+      {children}
+      <span style={{ fontFamily: C.font, fontSize: 8, letterSpacing: 1.4, textTransform: "uppercase", color: C.textFaint, fontWeight: 600 }}>{label}</span>
+    </div>
+  );
+}
+
+// Unified top bar — one flared strip across the top: tall, colour-coded
+// resources at the left flare; small faction name + round in the pinched
+// centre; VP + Actions dials at the right flare, with End Turn beneath.
+// Responsive width via clip-path (% x / px y); a matching SVG strokes the
+// glowing edge (non-scaling-stroke keeps the line crisp at any width).
+export function TopBar({ scrap, units, tech, name, color = C.red, vp, vpGoal, actions, round, onEndTurn, endDisabled, onSettings }) {
+  const H = 60;
+  const clip = "polygon(0 0, 100% 0, 100% 60px, 78% 60px, 72% 28px, 28% 28px, 22% 60px, 0 60px)";
+  const outline = "M0 0 L100 0 L100 60 L78 60 L72 28 L28 28 L22 60 L0 60 Z";
+  return (
+    <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: H, zIndex: 30, pointerEvents: "none" }}>
+      {/* translucent flared plate */}
+      <div style={{ position: "absolute", inset: 0, clipPath: clip, WebkitClipPath: clip, background: "linear-gradient(180deg, rgba(16,28,29,0.95) 0%, rgba(8,15,16,0.96) 100%)", filter: `drop-shadow(0 4px 14px rgba(0,0,0,0.5))` }} />
+      {/* glowing edge */}
+      <svg width="100%" height={H} viewBox={`0 0 100 ${H}`} preserveAspectRatio="none" style={{ position: "absolute", inset: 0, overflow: "visible" }}>
+        <path d={outline} fill="none" stroke={C.holo} strokeWidth="1.5" vectorEffect="non-scaling-stroke" style={{ filter: `drop-shadow(0 0 4px ${C.holo})` }} />
       </svg>
-      {slats.map((sl) => {
-        const lx = arcX(sl.cy) + 6;
-        return (
-          <div key={sl.key} style={{ position: "absolute", left: lx + 13, top: sl.cy - 17, height: 34, display: "flex", alignItems: "center", gap: 9 }}>
-            <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 32, height: 32, borderRadius: "50%", background: "radial-gradient(circle at 50% 40%, rgba(19,42,44,0.95), rgba(4,10,11,0.96))", border: `1px solid ${sl.color}`, boxShadow: `0 0 9px ${sl.color}88, inset 0 0 7px rgba(0,0,0,0.5)`, flexShrink: 0 }}>
-              <img src={sl.icon} alt="" style={{ width: 19, height: 19, objectFit: "contain", filter: "brightness(1.12)" }} />
-            </span>
-            <span style={{ fontFamily: C.font, fontWeight: 700, fontSize: 19, color: "#f4efe2", textShadow: `0 0 9px ${sl.color}` }}>{sl.value}</span>
-            <span style={{ fontFamily: C.font, fontSize: 9.5, letterSpacing: 1.6, textTransform: "uppercase", color: sl.color, fontWeight: 600 }}>{sl.label}</span>
-          </div>
-        );
-      })}
-      <button className="hud-int" title="Settings" onClick={onSettings}
-        style={{ position: "absolute", left: tx - 15, top: ty - 18, width: 32, height: 32, borderRadius: "50%", border: `1px solid ${C.holo}`, background: "radial-gradient(circle at 40% 34%, rgba(86,211,198,0.18), rgba(8,16,16,0.9) 78%)", boxShadow: `0 0 9px ${C.holo}66`, display: "flex", alignItems: "center", justifyContent: "center", padding: 0, color: C.holoHi, cursor: "pointer", pointerEvents: "auto" }}>
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3.2" /><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5 5l2.1 2.1M16.9 16.9L19 19M19 5l-2.1 2.1M7.1 16.9L5 19" strokeLinecap="round" /></svg>
+
+      {/* left flare — resources */}
+      <div style={{ position: "absolute", left: 16, top: 0, height: H, display: "flex", alignItems: "center", gap: 14, pointerEvents: "auto" }}>
+        <button className="hud-int" title="Settings" onClick={onSettings}
+          style={{ width: 28, height: 28, borderRadius: "50%", border: `1px solid ${C.holo}`, background: "radial-gradient(circle at 40% 34%, rgba(86,211,198,0.16), rgba(8,16,16,0.9) 78%)", boxShadow: `0 0 8px ${C.holo}55`, display: "flex", alignItems: "center", justifyContent: "center", padding: 0, color: C.holoHi, cursor: "pointer", flexShrink: 0 }}>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3.2" /><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5 5l2.1 2.1M16.9 16.9L19 19M19 5l-2.1 2.1M7.1 16.9L5 19" strokeLinecap="round" /></svg>
+        </button>
+        <ResourceCell {...RES.scrap} value={`${scrap}`} label="Scrap" />
+        <ResourceCell {...RES.units} value={`${units.n}/${units.cap}`} label="Units" />
+        <ResourceCell {...RES.tech} value={`L${tech.level}`} label={tech.label} />
+      </div>
+
+      {/* centre pinch — faction name + round */}
+      <div style={{ position: "absolute", left: 0, right: 0, top: 3, display: "flex", flexDirection: "column", alignItems: "center", gap: 2, pointerEvents: "none" }}>
+        <span style={{ fontFamily: C.font, fontSize: 14, fontWeight: 700, letterSpacing: 2, textTransform: "uppercase", color, textShadow: `0 0 10px ${color}77, 0 1px 2px rgba(0,0,0,0.7)`, lineHeight: 1, whiteSpace: "nowrap" }}>{name}</span>
+        <span style={{ width: 70, height: 1.5, background: `linear-gradient(90deg, transparent, ${color}, transparent)` }} />
+        <span style={{ fontFamily: C.font, fontSize: 8.5, letterSpacing: 2.2, textTransform: "uppercase", color: C.textFaint }}>Round {round}</span>
+      </div>
+
+      {/* right flare — VP + Actions dials, End Turn beneath */}
+      <div style={{ position: "absolute", right: 16, top: 0, height: H, display: "flex", alignItems: "center", gap: 14, pointerEvents: "auto" }}>
+        <DialCell label="Victory">
+          <Dial size={46} accent={C.gold} progress={vpGoal ? vp / vpGoal : 0}>
+            <DialFace icon={ICON.vp} value={vp} valueColor={C.gold} iconSize={15} valueSize={15} />
+          </Dial>
+        </DialCell>
+        <DialCell label="Actions">
+          <Dial size={46} accent={C.red} progress={actions.max ? actions.remaining / actions.max : 0} glow>
+            <DialFace value={`${actions.remaining}/${actions.max}`} valueColor={C.text} valueSize={15} />
+          </Dial>
+        </DialCell>
+      </div>
+      <button className="hud-int" onClick={endDisabled ? undefined : onEndTurn} disabled={endDisabled}
+        style={{ position: "absolute", top: H + 4, right: 18, zIndex: 31, pointerEvents: "auto", fontFamily: C.font, fontSize: 11.5, fontWeight: 700, letterSpacing: 1.8, textTransform: "uppercase", color: "#08100f", padding: "7px 20px", borderRadius: 7, border: `1px solid ${C.holo}`, whiteSpace: "nowrap", background: `linear-gradient(180deg, ${C.holoHi}, ${C.holo})`, boxShadow: `0 0 14px ${C.holo}66, 0 4px 10px rgba(0,0,0,0.5)`, cursor: endDisabled ? "not-allowed" : "pointer", opacity: endDisabled ? 0.4 : 1 }}>
+        End Turn
       </button>
     </div>
   );
@@ -232,37 +264,15 @@ function Dial({ size = 72, accent = C.holo, progress = null, glow = false, child
     </div>
   );
 }
-function DialFace({ icon, value, sub, valueColor = C.text, iconSize = 26 }) {
+function DialFace({ icon, value, sub, valueColor = C.text, iconSize = 26, valueSize = 18 }) {
   return (
     <>
-      {icon && <img src={icon} alt="" style={{ width: iconSize, height: iconSize, objectFit: "contain", marginBottom: -2, filter: "drop-shadow(0 2px 3px rgba(0,0,0,0.6))" }} />}
-      <span style={{ fontFamily: C.font, fontWeight: 700, fontSize: 18, lineHeight: 1, color: valueColor }}>{value}</span>
+      {icon && <img src={icon} alt="" style={{ width: iconSize, height: iconSize, objectFit: "contain", marginBottom: -1, filter: "drop-shadow(0 2px 3px rgba(0,0,0,0.6))" }} />}
+      <span style={{ fontFamily: C.font, fontWeight: 700, fontSize: valueSize, lineHeight: 1, color: valueColor }}>{value}</span>
       {sub && <span style={{ fontSize: 7.5, letterSpacing: 1.3, textTransform: "uppercase", color: C.textFaint, marginTop: 1 }}>{sub}</span>}
     </>
   );
 }
-export function FactionReadout({ name, color = C.red, vp, vpGoal, actions, round, onEndTurn, endDisabled }) {
-  return (
-    <div style={{ position: "absolute", top: 16, right: 16, zIndex: 30, display: "flex", alignItems: "center", gap: 4, padding: "10px 16px 14px", background: "linear-gradient(158deg, rgba(18,31,32,0.96) 0%, rgba(9,17,18,0.97) 60%, rgba(6,11,12,0.98) 100%)", border: `1px solid ${C.holo}`, borderTop: `2px solid ${color}`, borderRadius: 12, boxShadow: `inset 0 0 26px rgba(86,211,198,0.06), 0 0 22px rgba(86,211,198,0.2), 0 10px 26px rgba(0,0,0,0.55)` }}>
-      <div style={{ position: "absolute", top: 0, left: 16, right: 16, height: 2, background: `linear-gradient(90deg, transparent, ${color}, transparent)`, opacity: 0.8, pointerEvents: "none" }} />
-      <Dial size={72} accent={C.gold} progress={vpGoal ? vp / vpGoal : 0}>
-        <DialFace icon={ICON.vp} value={vp} sub={`VP · ${vp}/${vpGoal}`} valueColor={C.gold} />
-      </Dial>
-      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: "0 8px", minWidth: 150 }}>
-        <span style={{ fontFamily: C.font, fontSize: 21, fontWeight: 700, letterSpacing: 1.2, textTransform: "uppercase", color, textShadow: `0 0 12px ${color}66, 0 1px 2px rgba(0,0,0,0.7)`, lineHeight: 1.05, whiteSpace: "nowrap" }}>{name}</span>
-        <span style={{ fontSize: 10, letterSpacing: 2.4, textTransform: "uppercase", color: C.textFaint, marginTop: 3 }}>Round {round}</span>
-      </div>
-      <Dial size={72} accent={C.red} progress={actions.max ? actions.remaining / actions.max : 0} glow>
-        <DialFace value={`${actions.remaining}/${actions.max}`} sub="Actions" valueColor={C.text} />
-      </Dial>
-      <button className="hud-int" onClick={endDisabled ? undefined : onEndTurn} disabled={endDisabled}
-        style={{ position: "absolute", bottom: -19, left: "50%", transform: "translateX(-50%)", fontFamily: C.font, fontSize: 14, fontWeight: 700, letterSpacing: 2, textTransform: "uppercase", color: "#08100f", padding: "9px 30px", borderRadius: 8, border: `1px solid ${C.holo}`, whiteSpace: "nowrap", background: `linear-gradient(180deg, ${C.holoHi}, ${C.holo})`, boxShadow: `0 0 16px ${C.holo}66, 0 6px 12px rgba(0,0,0,0.5)`, cursor: endDisabled ? "not-allowed" : "pointer", opacity: endDisabled ? 0.45 : 1 }}>
-        End Turn
-      </button>
-    </div>
-  );
-}
-
 // --- bottom-right menu orb + radial menu -------------------------------
 // Bottom-right menu button — a clean circular holographic node (the radial
 // menu itself opens centred on screen).

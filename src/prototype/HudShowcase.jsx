@@ -5,7 +5,7 @@ import { useState } from "react";
 import { AnimatePresence } from "framer-motion";
 import ControlMeter from "./ControlMeter.jsx";
 import {
-  C, ICON, ResourceWheel, FactionReadout, MenuOrb, RadialMenu, LocationWindow, TitledWindow,
+  C, ICON, TopBar, MenuOrb, RadialMenu, LocationWindow, TitledWindow,
 } from "./HudChrome.jsx";
 
 // §20.2 — the Market is retired; the radial menu drops its sector and chips
@@ -55,8 +55,9 @@ export default function HudShowcase({ onExit }) {
         <span style={{ fontFamily: C.font, fontSize: 12, letterSpacing: 2, textTransform: "uppercase", color: C.textDim }}>Korad</span>
       </button>
 
-      <ResourceWheel scrap={18} units={{ n: 2, cap: 2 }} tech={{ level: 2, label: "Tech 55%" }} onSettings={() => {}} />
-      <FactionReadout name="Versari Korad" color={C.red} vp={4} vpGoal={10} actions={{ remaining: 2, max: 2 }} round={3} onEndTurn={() => {}} />
+      <TopBar scrap={18} units={{ n: 2, cap: 2 }} tech={{ level: 2, label: "Tech 55%" }}
+        name="Versari Korad" color={C.red} vp={4} vpGoal={10} actions={{ remaining: 2, max: 2 }} round={3}
+        onEndTurn={() => {}} onSettings={() => {}} />
       <MenuOrb onOpen={() => setMenuOpen(true)} />
 
       <AnimatePresence>

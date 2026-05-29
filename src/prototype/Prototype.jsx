@@ -12,7 +12,7 @@ import Inspector from "./Inspector.jsx";
 import UnitCard from "./UnitCard.jsx";
 import ControlMeter from "./ControlMeter.jsx";
 import {
-  ResourceWheel, FactionReadout, MenuOrb, RadialMenu, LocationWindow, TitledWindow, ICON, C as HUD,
+  TopBar, MenuOrb, RadialMenu, LocationWindow, TitledWindow, ICON, C as HUD,
 } from "./HudChrome.jsx";
 import { createGame } from "../game/setup.js";
 import { startTurn, endTurn } from "../game/turn.js";
@@ -641,13 +641,10 @@ export default function Prototype({ config, onNewGame }) {
 
       {/* HUD CHROME — radial / holographic overlays replacing the old
           top bar and bottom dock. */}
-      <ResourceWheel
+      <TopBar
         scrap={you.scrap}
         units={{ n: yourUnits.length, cap: you.unitCap }}
         tech={{ level: you.techLevel, label: techLabel }}
-        onSettings={() => setMenuPanel("settings")}
-      />
-      <FactionReadout
         name={UI_FACTIONS[state.youId]?.name}
         color={UI_FACTIONS[state.youId]?.color}
         vp={you.vp}
@@ -656,6 +653,7 @@ export default function Prototype({ config, onNewGame }) {
         round={state.round}
         onEndTurn={onEndTurn}
         endDisabled={!isYourTurn}
+        onSettings={() => setMenuPanel("settings")}
       />
       <MenuOrb onOpen={() => setMenuOpen(true)} />
 
