@@ -1,6 +1,8 @@
 // The signature control meter: a ring of 3 sections (each owned by a
 // player or neutral) with the §18.2 Loyalty pie (8 slices) in the centre.
-import { ownerColor, fullController, theme } from "./data.js";
+// Holographic light treatment: sections read as glowing translucent light in
+// their owner colour rather than solid blocks; neutral sections are faint.
+import { ownerColor, fullController } from "./data.js";
 import LoyaltyPie from "./LoyaltyPie.jsx";
 
 function wedgePath(cx, cy, r, a0, a1) {
@@ -22,38 +24,44 @@ export default function ControlMeter({
   const cx = size / 2;
   const cy = size / 2;
   const r = size / 2;
-  const gap = 6; // degrees of dark gutter between sections
+  const gap = 7; // degrees of dark gutter between sections
   const innerR = size * 0.34;
   const ctrl = fullController(sections);
+  const glow = Math.max(2, size * 0.07);
 
   const showPie = size >= 30 && loyalty != null;
   const pieSize = innerR * 2 - 2;
 
   return (
-    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} aria-hidden>
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ overflow: "visible" }} aria-hidden>
       {sections.map((owner, i) => {
         const a0 = -90 + i * 120 + gap / 2;
         const a1 = -90 + (i + 1) * 120 - gap / 2;
+        const neutral = !owner || owner === "neutral";
+        const col = ownerColor(owner);
         return (
           <path
             key={i}
-            d={wedgePath(cx, cy, r, a0, a1)}
-            fill={ownerColor(owner)}
-            stroke={theme.bg}
-            strokeWidth="1"
+            d={wedgePath(cx, cy, r - 1, a0, a1)}
+            fill={col}
+            fillOpacity={neutral ? 0.06 : 0.24}
+            stroke={col}
+            strokeWidth={neutral ? 1 : 1.7}
+            strokeOpacity={neutral ? 0.45 : 1}
+            strokeLinejoin="round"
+            style={neutral ? undefined : { filter: `drop-shadow(0 0 ${glow}px ${col})` }}
           />
         );
       })}
-      {/* crisp outer ring */}
-      <circle cx={cx} cy={cy} r={r - 0.6} fill="none" stroke="rgba(0,0,0,0.6)" strokeWidth="1.2" />
-      {/* centre disc — holds the §18.2 Loyalty pie */}
+      {/* centre disc — dark glass; glows in the controller's colour when fully held */}
       <circle
         cx={cx}
         cy={cy}
         r={innerR}
-        fill={theme.panel}
-        stroke={danger ? "#d2453f" : ctrl ? ownerColor(ctrl) : theme.border}
-        strokeWidth={ctrl ? 2 : 1}
+        fill="rgba(5,12,13,0.88)"
+        stroke={danger ? "#d2453f" : ctrl ? ownerColor(ctrl) : "rgba(86,211,198,0.45)"}
+        strokeWidth={ctrl || danger ? 1.8 : 1}
+        style={ctrl || danger ? { filter: `drop-shadow(0 0 ${glow}px ${danger ? "#d2453f" : ownerColor(ctrl)})` } : undefined}
       />
       {showPie ? (
         <LoyaltyPie
@@ -70,9 +78,9 @@ export default function ControlMeter({
             y={cy}
             textAnchor="middle"
             dominantBaseline="central"
-            fontSize={size * 0.36}
+            fontSize={size * 0.34}
             fontWeight="700"
-            fill={theme.textFaint}
+            fill="rgba(143,246,234,0.5)"
             fontFamily="'Oswald', sans-serif"
           >
             ·

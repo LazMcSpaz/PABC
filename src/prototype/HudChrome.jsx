@@ -146,34 +146,41 @@ function HoloSegments({ svgW, svgH, cx, cy, ri, ro, accent = C.holo, segments, p
   );
 }
 
-function SettingsHub({ onClick }) {
+// A resource readout cell: glowing icon node + value + label.
+function ResourceCell({ icon, value, label }) {
   return (
-    <button className="hud-int" title="Settings" onClick={onClick}
-      style={{ width: 52, height: 52, borderRadius: "50%", border: `1.5px solid ${C.holo}`, background: "radial-gradient(circle at 40% 34%, rgba(86,211,198,0.18), rgba(8,16,16,0.85) 78%)", boxShadow: `0 0 10px ${C.holo}66, inset 0 0 8px rgba(86,211,198,0.25)`, display: "flex", alignItems: "center", justifyContent: "center", padding: 0, color: C.holoHi, cursor: "pointer" }}>
-      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-        <circle cx="12" cy="12" r="3.2" />
-        <path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5 5l2.1 2.1M16.9 16.9L19 19M19 5l-2.1 2.1M7.1 16.9L5 19" strokeLinecap="round" />
-      </svg>
-    </button>
+    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 34, height: 34, borderRadius: "50%", background: "radial-gradient(circle at 50% 40%, rgba(19,42,44,0.95), rgba(4,10,11,0.96))", border: `1px solid ${C.holo}`, boxShadow: `0 0 9px ${C.holo}55, inset 0 0 8px rgba(0,0,0,0.5)` }}>
+        <img src={icon} alt="" style={{ width: 21, height: 21, objectFit: "contain", filter: "brightness(1.1)" }} />
+      </span>
+      <div style={{ display: "flex", flexDirection: "column", lineHeight: 1 }}>
+        <span style={{ fontFamily: C.font, fontSize: 18, fontWeight: 700, color: C.text }}>{value}</span>
+        <span style={{ fontSize: 8.5, letterSpacing: 1.3, textTransform: "uppercase", color: C.textFaint }}>{label}</span>
+      </div>
+    </div>
   );
 }
 
-// Top-left holographic half-wheel: Units / Tech / Scrap around settings.
+const ResSep = () => <div style={{ width: 1, height: 30, background: "rgba(86,211,198,0.22)" }} />;
+
+// Top-left resource readout — a holographic plate (mirrors the faction
+// readout top-right) carrying Scrap / Units / Tech and a settings button.
 export function ResourceWheel({ scrap, units, tech, onSettings }) {
-  const off = { left: -34, top: -34 };
-  const cx = 110, cy = 110, ri = 54, ro = 150;
-  const seg = (i) => ({ a0: 45 + i * 60, a1: 45 + (i + 1) * 60 });
   return (
-    <div style={{ position: "absolute", top: 0, left: 0, zIndex: 30 }}>
-      <HoloSegments
-        svgW={300} svgH={300} cx={cx} cy={cy} ri={ri} ro={ro} offset={off} accent={C.holo}
-        hub={<SettingsHub onClick={onSettings} />}
-        segments={[
-          { ...seg(0), icon: ICON.units, value: `${units.n}/${units.cap}`, label: "Units" },
-          { ...seg(1), icon: ICON.research, value: `L${tech.level}`, label: tech.label },
-          { ...seg(2), icon: ICON.scrap, value: `${scrap}`, label: "Scrap" },
-        ]}
-      />
+    <div style={{ position: "absolute", top: 16, left: 16, zIndex: 30, display: "flex", alignItems: "center", gap: 11, padding: "9px 14px", background: "linear-gradient(158deg, rgba(18,31,32,0.96) 0%, rgba(9,17,18,0.97) 60%, rgba(6,11,12,0.98) 100%)", border: `1px solid ${C.holo}`, borderRadius: 12, boxShadow: `inset 0 0 26px rgba(86,211,198,0.06), 0 0 22px rgba(86,211,198,0.2), 0 10px 26px rgba(0,0,0,0.55)` }}>
+      <div style={{ position: "absolute", top: 0, left: 16, right: 16, height: 2, background: `linear-gradient(90deg, transparent, ${C.holoHi}, transparent)`, opacity: 0.7, pointerEvents: "none" }} />
+      <ResourceCell icon={ICON.scrap} value={scrap} label="Scrap" />
+      <ResSep />
+      <ResourceCell icon={ICON.units} value={`${units.n}/${units.cap}`} label="Units" />
+      <ResSep />
+      <ResourceCell icon={ICON.research} value={`L${tech.level}`} label={tech.label} />
+      <button className="hud-int" title="Settings" onClick={onSettings}
+        style={{ marginLeft: 2, width: 32, height: 32, borderRadius: "50%", border: `1px solid ${C.holo}`, background: "radial-gradient(circle at 40% 34%, rgba(86,211,198,0.16), rgba(8,16,16,0.85) 78%)", boxShadow: `0 0 9px ${C.holo}55`, display: "flex", alignItems: "center", justifyContent: "center", padding: 0, color: C.holoHi, cursor: "pointer", flexShrink: 0 }}>
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <circle cx="12" cy="12" r="3.2" />
+          <path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5 5l2.1 2.1M16.9 16.9L19 19M19 5l-2.1 2.1M7.1 16.9L5 19" strokeLinecap="round" />
+        </svg>
+      </button>
     </div>
   );
 }
@@ -239,27 +246,16 @@ export function FactionReadout({ name, color = C.red, vp, vpGoal, actions, round
 }
 
 // --- bottom-right menu orb + radial menu -------------------------------
+// Bottom-right menu button — a clean circular holographic node (the radial
+// menu itself opens centred on screen).
 export function MenuOrb({ onOpen }) {
-  const S = 240, cx = S, cy = S, ri = 96, ro = 150;
   return (
     <button className="hud-int" onClick={onOpen} title="Menu"
-      style={{ position: "absolute", right: 0, bottom: 0, width: S * 0.62, height: S * 0.62, zIndex: 28, border: "none", background: "transparent", padding: 0, cursor: "pointer", overflow: "visible" }}>
-      <svg width={S} height={S} viewBox={`0 0 ${S} ${S}`} style={{ position: "absolute", right: 0, bottom: 0, overflow: "visible" }}>
-        <defs>
-          <radialGradient id="orb" cx="100%" cy="100%" r="80%">
-            <stop offset="40%" stopColor={C.holo} stopOpacity="0.28" /><stop offset="78%" stopColor={C.holo} stopOpacity="0.12" /><stop offset="100%" stopColor={C.holo} stopOpacity="0.02" />
-          </radialGradient>
-        </defs>
-        <path d={donut(cx, cy, ri, ro, 270, 360)} fill="url(#orb)" stroke={C.holoHi} strokeWidth="2.4" style={{ filter: `drop-shadow(0 0 14px ${C.holo})` }} />
-        <circle cx={cx} cy={cy} r={ro} fill="none" stroke={C.holoHi} strokeWidth="0.8" opacity="0.4" />
-        <circle cx={cx} cy={cy} r={ri} fill="none" stroke={C.holoHi} strokeWidth="1" opacity="0.6" />
-      </svg>
-      <span style={{ position: "absolute", right: 30, bottom: 34, display: "flex", flexDirection: "column", alignItems: "center", gap: 5, color: C.holoHi, textShadow: "0 1px 4px rgba(0,0,0,0.8)" }}>
-        <span style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 4 }}>
-          {[0, 1, 2, 3].map((i) => <span key={i} style={{ width: 7, height: 7, borderRadius: 2, background: C.holoHi, boxShadow: `0 0 6px ${C.holo}` }} />)}
-        </span>
-        <span style={{ fontFamily: C.font, fontSize: 11, fontWeight: 700, letterSpacing: 2 }}>MENU</span>
+      style={{ position: "absolute", right: 22, bottom: 22, zIndex: 28, width: 72, height: 72, borderRadius: "50%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 5, border: `1.5px solid ${C.holo}`, background: "radial-gradient(circle at 50% 38%, rgba(86,211,198,0.20), rgba(6,14,15,0.92) 72%)", boxShadow: `0 0 16px ${C.holo}66, inset 0 0 12px rgba(86,211,198,0.22)`, color: C.holoHi, cursor: "pointer", padding: 0 }}>
+      <span style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 4 }}>
+        {[0, 1, 2, 3].map((i) => <span key={i} style={{ width: 8, height: 8, borderRadius: 2, background: C.holoHi, boxShadow: `0 0 6px ${C.holo}` }} />)}
       </span>
+      <span style={{ fontFamily: C.font, fontSize: 10, fontWeight: 700, letterSpacing: 2 }}>MENU</span>
     </button>
   );
 }
