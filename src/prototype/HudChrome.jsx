@@ -36,10 +36,11 @@ export const C = {
 const A = import.meta.env.BASE_URL;
 export const ICON = {
   scrap: `${A}assets/ui/icons/resources/player_scrap_resource_icon.png`,
-  research: `${A}assets/ui/icons/resources/player_tech_research_icon.png`,
-  units: `${A}assets/ui/icons/resources/player_units_icon.png`,
+  research: `${A}assets/ui/icons/resources/research_icon.png`,
+  units: `${A}assets/ui/icons/resources/unit_icon.png`,
   vp: `${A}assets/ui/icons/resources/player_victory_points_icon.png`,
-  shield: `${A}assets/ui/icons/stats/garrison_strength_icon.png`,
+  shield: `${A}assets/ui/icons/stats/garrison_icon.png`,
+  diplomacy: `${A}assets/ui/icons/actions/diplomacy_icon.png`,
 };
 const FRAME = `${A}assets/ui/panels/frames/location_display_frame.webp`;
 const CHIPBG = {
@@ -97,6 +98,11 @@ function HoloSegments({ svgW, svgH, cx, cy, ri, ro, accent = C.holo, segments, p
             <stop offset="62%" stopColor={accent} stopOpacity="0.16" />
             <stop offset="100%" stopColor={accent} stopOpacity="0.05" />
           </radialGradient>
+          <radialGradient id={`${gid}-hi`} gradientUnits="userSpaceOnUse" cx={cx} cy={cy} r={ro} fx={cx} fy={cy}>
+            <stop offset="0%" stopColor={accent} stopOpacity="0.12" />
+            <stop offset="62%" stopColor={accent} stopOpacity="0.40" />
+            <stop offset="100%" stopColor={accent} stopOpacity="0.16" />
+          </radialGradient>
         </defs>
         {segments.map((s, i) => {
           const on = hover === i;
@@ -104,11 +110,11 @@ function HoloSegments({ svgW, svgH, cx, cy, ri, ro, accent = C.holo, segments, p
             <path
               key={i}
               d={donut(cx, cy, ri, ro, s.a0, s.a1, gapPx)}
-              fill={`url(#${gid})`}
-              stroke={accent}
-              strokeWidth={edge}
+              fill={`url(#${on ? `${gid}-hi` : gid})`}
+              stroke={on ? C.holoHi : accent}
+              strokeWidth={on ? edge + 1 : edge}
               opacity={on ? 1 : 0.85}
-              style={{ cursor: s.onClick ? "pointer" : "default", filter: prominent ? `drop-shadow(0 0 ${on ? glow + 7 : glow}px ${accent}) drop-shadow(0 0 ${on ? 26 : 16}px ${accent}99)` : `drop-shadow(0 0 ${on ? glow + 5 : glow}px ${accent}88)`, transition: "opacity .12s ease, filter .12s ease" }}
+              style={{ cursor: s.onClick ? "pointer" : "default", filter: prominent ? `drop-shadow(0 0 ${on ? glow + 9 : glow}px ${accent}) drop-shadow(0 0 ${on ? 30 : 16}px ${accent}99)` : `drop-shadow(0 0 ${on ? glow + 6 : glow}px ${accent}${on ? "" : "88"})`, transition: "opacity .12s ease, filter .12s ease, stroke-width .12s ease" }}
               onMouseEnter={() => setHover(i)}
               onMouseLeave={() => setHover((h) => (h === i ? -1 : h))}
               onClick={s.onClick}
@@ -119,6 +125,7 @@ function HoloSegments({ svgW, svgH, cx, cy, ri, ro, accent = C.holo, segments, p
         <circle cx={cx} cy={cy} r={ri} fill="none" stroke={accent} strokeWidth="0.8" opacity="0.5" />
       </svg>
       {segments.map((s, i) => {
+        const on = hover === i;
         const mid = (s.a0 + s.a1) / 2;
         const [x, y] = pt(cx, cy, (ri + ro) / 2, mid);
         return (
@@ -127,11 +134,11 @@ function HoloSegments({ svgW, svgH, cx, cy, ri, ro, accent = C.holo, segments, p
             onMouseEnter={() => setHover(i)}
             onMouseLeave={() => setHover((h) => (h === i ? -1 : h))}
             onClick={s.onClick}
-            style={{ position: "absolute", left: x, top: y, transform: "translate(-50%,-50%)", display: "flex", flexDirection: "column", alignItems: "center", gap: 1, pointerEvents: s.onClick ? "auto" : "none", cursor: s.onClick ? "pointer" : "default", textShadow: "0 1px 3px rgba(0,0,0,0.85)" }}
+            style={{ position: "absolute", left: x, top: y, transform: on ? "translate(-50%,-50%) scale(1.12)" : "translate(-50%,-50%)", transition: "transform .14s cubic-bezier(.2,.9,.3,1.4)", display: "flex", flexDirection: "column", alignItems: "center", gap: 1, pointerEvents: s.onClick ? "auto" : "none", cursor: s.onClick ? "pointer" : "default", textShadow: "0 1px 3px rgba(0,0,0,0.85)" }}
           >
-            {s.icon && <img src={s.icon} alt="" style={{ width: s.iconSize || 30, height: s.iconSize || 30, objectFit: "contain", filter: "drop-shadow(0 1px 3px rgba(0,0,0,0.8))" }} />}
+            {s.icon && <img src={s.icon} alt="" style={{ width: s.iconSize || 30, height: s.iconSize || 30, objectFit: "contain", filter: on ? `drop-shadow(0 0 7px ${accent}) brightness(1.18)` : "drop-shadow(0 1px 3px rgba(0,0,0,0.8))", transition: "filter .14s ease" }} />}
             {s.value != null && s.value !== "" && <span style={{ fontFamily: C.font, fontWeight: 700, fontSize: s.valueSize || 18, color: C.text, lineHeight: 1 }}>{s.value}</span>}
-            {s.label && <span style={{ fontSize: 8.5, letterSpacing: 1.5, textTransform: "uppercase", color: accent, fontWeight: 600 }}>{s.label}</span>}
+            {s.label && <span style={{ fontSize: 8.5, letterSpacing: 1.5, textTransform: "uppercase", color: on ? C.holoHi : accent, fontWeight: 600, textShadow: on ? `0 0 8px ${accent}` : undefined }}>{s.label}</span>}
           </div>
         );
       })}

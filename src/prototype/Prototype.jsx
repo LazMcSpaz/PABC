@@ -61,7 +61,7 @@ const MENU_ITEMS = [
   { key: "research", icon: ICON.research, label: "Research" },
   { key: "units", icon: ICON.units, label: "Units" },
   { key: "locations", icon: ICON.shield, label: "Locations" },
-  { key: "diplomacy", icon: ICON.shield, label: "Diplomacy" },
+  { key: "diplomacy", icon: ICON.diplomacy, label: "Diplomacy" },
 ];
 
 // Collapse a selected location hex into the single-window view-model that

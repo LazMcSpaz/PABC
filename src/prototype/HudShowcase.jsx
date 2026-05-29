@@ -13,6 +13,7 @@ const MENU_ITEMS = [
   { key: "research", icon: ICON.research, label: "Research" },
   { key: "units", icon: ICON.units, label: "Units" },
   { key: "locations", icon: ICON.shield, label: "Locations" },
+  { key: "diplomacy", icon: ICON.diplomacy, label: "Diplomacy" },
 ];
 
 const MOCK_LOC = {
@@ -63,6 +64,9 @@ export default function HudShowcase({ onExit }) {
       </TitledWindow>}
       {panel === "units" && <TitledWindow title="Units" icon={ICON.units} onClose={() => setPanel(null)}>
         <p className="pc-prose" style={{ margin: 0, fontSize: 13, lineHeight: 1.6, color: C.textDim }}>Your fielded units, their strength and movement, installed chips, and reinforcement options.</p>
+      </TitledWindow>}
+      {panel === "diplomacy" && <TitledWindow title="Diplomacy" icon={ICON.diplomacy} onClose={() => setPanel(null)}>
+        <p className="pc-prose" style={{ margin: 0, fontSize: 13, lineHeight: 1.6, color: C.textDim }}>Broker deals, pacts and coalitions with rival factions — manage reputation and pursue a Recognition victory.</p>
       </TitledWindow>}
       <div style={{ position: "absolute", bottom: 18, left: 24, color: C.textFaint, zIndex: 20 }}>
         <div style={{ fontFamily: C.font, fontSize: 11, letterSpacing: 3, textTransform: "uppercase" }}>HUD Look Pass · v2</div>
