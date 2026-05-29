@@ -42,11 +42,6 @@ export const ICON = {
   shield: `${A}assets/ui/icons/stats/garrison_icon.png`,
   diplomacy: `${A}assets/ui/icons/actions/diplomacy_icon.png`,
 };
-const FRAME = `${A}assets/ui/panels/frames/location_display_frame.webp`;
-const CHIPBG = {
-  unit: `${A}assets/ui/chips/unit/unit_chip_background.webp`,
-  location: `${A}assets/ui/chips/location/location_chip_background.webp`,
-};
 
 // --- geometry (angles from 12 o'clock, clockwise) ----------------------
 function pt(cx, cy, r, deg) {
@@ -341,17 +336,48 @@ export function CloseX({ onClose, style }) {
 }
 
 // --- framed window -----------------------------------------------------
-export function FrameWindow({ children, onClose, footer, width = 470 }) {
-  const W = width, H = Math.round(W / 0.809);
+// Angular HUD corner brackets drawn just inside a panel's corners.
+function CornerBrackets({ color = C.holo, len = 16, inset = 7, w = 2 }) {
+  const b = { position: "absolute", width: len, height: len, pointerEvents: "none", opacity: 0.85 };
+  return (
+    <>
+      <span style={{ ...b, top: inset, left: inset, borderTop: `${w}px solid ${color}`, borderLeft: `${w}px solid ${color}` }} />
+      <span style={{ ...b, top: inset, right: inset, borderTop: `${w}px solid ${color}`, borderRight: `${w}px solid ${color}` }} />
+      <span style={{ ...b, bottom: inset, left: inset, borderBottom: `${w}px solid ${color}`, borderLeft: `${w}px solid ${color}` }} />
+      <span style={{ ...b, bottom: inset, right: inset, borderBottom: `${w}px solid ${color}`, borderRight: `${w}px solid ${color}` }} />
+    </>
+  );
+}
+
+// Pure-holographic floating window — translucent teal-lit plate, glowing edge,
+// corner brackets, scanlines and a spring entrance. Optional title/icon header
+// and footer slot. Replaces the old painted-frame image.
+export function FrameWindow({ children, onClose, footer, width = 470, title, icon }) {
   useEscClose(onClose);
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 58, background: "radial-gradient(ellipse at center, rgba(8,14,14,0.86), rgba(2,5,5,0.94))", display: "flex", alignItems: "center", justifyContent: "center" }}>
-      <div onClick={(e) => e.stopPropagation()} style={{ position: "relative", width: W, height: H, backgroundImage: `url(${FRAME})`, backgroundSize: "100% 100%", backgroundRepeat: "no-repeat" }}>
-        <div style={{ position: "absolute", left: "12%", top: "9%", width: "64%", height: "48%", background: "radial-gradient(ellipse at 42% 36%, rgba(86,211,198,0.15), transparent 70%)", filter: "blur(6px)", pointerEvents: "none" }} />
-        <div className="pc-scroll" style={{ position: "absolute", left: "11%", right: "12%", top: "8%", bottom: "9%", overflowY: "auto" }}>{children}</div>
-        {footer}
-        <CloseX onClose={onClose} style={{ position: "absolute", top: "4.5%", right: "6.5%" }} />
-      </div>
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 58, background: "radial-gradient(ellipse at center, rgba(8,14,14,0.82), rgba(2,5,5,0.93))", backdropFilter: "blur(3px)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <motion.div onClick={(e) => e.stopPropagation()} className="hud-scratch"
+        initial={{ opacity: 0, scale: 0.95, y: 10 }} animate={{ opacity: 1, scale: 1, y: 0 }}
+        transition={{ type: "spring", stiffness: 300, damping: 26 }}
+        style={{ position: "relative", width, maxHeight: "88vh", display: "flex", flexDirection: "column",
+          background: "linear-gradient(158deg, rgba(18,31,32,0.97) 0%, rgba(9,17,18,0.98) 58%, rgba(6,11,12,0.99) 100%)",
+          border: `1px solid ${C.holo}`, borderRadius: 8,
+          boxShadow: `inset 0 0 34px rgba(86,211,198,0.07), 0 0 0 1px rgba(86,211,198,0.12), 0 0 36px rgba(86,211,198,0.22), 0 26px 70px rgba(0,0,0,0.72)` }}>
+        <div style={{ position: "absolute", top: 0, left: 20, right: 20, height: 2, background: `linear-gradient(90deg, transparent, ${C.holoHi}, transparent)`, opacity: 0.7, pointerEvents: "none" }} />
+        <CornerBrackets />
+        <div className="hud-scanlines" style={{ position: "absolute", inset: 0, borderRadius: 8 }} />
+        {title != null && (
+          <div style={{ position: "relative", display: "flex", alignItems: "center", gap: 12, padding: "16px 22px 12px", borderBottom: "1px solid rgba(86,211,198,0.22)" }}>
+            {icon && <img src={icon} alt="" style={{ width: 32, height: 32, objectFit: "contain", filter: `drop-shadow(0 0 5px ${C.holo}aa)` }} />}
+            <div style={{ fontFamily: C.font, fontSize: 23, fontWeight: 700, letterSpacing: 1.6, textTransform: "uppercase", color: C.text, textShadow: `0 0 10px ${C.holo}55` }}>{title}</div>
+          </div>
+        )}
+        <div className="pc-scroll" style={{ position: "relative", padding: 20, overflowY: "auto", flex: 1, minHeight: 0 }}>{children}</div>
+        {footer && (
+          <div style={{ position: "relative", padding: "12px 20px", borderTop: "1px solid rgba(86,211,198,0.22)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>{footer}</div>
+        )}
+        <CloseX onClose={onClose} style={{ position: "absolute", top: -14, right: -14 }} />
+      </motion.div>
     </div>
   );
 }
@@ -374,57 +400,56 @@ function Stat({ icon, value, label }) {
 // Single-window Location view. `view` is a plain object built by the host.
 export function LocationWindow({ view, onClose, onActivate, onContest, onRecruit, onBuild, onUpgrade, onRush, onSetSlider }) {
   const v = view;
+  const hair = "1px solid rgba(86,211,198,0.22)";
+  const holoBtn = { fontFamily: C.font, fontSize: 12, fontWeight: 700, letterSpacing: 1.4, textTransform: "uppercase", color: "#08100f", padding: "9px 16px", borderRadius: 7, border: `1px solid ${C.holo}`, background: `linear-gradient(180deg, ${C.holoHi}, ${C.holo})`, boxShadow: `0 0 14px ${C.holo}55` };
   return (
     <FrameWindow
       onClose={onClose}
       footer={
         <>
-          {v.loyalty != null && (
-            <div style={{ position: "absolute", right: "9%", bottom: "9.5%", width: "23%", textAlign: "center", pointerEvents: "none" }}>
-              <div style={{ fontFamily: C.font, fontWeight: 800, fontSize: 26, color: v.loyaltyDanger ? C.red : C.gold, textShadow: "0 1px 3px #000", lineHeight: 1 }}>{v.loyalty}/{v.loyaltyMax}</div>
-              <div style={{ fontSize: 8, letterSpacing: 1.5, textTransform: "uppercase", color: C.holoHi }}>Loyalty</div>
-            </div>
-          )}
+          <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+            {v.loyalty != null && (
+              <>
+                <span style={{ fontFamily: C.font, fontWeight: 800, fontSize: 24, color: v.loyaltyDanger ? C.red : C.gold, textShadow: "0 0 8px rgba(0,0,0,0.6)", lineHeight: 1 }}>{v.loyalty}/{v.loyaltyMax}</span>
+                <span style={{ fontSize: 9, letterSpacing: 1.8, textTransform: "uppercase", color: C.holoHi }}>Loyalty</span>
+              </>
+            )}
+          </div>
           {v.contest && (
             <button className="hud-int" onClick={v.contest.canContest ? () => onContest?.({ unit: v.contest.unitId }) : undefined} disabled={!v.contest.canContest}
-              style={{ position: "absolute", right: "34%", bottom: "11%", fontFamily: C.font, fontSize: 13, fontWeight: 700, letterSpacing: 1.6, textTransform: "uppercase", color: "#fff", padding: "8px 18px", borderRadius: 7, border: `1px solid ${C.red}`, background: "linear-gradient(180deg, #e2554c, #a3322c)", boxShadow: `0 2px 0 #6e201b, 0 0 12px ${C.red}66`, cursor: v.contest.canContest ? "pointer" : "not-allowed", opacity: v.contest.canContest ? 1 : 0.5 }}>
+              style={{ fontFamily: C.font, fontSize: 13, fontWeight: 700, letterSpacing: 1.6, textTransform: "uppercase", color: "#fff", padding: "9px 22px", borderRadius: 7, border: `1px solid ${C.red}`, background: "linear-gradient(180deg, #e2554c, #a3322c)", boxShadow: `0 2px 0 #6e201b, 0 0 14px ${C.red}66`, cursor: v.contest.canContest ? "pointer" : "not-allowed", opacity: v.contest.canContest ? 1 : 0.5 }}>
               Contest
             </button>
           )}
         </>
       }
     >
-      <div style={{ display: "flex", flexDirection: "column", height: "100%", gap: 10 }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
         <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
           <div>
-            <div style={{ fontFamily: C.font, fontSize: 30, fontWeight: 700, letterSpacing: 1, color: C.text, lineHeight: 1, textShadow: "0 1px 3px #000" }}>{v.name}</div>
-            <div style={{ display: "flex", gap: 6, marginTop: 6, alignItems: "center" }}>
-              <span style={{ fontFamily: C.font, fontSize: 10.5, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", color: "#1a1206", background: v.valueColor || C.copperHi, padding: "2px 8px", borderRadius: 3 }}>{v.valueLabel}</span>
+            <div style={{ fontFamily: C.font, fontSize: 30, fontWeight: 700, letterSpacing: 1.5, textTransform: "uppercase", color: C.text, lineHeight: 1, textShadow: `0 0 12px ${C.holo}44` }}>{v.name}</div>
+            <div style={{ display: "flex", gap: 6, marginTop: 8, alignItems: "center" }}>
+              <span style={{ fontFamily: C.font, fontSize: 10.5, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", color: "#08100f", background: v.valueColor || C.copperHi, padding: "2px 8px", borderRadius: 3 }}>{v.valueLabel}</span>
               <span style={{ display: "flex", gap: 2 }}>{Array.from({ length: v.vp }).map((_, i) => <img key={i} src={ICON.vp} alt="" style={{ width: 15, height: 15 }} />)}</span>
             </div>
-            <div style={{ fontSize: 10, letterSpacing: 1.4, textTransform: "uppercase", color: C.textFaint, marginTop: 6 }}>{v.statusLabel}</div>
+            <div style={{ fontSize: 10, letterSpacing: 1.4, textTransform: "uppercase", color: C.textDim, marginTop: 7 }}>{v.statusLabel}</div>
           </div>
-          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2, marginTop: 6, marginRight: 30 }}>
-            <ControlMeter sections={v.sections} loyalty={v.loyalty} danger={v.loyaltyDanger} size={54} />
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3 }}>
+            <div style={{ filter: `drop-shadow(0 0 8px ${C.holo}55)` }}>
+              <ControlMeter sections={v.sections} loyalty={v.loyalty} danger={v.loyaltyDanger} size={56} />
+            </div>
             <SectionLabel color={C.textDim}>Control</SectionLabel>
           </div>
         </div>
 
-        <div style={{ display: "flex", gap: 18, padding: "8px 0", borderTop: "1px solid rgba(192,124,56,0.3)", borderBottom: "1px solid rgba(192,124,56,0.3)" }}>
+        <div style={{ display: "flex", gap: 18, padding: "10px 0", borderTop: hair, borderBottom: hair }}>
           <Stat icon={ICON.shield} value={v.garrison} label="Garrison" />
           <Stat icon={ICON.scrap} value={`+${v.economy ? v.economy.output : v.production}`} label="Output" />
           <Stat icon={ICON.units} value={v.economy ? `${v.economy.slotsUsed}/${v.economy.slotCapacity}` : v.chipSlots} label="Chip Slots" />
         </div>
 
         {v.economy && (
-          <EconomyPanel
-            hexId={v.hexId}
-            eco={v.economy}
-            onBuild={onBuild}
-            onUpgrade={onUpgrade}
-            onRush={onRush}
-            onSetSlider={onSetSlider}
-          />
+          <EconomyPanel hexId={v.hexId} eco={v.economy} onBuild={onBuild} onUpgrade={onUpgrade} onRush={onRush} onSetSlider={onSetSlider} />
         )}
 
         {v.ability && (
@@ -434,7 +459,7 @@ export function LocationWindow({ view, onClose, onActivate, onContest, onRecruit
               <p className="pc-prose" style={{ margin: 0, fontSize: 12.5, lineHeight: 1.5, color: C.text, flex: 1 }}>{v.ability.text}</p>
               {v.ability.canActivate != null && (
                 <button className="hud-int" onClick={v.ability.canActivate ? () => onActivate?.(v.hexId) : undefined} disabled={!v.ability.canActivate}
-                  style={{ flexShrink: 0, fontFamily: C.font, fontSize: 12, fontWeight: 700, letterSpacing: 1.4, textTransform: "uppercase", color: "#08100f", padding: "9px 16px", borderRadius: 7, border: `1px solid ${C.holo}`, background: `linear-gradient(180deg, ${C.holoHi}, ${C.holo})`, boxShadow: `0 2px 0 ${C.copperLo}, 0 0 12px ${C.holo}66`, cursor: v.ability.canActivate ? "pointer" : "not-allowed", opacity: v.ability.canActivate ? 1 : 0.5 }}>
+                  style={{ flexShrink: 0, ...holoBtn, cursor: v.ability.canActivate ? "pointer" : "not-allowed", opacity: v.ability.canActivate ? 1 : 0.5 }}>
                   {v.ability.usedThisTurn ? "Used" : "Activate"}
                 </button>
               )}
@@ -448,7 +473,7 @@ export function LocationWindow({ view, onClose, onActivate, onContest, onRecruit
             <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 6 }}>
               <p className="pc-prose" style={{ margin: 0, fontSize: 12.5, lineHeight: 1.5, color: C.textDim, flex: 1 }}>Train a new unit here. Costs {v.recruit.cost} scrap + 1 Action.</p>
               <button className="hud-int" onClick={v.recruit.canAfford ? () => onRecruit?.(v.hexId) : undefined} disabled={!v.recruit.canAfford}
-                style={{ flexShrink: 0, fontFamily: C.font, fontSize: 12, fontWeight: 700, letterSpacing: 1.4, textTransform: "uppercase", color: "#1a1206", padding: "9px 16px", borderRadius: 7, border: "1px solid #8a5e16", background: `linear-gradient(180deg, ${C.copperHi}, ${C.copper})`, boxShadow: "0 2px 0 #6e4a12", cursor: v.recruit.canAfford ? "pointer" : "not-allowed", opacity: v.recruit.canAfford ? 1 : 0.5 }}>
+                style={{ flexShrink: 0, ...holoBtn, cursor: v.recruit.canAfford ? "pointer" : "not-allowed", opacity: v.recruit.canAfford ? 1 : 0.5 }}>
                 Recruit
               </button>
             </div>
@@ -456,15 +481,13 @@ export function LocationWindow({ view, onClose, onActivate, onContest, onRecruit
         )}
 
         {v.contest && (
-          <div className="pc-prose" style={{ fontSize: 11, lineHeight: 1.5, color: C.textDim, background: "rgba(0,0,0,0.25)", border: "1px solid rgba(192,124,56,0.25)", borderRadius: 7, padding: "8px 10px" }}>
+          <div className="pc-prose" style={{ fontSize: 11, lineHeight: 1.5, color: C.textDim, background: "rgba(86,211,198,0.05)", border: hair, borderRadius: 7, padding: "8px 10px" }}>
             <b style={{ color: C.text }}>{v.contest.attackerName}</b> {v.contest.attackerTotal} + 1d6
             <span style={{ color: C.textFaint }}> vs </span>
             <b style={{ color: C.text }}>{v.contest.defenderLabel}</b> {v.contest.defenderValue}{v.contest.defenderRollsDie ? " + 1d6" : " (no roll)"}.
             {v.contest.hasNeutral ? " Neutral sections force the fight onto the garrison." : " Beat the holder to flip a section."}
           </div>
         )}
-
-        <div style={{ flex: 1 }} />
       </div>
     </FrameWindow>
   );
@@ -489,7 +512,7 @@ function EconomyPanel({ hexId, eco, onBuild, onUpgrade, onRush, onSetSlider }) {
       style={{
         flex: 1, fontFamily: C.font, fontSize: 10, fontWeight: 700, letterSpacing: 1,
         textTransform: "uppercase", padding: "5px 4px", borderRadius: 5, cursor: can ? "pointer" : "default",
-        border: `1px solid ${active ? C.holo : "rgba(192,124,56,0.3)"}`,
+        border: `1px solid ${active ? C.holo : "rgba(86,211,198,0.3)"}`,
         background: active ? "rgba(86,211,198,0.18)" : "rgba(0,0,0,0.25)",
         color: active ? C.holoHi : C.textDim,
       }}
@@ -526,7 +549,7 @@ function EconomyPanel({ hexId, eco, onBuild, onUpgrade, onRush, onSetSlider }) {
             </div>
           </div>
           <button className="hud-int" disabled={!can || eco.scrap < 1} onClick={can && eco.scrap >= 1 ? () => onRush?.(hexId) : undefined}
-            style={{ flexShrink: 0, fontFamily: C.font, fontSize: 11, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", color: "#1a1206", padding: "7px 12px", borderRadius: 6, border: "1px solid #8a5e16", background: `linear-gradient(180deg, ${C.copperHi}, ${C.copper})`, cursor: can && eco.scrap >= 1 ? "pointer" : "not-allowed", opacity: can && eco.scrap >= 1 ? 1 : 0.5 }}>
+            style={{ flexShrink: 0, fontFamily: C.font, fontSize: 11, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", color: "#1a1206", padding: "7px 12px", borderRadius: 6, border: "1px solid #8a6a16", background: `linear-gradient(180deg, #f0c44e, ${C.gold})`, boxShadow: `0 0 12px ${C.gold}55`, cursor: can && eco.scrap >= 1 ? "pointer" : "not-allowed", opacity: can && eco.scrap >= 1 ? 1 : 0.5 }}>
             Rush
           </button>
         </div>
@@ -540,7 +563,7 @@ function EconomyPanel({ hexId, eco, onBuild, onUpgrade, onRush, onSetSlider }) {
           <button key={c.uid} className="hud-int" disabled={!can || !c.upgrade}
             onClick={can && c.upgrade ? () => setOpen((o) => (o && o.upgrade === c.uid ? null : { upgrade: c.uid })) : undefined}
             title={c.upgrade ? `Upgrade → ${c.upgrade.name}` : "No upgrade"}
-            style={{ fontFamily: C.font, fontSize: 11, fontWeight: 700, padding: "6px 9px", borderRadius: 6, border: `1px solid ${c.disabled ? C.red : "rgba(192,124,56,0.4)"}`, background: "rgba(0,0,0,0.3)", color: c.disabled ? C.red : C.text, cursor: can && c.upgrade ? "pointer" : "default" }}>
+            style={{ fontFamily: C.font, fontSize: 11, fontWeight: 700, padding: "6px 9px", borderRadius: 6, border: `1px solid ${c.disabled ? C.red : "rgba(86,211,198,0.4)"}`, background: "rgba(0,0,0,0.3)", color: c.disabled ? C.red : C.text, cursor: can && c.upgrade ? "pointer" : "default" }}>
             {c.name}{c.disabled ? " (dormant)" : ""}{c.upgrade ? " ▲" : ""}
           </button>
         ))}
@@ -563,7 +586,7 @@ function EconomyPanel({ hexId, eco, onBuild, onUpgrade, onRush, onSetSlider }) {
             return (
               <button key={b.chipId} className="hud-int" disabled={!enabled}
                 onClick={enabled ? () => { onBuild?.(hexId, b.chipId); setOpen(null); } : undefined}
-                style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, textAlign: "left", padding: "6px 9px", borderRadius: 5, border: "1px solid rgba(192,124,56,0.25)", background: enabled ? "rgba(0,0,0,0.2)" : "rgba(0,0,0,0.35)", color: enabled ? C.text : C.textFaint, cursor: enabled ? "pointer" : "not-allowed", opacity: b.locked ? 0.55 : 1 }}>
+                style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, textAlign: "left", padding: "6px 9px", borderRadius: 5, border: "1px solid rgba(86,211,198,0.25)", background: enabled ? "rgba(0,0,0,0.2)" : "rgba(0,0,0,0.35)", color: enabled ? C.text : C.textFaint, cursor: enabled ? "pointer" : "not-allowed", opacity: b.locked ? 0.55 : 1 }}>
                 <span>
                   <b style={{ color: enabled ? C.text : C.textFaint }}>{b.name}</b>
                   <span style={{ fontSize: 10, color: C.textFaint }}> · {b.desc}</span>
@@ -590,7 +613,7 @@ function EconomyPanel({ hexId, eco, onBuild, onUpgrade, onRush, onSetSlider }) {
             <SectionLabel>Upgrade {c.name}</SectionLabel>
             <button className="hud-int" disabled={!enabled}
               onClick={enabled ? () => { onUpgrade?.(hexId, c.uid); setOpen(null); } : undefined}
-              style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, textAlign: "left", padding: "6px 9px", borderRadius: 5, border: "1px solid rgba(192,124,56,0.25)", background: enabled ? "rgba(0,0,0,0.2)" : "rgba(0,0,0,0.35)", color: enabled ? C.text : C.textFaint, cursor: enabled ? "pointer" : "not-allowed", opacity: up.locked ? 0.55 : 1 }}>
+              style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, textAlign: "left", padding: "6px 9px", borderRadius: 5, border: "1px solid rgba(86,211,198,0.25)", background: enabled ? "rgba(0,0,0,0.2)" : "rgba(0,0,0,0.35)", color: enabled ? C.text : C.textFaint, cursor: enabled ? "pointer" : "not-allowed", opacity: up.locked ? 0.55 : 1 }}>
               <span>
                 <b style={{ color: enabled ? C.text : C.textFaint }}>→ {up.name}</b>
                 <span style={{ fontSize: 10, color: C.textFaint }}> · {up.desc}</span>
@@ -608,18 +631,11 @@ function EconomyPanel({ hexId, eco, onBuild, onUpgrade, onRush, onSetSlider }) {
   );
 }
 
-// Generic titled framed window (Units / Market / etc.).
+// Generic titled framed window (Units / Locations / Diplomacy / etc.).
 export function TitledWindow({ title, icon, onClose, children, width }) {
   return (
-    <FrameWindow onClose={onClose} width={width}>
-      <div style={{ display: "flex", flexDirection: "column", height: "100%", gap: 12 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          {icon && <img src={icon} alt="" style={{ width: 38, height: 38, objectFit: "contain" }} />}
-          <div style={{ fontFamily: C.font, fontSize: 26, fontWeight: 700, letterSpacing: 1, color: C.text, textShadow: "0 1px 3px #000" }}>{title}</div>
-        </div>
-        <div style={{ height: 1, background: "rgba(192,124,56,0.3)" }} />
-        {children}
-      </div>
+    <FrameWindow onClose={onClose} width={width} title={title} icon={icon}>
+      {children}
     </FrameWindow>
   );
 }
