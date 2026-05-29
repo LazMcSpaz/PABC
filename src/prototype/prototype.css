@@ -296,3 +296,29 @@
     animation: none;
   }
 }
+
+/* Board-wide holographic scan pass — a faint teal CRT raster laid over the
+ * whole play surface (under the floating HUD chrome). Subtle + slowly drifting;
+ * screen-blended so it reads as projected light rather than darkening. */
+.hud-screen-scan {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    0deg,
+    rgba(86, 211, 198, 0.08) 0px,
+    rgba(86, 211, 198, 0.08) 1px,
+    transparent 1px,
+    transparent 4px
+  );
+  mix-blend-mode: screen;
+  opacity: 0.9;
+  animation: hud-screen-drift 7s linear infinite;
+}
+@keyframes hud-screen-drift {
+  from { background-position-y: 0; }
+  to { background-position-y: 8px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hud-screen-scan { animation: none; }
+}

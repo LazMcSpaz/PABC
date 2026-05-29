@@ -132,9 +132,8 @@ function HoloSegments({ svgW, svgH, cx, cy, ri, ro, accent = C.holo, segments, p
             style={{ position: "absolute", left: x, top: y, transform: on ? "translate(-50%,-50%) scale(1.12)" : "translate(-50%,-50%)", transition: "transform .14s cubic-bezier(.2,.9,.3,1.4)", display: "flex", flexDirection: "column", alignItems: "center", gap: 1, pointerEvents: s.onClick ? "auto" : "none", cursor: s.onClick ? "pointer" : "default", textShadow: "0 1px 3px rgba(0,0,0,0.85)" }}
           >
             {s.icon && (
-              <span style={{ position: "relative", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
-                <span style={{ position: "absolute", width: (s.iconSize || 30) * 1.55, height: (s.iconSize || 30) * 1.55, borderRadius: "50%", background: `radial-gradient(circle, rgba(6,14,14,0.72) 20%, ${accent}3a 50%, transparent 72%)`, pointerEvents: "none", filter: on ? "brightness(1.35)" : undefined, transition: "filter .14s ease" }} />
-                <img src={s.icon} alt="" style={{ position: "relative", width: s.iconSize || 30, height: s.iconSize || 30, objectFit: "contain", filter: on ? `drop-shadow(0 0 8px ${accent}) brightness(1.18)` : `drop-shadow(0 0 5px ${accent}aa)`, transition: "filter .14s ease" }} />
+              <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: Math.round((s.iconSize || 30) * 1.42), height: Math.round((s.iconSize || 30) * 1.42), borderRadius: "50%", background: "radial-gradient(circle at 50% 40%, rgba(19,42,44,0.96), rgba(4,10,11,0.97))", border: `1px solid ${on ? C.holoHi : accent}`, boxShadow: on ? `0 0 16px ${accent}, inset 0 0 10px ${accent}30` : `0 0 9px ${accent}55, inset 0 0 8px rgba(0,0,0,0.5)`, transition: "box-shadow .14s ease, border-color .14s ease" }}>
+                <img src={s.icon} alt="" style={{ width: s.iconSize || 30, height: s.iconSize || 30, objectFit: "contain", filter: on ? "brightness(1.25)" : "brightness(1.05)", transition: "filter .14s ease" }} />
               </span>
             )}
             {s.value != null && s.value !== "" && <span style={{ fontFamily: C.font, fontWeight: 700, fontSize: s.valueSize || 18, color: C.text, lineHeight: 1 }}>{s.value}</span>}
@@ -356,9 +355,12 @@ function CornerBrackets({ color = C.holo, len = 16, inset = 7, w = 2 }) {
 export function FrameWindow({ children, onClose, footer, width = 470, title, icon }) {
   useEscClose(onClose);
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 58, background: "radial-gradient(ellipse at center, rgba(8,14,14,0.82), rgba(2,5,5,0.93))", backdropFilter: "blur(3px)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+    <motion.div onClick={onClose}
+      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, transition: { duration: 0.2 } }} transition={{ duration: 0.16 }}
+      style={{ position: "fixed", inset: 0, zIndex: 58, background: "radial-gradient(ellipse at center, rgba(8,14,14,0.82), rgba(2,5,5,0.93))", backdropFilter: "blur(3px)", display: "flex", alignItems: "center", justifyContent: "center" }}>
       <motion.div onClick={(e) => e.stopPropagation()} className="hud-scratch"
         initial={{ opacity: 0, scale: 0.95, y: 10 }} animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.96, y: 8, transition: { duration: 0.18, ease: "easeIn" } }}
         transition={{ type: "spring", stiffness: 300, damping: 26 }}
         style={{ position: "relative", width, maxHeight: "88vh", display: "flex", flexDirection: "column",
           background: "linear-gradient(158deg, rgba(18,31,32,0.97) 0%, rgba(9,17,18,0.98) 58%, rgba(6,11,12,0.99) 100%)",
@@ -379,7 +381,7 @@ export function FrameWindow({ children, onClose, footer, width = 470, title, ico
         )}
         <CloseX onClose={onClose} style={{ position: "absolute", top: -14, right: -14 }} />
       </motion.div>
-    </div>
+    </motion.div>
   );
 }
 

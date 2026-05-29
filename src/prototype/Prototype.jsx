@@ -568,6 +568,7 @@ export default function Prototype({ config, onNewGame }) {
         position: "relative",
       }}
     >
+      <div className="hud-screen-scan" style={{ zIndex: 6 }} />
       {/* BOARD — the field of battle; drag to pan, wheel to zoom.
           HUD chrome (resource wheel, faction readout, menu orb) floats
           over it as absolute overlays — see below. */}
@@ -604,23 +605,26 @@ export default function Prototype({ config, onNewGame }) {
 
       {/* HEX DETAIL — locations open the single-window Location view;
           encounter / terrain hexes keep the tabbed Inspector. */}
-      {selectedHexId && state.hexes[selectedHexId]?.type === "location" &&
-        state.hexes[selectedHexId]?.fog === "visible" && (
-        <LocationWindow
-          view={buildLocView(state, state.hexes[selectedHexId], isYourTurn)}
-          onClose={() => setSelectedHexId(null)}
-          onActivate={(h) => onActivate(h)}
-          onRecruit={(h) => onRecruit(h)}
-          onBuild={onBuild}
-          onUpgrade={onUpgrade}
-          onRush={onRush}
-          onSetSlider={onSetSlider}
-          onContest={(p) => {
-            onContest(p);
-            setSelectedHexId(null);
-          }}
-        />
-      )}
+      <AnimatePresence>
+        {selectedHexId && state.hexes[selectedHexId]?.type === "location" &&
+          state.hexes[selectedHexId]?.fog === "visible" && (
+          <LocationWindow
+            key="location-window"
+            view={buildLocView(state, state.hexes[selectedHexId], isYourTurn)}
+            onClose={() => setSelectedHexId(null)}
+            onActivate={(h) => onActivate(h)}
+            onRecruit={(h) => onRecruit(h)}
+            onBuild={onBuild}
+            onUpgrade={onUpgrade}
+            onRush={onRush}
+            onSetSlider={onSetSlider}
+            onContest={(p) => {
+              onContest(p);
+              setSelectedHexId(null);
+            }}
+          />
+        )}
+      </AnimatePresence>
       {selectedHexId && state.hexes[selectedHexId]?.type !== "location" && (
         <Inspector
           state={state}
@@ -661,8 +665,9 @@ export default function Prototype({ config, onNewGame }) {
         )}
       </AnimatePresence>
 
+      <AnimatePresence>
       {menuPanel === "units" && (
-        <TitledWindow title="Units" icon={ICON.units} onClose={() => setMenuPanel(null)}>
+        <TitledWindow key="units" title="Units" icon={ICON.units} onClose={() => setMenuPanel(null)}>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
             {yourUnits.length === 0 && (
               <span style={{ color: HUD.textDim, fontSize: 13 }}>No units in the field yet.</span>
@@ -682,7 +687,7 @@ export default function Prototype({ config, onNewGame }) {
       )}
 
       {menuPanel === "locations" && (
-        <TitledWindow title="Locations" icon={ICON.shield} onClose={() => setMenuPanel(null)}>
+        <TitledWindow key="locations" title="Locations" icon={ICON.shield} onClose={() => setMenuPanel(null)}>
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {yourLocationHexes.length === 0 && (
               <span style={{ color: HUD.textDim, fontSize: 13 }}>
@@ -696,7 +701,7 @@ export default function Prototype({ config, onNewGame }) {
                   key={h.id}
                   className="hud-int"
                   onClick={() => { setMenuPanel(null); setSelectedHexId(h.id); }}
-                  style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 10px", borderRadius: 8, border: "1px solid rgba(192,124,56,0.3)", background: "rgba(0,0,0,0.25)", color: HUD.text, cursor: "pointer", textAlign: "left" }}
+                  style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 10px", borderRadius: 8, border: "1px solid rgba(86,211,198,0.3)", background: "rgba(0,0,0,0.25)", color: HUD.text, cursor: "pointer", textAlign: "left" }}
                 >
                   <ControlMeter sections={h.control.sections} loyalty={h.control.loyalty} danger={h.control.loyaltyDanger} size={40} />
                   <div style={{ display: "flex", flexDirection: "column" }}>
@@ -715,7 +720,7 @@ export default function Prototype({ config, onNewGame }) {
       )}
 
       {menuPanel === "settings" && (
-        <TitledWindow title="Settings" onClose={() => setMenuPanel(null)}>
+        <TitledWindow key="settings" title="Settings" onClose={() => setMenuPanel(null)}>
           <p className="pc-prose" style={{ margin: 0, fontSize: 13, lineHeight: 1.6, color: HUD.textDim }}>
             Game options will live here. For now:
           </p>
@@ -724,6 +729,7 @@ export default function Prototype({ config, onNewGame }) {
           </div>
         </TitledWindow>
       )}
+      </AnimatePresence>
 
       {toast && (
         <div
