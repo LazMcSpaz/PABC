@@ -146,40 +146,58 @@ function HoloSegments({ svgW, svgH, cx, cy, ri, ro, accent = C.holo, segments, p
   );
 }
 
-// A resource readout cell: glowing icon node + value + label.
-function ResourceCell({ icon, value, label }) {
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-      <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 34, height: 34, borderRadius: "50%", background: "radial-gradient(circle at 50% 40%, rgba(19,42,44,0.95), rgba(4,10,11,0.96))", border: `1px solid ${C.holo}`, boxShadow: `0 0 9px ${C.holo}55, inset 0 0 8px rgba(0,0,0,0.5)` }}>
-        <img src={icon} alt="" style={{ width: 21, height: 21, objectFit: "contain", filter: "brightness(1.1)" }} />
-      </span>
-      <div style={{ display: "flex", flexDirection: "column", lineHeight: 1 }}>
-        <span style={{ fontFamily: C.font, fontSize: 18, fontWeight: 700, color: C.text }}>{value}</span>
-        <span style={{ fontSize: 8.5, letterSpacing: 1.3, textTransform: "uppercase", color: C.textFaint }}>{label}</span>
-      </div>
-    </div>
-  );
-}
+// Per-resource colour identity (used for the slat edge, icon node + value glow).
+const RES = {
+  scrap: { color: "#e8b53f", icon: ICON.scrap },
+  units: { color: "#e8734a", icon: ICON.units },
+  tech: { color: C.holo, icon: ICON.research },
+};
 
-const ResSep = () => <div style={{ width: 1, height: 30, background: "rgba(86,211,198,0.22)" }} />;
-
-// Top-left resource readout — a holographic plate (mirrors the faction
-// readout top-right) carrying Scrap / Units / Tech and a settings button.
+// Top-left resource readout — a swept "wing": angled, colour-coded slats
+// nested against a glowing arc spine (icon node + value + label per slat).
 export function ResourceWheel({ scrap, units, tech, onSettings }) {
+  const W = 362, H = 216;
+  const cxA = 150, cyA = 108, R = 132, sk = 15, hh = 21;
+  const arcX = (y) => cxA - Math.sqrt(Math.max(0, R * R - (y - cyA) ** 2));
+  const ang = (d) => [cxA + R * Math.cos((d * Math.PI) / 180), cyA + R * Math.sin((d * Math.PI) / 180)];
+  const [tx, ty] = ang(232), [bx, by] = ang(128);
+  const arcD = `M ${tx.toFixed(1)} ${ty.toFixed(1)} A ${R} ${R} 0 0 0 ${bx.toFixed(1)} ${by.toFixed(1)}`;
+  const slats = [
+    { key: "tech", cy: 56, rx: 332, ...RES.tech, value: `L${tech.level}`, label: tech.label },
+    { key: "units", cy: 110, rx: 300, ...RES.units, value: `${units.n}/${units.cap}`, label: "Units" },
+    { key: "scrap", cy: 164, rx: 268, ...RES.scrap, value: `${scrap}`, label: "Scrap" },
+  ];
+  const poly = (lx, rx, cy) => `${lx + sk},${cy - hh} ${rx + sk},${cy - hh} ${rx},${cy + hh} ${lx},${cy + hh}`;
+
   return (
-    <div style={{ position: "absolute", top: 16, left: 16, zIndex: 30, display: "flex", alignItems: "center", gap: 11, padding: "9px 14px", background: "linear-gradient(158deg, rgba(18,31,32,0.96) 0%, rgba(9,17,18,0.97) 60%, rgba(6,11,12,0.98) 100%)", border: `1px solid ${C.holo}`, borderRadius: 12, boxShadow: `inset 0 0 26px rgba(86,211,198,0.06), 0 0 22px rgba(86,211,198,0.2), 0 10px 26px rgba(0,0,0,0.55)` }}>
-      <div style={{ position: "absolute", top: 0, left: 16, right: 16, height: 2, background: `linear-gradient(90deg, transparent, ${C.holoHi}, transparent)`, opacity: 0.7, pointerEvents: "none" }} />
-      <ResourceCell icon={ICON.scrap} value={scrap} label="Scrap" />
-      <ResSep />
-      <ResourceCell icon={ICON.units} value={`${units.n}/${units.cap}`} label="Units" />
-      <ResSep />
-      <ResourceCell icon={ICON.research} value={`L${tech.level}`} label={tech.label} />
+    <div style={{ position: "absolute", top: 12, left: 8, zIndex: 30, width: W, height: H, pointerEvents: "none" }}>
+      <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} style={{ position: "absolute", inset: 0, overflow: "visible" }}>
+        <path d={arcD} fill="none" stroke={C.holo} strokeWidth="2.5" style={{ filter: `drop-shadow(0 0 7px ${C.holo})` }} />
+        <path d={arcD} fill="none" stroke={C.holoHi} strokeWidth="0.8" opacity="0.6" />
+        {slats.map((sl) => {
+          const lx = arcX(sl.cy) + 6;
+          return (
+            <polygon key={sl.key} points={poly(lx, sl.rx, sl.cy)}
+              fill={sl.color} fillOpacity="0.10" stroke={sl.color} strokeWidth="1.6"
+              strokeLinejoin="round" style={{ filter: `drop-shadow(0 0 6px ${sl.color}aa)` }} />
+          );
+        })}
+      </svg>
+      {slats.map((sl) => {
+        const lx = arcX(sl.cy) + 6;
+        return (
+          <div key={sl.key} style={{ position: "absolute", left: lx + 13, top: sl.cy - 17, height: 34, display: "flex", alignItems: "center", gap: 9 }}>
+            <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 32, height: 32, borderRadius: "50%", background: "radial-gradient(circle at 50% 40%, rgba(19,42,44,0.95), rgba(4,10,11,0.96))", border: `1px solid ${sl.color}`, boxShadow: `0 0 9px ${sl.color}88, inset 0 0 7px rgba(0,0,0,0.5)`, flexShrink: 0 }}>
+              <img src={sl.icon} alt="" style={{ width: 19, height: 19, objectFit: "contain", filter: "brightness(1.12)" }} />
+            </span>
+            <span style={{ fontFamily: C.font, fontWeight: 700, fontSize: 19, color: "#f4efe2", textShadow: `0 0 9px ${sl.color}` }}>{sl.value}</span>
+            <span style={{ fontFamily: C.font, fontSize: 9.5, letterSpacing: 1.6, textTransform: "uppercase", color: sl.color, fontWeight: 600 }}>{sl.label}</span>
+          </div>
+        );
+      })}
       <button className="hud-int" title="Settings" onClick={onSettings}
-        style={{ marginLeft: 2, width: 32, height: 32, borderRadius: "50%", border: `1px solid ${C.holo}`, background: "radial-gradient(circle at 40% 34%, rgba(86,211,198,0.16), rgba(8,16,16,0.85) 78%)", boxShadow: `0 0 9px ${C.holo}55`, display: "flex", alignItems: "center", justifyContent: "center", padding: 0, color: C.holoHi, cursor: "pointer", flexShrink: 0 }}>
-        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-          <circle cx="12" cy="12" r="3.2" />
-          <path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5 5l2.1 2.1M16.9 16.9L19 19M19 5l-2.1 2.1M7.1 16.9L5 19" strokeLinecap="round" />
-        </svg>
+        style={{ position: "absolute", left: tx - 15, top: ty - 18, width: 32, height: 32, borderRadius: "50%", border: `1px solid ${C.holo}`, background: "radial-gradient(circle at 40% 34%, rgba(86,211,198,0.18), rgba(8,16,16,0.9) 78%)", boxShadow: `0 0 9px ${C.holo}66`, display: "flex", alignItems: "center", justifyContent: "center", padding: 0, color: C.holoHi, cursor: "pointer", pointerEvents: "auto" }}>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3.2" /><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5 5l2.1 2.1M16.9 16.9L19 19M19 5l-2.1 2.1M7.1 16.9L5 19" strokeLinecap="round" /></svg>
       </button>
     </div>
   );
