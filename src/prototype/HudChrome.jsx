@@ -131,7 +131,12 @@ function HoloSegments({ svgW, svgH, cx, cy, ri, ro, accent = C.holo, segments, p
             onClick={s.onClick}
             style={{ position: "absolute", left: x, top: y, transform: on ? "translate(-50%,-50%) scale(1.12)" : "translate(-50%,-50%)", transition: "transform .14s cubic-bezier(.2,.9,.3,1.4)", display: "flex", flexDirection: "column", alignItems: "center", gap: 1, pointerEvents: s.onClick ? "auto" : "none", cursor: s.onClick ? "pointer" : "default", textShadow: "0 1px 3px rgba(0,0,0,0.85)" }}
           >
-            {s.icon && <img src={s.icon} alt="" style={{ width: s.iconSize || 30, height: s.iconSize || 30, objectFit: "contain", filter: on ? `drop-shadow(0 0 7px ${accent}) brightness(1.18)` : "drop-shadow(0 1px 3px rgba(0,0,0,0.8))", transition: "filter .14s ease" }} />}
+            {s.icon && (
+              <span style={{ position: "relative", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+                <span style={{ position: "absolute", width: (s.iconSize || 30) * 1.55, height: (s.iconSize || 30) * 1.55, borderRadius: "50%", background: `radial-gradient(circle, rgba(6,14,14,0.72) 20%, ${accent}3a 50%, transparent 72%)`, pointerEvents: "none", filter: on ? "brightness(1.35)" : undefined, transition: "filter .14s ease" }} />
+                <img src={s.icon} alt="" style={{ position: "relative", width: s.iconSize || 30, height: s.iconSize || 30, objectFit: "contain", filter: on ? `drop-shadow(0 0 8px ${accent}) brightness(1.18)` : `drop-shadow(0 0 5px ${accent}aa)`, transition: "filter .14s ease" }} />
+              </span>
+            )}
             {s.value != null && s.value !== "" && <span style={{ fontFamily: C.font, fontWeight: 700, fontSize: s.valueSize || 18, color: C.text, lineHeight: 1 }}>{s.value}</span>}
             {s.label && <span style={{ fontSize: 8.5, letterSpacing: 1.5, textTransform: "uppercase", color: on ? C.holoHi : accent, fontWeight: 600, textShadow: on ? `0 0 8px ${accent}` : undefined }}>{s.label}</span>}
           </div>
@@ -183,13 +188,13 @@ function Dial({ size = 72, accent = C.holo, progress = null, glow = false, child
       <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
         <defs>
           <radialGradient id={`f${gid}`} cx="42%" cy="36%" r="80%">
-            <stop offset="0%" stopColor="#323a3e" /><stop offset="62%" stopColor="#1d2326" /><stop offset="100%" stopColor="#11161a" />
+            <stop offset="0%" stopColor="#173033" /><stop offset="62%" stopColor="#0e1d1f" /><stop offset="100%" stopColor="#081012" />
           </radialGradient>
           <linearGradient id={`r${gid}`} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor={C.copperHi} /><stop offset="48%" stopColor={C.copper} /><stop offset="100%" stopColor={C.copperLo} />
+            <stop offset="0%" stopColor={C.holoHi} /><stop offset="50%" stopColor={C.holo} /><stop offset="100%" stopColor="#1c4a45" />
           </linearGradient>
         </defs>
-        <circle cx={c} cy={c} r={rRim} fill="none" stroke={`url(#r${gid})`} strokeWidth="3.4" />
+        <circle cx={c} cy={c} r={rRim} fill="none" stroke={`url(#r${gid})`} strokeWidth="3.4" style={{ filter: `drop-shadow(0 0 5px ${C.holo}88)` }} />
         <circle cx={c} cy={c} r={rRim - 2} fill="none" stroke="rgba(0,0,0,0.55)" strokeWidth="1" />
         <circle cx={c} cy={c} r={rFace} fill={`url(#f${gid})`} stroke="rgba(0,0,0,0.6)" strokeWidth="1" />
         {progress != null && (
@@ -212,27 +217,22 @@ function DialFace({ icon, value, sub, valueColor = C.text, iconSize = 26 }) {
     </>
   );
 }
-function Rivet({ style }) {
-  return <span style={{ position: "absolute", width: 6, height: 6, borderRadius: "50%", background: "radial-gradient(circle at 35% 30%, #8b9197, #2a2f33 80%)", boxShadow: "inset 0 0 0 1px rgba(0,0,0,0.5)", ...style }} />;
-}
-
 export function FactionReadout({ name, color = C.red, vp, vpGoal, actions, round, onEndTurn, endDisabled }) {
   return (
-    <div className="hud-scratch" style={{ position: "absolute", top: 16, right: 16, zIndex: 30, display: "flex", alignItems: "center", gap: 4, padding: "8px 14px 12px", background: `linear-gradient(168deg, ${C.steelHi} 0%, ${C.steel} 42%, ${C.steelLo} 100%)`, border: "1px solid rgba(0,0,0,0.55)", borderTop: `2px solid ${color}`, borderRadius: 14, boxShadow: "0 8px 22px rgba(0,0,0,0.55), inset 0 0 0 1px rgba(192,124,56,0.28), inset 0 1px 0 rgba(255,255,255,0.06)" }}>
-      <Rivet style={{ top: 7, left: 7 }} />
-      <Rivet style={{ top: 7, right: 7 }} />
+    <div style={{ position: "absolute", top: 16, right: 16, zIndex: 30, display: "flex", alignItems: "center", gap: 4, padding: "10px 16px 14px", background: "linear-gradient(158deg, rgba(18,31,32,0.96) 0%, rgba(9,17,18,0.97) 60%, rgba(6,11,12,0.98) 100%)", border: `1px solid ${C.holo}`, borderTop: `2px solid ${color}`, borderRadius: 12, boxShadow: `inset 0 0 26px rgba(86,211,198,0.06), 0 0 22px rgba(86,211,198,0.2), 0 10px 26px rgba(0,0,0,0.55)` }}>
+      <div style={{ position: "absolute", top: 0, left: 16, right: 16, height: 2, background: `linear-gradient(90deg, transparent, ${color}, transparent)`, opacity: 0.8, pointerEvents: "none" }} />
       <Dial size={72} accent={C.gold} progress={vpGoal ? vp / vpGoal : 0}>
         <DialFace icon={ICON.vp} value={vp} sub={`VP · ${vp}/${vpGoal}`} valueColor={C.gold} />
       </Dial>
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: "0 8px", minWidth: 150 }}>
-        <span style={{ fontFamily: C.font, fontSize: 21, fontWeight: 700, letterSpacing: 1.2, textTransform: "uppercase", color, textShadow: "0 1px 2px rgba(0,0,0,0.7)", lineHeight: 1.05, whiteSpace: "nowrap" }}>{name}</span>
+        <span style={{ fontFamily: C.font, fontSize: 21, fontWeight: 700, letterSpacing: 1.2, textTransform: "uppercase", color, textShadow: `0 0 12px ${color}66, 0 1px 2px rgba(0,0,0,0.7)`, lineHeight: 1.05, whiteSpace: "nowrap" }}>{name}</span>
         <span style={{ fontSize: 10, letterSpacing: 2.4, textTransform: "uppercase", color: C.textFaint, marginTop: 3 }}>Round {round}</span>
       </div>
       <Dial size={72} accent={C.red} progress={actions.max ? actions.remaining / actions.max : 0} glow>
         <DialFace value={`${actions.remaining}/${actions.max}`} sub="Actions" valueColor={C.text} />
       </Dial>
       <button className="hud-int" onClick={endDisabled ? undefined : onEndTurn} disabled={endDisabled}
-        style={{ position: "absolute", bottom: -19, left: "50%", transform: "translateX(-50%)", fontFamily: C.font, fontSize: 14, fontWeight: 700, letterSpacing: 2, textTransform: "uppercase", color: "#1a1206", padding: "9px 30px", borderRadius: 8, border: "1px solid #8a5e16", whiteSpace: "nowrap", background: `linear-gradient(180deg, ${C.copperHi}, ${C.copper})`, boxShadow: "0 3px 0 #6e4a12, 0 6px 12px rgba(0,0,0,0.5)", cursor: endDisabled ? "not-allowed" : "pointer", opacity: endDisabled ? 0.45 : 1 }}>
+        style={{ position: "absolute", bottom: -19, left: "50%", transform: "translateX(-50%)", fontFamily: C.font, fontSize: 14, fontWeight: 700, letterSpacing: 2, textTransform: "uppercase", color: "#08100f", padding: "9px 30px", borderRadius: 8, border: `1px solid ${C.holo}`, whiteSpace: "nowrap", background: `linear-gradient(180deg, ${C.holoHi}, ${C.holo})`, boxShadow: `0 0 16px ${C.holo}66, 0 6px 12px rgba(0,0,0,0.5)`, cursor: endDisabled ? "not-allowed" : "pointer", opacity: endDisabled ? 0.45 : 1 }}>
         End Turn
       </button>
     </div>
@@ -305,17 +305,18 @@ export function RadialMenu({ items, onPick, onClose }) {
   const seg = (i) => ({ a0: -span / 2 + i * span, a1: -span / 2 + (i + 1) * span });
   return (
     <motion.div onClick={onClose}
-      initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.18, ease: "easeOut" }}
+      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, transition: { duration: 0.26, ease: "easeIn" } }} transition={{ duration: 0.18, ease: "easeOut" }}
       style={{ position: "fixed", inset: 0, zIndex: 60, background: "rgba(4,8,8,0.62)", backdropFilter: "blur(2px)", display: "flex", alignItems: "center", justifyContent: "center" }}>
       <motion.div onClick={(e) => e.stopPropagation()}
         initial={{ scale: 0.84, rotate: -7, opacity: 0 }}
         animate={{ scale: 1, rotate: 0, opacity: 1 }}
+        exit={{ scale: 0.8, rotate: 8, opacity: 0, transition: { duration: 0.26, ease: "easeIn" } }}
         transition={{ type: "spring", stiffness: 240, damping: 20, mass: 0.7 }}
         style={{ position: "relative", width: S, height: S }}>
         <div className="hud-glitch" style={{ position: "absolute", inset: 0 }}>
           <ScannerRing size={S} />
           <HoloSegments svgW={S} svgH={S} cx={c} cy={c} ri={ri} ro={ro} accent={C.holo} prominent gapPx={10}
-            segments={items.map((it, i) => ({ ...seg(i), icon: it.icon, iconSize: 40, label: it.label, onClick: () => onPick(it.key) }))}
+            segments={items.map((it, i) => ({ ...seg(i), icon: it.icon, iconSize: 46, label: it.label, onClick: () => onPick(it.key) }))}
             hub={<span style={{ display: "flex", flexDirection: "column", alignItems: "center", color: C.holoHi }}><span style={{ fontFamily: C.font, fontSize: 13, fontWeight: 700, letterSpacing: 3 }}>SELECT</span><span style={{ fontSize: 9, letterSpacing: 1.5, color: C.textFaint }}>tap a sector</span></span>}
           />
           <div className="hud-scanlines" style={{ position: "absolute", left: c - ro, top: c - ro, width: ro * 2, height: ro * 2, borderRadius: "50%" }} />

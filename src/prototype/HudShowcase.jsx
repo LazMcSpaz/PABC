@@ -2,6 +2,7 @@
 // components with mock data so the visuals can be reviewed without a
 // running game. The live wiring lives in Prototype.jsx.
 import { useState } from "react";
+import { AnimatePresence } from "framer-motion";
 import ControlMeter from "./ControlMeter.jsx";
 import {
   C, ICON, ResourceWheel, FactionReadout, MenuOrb, RadialMenu, LocationWindow, TitledWindow,
@@ -57,7 +58,9 @@ export default function HudShowcase({ onExit }) {
       <FactionReadout name="Versari Korad" color={C.red} vp={4} vpGoal={10} actions={{ remaining: 2, max: 2 }} round={3} onEndTurn={() => {}} />
       <MenuOrb onOpen={() => setMenuOpen(true)} />
 
-      {menuOpen && <RadialMenu items={MENU_ITEMS} onPick={open} onClose={() => setMenuOpen(false)} />}
+      <AnimatePresence>
+        {menuOpen && <RadialMenu key="radial-menu" items={MENU_ITEMS} onPick={open} onClose={() => setMenuOpen(false)} />}
+      </AnimatePresence>
       {panel === "locations" && <LocationWindow view={MOCK_LOC} onClose={() => setPanel(null)} onActivate={() => {}} onContest={() => {}} onRecruit={() => {}} onBuild={() => {}} onUpgrade={() => {}} onRush={() => {}} onSetSlider={() => {}} />}
       {panel === "research" && <TitledWindow title="Research" icon={ICON.research} onClose={() => setPanel(null)}>
         <p className="pc-prose" style={{ margin: 0, fontSize: 13, lineHeight: 1.6, color: C.textDim }}>Advance your tech level to earn ability points on the Tech Wheel — Military, Industry, Logistics and Intelligence branches.</p>

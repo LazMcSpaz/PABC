@@ -2,6 +2,7 @@
 // everything else lives in peripheral bars — a top faction bar and a
 // bottom tab dock — with a floating tabbed window for hex inspection.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AnimatePresence } from "framer-motion";
 import "./prototype.css";
 import { FACTIONS as UI_FACTIONS, LOCATIONS as UI_LOCATIONS, valueOf, fullController, theme } from "./data.js";
 import { Btn } from "./kit.jsx";
@@ -654,9 +655,11 @@ export default function Prototype({ config, onNewGame }) {
       />
       <MenuOrb onOpen={() => setMenuOpen(true)} />
 
-      {menuOpen && (
-        <RadialMenu items={MENU_ITEMS} onPick={onMenuPick} onClose={() => setMenuOpen(false)} />
-      )}
+      <AnimatePresence>
+        {menuOpen && (
+          <RadialMenu key="radial-menu" items={MENU_ITEMS} onPick={onMenuPick} onClose={() => setMenuOpen(false)} />
+        )}
+      </AnimatePresence>
 
       {menuPanel === "units" && (
         <TitledWindow title="Units" icon={ICON.units} onClose={() => setMenuPanel(null)}>
