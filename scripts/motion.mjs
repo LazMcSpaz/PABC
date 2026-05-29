@@ -1,13 +1,17 @@
 // Motion capture — the feedback loop for *animation* (stills can't show it).
 //
-// Opens the radial menu on the /#hud showcase and records:
-//   - a burst of PNG frames through the entrance animation (open-NN.png),
-//     which can be read back as images to verify the motion progresses;
-//   - two idle frames ~1.4s apart (idle-a/b.png) to show ambient rotation;
-//   - a webm video of the whole thing (radial-menu.webm) to share.
+// Opens the radial menu on the /#hud showcase and records a webm of the
+// entrance spring, the idle scanner ring, and the periodic glitch, plus a
+// burst of PNG stills through the entrance (which can be read back to verify
+// the motion progresses).
 //
 //   npm run dev      # in one shell (or background)
 //   npm run motion
+//
+// NOTE: Chromium's screencast (used by recordVideo) downscales the frame into
+// a corner when a full-screen backdrop-filter is present — a known recording
+// quirk, NOT a bug in the live UI (page.screenshot and real browsers render it
+// full-size). We neutralise backdrop-filter for the recording only.
 
 import { chromium } from "playwright";
 import { mkdir, rename } from "node:fs/promises";
@@ -15,6 +19,7 @@ import { mkdir, rename } from "node:fs/promises";
 const BASE = (process.env.SHOT_BASE || "http://localhost:5173").replace(/\/$/, "");
 const OUT = "screenshots/motion";
 const VIEWPORT = { width: 1440, height: 900 };
+const KILL_BACKDROP = "*{backdrop-filter:none!important;-webkit-backdrop-filter:none!important;}";
 
 async function run() {
   await mkdir(OUT, { recursive: true });
@@ -28,20 +33,20 @@ async function run() {
 
   await page.goto(`${BASE}/#hud`, { waitUntil: "domcontentloaded" });
   await page.getByText("HUD Look Pass").waitFor({ timeout: 15000 });
-  await page.waitForTimeout(500);
+  await page.addStyleTag({ content: KILL_BACKDROP });
+  await page.waitForTimeout(400);
 
-  // Open the radial menu and burst-capture the entrance.
+  // Open the radial menu and burst-capture the entrance (stills are always
+  // full-scale, independent of the screencast quirk above).
   await page.getByText("MENU", { exact: true }).click();
   for (let i = 0; i < 9; i++) {
     await page.screenshot({ path: `${OUT}/open-${String(i).padStart(2, "0")}.png` });
     await page.waitForTimeout(55);
   }
 
-  // Idle: two frames far enough apart that the scanner ring's rotation shows.
-  await page.waitForTimeout(400);
-  await page.screenshot({ path: `${OUT}/idle-a.png` });
-  await page.waitForTimeout(1400);
-  await page.screenshot({ path: `${OUT}/idle-b.png` });
+  // Hold long enough for the video to capture the idle ring + one glitch
+  // (the glitch fires ~4.6s into the 5.5s cycle).
+  await page.waitForTimeout(5200);
 
   const video = page.video();
   await page.close();
@@ -50,7 +55,7 @@ async function run() {
   await browser.close();
   if (videoPath) await rename(videoPath, `${OUT}/radial-menu.webm`).catch(() => {});
 
-  console.log(`Motion captured in ${OUT}/ — open-*.png, idle-a/b.png, radial-menu.webm`);
+  console.log(`Motion captured in ${OUT}/ — open-*.png + radial-menu.webm`);
 }
 
 run().catch((err) => {
