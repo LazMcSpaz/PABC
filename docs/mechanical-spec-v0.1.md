@@ -1310,11 +1310,11 @@ Logistics**. Each path is **5 nodes over 3 layers**:
   4 points cannot complete even one 5-node path (a full path is 5), so every
   build is a real set of trade-offs — go deep in one branch, split a path's
   two branches, or dabble across paths.
-- **Stacking vs. replacement** within a branch (does A2 add to A1 or upgrade
-  it?) is **deferred** until the branch abilities are written — it may not
-  apply to every node.
+- **Stacking vs. replacement.** Resolved in §17.5: branch effects **ADD**.
+  A deeper node never replaces a shallower one — holding Doctrine and
+  Vanguard grants both contest-roll bonuses in their respective contexts.
 
-### 17.5 Entry node abilities (defined)
+### 17.5 Node abilities
 
 | Path | Entry node | Effect |
 |---|---|---|
@@ -1329,8 +1329,71 @@ Logistics**. Each path is **5 nodes over 3 layers**:
   committing to a draw. (Engine note: the discard reshuffles the card at least
   3 cards down and fires only on that player's own draws.)
 
-The two branch nodes (A1/A2, B1/B2) of every path are **placeholders** for
-now — to be designed in a later pass.
+**Branch effects ADD to the entry** (and to each other within the same
+branch); no branch node *replaces* a shallower one. Holding two nodes always
+means holding both effects.
+
+#### Military
+
+Entry **Doctrine** is the contest-roll generalist; the two branches
+specialise.
+
+- **A · Aggression** — your *attacks* hit harder.
+  - **A1 Vanguard** — +1 contest roll when *you initiate* the contest
+    (stacks with Doctrine: +2 attacking, +1 defending).
+  - **A2 Killing Blow** — when you attack and win, the loser loses
+    **2 Strength** (was 1). Your wins are twice as bloody.
+- **B · Bastion** — *your Locations* are harder to take.
+  - **B1 Turrets** — when defending a hex you control, +1 contest roll AND
+    the §16.6 fortify bonus doubles (1 → 2).
+  - **B2 Citadel** — Locations you control gain +2 garrison Strength;
+    Locations captured *from* you initialize at **Loyalty 0** for the new
+    owner — your conquest is hollow to whoever takes it.
+
+#### Logistics
+
+Entry **Supply Lines** is the mobility generalist.
+
+- **A · Maneuver** — your units go further.
+  - **A1 Forced March** — +1 Movement (stacks with Supply Lines: +2 total).
+  - **A2 Forward Supply** — your §16.5 reinforcement convoys may route
+    through enemy ZoC hexes. Forward-deployed units stay supplied behind
+    enemy lines.
+- **B · Sustainment** — your units last longer.
+  - **B1 Field Hospital** — +1 passive heal per Upkeep on held Locations
+    (stacks with the §16.5 base: +2/Upkeep).
+  - **B2 Supply Convoys** — convoys travel +1 hex/round; the
+    `scrapPerStrength` healing rate is **1:1** (was 2:1).
+
+#### Economy
+
+Entry **Industry** is the production generalist.
+
+- **A · Industry** — more material.
+  - **A1 Refineries** — +1 scrap per Upkeep per held Location (stacks with
+    Industry: +2 per Location).
+  - **A2 Industrial Might** — your **Capital generates +1 Research per
+    Upkeep** (in addition to any Labs). Industry compounds into Tech.
+- **B · Construction** — better building.
+  - **B1 Production Lines** — chip `buildCost` reduced by 1 (floor 1).
+  - **B2 Capital Works** — your Capital gains **+1 chip slot**.
+
+#### Intelligence
+
+Entry **Recon** is the encounter-control generalist.
+
+- **A · Vision** — see more of the map.
+  - **A1 Watch Network** — +1 faction-wide Vision AND +1 faction-wide
+    Detection.
+  - **A2 Listening Post** — unlocks the **Build Listening Post** action —
+    a deployable hidden vision source in the field. **See §17.7** for the
+    full subsystem.
+- **B · Espionage** — read and disrupt rivals.
+  - **B1 Spy Ring** — you read normally-hidden rival state: each rival's
+    Tech Wheel allocation, and their pairwise Standing with third parties.
+  - **B2 Saboteurs** — once per round, target an enemy-controlled Location
+    and lower its Loyalty by 1. The covert offence the diplomacy player
+    wants.
 
 ### 17.6 Victory interaction
 
@@ -1344,7 +1407,71 @@ now — to be designed in a later pass.
   Economy and Intelligence branches are likely feeders. Revisit as the wheel
   fills in.
 
-### 17.7 Engine mapping (for implementers)
+### 17.7 Listening Post (Intelligence A2 — Vision)
+
+A unit-built static structure that grants its owner a small sight footprint
+deep in territory it does not control, and survives by **stealth, not
+toughness.** The covert eye in the field.
+
+**State.** `state.world.listeningPosts[hex] = { owner, hex, strength: 5, paid }`.
+A hex may carry at most one listening post; posts may not occupy Location
+hexes (the Location is already a sight source). Uncapped per player — the
+scrap cost self-regulates.
+
+**Build action.** Requires that the acting player has assigned Intelligence
+A2; a friendly unit stands on the target hex; the hex is **not** a Location.
+Costs **1 Action + 3 scrap** (paid immediately from the bank). Spawns a post
+on that hex owned by the acting player. The post is **concealed** at spawn.
+
+**Vision contribution.** The post is a Vision source of radius **1** — it
+sights its own hex + adjacent neighbours for its owner. Vision **only**; the
+post contributes **no Detection** (a concealed enemy unit standing on the
+post's hex is still invisible to the owner unless they have separate
+Detection in range). §19 LoS rules apply normally — elevation and cover
+affect what the post sees, exactly as for a unit standing there.
+
+**Concealment & reveal.** The post follows §19.5 concealment — invisible in
+fog by default. It is revealed to faction F when either:
+
+- an F-owned unit enters the post's hex (contact), or
+- an F-owned Detection source comes in range of the post's hex.
+
+Once revealed to a faction the post stays revealed for that faction — it
+does not re-stealth.
+
+**Destruction.** An enemy unit standing on the post's hex may spend 1 Action
+to contest it. The post defends as an undefended garrison: Strength **5** +
+1d6 vs the attacker's normal contest total (defender wins ties per §16). On
+the post losing it is removed. The §16.4 Pyrrhic rule applies normally — a
+margin-≤1 win still costs the attacker 1 Strength. The post cannot wound an
+attacker beyond Pyrrhic (it has no unit to lose Strength).
+
+**Upkeep.** 1 scrap per Upkeep, paid alongside §20.9 chip upkeep from the
+player's bank. An **unpaid** post goes **dormant**: it contributes no Vision
+and does not appear among its owner's vision sources until the next Upkeep
+at which it is paid. Dormant posts do not auto-destruct — the owner may
+resume by paying. **Dormant posts stay concealed** under the same reveal
+rules — going dormant does not reveal the post to anyone.
+
+**Why Vision, not Espionage.** The post extends *your* sight; it does not
+read or disrupt rival state. The Espionage branch (B1 Spy Ring → B2
+Saboteurs) is the covert-offense path; the Vision branch (A1 Watch Network →
+A2 Listening Post) is the sight-projection path.
+
+**Engine surface.** The post is **the only branch node large enough to need
+its own subsystem** — the other 15 are numeric tweaks or one-effect additions
+on existing mechanics. New: a `posts.js` module owning the listening-post
+state and lifecycle; a `BUILD_POST` action in `actions.js` (validates A2
+assignment, unit-on-hex, non-Location, ≥3 scrap, ≥1 Action); a Vision source
+contribution in `visibility.js` (radius 1, owner-scoped, dormant-skip);
+a contest target type in `contest.js` (standing garrison Str 5, no §16.5
+healing); a per-post upkeep tick alongside `chargeChipUpkeep` in `turn.js`;
+events `post_built` / `post_destroyed` / `post_dormant` / `post_paid`; AI
+hooks to value placement (frontier scouting) and to value destroying revealed
+enemy posts. The AI's effect→value table (see `docs/ai-overhaul-plan.md`)
+gains one entry for "deployable Vision source."
+
+### 17.8 Engine mapping (for implementers)
 
 - Rename/replace the raw `player.tech` concept: store **`player.research`**
   (Labs + encounter grants) and derive **`player.techLevel`** via the §17.2
@@ -2068,17 +2195,19 @@ authored later.)
 
 ### 19.8 Intelligence tech path — payoff (gives §17.5 branches their theme)
 
-The stubbed Intelligence branch nodes (§17.5) now have a unifying theme:
-**information dominance.** Proposed branch split (node effects authored when
-branches are designed):
+The Intelligence branch nodes — defined in **§17.5**, with the Listening
+Post detailed in **§17.7** — realize **information dominance** along two
+axes:
 
 - **Entry — Recon:** the existing encounter discard/redraw (unchanged).
-- **Vision branch:** extended sight, LoS through some cover/elevation,
-  Detection, and an activated **reveal-region pulse**.
-- **Espionage branch:** borrow sight inside a rival's territory, read
-  normally-hidden rival state (wheel allocation, Standing, a Location's
-  Loyalty), and **sabotage** (lower a target Loyalty, plant a **false
-  ghost**). This is the covert offense the diplomacy player wants.
+- **Vision branch (A1 Watch Network → A2 Listening Post):** passive
+  faction-wide sight and Detection (A1), then a deployable hidden eye in the
+  field (A2). The sight-projection path.
+- **Espionage branch (B1 Spy Ring → B2 Saboteurs):** read normally-hidden
+  rival state — each rival's wheel allocation and pairwise Standing with
+  third parties (B1) — then act on it covertly — lower a target enemy
+  Location's Loyalty by 1, once per round (B2). The covert offence the
+  diplomacy player wants.
 
 ### 19.9 Diplomacy interlock — shared vision & intel trade
 
@@ -2150,7 +2279,7 @@ reaction window for the surprised side.
   roll penalty alongside dropping the reaction window?
 - **Ghost aging** — do last-known markers expire, and after how many rounds?
 - **First-discovery reward** and **special-site** contents.
-- **Scout / watchtower chip** stats; **Intelligence branch** node effects.
+- **Scout / watchtower chip** stats.
 - **Shared-vision scope** — whole map vs. region; automatic for allies vs.
   opt-in deal.
 - **AI fog policy** by difficulty — where, if ever, partial reveal kicks in.
