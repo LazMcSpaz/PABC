@@ -9,10 +9,11 @@ import {
   C, ICON, TopBar, MenuOrb, RadialMenu, LocationWindow, TitledWindow,
 } from "./HudChrome.jsx";
 
-// Mock tech-wheel state for the showcase: one entry held, one entry available
-// (Doctrine prereq met for branch A1), one point left to spend.
+// Mock tech-wheel state for the showcase: Doctrine + Vanguard already held
+// (so Killing Blow / Turrets are now reachable), Industry held too. One
+// point left to spend — assignable nodes pulse, locked nodes stay dim.
 const MOCK_PLAYER = {
-  techWheel: ["mil-entry"],
+  techWheel: ["mil-entry", "mil-a1", "eco-entry"],
   abilityPointsAvailable: 1,
 };
 
