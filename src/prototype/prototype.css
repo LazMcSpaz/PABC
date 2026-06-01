@@ -322,3 +322,15 @@
 @media (prefers-reduced-motion: reduce) {
   .hud-screen-scan { animation: none; }
 }
+
+/* Tech wheel — assignable nodes pulse brighter to advertise interactivity. */
+@keyframes tech-pulse {
+  0%, 100% { filter: brightness(1); }
+  50% { filter: brightness(1.32); }
+}
+.tech-pulse {
+  animation: tech-pulse 1.9s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .tech-pulse { animation: none; }
+}
