@@ -794,14 +794,17 @@ export default function Prototype({ config, onNewGame }) {
         <SalvageModal prompt={salvagePrompt} onConfirm={onSalvageConfirm} />
       )}
 
-      {showTechWheel && (
-        <TechWheelOverlay
-          you={you}
-          state={state}
-          onAssign={onAssignTech}
-          onClose={() => setShowTechWheel(false)}
-        />
-      )}
+      <AnimatePresence>
+        {showTechWheel && (
+          <TechWheel
+            key="research"
+            player={you}
+            onAssign={onAssignTech}
+            onClose={() => setShowTechWheel(false)}
+            levelInfo={{ level: you.techLevel, maxLevel: state.maxTechLevel, research: you.research }}
+          />
+        )}
+      </AnimatePresence>
 
       {showDiplomacy && (
         <DiplomacyScreen
@@ -909,38 +912,6 @@ function EndOverlay({ state, onNewGame }) {
             New Game
           </Btn>
         </div>
-      </div>
-    </div>
-  );
-}
-
-function TechWheelOverlay({ you, state, onAssign, onClose }) {
-  return (
-    <div
-      style={{
-        position: "fixed", inset: 0, zIndex: 72, background: "rgba(0,0,0,0.8)",
-        display: "flex", alignItems: "center", justifyContent: "center",
-      }}
-      onClick={onClose}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        style={{
-          background: theme.plate, border: `1px solid ${theme.borderLit}`, borderRadius: 12,
-          boxShadow: theme.shadowDeep, padding: "18px 22px 20px", maxWidth: "96vw",
-        }}
-      >
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-          <span style={{ fontFamily: theme.fontDisplay, fontSize: 14, fontWeight: 700, letterSpacing: 1.5, textTransform: "uppercase", color: theme.text }}>
-            Tech Wheel
-          </span>
-          <span style={{ fontSize: 11, color: theme.textDim }}>
-            Level {you.techLevel}/{state.maxTechLevel} · Research {you.research} ·{" "}
-            <span style={{ color: theme.accent, fontWeight: 700 }}>{you.abilityPointsAvailable} Ability Points</span>
-          </span>
-          <Btn onClick={onClose}>Close</Btn>
-        </div>
-        <TechWheel player={you} onAssign={onAssign} />
       </div>
     </div>
   );

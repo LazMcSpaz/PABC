@@ -4,9 +4,17 @@
 import { useState } from "react";
 import { AnimatePresence } from "framer-motion";
 import ControlMeter from "./ControlMeter.jsx";
+import TechWheel from "./TechWheel.jsx";
 import {
   C, ICON, TopBar, MenuOrb, RadialMenu, LocationWindow, TitledWindow,
 } from "./HudChrome.jsx";
+
+// Mock tech-wheel state for the showcase: one entry held, one entry available
+// (Doctrine prereq met for branch A1), one point left to spend.
+const MOCK_PLAYER = {
+  techWheel: ["mil-entry"],
+  abilityPointsAvailable: 1,
+};
 
 // §20.2 — the Market is retired; the radial menu drops its sector and chips
 // are built per-Location in the Location window.
@@ -65,9 +73,9 @@ export default function HudShowcase({ onExit }) {
       </AnimatePresence>
       <AnimatePresence>
         {panel === "locations" && <LocationWindow key="locations" view={MOCK_LOC} onClose={() => setPanel(null)} onActivate={() => {}} onContest={() => {}} onRecruit={() => {}} onBuild={() => {}} onUpgrade={() => {}} onRush={() => {}} onSetSlider={() => {}} />}
-        {panel === "research" && <TitledWindow key="research" title="Research" icon={ICON.research} onClose={() => setPanel(null)}>
-          <p className="pc-prose" style={{ margin: 0, fontSize: 13, lineHeight: 1.6, color: C.textDim }}>Advance your tech level to earn ability points on the Tech Wheel — Military, Industry, Logistics and Intelligence branches.</p>
-        </TitledWindow>}
+        {panel === "research" && (
+          <TechWheel key="research" player={MOCK_PLAYER} onAssign={() => {}} onClose={() => setPanel(null)} levelInfo={{ level: 2, maxLevel: 4, research: 12 }} />
+        )}
         {panel === "units" && <TitledWindow key="units" title="Units" icon={ICON.units} onClose={() => setPanel(null)}>
           <p className="pc-prose" style={{ margin: 0, fontSize: 13, lineHeight: 1.6, color: C.textDim }}>Your fielded units, their strength and movement, installed chips, and reinforcement options.</p>
         </TitledWindow>}
