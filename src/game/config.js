@@ -110,6 +110,16 @@ export const CONFIG = {
     terrainSeedDensity: { elevation: 0.18, cover: 0.22 }, // §19.4 share of terrain hexes
   },
 
+  // §17.7 Listening Post (Intelligence A2) — a unit-built, concealed Vision
+  // source that survives by stealth, not toughness. Costs scrap to build and
+  // a trickle of scrap per Upkeep to keep paid (else it goes dormant).
+  posts: {
+    buildCost: 3, // §17.7 — 1 Action + 3 scrap to deploy
+    upkeep: 1,    // §17.7 — 1 scrap per Upkeep; unpaid → dormant
+    defense: 5,   // §17.7 — defends a contest as a standing garrison Str 5 + 1d6
+    range: 1,     // §17.7 — radius-1 Vision footprint (Vision only, no Detection)
+  },
+
   // §18.4–§18.13 Diplomacy. Standing is pairwise (numeric); Menace/Honor are
   // global player reputations; Tolerance & the trust floor are DERIVED gates.
   // All TBD-in-spec, inline here and tunable.

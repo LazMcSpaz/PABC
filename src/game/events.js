@@ -40,6 +40,8 @@ export const EVENT_NAMES = new Set([
   "chip_dormant", "chip_reactivated", "slider_changed",
   // §19 Exploration, Vision & Fog of War (APPEND-ONLY — distinct keys).
   "hex_explored", "unit_spotted", "unit_lost_sight", "ambush_triggered",
+  // §17.7 Listening Post (Intelligence A2) lifecycle (APPEND-ONLY).
+  "post_built", "post_destroyed", "post_dormant", "post_paid", "post_revealed",
   // §18.4–§18.13 Diplomacy (APPEND-ONLY — distinct keys).
   "menace_changed", "honor_changed", "deal_struck", "deal_proposed",
   "war_declared", "peace_made",

@@ -20,6 +20,7 @@ import { CHIPS, CAPITAL } from "./content.js";
 import { emit } from "./events.js";
 import { isElevation, isCover } from "./board.js";
 import { hasTechNode } from "./tech.js";
+import { revealPost } from "./posts.js";
 
 // --- chip schema (§19.7 — scout / watchtower chips are authored later) ---
 // recomputeVisibility reads these OPTIONAL fields off any chip def, so the
@@ -59,18 +60,15 @@ function chipAny(state, chipUids, field) {
   return false;
 }
 
-// §19.8 Intelligence vision-branch payoff: the stubbed branch nodes now
-// carry a theme. The vision branch (int-a*) grants faction-wide sight +
-// Detection; the espionage branch (int-b*) is delivered via effects.
+// §17.5 Intelligence A1 (Watch Network): +1 faction-wide Vision AND +1
+// faction-wide Detection. A1 ONLY — A2 (Listening Post, §17.7) is its own
+// deployable Vision source, not a faction-wide buff, so it must NOT grant
+// this bonus (the old A1-OR-A2 gate was a bug once A2 gained its own effect).
 function intelVisionBonus(state, fid) {
-  return hasTechNode(state, fid, "int-a1") || hasTechNode(state, fid, "int-a2")
-    ? CONFIG.fog.intelVisionBonus
-    : 0;
+  return hasTechNode(state, fid, "int-a1") ? CONFIG.fog.intelVisionBonus : 0;
 }
 function intelDetection(state, fid) {
-  return hasTechNode(state, fid, "int-a1") || hasTechNode(state, fid, "int-a2")
-    ? CONFIG.fog.intelDetection
-    : 0;
+  return hasTechNode(state, fid, "int-a1") ? CONFIG.fog.intelDetection : 0;
 }
 
 // --- source radii ----------------------------------------------------
@@ -243,6 +241,26 @@ export function recomputeVisibility(state, fid, { emitEvents = true } = {}) {
     if (zoc[hex] !== fid) continue;
     if (zr <= 0) next.add(hex);
     else for (const h of castVision(state, hex, zr, false)) next.add(h);
+  }
+
+  // §17.7 Listening Posts — each PAID post `fid` owns is a radius-1 Vision
+  // source on its hex (Vision only — no Detection). Dormant (unpaid) posts
+  // contribute nothing and don't appear among the owner's sources.
+  const posts = state.world?.listeningPosts || {};
+  for (const hex in posts) {
+    const post = posts[hex];
+    if (post.owner !== fid || !post.paid) continue;
+    const onElev = isElevation(state.board.hexes[post.hex]);
+    for (const h of castVision(state, post.hex, CONFIG.posts.range, onElev)) next.add(h);
+  }
+
+  // §17.7 Detection reveal — any post (not fid's own) whose hex sits within
+  // range of an fid Detection source is revealed to fid (permanent). Reveals
+  // even dormant/concealed posts: Detection pierces the stealth.
+  for (const hex in posts) {
+    const post = posts[hex];
+    if (post.owner === fid || post.revealedTo?.includes(fid)) continue;
+    if (hasDetectionAt(state, fid, post.hex)) revealPost(state, post, fid, "detection");
   }
 
   // Hexes leaving visible → snapshot their live state into memory (ghosts).

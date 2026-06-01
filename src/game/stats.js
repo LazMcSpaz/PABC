@@ -30,6 +30,8 @@ export function recomputeStats(state) {
     if (hasTechNode(state, unit.owner, "log-entry")) {
       movement += TECH_NODES["log-entry"].effect.amount;
     }
+    // §17.5 Logistics A1 (Forced March): +1 more Movement — ADDS to the entry.
+    if (hasTechNode(state, unit.owner, "log-a1")) movement += 1;
 
     unit.strength = Math.max(0, strength);
     unit.movement = Math.max(0, movement);
@@ -52,14 +54,20 @@ function bandLevel(research) {
 export function recomputeResearch(state) {
   for (const p of Object.values(state.players)) {
     let labResearch = 0;
+    let holdsCapital = false;
     for (const loc of Object.values(state.locations)) {
       if (loc.controller !== p.id) continue;
       for (const c of loc.chips) {
+        if (state.chips[c]?.chipId === "capital") holdsCapital = true;
         if (state.chips[c]?.disabled) continue; // §20.9 dormant Lab — no Research
         labResearch += CHIPS[state.chips[c]?.chipId]?.research || 0;
       }
     }
-    const research = (p.permanentResearch || 0) + labResearch;
+    // §17.5 Economy A2 (Industrial Might): a holder's Capital generates +1
+    // Research/Upkeep while held. CONDITIONAL on Capital control (drops if
+    // the Capital is lost) — NOT a permanent floor like encounter Research.
+    const capitalResearch = holdsCapital && hasTechNode(state, p.id, "eco-a2") ? 1 : 0;
+    const research = (p.permanentResearch || 0) + labResearch + capitalResearch;
     if (research !== p.research) {
       p.research = research;
       emit(state, "research_changed", { player: p.id, research });
@@ -94,4 +102,15 @@ export function assignTechNode(state, pid, nodeId) {
   emit(state, "tech_node_assigned", { player: pid, node: nodeId });
   recomputeStats(state); // a Logistics node changes unit movement at once
   return { ok: true, node: nodeId };
+}
+
+// §17.5 Military B2 (Citadel): Locations a B2 holder controls gain +2
+// garrison Strength. Derived at read (never mutates loc.garrison) so it can
+// neither double-apply nor strand a bonus when the node is peeled or the
+// Location changes hands. Read by contest.js when valuing a defence.
+export const CITADEL_GARRISON_BONUS = 2;
+export function citadelGarrison(state, loc) {
+  return loc.controller && hasTechNode(state, loc.controller, "mil-b2")
+    ? CITADEL_GARRISON_BONUS
+    : 0;
 }

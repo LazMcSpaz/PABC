@@ -8,7 +8,7 @@ import { applyEffect } from "./effects.js";
 import { recomputeStats, recomputeResearch, assignTechNode } from "./stats.js";
 import { recomputeInfluence, zocOwner, inZoC } from "./influence.js";
 import { reinforcementRoute, bfsDistances } from "./board.js";
-import { recomputeVisibility, isUnitVisibleTo, revealRegion } from "./visibility.js";
+import { recomputeVisibility, isUnitVisibleTo, revealRegion, unitVision, isHexVisible } from "./visibility.js";
 import {
   ensureDiplomacy, menaceFromAttack, onAttack,
   formPact, declareWar, vassalize, runDiplomacyRound,
@@ -21,12 +21,14 @@ import { factionDef, MINOR_FACTIONS } from "./content.js";
 import { activePlayerId } from "./targeting.js";
 import { FACTIONS, LOCATIONS, ABILITIES, REACTIVES, CHIPS } from "./content.js";
 import { resolveSalvage } from "./contest.js";
+import { readRivalIntel } from "./intel.js";
+import { postAt, isPostVisibleTo, chargePostUpkeep } from "./posts.js";
 import { loadFieldEncounters, findUnsupportedTypes, choiceIsRunnable, WORLD_ENCOUNTERS } from "./content-loader.js";
 import { evalCond, evalStrength } from "./dsl.js";
 import { registerQuest } from "./quests.js";
 import { CONFIG } from "./config.js";
 import { takeAITurn } from "./ai.js";
-import { enforceLoyaltySlotCap, chargeChipUpkeep } from "./economy.js";
+import { enforceLoyaltySlotCap, chargeChipUpkeep, slotCapacity, effectiveBuildCost } from "./economy.js";
 
 const seed = Number(process.argv[2]) || 42;
 const line = (s = "") => console.log(s);
@@ -1042,6 +1044,456 @@ line("\n  [Tech Wheel] entry-node effects");
     check("Intelligence + Recon Team grant 2 discards (3rd card drawn)",
       discards === 2 && delivered && delivered.payload.encounter === original[2]);
   }
+}
+
+// =====================================================================
+// §17.5 TECH WHEEL BRANCH NODES — the 16 branch effects. Each builds a
+// fresh deterministic game, sets the player's wheel directly, and asserts
+// the effect site behaves. Effects ADD to their entry (never replace).
+// =====================================================================
+line("\n  [Tech Wheel §17.5] Military branch (Aggression / Bastion)");
+{
+  const terrain = Object.values(createGame({ seed }).board.hexes).find((h) => h.type === "terrain").id;
+  const stage = (g, atk, vic, hex, as = 10, vs = 4) => {
+    atk.node = hex; atk.moveRemaining = atk.movement; atk.chips = []; atk.baseStrength = as;
+    vic.node = hex; vic.chips = []; vic.baseStrength = vs;
+    g.players[atk.owner].actions.remaining = 5;
+    recomputeStats(g);
+  };
+
+  // A1 Vanguard — +1 to the INITIATOR's roll, stacking with Doctrine.
+  {
+    const g = createGame({ seed }); startTurn(g);
+    const me = g.turnOrder[0], foe = g.turnOrder[1];
+    g.rng.roll = () => 3;
+    const atk = Object.values(g.units).find((u) => u.owner === me);
+    const vic = Object.values(g.units).find((u) => u.owner === foe);
+    g.players[me].techLevel = 5; g.players[me].techWheel = ["mil-entry"];
+    stage(g, atk, vic, terrain);
+    const base = performAction(g, "contest", { unit: atk.uid, target: vic.uid });
+    g.players[me].techWheel = ["mil-entry", "mil-a1"];
+    stage(g, atk, vic, terrain);
+    const van = performAction(g, "contest", { unit: atk.uid, target: vic.uid });
+    check("Military A1 (Vanguard): +1 attacker roll over baseline (stacks with Doctrine)",
+      van.attackerVanguard === 1 && van.initiatorTotal === base.initiatorTotal + 1);
+  }
+
+  // A2 Killing Blow — a winning attack drops the loser 2 Strength (was 1).
+  {
+    const g = createGame({ seed }); startTurn(g);
+    const me = g.turnOrder[0], foe = g.turnOrder[1];
+    g.rng.roll = () => 1;
+    const atk = Object.values(g.units).find((u) => u.owner === me);
+    const vic = Object.values(g.units).find((u) => u.owner === foe);
+    g.players[me].techLevel = 5; g.players[me].techWheel = ["mil-entry", "mil-a1", "mil-a2"];
+    stage(g, atk, vic, terrain, 8, 4); // decisive, non-pyrrhic win
+    const r = performAction(g, "contest", { unit: atk.uid, target: vic.uid });
+    check("Military A2 (Killing Blow): a winning attack drops the loser 2 Strength",
+      r.won && r.defenderStrLost === 2 && vic.baseStrength === 2);
+  }
+
+  // B1 Turrets — defending a controlled hex: +1 contest AND fortify doubles.
+  {
+    const turretRun = (withB1) => {
+      const g = createGame({ seed }); startTurn(g);
+      const me = g.turnOrder[0], foe = g.turnOrder[1];
+      g.rng.roll = () => 1;
+      const loc = Object.values(g.locations).find((l) => l.controller === foe);
+      const defU = Object.values(g.units).find((u) => u.owner === foe);
+      defU.node = loc.hexId; defU.fortified = true; defU.baseStrength = 4;
+      const atk = Object.values(g.units).find((u) => u.owner === me);
+      atk.node = loc.hexId; atk.moveRemaining = atk.movement; atk.baseStrength = 4;
+      recomputeStats(g); g.players[me].actions.remaining = 5;
+      if (withB1) { g.players[foe].techLevel = 5; g.players[foe].techWheel = ["mil-entry", "mil-b1"]; }
+      return performAction(g, "contest", { unit: atk.uid });
+    };
+    const base = turretRun(false), b1 = turretRun(true);
+    check("Military B1 (Turrets): +1 defender contest on a controlled hex",
+      base.defenderTurrets === 0 && b1.defenderTurrets === 1);
+    check("Military B1 (Turrets): doubles the §16.6 fortify bonus (1 → 2)",
+      base.defenderFortify === 1 && b1.defenderFortify === 2);
+  }
+
+  // B2 Citadel — +2 garrison Strength; a capture FROM a holder starts Loyalty 0.
+  {
+    const citadelRun = (withB2) => {
+      const g = createGame({ seed }); startTurn(g);
+      const me = g.turnOrder[0], foe = g.turnOrder[1];
+      g.rng.roll = () => 1;
+      const loc = Object.values(g.locations).find((l) => l.controller === foe);
+      // clear foe units off → garrison-only defence (clean defenderValue)
+      for (const u of Object.values(g.units)) if (u.owner === foe && u.node === loc.hexId) {
+        const away = g.board.adjacency[loc.hexId].find((h) => !g.locations[h]);
+        if (away) u.node = away;
+      }
+      const atk = Object.values(g.units).find((u) => u.owner === me);
+      atk.node = loc.hexId; atk.moveRemaining = atk.movement; atk.baseStrength = 1;
+      recomputeStats(g); g.players[me].actions.remaining = 5;
+      if (withB2) { g.players[foe].techLevel = 5; g.players[foe].techWheel = ["mil-entry", "mil-b1", "mil-b2"]; }
+      return performAction(g, "contest", { unit: atk.uid });
+    };
+    const base = citadelRun(false), b2 = citadelRun(true);
+    check("Military B2 (Citadel): +2 garrison Strength on a controlled Location",
+      b2.defenderValue === base.defenderValue + 2);
+
+    const g = createGame({ seed }); startTurn(g);
+    const me = g.turnOrder[0], foe = g.turnOrder[1];
+    const loc = Object.values(g.locations).find((l) => l.controller === foe);
+    g.players[foe].techLevel = 5; g.players[foe].techWheel = ["mil-entry", "mil-b1", "mil-b2"];
+    for (const u of Object.values(g.units)) if (u.owner === foe && u.node === loc.hexId) {
+      const away = g.board.adjacency[loc.hexId].find((h) => !g.locations[h]);
+      if (away) u.node = away;
+    }
+    const atk = Object.values(g.units).find((u) => u.owner === me);
+    atk.node = loc.hexId; atk.moveRemaining = atk.movement;
+    applyEffect(g, { type: "MODIFY_STAT", stat: "Strength", amount: 60, target: atk.uid, duration: "this_turn" }, { sourcePlayer: me });
+    g.players[me].actions.remaining = 20; g.rng.roll = () => 6;
+    for (let i = 0; i < 3 && loc.controller !== me; i++) performAction(g, "contest", { unit: atk.uid });
+    check("Military B2 (Citadel): a Location captured FROM a B2 holder starts at Loyalty 0",
+      loc.controller === me && loc.loyalty === 0);
+  }
+}
+
+line("\n  [Tech Wheel §17.5] Logistics branch (Maneuver / Sustainment)");
+{
+  // A1 Forced March — +1 Movement, stacking with Supply Lines (+2 total).
+  {
+    const g = createGame({ seed }); startTurn(g);
+    const me = g.turnOrder[0];
+    const u = Object.values(g.units).find((x) => x.owner === me);
+    const before = u.movement;
+    g.players[me].techLevel = 5; g.players[me].techWheel = ["log-entry", "log-a1"];
+    recomputeStats(g);
+    check("Logistics A1 (Forced March): Movement is base + 2 (entry + A1)",
+      u.movement === before + 2);
+  }
+
+  // A2 Forward Supply — route a convoy THROUGH enemy ZoC (synthetic graph).
+  {
+    const mk = (a2) => ({
+      players: { me: { id: "me", techWheel: a2 ? ["log-entry", "log-a2"] : [] } },
+      locations: { a: { hexId: "a", controller: "me" } },
+      board: { adjacency: { a: ["b"], b: ["a", "c"], c: ["b"] } },
+      world: { zoc: { b: "foe" } },
+    });
+    check("Logistics A2 (Forward Supply): enemy ZoC walls a convoy off WITHOUT it",
+      reinforcementRoute(mk(false), "me", "c") === null);
+    const route = reinforcementRoute(mk(true), "me", "c");
+    check("Logistics A2 (Forward Supply): a holder routes a convoy THROUGH enemy ZoC",
+      route && route.dist === 2 && route.originHex === "a");
+    const walled = reinforcementRoute({
+      players: { me: { id: "me", techWheel: ["log-entry", "log-a2"] } },
+      locations: { a: { hexId: "a", controller: "me" }, b: { hexId: "b", controller: "foe" } },
+      board: { adjacency: { a: ["b"], b: ["a", "c"], c: ["b"] } },
+      world: { zoc: {} },
+    }, "me", "c");
+    check("Forward Supply: an enemy-CONTROLLED Location hex is still a hard wall",
+      walled === null);
+  }
+
+  // B1 Field Hospital — heal is 2/Upkeep on a held Location.
+  {
+    const g = createGame({ seed }); startTurn(g);
+    const me = g.turnOrder[0];
+    const loc = Object.values(g.locations).find((l) => l.controller === me);
+    const u = Object.values(g.units).find((x) => x.owner === me);
+    u.node = loc.hexId; u.baseStrength = 1; recomputeStats(g);
+    g.players[me].techLevel = 5; g.players[me].techWheel = ["log-entry", "log-b1"];
+    const before = u.baseStrength;
+    for (let i = 0; i < g.turnOrder.length; i++) endTurn(g); // one of me's Upkeeps
+    check("Logistics B1 (Field Hospital): heals 2/Upkeep on a held Location",
+      u.baseStrength === before + 2);
+  }
+
+  // B2 Supply Convoys — +1 extra travel/round, and 1:1 reinforce healing.
+  {
+    const travelRun = (b2) => {
+      const g = createGame({ seed }); startTurn(g);
+      const me = g.turnOrder[0];
+      g.players[me].permanentResearch = 8; // floor at L5 so the wheel can't peel
+      g.players[me].techWheel = b2 ? ["log-entry", "log-b2"] : ["log-entry"];
+      recomputeResearch(g);
+      const u = Object.values(g.units).find((x) => x.owner === me);
+      // strip me of Locations → no supply source → the convoy never delivers,
+      // so we can read the per-round travel increment directly.
+      for (const l of Object.values(g.locations)) if (l.controller === me) l.controller = null;
+      g.reinforcements.push({ owner: me, targetUnit: u.uid, amount: 1, traveled: 0, originHex: u.node, requestedRound: g.round });
+      for (let i = 0; i < g.turnOrder.length; i++) endTurn(g);
+      return g.reinforcements.find((r) => r.targetUnit === u.uid)?.traveled ?? null;
+    };
+    check("Logistics B2 (Supply Convoys): a holder's convoy advances +1 extra hex/round (2 vs 1)",
+      travelRun(false) === 1 && travelRun(true) === 2);
+
+    const g = createGame({ seed }); startTurn(g);
+    const me = g.turnOrder[0];
+    g.players[me].techLevel = 5; g.players[me].techWheel = ["log-entry", "log-b2"];
+    const loc = Object.values(g.locations).find((l) => l.controller === me);
+    const u = Object.values(g.units).find((x) => x.owner === me);
+    u.node = loc.hexId; u.baseStrength = 1; recomputeStats(g); // deficit 3 (cap 4)
+    g.players[me].resource = 100; g.players[me].actions.remaining = 5;
+    const before = g.players[me].resource;
+    const r = performAction(g, "reinforce", { unit: u.uid, mode: "instant" });
+    check("Logistics B2 (Supply Convoys): instant reinforce heals at 1 scrap/Strength (3, was 6)",
+      r.ok && before - g.players[me].resource === 3);
+  }
+}
+
+line("\n  [Tech Wheel §17.5] Economy branch (Industry / Construction)");
+{
+  // A1 Refineries — +2 scrap/Location with Industry (entry + A1).
+  {
+    const g = createGame({ seed }); startTurn(g);
+    const me = g.turnOrder[0];
+    g.players[me].techLevel = 5; g.players[me].techWheel = ["eco-entry", "eco-a1"];
+    const locs = Object.values(g.locations).filter((l) => l.controller === me);
+    const expected = locs.reduce((n, l) => n + l.production, 0) + locs.length * 2;
+    const before = g.players[me].resource;
+    for (let i = 0; i < g.turnOrder.length; i++) endTurn(g);
+    check("Economy A1 (Refineries): +2 scrap/held Location (entry + A1)",
+      g.players[me].resource - before === expected);
+  }
+
+  // A2 Industrial Might — a held Capital adds +1 Research; conditional.
+  {
+    const g = createGame({ seed }); startTurn(g);
+    const me = g.turnOrder[0];
+    const home = Object.values(g.locations).find(
+      (l) => l.controller === me && l.chips.some((c) => g.chips[c]?.chipId === "capital"));
+    g.players[me].permanentResearch = 6; // floor at L4 (3 points) so eco-a2 is legal
+    g.players[me].techWheel = ["eco-entry", "eco-a1"]; recomputeResearch(g);
+    const without = g.players[me].research;
+    g.players[me].techWheel = ["eco-entry", "eco-a1", "eco-a2"]; recomputeResearch(g);
+    check("Economy A2 (Industrial Might): a held Capital generates +1 Research",
+      !!home && g.players[me].research === without + 1);
+    home.controller = null; recomputeResearch(g);
+    check("Industrial Might: the +1 is CONDITIONAL — it drops when the Capital is lost",
+      g.players[me].research === without);
+  }
+
+  // B1 Production Lines — effective buildCost is 1 cheaper (floor 1).
+  {
+    const g = createGame({ seed }); startTurn(g);
+    const me = g.turnOrder[0];
+    const def = CHIPS["labs"]; // buildCost 3
+    g.players[me].techLevel = 5; g.players[me].techWheel = ["eco-entry", "eco-b1"];
+    check("Economy B1 (Production Lines): effective buildCost reduced by 1 (floor 1)",
+      effectiveBuildCost(g, me, def) === 2);
+    // integration: a queued build records the reduced cost.
+    g.players[me].permanentResearch = 8; recomputeResearch(g); // keep L5 (gate clears, wheel safe)
+    g.players[me].techWheel = ["eco-entry", "eco-b1"];
+    const loc = Object.values(g.locations).find((l) => l.controller === me);
+    performAction(g, "build", { at: loc.hexId, chipId: "labs" });
+    check("Production Lines: a queued build uses the reduced cost",
+      loc.activeBuild && loc.activeBuild.cost === 2);
+  }
+
+  // B2 Capital Works — +1 chip slot at the Capital only.
+  {
+    const g = createGame({ seed }); startTurn(g);
+    const me = g.turnOrder[0];
+    const home = Object.values(g.locations).find(
+      (l) => l.controller === me && l.chips.some((c) => g.chips[c]?.chipId === "capital"));
+    const before = slotCapacity(home, g);
+    g.players[me].techLevel = 5; g.players[me].techWheel = ["eco-entry", "eco-b1", "eco-b2"];
+    check("Economy B2 (Capital Works): +1 chip slot at the holder's Capital",
+      slotCapacity(home, g) === before + 1);
+    const neutral = Object.values(g.locations).find((l) => !l.controller);
+    neutral.controller = me;
+    const withB2 = slotCapacity(neutral, g);
+    g.players[me].techWheel = ["eco-entry", "eco-b1"];
+    check("Capital Works: Capital-only — a plain Location gets no extra slot",
+      withB2 === slotCapacity(neutral, g));
+  }
+}
+
+line("\n  [Tech Wheel §17.5] Intelligence branch (Vision / Espionage)");
+{
+  // A1 Watch Network — +1 faction Vision; the OLD A1-OR-A2 bug is fixed.
+  {
+    const g = createGame({ seed }); startTurn(g);
+    const me = g.turnOrder[0];
+    const u = Object.values(g.units).find((x) => x.owner === me);
+    g.players[me].techWheel = [];
+    const base = unitVision(g, u);
+    g.players[me].techLevel = 5; g.players[me].techWheel = ["int-entry", "int-a1"];
+    const withA1 = unitVision(g, u);
+    g.players[me].techWheel = ["int-entry", "int-a2"];
+    const withA2 = unitVision(g, u);
+    check("Intelligence A1 (Watch Network): grants +1 faction-wide Vision",
+      withA1 === base + CONFIG.fog.intelVisionBonus);
+    check("Watch Network bug fix: A2 (Listening Post) alone grants NO faction Vision",
+      withA2 === base);
+  }
+
+  // B1 Spy Ring — read a rival's wheel + standing, or null without it.
+  {
+    const g = createGame({ seed });
+    const me = g.turnOrder[0], rival = g.turnOrder[1];
+    g.players[rival].techWheel = ["mil-entry", "mil-a1"];
+    check("Intelligence B1 (Spy Ring): no intel without the node", readRivalIntel(g, me, rival) === null);
+    g.players[me].techLevel = 5; g.players[me].techWheel = ["int-entry", "int-b1"];
+    const intel = readRivalIntel(g, me, rival);
+    check("Intelligence B1 (Spy Ring): a holder reads a rival's wheel + factionStanding",
+      intel && JSON.stringify(intel.techWheel) === JSON.stringify(["mil-entry", "mil-a1"]) &&
+        typeof intel.factionStanding === "object");
+  }
+
+  // B2 Saboteurs — −1 Loyalty on an enemy Location, gated once/round.
+  {
+    const g = createGame({ seed }); startTurn(g);
+    const me = g.turnOrder[0], foe = g.turnOrder[1];
+    g.players[me].permanentResearch = 8; // floor at L5 so the wheel can't peel across rounds
+    g.players[me].techWheel = ["int-entry", "int-b1", "int-b2"]; recomputeResearch(g);
+    g.players[me].actions.remaining = 5;
+    const target = Object.values(g.locations).find((l) => l.controller === foe);
+    target.loyalty = 5;
+    const own = Object.values(g.locations).find((l) => l.controller === me);
+    const bad = performAction(g, "sabotage", { at: own.hexId });
+    const r1 = performAction(g, "sabotage", { at: target.hexId });
+    const r2 = performAction(g, "sabotage", { at: target.hexId });
+    check("Intelligence B2 (Saboteurs): drops target Loyalty by 1", r1.ok && target.loyalty === 4);
+    check("Saboteurs: cannot target your own Location", !bad.ok);
+    check("Saboteurs: gated to once per round", !r2.ok && r2.reason === "already sabotaged this round");
+    for (let i = 0; i < g.turnOrder.length; i++) endTurn(g);
+    g.players[me].actions.remaining = 5;
+    const r3 = performAction(g, "sabotage", { at: target.hexId });
+    check("Saboteurs: re-enabled the next round", r3.ok && target.loyalty === 3);
+  }
+}
+
+// =====================================================================
+// §17.7 LISTENING POST — the deployable Vision subsystem. Build → sight →
+// concealment → contact-reveal → contest-destruction → upkeep dormancy.
+// =====================================================================
+line("\n  [Tech Wheel §17.7] Listening Post");
+{
+  // Build validation + cost.
+  {
+    const g = createGame({ seed }); startTurn(g);
+    const me = g.turnOrder[0];
+    const hex = Object.values(g.board.hexes).find((h) => h.type === "terrain" && !g.locations[h.id]).id;
+    const u = Object.values(g.units).find((x) => x.owner === me);
+    u.node = hex; recomputeStats(g);
+    g.players[me].resource = 10; g.players[me].actions.remaining = 5;
+    g.players[me].techWheel = ["int-entry"]; // no A2
+    const noA2 = performAction(g, "build-post", { hex });
+    g.players[me].techLevel = 5; g.players[me].techWheel = ["int-entry", "int-a1", "int-a2"];
+    const poorRes = g.players[me].resource; g.players[me].resource = 1;
+    const poor = performAction(g, "build-post", { hex });
+    g.players[me].resource = poorRes;
+    const onLoc = performAction(g, "build-post", { hex: Object.values(g.locations).find((l) => l.controller === me).hexId });
+    const built = performAction(g, "build-post", { hex });
+    check("Listening Post: build needs A2 + scrap + a non-Location hex, then succeeds",
+      !noA2.ok && !poor.ok && !onLoc.ok && built.ok && !!postAt(g, hex));
+    check("Listening Post: costs 3 scrap (10 → 7)", g.players[me].resource === 7);
+  }
+
+  // Vision (paid vs dormant) + concealment from enemies.
+  {
+    const g = createGame({ seed }); startTurn(g);
+    const me = g.turnOrder[0], foe = g.turnOrder[1];
+    g.players[me].techLevel = 5; g.players[me].techWheel = ["int-entry", "int-a1", "int-a2"];
+    const home = Object.values(g.locations).find((l) => l.controller === me);
+    const dHome = bfsDistances(g.board.adjacency, home.hexId);
+    // farthest terrain hex from home so me's Capital can't see it
+    const hex = Object.keys(g.board.hexes)
+      .filter((h) => g.board.hexes[h].type === "terrain" && !g.locations[h])
+      .sort((a, b) => (dHome[b] ?? 0) - (dHome[a] ?? 0))[0];
+    const u = Object.values(g.units).find((x) => x.owner === me);
+    u.node = hex; recomputeStats(g);
+    g.players[me].resource = 10; g.players[me].actions.remaining = 5;
+    performAction(g, "build-post", { hex });
+    const post = postAt(g, hex);
+    // Isolate the post as me's ONLY Vision source: drop me's units, Locations
+    // (as sources), and ZoC so the post alone can light the hex.
+    for (const uid of Object.keys(g.units)) if (g.units[uid].owner === me) delete g.units[uid];
+    for (const l of Object.values(g.locations)) if (l.controller === me) l.controller = null;
+    g.world.zoc = {};
+    recomputeVisibility(g, me, { emitEvents: false });
+    const seesPaid = isHexVisible(g, me, hex);
+    const reach = (g.board.adjacency[hex] || []).some((h) => isHexVisible(g, me, h));
+    check("Listening Post: a PAID post grants radius-1 sight (own hex + an adjacent)",
+      seesPaid && reach);
+    check("Listening Post: concealed from enemies in fog (not in foe's revealedTo)",
+      !isPostVisibleTo(g, foe, post));
+    post.paid = false; // dormant
+    recomputeVisibility(g, me, { emitEvents: false });
+    check("Listening Post: a dormant (unpaid) post contributes NO Vision",
+      !isHexVisible(g, me, hex));
+  }
+
+  // Contact reveal — a foe unit entering the hex reveals the post.
+  {
+    const g = createGame({ seed }); startTurn(g);
+    const me = g.turnOrder[0], foe = g.turnOrder[1];
+    g.players[me].techLevel = 5; g.players[me].techWheel = ["int-entry", "int-a1", "int-a2"];
+    const hex = Object.values(g.board.hexes).find((h) => h.type === "terrain" && !g.locations[h.id]).id;
+    const u = Object.values(g.units).find((x) => x.owner === me);
+    u.node = hex; recomputeStats(g); g.players[me].resource = 10; g.players[me].actions.remaining = 5;
+    performAction(g, "build-post", { hex });
+    const post = postAt(g, hex);
+    check("Listening Post: concealed before contact", !isPostVisibleTo(g, foe, post));
+    while (activePlayerId(g) !== foe) endTurn(g);
+    const fu = Object.values(g.units).find((x) => x.owner === foe);
+    fu.node = g.board.adjacency[hex][0]; fu.moveRemaining = 9; recomputeStats(g);
+    g.players[foe].actions.remaining = 5;
+    const mv = performAction(g, "move", { unit: fu.uid, to: hex });
+    check("Listening Post: an enemy entering the hex reveals it (contact)",
+      mv.ok && isPostVisibleTo(g, foe, postAt(g, hex)));
+  }
+
+  // Destruction — an enemy contest at Strength 5 destroys the post.
+  {
+    const g = createGame({ seed }); startTurn(g);
+    const me = g.turnOrder[0], foe = g.turnOrder[1];
+    g.players[me].techLevel = 5; g.players[me].techWheel = ["int-entry", "int-a1", "int-a2"];
+    const hex = Object.values(g.board.hexes).find((h) => h.type === "terrain" && !g.locations[h.id]).id;
+    const mu = Object.values(g.units).find((x) => x.owner === me);
+    mu.node = hex; recomputeStats(g); g.players[me].resource = 10; g.players[me].actions.remaining = 5;
+    performAction(g, "build-post", { hex });
+    while (activePlayerId(g) !== foe) endTurn(g);
+    const fu = Object.values(g.units).find((x) => x.owner === foe);
+    fu.node = hex; fu.baseStrength = 12; fu.moveRemaining = fu.movement; recomputeStats(g);
+    g.players[foe].actions.remaining = 5; g.rng.roll = () => 6;
+    const r = performAction(g, "contest", { unit: fu.uid, target: "post" });
+    check("Listening Post: an enemy contest defends at Strength 5 and can destroy it",
+      r.won && r.kind === "post" && r.defenderValue === CONFIG.posts.defense && !postAt(g, hex));
+  }
+
+  // Upkeep — unpaid → dormant; repaid → active. Dormancy doesn't reveal.
+  {
+    const g = createGame({ seed }); startTurn(g);
+    const me = g.turnOrder[0], foe = g.turnOrder[1];
+    g.players[me].techLevel = 5; g.players[me].techWheel = ["int-entry", "int-a1", "int-a2"];
+    const hex = Object.values(g.board.hexes).find((h) => h.type === "terrain" && !g.locations[h.id]).id;
+    const u = Object.values(g.units).find((x) => x.owner === me);
+    u.node = hex; recomputeStats(g); g.players[me].resource = 10; g.players[me].actions.remaining = 5;
+    performAction(g, "build-post", { hex });
+    g.players[me].resource = 0;
+    chargePostUpkeep(g, me);
+    const post = postAt(g, hex);
+    check("Listening Post: an unpaid post goes dormant at Upkeep",
+      post.paid === false && !post.revealedTo.includes(foe)); // dormancy reveals nobody
+    g.players[me].resource = 5;
+    chargePostUpkeep(g, me);
+    check("Listening Post: paying upkeep reactivates the post",
+      post.paid === true && g.players[me].resource === 4);
+  }
+}
+
+// =====================================================================
+// AI SANITY — the demo AI USES the tech wheel, and a full AI-vs-AI game
+// terminates with a winner (no infinite loop). Deterministic on seed 42.
+// =====================================================================
+line("\n  [AI sanity] tech-wheel use + game termination");
+{
+  const g = createGame({ seed: 42 });
+  let safety = 1500;
+  while (!g.winnerId && safety-- > 0) takeAITurn(g);
+  const assigns = g.log.filter((e) => e.name === "tech_node_assigned").length;
+  check("AI assigns tech-wheel nodes during a game (tech_node_assigned fires)", assigns > 0);
+  check("a full AI-vs-AI game terminates with a winner (no infinite loop)",
+    safety > 0 && !!g.winnerId);
 }
 
 // =====================================================================

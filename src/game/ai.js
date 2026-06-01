@@ -12,6 +12,10 @@ import { LOCATIONS } from "./content.js";
 import { CONFIG } from "./config.js";
 import { buildableChips, slotCapacity, slotsUsed, stationedUnitWithBay } from "./economy.js";
 import { isUnitVisibleTo } from "./visibility.js";
+import { assignTechNode } from "./stats.js";
+import { hasTechNode } from "./tech.js";
+import { postAt } from "./posts.js";
+import { standingTier } from "./standing.js";
 import { factionDef } from "./content.js";
 import {
   factionIds, powerOf, arePacted, atWar, vassalLord, mayEngage,
@@ -23,6 +27,9 @@ const SAFETY_CAP = 10; // hard stop if priority loop ever spins
 export function takeAITurn(state) {
   if (state.winnerId) return;
   const pid = activePlayerId(state);
+  // Spend any free Ability Point before acting, so the new node's effect is
+  // live this turn.
+  maybeAssignTech(state, pid);
   let guard = SAFETY_CAP;
   while (
     state.players[pid].actions.remaining > 0 &&
@@ -84,7 +91,68 @@ function tryOneAction(state, pid) {
   // 4. Activate any controlled location with a free / cheap ability
   if (tryActivate(state, pid)) return true;
 
+  // 5. §17.7 — deploy a Listening Post on a held frontier hex (low chance).
+  if (tryBuildPost(state, pid)) return true;
+
+  // 6. §17.5 Saboteurs — undermine a hostile rival's strongest Location.
+  if (trySabotage(state, pid)) return true;
+
   return false;
+}
+
+// AI overhaul plan replaces this — a hard-coded heuristic so the demo AI at
+// least USES the tech wheel (the full effect→value table is the
+// docs/ai-overhaul-plan.md overhaul, deliberately out of scope here).
+function maybeAssignTech(state, pid) {
+  const p = state.players[pid];
+  if (((p.techLevel || 1) - 1) - (p.techWheel?.length || 0) <= 0) return; // no free point
+  const me = factionDef(pid) || {};
+  // Path by faction dial: conquest → Military, diplomacy → Intelligence,
+  // otherwise Economy; aggressive factions still favour Military.
+  let path = "economy";
+  if (me.victoryLean === "conquest") path = "military";
+  else if (me.victoryLean === "diplomacy" || me.victoryLean === "diplomatic") path = "intelligence";
+  else if ((me.aggression ?? 0) > 0.6) path = "military";
+  // Branch: A (Aggression / Vision / Maneuver / Industry) when aggressive,
+  // else B (Bastion / Espionage / Sustainment / Construction).
+  const branch = (me.aggression ?? 0) > 0.6 ? "a" : "b";
+  const prefix = { military: "mil", logistics: "log", economy: "eco", intelligence: "int" }[path];
+  // Fill the chosen branch shallow-to-deep; the first assignable node wins.
+  for (const node of [`${prefix}-entry`, `${prefix}-${branch}1`, `${prefix}-${branch}2`]) {
+    if (p.techWheel.includes(node)) continue;
+    if (assignTechNode(state, pid, node).ok) return;
+    break; // a deeper node's prereq isn't met yet — wait for the next point
+  }
+}
+
+// §17.7 — low-probability Listening Post placement: drop a concealed Vision
+// source on a non-Location hex the AI already occupies (frontier scouting).
+function tryBuildPost(state, pid) {
+  if (!hasTechNode(state, pid, "int-a2")) return false;
+  if ((state.players[pid].resource || 0) < CONFIG.posts.buildCost) return false;
+  if (state.rng.roll(6) > 1) return false; // ~1-in-6 per turn — keep it rare
+  for (const u of ownUnits(state, pid)) {
+    if (state.locations[u.node] || postAt(state, u.node)) continue;
+    if (performAction(state, "build-post", { hex: u.node }).ok) return true;
+  }
+  return false;
+}
+
+// §17.5 Saboteurs — once per round, lower the Loyalty of a hostile rival's
+// highest-Loyalty Location.
+function trySabotage(state, pid) {
+  if (!hasTechNode(state, pid, "int-b2")) return false;
+  if (state.players[pid].sabotageUsedRound === state.round) return false;
+  let best = null, bestLoy = -1;
+  for (const loc of Object.values(state.locations)) {
+    const c = loc.controller;
+    if (!c || c === pid) continue;
+    const hostile = atWar(state, pid, c) || standingTier(getStanding(state, pid, c)) === "hostile";
+    if (!hostile) continue;
+    if ((loc.loyalty ?? 0) > bestLoy) { bestLoy = loc.loyalty ?? 0; best = loc; }
+  }
+  if (!best) return false;
+  return performAction(state, "sabotage", { at: best.hexId }).ok;
 }
 
 // --- helpers ----------------------------------------------------------
@@ -288,7 +356,7 @@ function pickBuild(state, pid, loc) {
 
   // Location chips into a free slot first.
   const locFits = options
-    .filter((o) => o.def.kind === "location" && slotsUsed(state, loc.chips) + (o.def.slots || 1) <= slotCapacity(loc))
+    .filter((o) => o.def.kind === "location" && slotsUsed(state, loc.chips) + (o.def.slots || 1) <= slotCapacity(loc, state))
     .sort((a, b) => score(b.def) - score(a.def));
   if (locFits.length) {
     return performAction(state, "build", { at: loc.hexId, chipId: locFits[0].chipId }).ok;

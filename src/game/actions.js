@@ -9,13 +9,16 @@ import { CONFIG } from "./config.js";
 import { FACTIONS, CHIPS, ABILITIES, chipDefOf, factionDef } from "./content.js";
 import { validateContest, runContest } from "./contest.js";
 import { recomputeStats } from "./stats.js";
+import { recomputeInfluence } from "./influence.js";
 import { recomputeVisibility } from "./visibility.js";
 import { applyEffects } from "./effects.js";
 import { drawFieldEncounter, resolveMarkerOnHex } from "./encounters.js";
 import { makeUnit } from "./setup.js";
+import { hasTechNode } from "./tech.js";
+import { postAt, buildPost, revealPost } from "./posts.js";
 import {
   meetsTech, meetsLoyalty, slotCapacity, slotsUsed, stationedUnitWithBay,
-  techLevelReqFor, upgradeOption, completeBuildIfDone,
+  techLevelReqFor, upgradeOption, completeBuildIfDone, effectiveBuildCost,
 } from "./economy.js";
 
 const fail = (reason) => ({ ok: false, reason });
@@ -63,6 +66,11 @@ function runMove(state, { params, ctx }) {
   // this unit is a render/query-time concealment check, not a stored-set
   // change — so no all-faction recompute is needed here.
   recomputeVisibility(state, unit.owner);
+
+  // §17.7 Contact reveal — entering a hex carrying an enemy listening post
+  // reveals it (permanently) to the mover's faction.
+  const here = postAt(state, params.to);
+  if (here && here.owner !== unit.owner) revealPost(state, here, unit.owner, "contact");
 
   // §15.5 placement markers take precedence — they're authored to land
   // on a specific hex and one-shot when discovered.
@@ -161,6 +169,12 @@ function unitStrengthCap(unit) {
   return unit.veteran ? CONFIG.unit.veteranStrengthCap : CONFIG.unit.baseStrengthCap;
 }
 
+// §17.5 Logistics B2 (Supply Convoys): a holder heals at 1 scrap per Strength
+// (was 2). Plain reinforcement uses the §16.5 base rate.
+function scrapPerStrengthFor(state, pid) {
+  return hasTechNode(state, pid, "log-b2") ? 1 : CONFIG.heal.scrapPerStrength;
+}
+
 function validateReinforce(state, { pid, player, params }) {
   const unit = state.units[params.unit];
   if (!unit) return fail("no such unit");
@@ -168,7 +182,7 @@ function validateReinforce(state, { pid, player, params }) {
   const cap = unitStrengthCap(unit);
   const deficit = cap - unit.baseStrength;
   if (deficit <= 0) return fail("unit is already at full Strength");
-  const cost = CONFIG.heal.scrapPerStrength * deficit;
+  const cost = scrapPerStrengthFor(state, pid) * deficit;
   if (player.resource < cost) return fail("not enough scrap");
 
   const mode = params.mode || "instant";
@@ -190,7 +204,7 @@ function runReinforce(state, { pid, player, params }) {
   const unit = state.units[params.unit];
   const cap = unitStrengthCap(unit);
   const deficit = cap - unit.baseStrength;
-  const cost = CONFIG.heal.scrapPerStrength * deficit;
+  const cost = scrapPerStrengthFor(state, pid) * deficit;
   player.resource -= cost;
   emit(state, "resource_spent", { player: pid, resource: "Resource", amount: -cost });
 
@@ -240,7 +254,7 @@ function validateBuild(state, { pid, player, params }) {
   if (def.kind === "unit") {
     if (!stationedUnitWithBay(state, loc, def.slots || 1))
       return fail("needs a friendly unit stationed here with bay space");
-  } else if (slotsUsed(state, loc.chips) + (def.slots || 1) > slotCapacity(loc)) {
+  } else if (slotsUsed(state, loc.chips) + (def.slots || 1) > slotCapacity(loc, state)) {
     return fail("not enough chip slots");
   }
   return { ok: true };
@@ -255,7 +269,7 @@ function runBuild(state, { params }) {
         : stationedUnitWithBay(state, loc, def.slots || 1)?.uid)
     : null;
   loc.activeBuild = {
-    kind: "build", chipId: def.id, cost: def.buildCost ?? def.cost ?? 0,
+    kind: "build", chipId: def.id, cost: effectiveBuildCost(state, loc.controller, def),
     targetSlot: loc.chips.length, targetUnit,
   };
   emit(state, "build_started", { hex: loc.hexId, chipId: def.id, kind: "build", cost: loc.activeBuild.cost });
@@ -284,7 +298,7 @@ function runUpgrade(state, { pid, params }) {
   const opt = upgradeOption(state, loc, params.chip);
   const holder = findChipHolder(state, loc, params.chip, pid);
   loc.activeBuild = {
-    kind: "upgrade", chipId: opt.chipId, cost: opt.def.buildCost ?? opt.def.cost ?? 0,
+    kind: "upgrade", chipId: opt.chipId, cost: effectiveBuildCost(state, loc.controller, opt.def),
     targetChipUid: params.chip,
     targetUnit: holder.kind === "unit" ? holder.uid : null,
   };
@@ -396,6 +410,60 @@ function runActivate(state, { pid, player, params, ctx }) {
   return { location: loc.hexId, ability: ability.id };
 }
 
+// --- Build Listening Post (§17.7) ------------------------------------
+// Intelligence A2 deploys a concealed, radius-1 Vision source on a field hex.
+// Validates the A2 assignment, a friendly unit on the hex, a non-Location
+// hex, and ≥3 scrap; costs 1 Action + 3 scrap (paid immediately).
+function validateBuildPost(state, { pid, player, params }) {
+  if (!hasTechNode(state, pid, "int-a2"))
+    return fail("requires Intelligence A2 (Listening Post)");
+  const hex = params.hex;
+  if (!state.board.hexes[hex]) return fail("no such hex");
+  if (state.locations[hex]) return fail("cannot build a post on a Location hex");
+  if (postAt(state, hex)) return fail("a listening post already occupies that hex");
+  const friendlyHere = Object.values(state.units).some((u) => u.owner === pid && u.node === hex);
+  if (!friendlyHere) return fail("needs a friendly unit on the target hex");
+  if (player.resource < CONFIG.posts.buildCost) return fail("not enough scrap");
+  return { ok: true };
+}
+
+function runBuildPost(state, { pid, player, params }) {
+  player.resource -= CONFIG.posts.buildCost;
+  emit(state, "resource_spent", {
+    player: pid, resource: "Resource", amount: -CONFIG.posts.buildCost, source: "build-post",
+  });
+  const post = buildPost(state, pid, params.hex);
+  recomputeVisibility(state, pid, { emitEvents: false }); // §17.7 — a new Vision source
+  return { hex: post.hex };
+}
+
+// --- Sabotage (§17.5 Intelligence B2 — Saboteurs) --------------------
+// Once per round, lower an enemy-controlled Location's Loyalty by 1. Gated by
+// the B2 assignment and a per-round usage stamp (the stamp is the current
+// round number, so a new round automatically re-enables it).
+function validateSabotage(state, { pid, params }) {
+  if (!hasTechNode(state, pid, "int-b2"))
+    return fail("requires Intelligence B2 (Saboteurs)");
+  const loc = state.locations[params.at];
+  if (!loc) return fail("no such location");
+  if (!loc.controller || loc.controller === pid)
+    return fail("target must be an enemy-controlled Location");
+  if (state.players[pid].sabotageUsedRound === state.round)
+    return fail("already sabotaged this round");
+  return { ok: true };
+}
+
+function runSabotage(state, { pid, params }) {
+  const loc = state.locations[params.at];
+  loc.loyalty = Math.max(0, (loc.loyalty ?? 0) - 1);
+  state.players[pid].sabotageUsedRound = state.round;
+  emit(state, "loyalty_changed", {
+    hex: loc.hexId, owner: loc.controller, loyalty: loc.loyalty, cause: "sabotage",
+  });
+  recomputeInfluence(state); // §18.3 — Loyalty feeds the Influence field / ZoC
+  return { hex: loc.hexId, loyalty: loc.loyalty };
+}
+
 // --- dispatch --------------------------------------------------------
 const ACTIONS = {
   move: { cost: 0, validate: validateMove, run: runMove }, // §16.2 — free of Actions
@@ -409,6 +477,9 @@ const ACTIONS = {
   rush: { cost: 0, validate: validateRush, run: runRush },
   "set-slider": { cost: 0, validate: validateSetSlider, run: runSetSlider },
   activate: { cost: activateActionCost, validate: validateActivate, run: runActivate },
+  // §17.7 / §17.5 Intelligence A2 + B2 — deploy a Listening Post, run a Saboteur.
+  "build-post": { cost: 1, validate: validateBuildPost, run: runBuildPost },
+  sabotage: { cost: 1, validate: validateSabotage, run: runSabotage },
 };
 
 export function performAction(state, type, params = {}, ctx = {}) {
