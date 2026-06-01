@@ -8,13 +8,14 @@ import { emit } from "./events.js";
 import { openReactionWindow } from "./reactions.js";
 import { CONFIG } from "./config.js";
 import { CHIPS, LOCATIONS, FACTIONS, factionDef } from "./content.js";
-import { recomputeStats, recomputeResearch } from "./stats.js";
+import { recomputeStats, recomputeResearch, citadelGarrison } from "./stats.js";
 import { recomputeInfluence } from "./influence.js";
 import { recomputeVisibility, recomputeVisibilityFor, isUnitVisibleTo } from "./visibility.js";
 import { onLocationCaptured, onRaidWon } from "./standing.js";
 import { onAttack } from "./diplomacy.js";
 import { makeUnit } from "./setup.js";
 import { TECH_NODES, hasTechNode } from "./tech.js";
+import { destroyPost } from "./posts.js";
 
 const fail = (reason) => ({ ok: false, reason });
 
@@ -90,6 +91,14 @@ function resolveTarget(state, pid, unit, params) {
   const node = unit.node;
   const loc = state.locations[node] || null;
 
+  // §17.7 — destroy an enemy listening post on this hex (explicit target).
+  if (params.target === "post") {
+    const post = state.world?.listeningPosts?.[node] || null;
+    if (!post) return fail("no listening post on this hex");
+    if (post.owner === pid) return fail("cannot contest your own listening post");
+    return { ok: true, kind: "post", post };
+  }
+
   if (params.target && state.units[params.target]) {
     const tu = state.units[params.target];
     if (tu.node !== node) return fail("that unit is not on your unit's hex");
@@ -116,8 +125,12 @@ function resolveTarget(state, pid, unit, params) {
 // fight together — their Strengths sum (§ combined-stack rule).
 function defenderValue(state, t) {
   if (t.kind === "raid") return stackStrength(state, t.unit.owner, t.unit.node);
+  // §17.7 — a listening post defends as a standing garrison: Strength 5, no
+  // chip/garrison/unit additions (it has no troops).
+  if (t.kind === "post") return t.post.strength;
   const loc = t.loc;
-  let v = loc.garrison + chipGarrison(state, loc);
+  // §17.5 Military B2 (Citadel) adds +2 garrison Strength here (derived).
+  let v = loc.garrison + chipGarrison(state, loc) + citadelGarrison(state, loc);
   if (!loc.sections.includes("neutral") && loc.controller) {
     v += stackStrength(state, loc.controller, loc.hexId);
   }
@@ -168,7 +181,10 @@ function captureLocation(state, loc, victor) {
 
   loc.controller = victor;
   loc.loyaltyOwner = victor;
-  loc.loyalty = CONFIG.loyalty.start; // §18.2 — Loyalty initialises low on capture
+  // §18.2 — Loyalty initialises low on capture; §17.5 Military B2 (Citadel):
+  // a Location captured FROM a B2 holder initialises at Loyalty 0 — the
+  // conquest is hollow to whoever takes it.
+  loc.loyalty = from && hasTechNode(state, from, "mil-b2") ? 0 : CONFIG.loyalty.start;
   // §20.8 — in-progress construction is forfeited on capture (the workshop
   // changed hands mid-build); the slider resets to bank everything until the
   // new controller chooses what to build at this freshly-taken, low-Loyalty city.
@@ -520,7 +536,19 @@ export function runContest(state, { pid, params, ctx = {} }) {
       ? defendingUnit(state, t.loc)
       : null;
   const defenderUnit = t.kind === "raid" ? t.unit : locDefUnit;
-  const defHex = t.kind === "raid" ? t.unit.node : t.loc.hexId;
+  const defHex = t.kind === "raid" ? t.unit.node
+    : t.kind === "post" ? t.post.hex
+    : t.loc.hexId;
+
+  // §17.5 Military B1 (Turrets): defending a hex you CONTROL grants +1 contest
+  // AND doubles the §16.6 fortify bonus (1 → 2). "A hex you control" = a
+  // Location whose controller is the defender (raid on, or defence of, it).
+  const defLocHere = state.locations[defHex];
+  const defenderHexOwner = t.kind === "raid" ? t.unit.owner
+    : t.kind === "post" ? t.post.owner
+    : t.loc.controller;
+  const turrets = !!(defLocHere && defLocHere.controller && defLocHere.controller === defenderHexOwner
+    && t.kind !== "post" && hasTechNode(state, defLocHere.controller, "mil-b1"));
 
   // Combined stack Strength: every friendly unit on the contesting hex
   // fights together, so their Strengths sum (Concentration is added on top).
@@ -538,17 +566,26 @@ export function runContest(state, { pid, params, ctx = {} }) {
   let defConcentration = 0, defFortify = 0, defVeteran = 0;
   if (defenderUnit) {
     defConcentration = concentration(state, defenderUnit.owner, defHex, defenderUnit.uid);
-    if (defenderUnit.fortified) defFortify = CONFIG.combat.fortifyBonus;
+    // §17.5 Turrets doubles the fortify bonus for a B1 holder on its own hex.
+    if (defenderUnit.fortified) defFortify = CONFIG.combat.fortifyBonus * (turrets ? 2 : 1);
     if (defenderUnit.veteran) defVeteran = CONFIG.combat.veteranBonus;
   }
 
   // §17.5 Military entry (Doctrine): +1 to that player's contest roll,
   // whether they are attacking or defending. The defending player is the
-  // raided unit's owner / the Location's controller (even garrison-only).
+  // raided unit's owner / the Location's controller (even garrison-only). A
+  // listening post (§17.7) has no controlling unit, so no Doctrine bonus.
   const milAmt = TECH_NODES["mil-entry"].effect.amount;
-  const defOwner = t.kind === "raid" ? t.unit.owner : t.loc.controller;
+  const defOwner = t.kind === "raid" ? t.unit.owner
+    : t.kind === "post" ? t.post.owner
+    : t.loc.controller;
   const atkMilitary = hasTechNode(state, pid, "mil-entry") ? milAmt : 0;
-  const defMilitary = defOwner && hasTechNode(state, defOwner, "mil-entry") ? milAmt : 0;
+  const defMilitary = defOwner && t.kind !== "post" && hasTechNode(state, defOwner, "mil-entry") ? milAmt : 0;
+  // §17.5 Military A1 (Vanguard): +1 to the INITIATOR's roll (you attacking) —
+  // ADDS to Doctrine (so +2 attacking, +1 defending for a holder of both).
+  const atkVanguard = hasTechNode(state, pid, "mil-a1") ? 1 : 0;
+  // §17.5 Military B1 (Turrets): +1 contest for the defender on its own hex.
+  const defTurrets = turrets ? 1 : 0;
 
   // House rule (departs from spec §9): a Location defended purely by its
   // garrison — no defending unit — does NOT roll a d6.
@@ -564,12 +601,13 @@ export function runContest(state, { pid, params, ctx = {} }) {
     });
   }
 
-  const defenderRollsDie = t.kind === "raid" || (t.kind === "location" && !!defenderUnit);
+  // §17.7 — a listening post defends as a standing garrison and rolls 1d6.
+  const defenderRollsDie = t.kind === "raid" || t.kind === "post" || (t.kind === "location" && !!defenderUnit);
   const initiatorRoll = state.rng.roll(CONFIG.contestDieSides);
   const defenderRoll = defenderRollsDie ? state.rng.roll(CONFIG.contestDieSides) : 0;
-  const initiatorTotal = atkStrength + atkConcentration + atkVeteran + atkMilitary + atkAmbush + initiatorRoll;
+  const initiatorTotal = atkStrength + atkConcentration + atkVeteran + atkMilitary + atkVanguard + atkAmbush + initiatorRoll;
   const defenderTotal =
-    defValue + defConcentration + defMountain + defFortify + defVeteran + defMilitary + defAmbush + defenderRoll;
+    defValue + defConcentration + defMountain + defFortify + defVeteran + defMilitary + defTurrets + defAmbush + defenderRoll;
   const won = initiatorTotal > defenderTotal;
 
   const detail = {
@@ -578,10 +616,10 @@ export function runContest(state, { pid, params, ctx = {} }) {
     defenderRolled: defenderRollsDie,
     // §16.6 / §17.5 breakdown for the UI
     attackerConcentration: atkConcentration, attackerVeteran: atkVeteran,
-    attackerAllies: atkAllies, attackerMilitary: atkMilitary,
+    attackerAllies: atkAllies, attackerMilitary: atkMilitary, attackerVanguard: atkVanguard,
     defenderConcentration: defConcentration, defenderMountain: defMountain,
     defenderFortify: defFortify, defenderVeteran: defVeteran,
-    defenderAllies: defAllies, defenderMilitary: defMilitary,
+    defenderAllies: defAllies, defenderMilitary: defMilitary, defenderTurrets: defTurrets,
     // §19.5 ambush
     attackerAmbush, defenderAmbush, attackerAmbushBonus: atkAmbush, defenderAmbushBonus: defAmbush,
   };
@@ -602,29 +640,44 @@ export function runContest(state, { pid, params, ctx = {} }) {
   if (won) {
     emit(state, "contest_won", { initiator: unit.uid, player: pid, ...detail });
     if (t.kind === "location") resolveLocationWin(state, pid, t.loc, params);
-    else onRaidWon(state, pid, t.unit); // standing hook; retreat after attrition
+    else if (t.kind === "raid") onRaidWon(state, pid, t.unit); // standing hook; retreat after attrition
   } else {
     emit(state, "contest_lost", { initiator: unit.uid, player: pid, ...detail });
   }
 
   const logStart = state.log.length;
 
-  // 1. Loser −1 (garrison loser has no unit to wound).
-  if (loserUid && state.units[loserUid]) {
-    loseBaseStrength(state, loserUid, 1, winnerUnit?.uid ?? null, ctx, note);
-  }
-  // 2. Rout: an overwhelming margin spills a casualty to a 2nd friendly
-  //    unit stacked on the loser's hex.
-  if (margin >= CONFIG.attrition.routMargin && loserOwner) {
-    const second = Object.values(state.units).find(
-      (u) => u.node === loserHex && u.owner === loserOwner && u.uid !== loserUid,
-    );
-    if (second) loseBaseStrength(state, second.uid, 1, winnerUnit?.uid ?? null, ctx, note);
-  }
-  // 3. Pyrrhic: a winner that barely won (margin 0 — defender ties — or 1)
-  //    also loses 1, but only if the winner is a unit.
-  if (margin <= 1 && winnerUnit && state.units[winnerUnit.uid]) {
-    loseBaseStrength(state, winnerUnit.uid, 1, null, ctx, note);
+  if (t.kind === "post") {
+    // §17.7 — a won contest destroys the post (it takes no Strength damage —
+    // it just dies). The §16.4 Pyrrhic rule still costs the attacker 1 on a
+    // margin-≤1 WIN; on a LOSS the post cannot wound the attacker (no unit).
+    if (won) {
+      destroyPost(state, t.post.hex, pid);
+      recomputeVisibilityFor(state, [t.post.owner, pid], { emitEvents: false });
+    }
+    if (won && margin <= 1 && winnerUnit && state.units[winnerUnit.uid]) {
+      loseBaseStrength(state, winnerUnit.uid, 1, null, ctx, note);
+    }
+  } else {
+    // 1. Loser −1 (garrison loser has no unit to wound). §17.5 Military A2
+    //    (Killing Blow): a winning ATTACKER holding A2 drops the loser by 2.
+    const loserLoss = won && hasTechNode(state, pid, "mil-a2") ? 2 : 1;
+    if (loserUid && state.units[loserUid]) {
+      loseBaseStrength(state, loserUid, loserLoss, winnerUnit?.uid ?? null, ctx, note);
+    }
+    // 2. Rout: an overwhelming margin spills a casualty to a 2nd friendly
+    //    unit stacked on the loser's hex.
+    if (margin >= CONFIG.attrition.routMargin && loserOwner) {
+      const second = Object.values(state.units).find(
+        (u) => u.node === loserHex && u.owner === loserOwner && u.uid !== loserUid,
+      );
+      if (second) loseBaseStrength(state, second.uid, 1, winnerUnit?.uid ?? null, ctx, note);
+    }
+    // 3. Pyrrhic: a winner that barely won (margin 0 — defender ties — or 1)
+    //    also loses 1, but only if the winner is a unit.
+    if (margin <= 1 && winnerUnit && state.units[winnerUnit.uid]) {
+      loseBaseStrength(state, winnerUnit.uid, 1, null, ctx, note);
+    }
   }
 
   // §16.4 raid retreat — a surviving raid loser may fall back one hex

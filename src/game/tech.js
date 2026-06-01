@@ -1,11 +1,18 @@
 // The Tech Wheel (mechanical-spec §17). Four paths radiate from the
 // centre — Military, Economy, Intelligence, Logistics — each 5 nodes over
-// 3 layers: entry → A1 → A2 and entry → B1 → B2. Only the four entry nodes
-// carry real effects today; the 16 branch nodes are PLACEHOLDERS (noop).
+// 3 layers: entry → A1 → A2 and entry → B1 → B2.
+//
+// Effect routing (§17.5/§17.7): nodes carry only an `effect` TAG here (the
+// entries name their lever; the 16 branch nodes keep the `noop` shape). The
+// real behaviour lives in the consumer modules — contest.js, stats.js,
+// turn.js, economy.js, board.js, visibility.js, posts.js, actions.js — each
+// gating off `hasTechNode(state, pid, "<nodeId>")`. Branch effects ADD to
+// their entry (and to each other within a branch); none replaces a shallower
+// one. The one branch node large enough to need its own subsystem is
+// Intelligence A2 (Listening Post, §17.7) — see posts.js.
 //
 // This module is pure data + pure read helpers — no engine imports — so
-// every effect site (stats / contest / turn / encounters) can ask
-// `hasTechNode` without circular-import pain.
+// every effect site can ask `hasTechNode` without circular-import pain.
 
 // Build a path's 5 nodes with the standard prereq chains.
 function buildPath(path, prefix, entryEffect) {

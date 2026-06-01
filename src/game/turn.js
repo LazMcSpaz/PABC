@@ -13,6 +13,8 @@ import { evaluateTriggers } from "./triggers.js";
 import { evaluateConditionalBeats } from "./quests.js";
 import { applyOutputAndBuilds, chargeChipUpkeep, enforceLoyaltySlotCap } from "./economy.js";
 import { runDiplomacyRound } from "./diplomacy.js";
+import { hasTechNode } from "./tech.js";
+import { chargePostUpkeep } from "./posts.js";
 
 function expireModifiers(state, pid) {
   const own = new Set(
@@ -125,7 +127,10 @@ function passiveHeal(state, pid) {
     const cap = u.veteran ? CONFIG.unit.veteranStrengthCap : CONFIG.unit.baseStrengthCap;
     if (u.baseStrength >= cap) continue;
     const before = u.baseStrength;
-    u.baseStrength = Math.min(cap, u.baseStrength + CONFIG.heal.passivePerTurn);
+    // §17.5 Logistics B1 (Field Hospital): +1 more heal/Upkeep — ADDS to the
+    // §16.5 base, so a holder mends 2/Upkeep on held Locations.
+    const healAmt = CONFIG.heal.passivePerTurn + (hasTechNode(state, pid, "log-b1") ? 1 : 0);
+    u.baseStrength = Math.min(cap, u.baseStrength + healAmt);
     recomputeStats(state);
     emit(state, "unit_reinforced", { unit: u.uid, amount: u.baseStrength - before });
   }
@@ -162,6 +167,11 @@ export function startTurn(state) {
   applyOutputAndBuilds(state, pid);
   // §20.9 — charge per-chip upkeep from banked scrap; the unpaid go dormant.
   chargeChipUpkeep(state, pid);
+  // §17.7 — charge per-listening-post upkeep alongside chip upkeep; an unpaid
+  // post goes dormant (no Vision) until repaid. Refresh fog so a post that
+  // just went dormant stops contributing sight this turn.
+  chargePostUpkeep(state, pid);
+  recomputeVisibility(state, pid, { emitEvents: false });
 
   // Preparation (the optional stat-buy step) is folded in once Layer 3
   // gives it something to do; for now the turn opens straight into Main.
@@ -215,7 +225,9 @@ function sweepReinforcements(state) {
   for (const r of state.reinforcements) {
     const unit = state.units[r.targetUnit];
     if (!unit) continue; // target destroyed — convoy disbands
-    r.traveled = (r.traveled || 0) + 1;
+    // §17.5 Logistics B2 (Supply Convoys): a holder's convoy covers +1 extra
+    // hex/round (2 instead of 1), arriving sooner from behind the lines.
+    r.traveled = (r.traveled || 0) + (hasTechNode(state, r.owner, "log-b2") ? 2 : 1);
     const route = reinforcementRoute(state, r.owner, unit.node);
     if (route && r.traveled >= route.dist) {
       const cap = unit.veteran ? CONFIG.unit.veteranStrengthCap : CONFIG.unit.baseStrengthCap;

@@ -293,6 +293,8 @@ export function createGame({
       // per-faction scalar field (fid -> hexId -> number).
       influence: {},
       zoc: {},
+      // §17.7 Listening Posts — hexId -> { owner, hex, strength, paid, revealedTo }.
+      listeningPosts: {},
     },
     factionStanding: Object.fromEntries(
       playing.map((fid) => [fid, Object.fromEntries(playing.map((pid) => [pid, 0]))]),

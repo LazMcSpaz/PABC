@@ -36,10 +36,25 @@ export function meetsLoyalty(loc, def) {
 
 // §20.6 — a Location's effective slot count: its base chipSlots plus the +1
 // bonus slot once Loyalty reaches the bonus rung. Capitals (loyalty null /
-// locked) count as fully integrated.
-export function slotCapacity(loc) {
+// locked) count as fully integrated. `state` is optional (UI display paths
+// omit it); pass it to apply the §17.5 Capital Works (eco-b2) bonus slot.
+export function slotCapacity(loc, state) {
   const loy = loc.loyalty == null ? CONFIG.loyalty.ceiling : loc.loyalty;
-  return loc.chipSlots + (loy >= CONFIG.economy.bonusSlotLoyalty ? 1 : 0);
+  let cap = loc.chipSlots + (loy >= CONFIG.economy.bonusSlotLoyalty ? 1 : 0);
+  // §17.5 Economy B2 (Capital Works): +1 chip slot at the holder's Capital.
+  if (state && loc.controller && hasTechNode(state, loc.controller, "eco-b2") &&
+      loc.chips.some((c) => state.chips[c]?.chipId === "capital")) {
+    cap += 1;
+  }
+  return cap;
+}
+
+// §17.5 Economy B1 (Production Lines): a holder's chips cost 1 less to build
+// (floor 1). Read wherever an effective buildCost is needed (build/upgrade).
+export function effectiveBuildCost(state, pid, def) {
+  const base = def.buildCost ?? def.cost ?? 0;
+  if (base <= 0) return base;
+  return hasTechNode(state, pid, "eco-b1") ? Math.max(1, base - 1) : base;
 }
 
 // Slots a chip-uid list occupies (Capital counts as 1). A dormant chip
@@ -64,6 +79,8 @@ export function locationOutput(state, loc) {
     out += chipDefOf(state, c)?.output || 0;
   }
   if (loc.controller && hasTechNode(state, loc.controller, "eco-entry")) out += 1;
+  // §17.5 Economy A1 (Refineries): +1 more scrap/Location — ADDS to the entry.
+  if (loc.controller && hasTechNode(state, loc.controller, "eco-a1")) out += 1;
   return Math.max(0, out);
 }
 
@@ -278,7 +295,7 @@ export function enforceLoyaltySlotCap(state, pid) {
   let ejectedAny = false;
   for (const loc of Object.values(state.locations)) {
     if (loc.controller !== pid) continue;
-    const cap = slotCapacity(loc);
+    const cap = slotCapacity(loc, state);
     let guard = loc.chips.length + 1;
     while (slotsUsed(state, loc.chips) > cap && guard-- > 0) {
       // newest-first, but never the Capital (it is inert/protected)

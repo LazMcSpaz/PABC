@@ -1,6 +1,7 @@
 // Board construction — the hex graph and the per-game layout generator
 // (mechanical-spec §6.1, §6.7).
 import { CONFIG, VALUE_RANK } from "./config.js";
+import { hasTechNode } from "./tech.js";
 
 // Build a hex field from a list of row widths (e.g. [3,4,5,6,5,4,3]).
 // Hexes are pointy-top; a row is centred, so a hex's horizontal centre is
@@ -66,9 +67,14 @@ export function reinforcementRoute(state, pid, targetNode) {
   if (!sources.length) return null;
 
   const zoc = state.world?.zoc;
+  // §17.5 Logistics A2 (Forward Supply): convoys may route THROUGH enemy ZoC
+  // hexes — forward-deployed units stay supplied behind enemy lines. Enemy-
+  // CONTROLLED Location hexes remain hard walls regardless.
+  const forwardSupply = hasTechNode(state, pid, "log-a2");
   const isWall = (hex) => {
     const loc = state.locations[hex];
     if (loc && loc.controller && loc.controller !== pid) return true;
+    if (forwardSupply) return false;
     const owner = zoc?.[hex];
     return !!(owner && owner !== pid);
   };
