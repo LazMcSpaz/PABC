@@ -1,8 +1,8 @@
-// The Tech Wheel (§17). A floating holographic radial tree — four paths
-// radiate from the hub (Military, Logistics, Economy, Intelligence), each
-// with 5 nodes (entry → a1 → a2 and entry → b1 → b2). Renders as its own
-// overlay (no panel chrome) so the tree reads as the focus, matching the
-// radial menu's free-floating language.
+// The Tech Wheel (§17). A floating concentric pie tree matching the radial
+// menu's holographic language. Four concentric rings: a central "Tech Tree"
+// hub, then 4 base-entry slices (one per path), then 8 layer-2 slices (A1
+// and B1 of each path), then 8 layer-3 slices (A2 and B2). Hover, glow and
+// stagger entrance mirror the menu wheel.
 import { useState } from "react";
 import { motion } from "framer-motion";
 import { TECH_NODES, TECH_PATHS } from "../game/tech.js";
@@ -10,6 +10,7 @@ import { CloseX, useEscClose } from "./HudChrome.jsx";
 
 const HOLO = "#56d3c6";
 const HOLO_HI = "#8ff6ea";
+const ASSET = import.meta.env.BASE_URL;
 
 const PATH_COLOR = {
   military: "#e0654a",
@@ -17,31 +18,55 @@ const PATH_COLOR = {
   economy: "#e8b53f",
   intelligence: HOLO,
 };
-const PATH_ANGLE = { military: -90, economy: 0, intelligence: 90, logistics: 180 };
-const RADIUS = { 1: 92, 2: 154, 3: 210 };
-const BRANCH_OFFSET = 24;
-const SIZE = 460;
+
+// White line-art PNG icons — tinted to each path's colour via CSS mask.
+const PATH_ICON_URL = {
+  military: `${ASSET}assets/ui/icons/actions/military_icon.png`,
+  logistics: `${ASSET}assets/ui/icons/actions/logistics_icon.png`,
+  economy: `${ASSET}assets/ui/icons/actions/industry_icon.png`,
+  intelligence: `${ASSET}assets/ui/icons/actions/intelligence_icon.png`,
+};
+
+// Tech.js id prefixes (mil/log/eco/int).
+const PATH_PREFIX = { military: "mil", logistics: "log", economy: "eco", intelligence: "int" };
+
+// Order clockwise from 12 o'clock (HoloSegments angle convention).
+const PATHS_CW = ["military", "economy", "intelligence", "logistics"];
+
+const SIZE = 480;
 const CTR = SIZE / 2;
+const RINGS = {
+  hub: { ri: 0, ro: 56 },
+  entry: { ri: 56, ro: 116 },
+  layer2: { ri: 116, ro: 176 },
+  layer3: { ri: 176, ro: 234 },
+};
+const GAP_PX = 5;
 
-function nodeAngle(n) {
-  let deg = PATH_ANGLE[n.path];
-  if (n.layer > 1) deg += n.id.includes("-a") ? -BRANCH_OFFSET : BRANCH_OFFSET;
-  return deg;
+// HoloSegments angle convention: 0=top, +90=right, +180=bottom, +270=left.
+function pt(cx, cy, r, deg) {
+  const a = (deg * Math.PI) / 180;
+  return [cx + r * Math.sin(a), cy - r * Math.cos(a)];
 }
-function nodePos(n) {
-  const a = (nodeAngle(n) * Math.PI) / 180;
-  return { x: CTR + RADIUS[n.layer] * Math.cos(a), y: CTR + RADIUS[n.layer] * Math.sin(a) };
-}
-function nodeName(n) {
-  if (n.layer === 1) return TECH_PATHS[n.path].entryName;
-  return `${TECH_PATHS[n.path].name} · ${n.id.slice(-2).toUpperCase()}`;
-}
-function nodeText(n) {
-  if (n.layer === 1) return TECH_PATHS[n.path].entryText;
-  return "Branch ability — to be designed.";
+function donut(cx, cy, ri, ro, a0, a1, gapPx = 0) {
+  const degO = gapPx ? ((gapPx / 2 / ro) * 180) / Math.PI : 0;
+  const degI = gapPx && ri > 0 ? ((gapPx / 2 / ri) * 180) / Math.PI : 0;
+  const oa0 = a0 + degO, oa1 = a1 - degO;
+  const ia0 = a0 + degI, ia1 = a1 - degI;
+  const [ox0, oy0] = pt(cx, cy, ro, oa0);
+  const [ox1, oy1] = pt(cx, cy, ro, oa1);
+  const [ix1, iy1] = pt(cx, cy, ri, ia1);
+  const [ix0, iy0] = pt(cx, cy, ri, ia0);
+  const large = (oa1 - oa0 + 360) % 360 > 180 ? 1 : 0;
+  return (
+    `M ${ox0.toFixed(2)} ${oy0.toFixed(2)} ` +
+    `A ${ro} ${ro} 0 ${large} 1 ${ox1.toFixed(2)} ${oy1.toFixed(2)} ` +
+    `L ${ix1.toFixed(2)} ${iy1.toFixed(2)} ` +
+    `A ${ri} ${ri} 0 ${large} 0 ${ix0.toFixed(2)} ${iy0.toFixed(2)} Z`
+  );
 }
 
-function PathGlyph({ path, color, size = 22 }) {
+function PathGlyph({ path, color, size = 24 }) {
   const s = { fill: "none", stroke: color, strokeWidth: 1.6, strokeLinecap: "round", strokeLinejoin: "round" };
   switch (path) {
     case "military":
@@ -57,23 +82,135 @@ function PathGlyph({ path, color, size = 22 }) {
   }
 }
 
+function PathIcon({ path, color, size = 30, dim = false }) {
+  const url = PATH_ICON_URL[path];
+  if (url) {
+    // White line-art icons tinted to the path colour via CSS mask.
+    return <div style={{
+      width: size, height: size,
+      backgroundColor: color,
+      WebkitMaskImage: `url(${url})`,
+      WebkitMaskSize: "contain",
+      WebkitMaskRepeat: "no-repeat",
+      WebkitMaskPosition: "center",
+      maskImage: `url(${url})`,
+      maskSize: "contain",
+      maskRepeat: "no-repeat",
+      maskPosition: "center",
+      opacity: dim ? 0.55 : 1,
+      filter: dim ? undefined : `drop-shadow(0 0 6px ${color}88)`,
+    }} />;
+  }
+  return <PathGlyph path={path} color={color} size={size} />;
+}
+
+function nodeName(node) {
+  if (!node) return "";
+  if (node.layer === 1) return TECH_PATHS[node.path].entryName;
+  return `${TECH_PATHS[node.path].name} · ${node.id.slice(-2).toUpperCase()}`;
+}
+function nodeText(node) {
+  if (!node) return "";
+  if (node.layer === 1) return TECH_PATHS[node.path].entryText;
+  return "Branch ability — to be designed.";
+}
+
+function buildSegments(assigned, points) {
+  const segs = [];
+  PATHS_CW.forEach((path, i) => {
+    const pre = PATH_PREFIX[path];
+    const baseA = -45 + i * 90;   // counterclockwise edge of path quadrant
+    const baseM = i * 90;          // path axis (midline)
+    const baseB = 45 + i * 90;    // clockwise edge of path quadrant
+    const mk = (id, ring, a0, a1) => {
+      const node = TECH_NODES[id];
+      const isAssigned = assigned.has(id);
+      const canAssign = !isAssigned && points > 0 && (node.prereq == null || assigned.has(node.prereq));
+      return { id, path, ring, a0, a1, node, isAssigned, canAssign };
+    };
+    segs.push(mk(`${pre}-entry`, "entry", baseA, baseB));
+    segs.push(mk(`${pre}-a1`, "layer2", baseA, baseM));
+    segs.push(mk(`${pre}-b1`, "layer2", baseM, baseB));
+    segs.push(mk(`${pre}-a2`, "layer3", baseA, baseM));
+    segs.push(mk(`${pre}-b2`, "layer3", baseM, baseB));
+  });
+  return segs;
+}
+
+function Segment({ seg, hovered, onHover, onClick }) {
+  const isHover = hovered === seg.id;
+  const col = PATH_COLOR[seg.path];
+  const { ri, ro } = RINGS[seg.ring];
+  const d = donut(CTR, CTR, ri, ro, seg.a0, seg.a1, GAP_PX);
+  const { isAssigned, canAssign } = seg;
+  const isDim = !isAssigned && !canAssign;
+  const fillOpacity = isAssigned ? 0.34 : isHover ? 0.24 : canAssign ? 0.13 : 0.04;
+  const strokeWidth = isAssigned ? 2 : isHover ? 1.9 : canAssign ? 1.4 : 1;
+  const strokeOpacity = isDim ? 0.4 : 1;
+  const glow = isAssigned ? 11 : isHover ? 14 : canAssign ? 7 : 0;
+  return (
+    <path
+      d={d}
+      fill={col}
+      fillOpacity={fillOpacity}
+      stroke={col}
+      strokeWidth={strokeWidth}
+      strokeOpacity={strokeOpacity}
+      strokeLinejoin="round"
+      style={{
+        cursor: canAssign ? "pointer" : "default",
+        filter: glow ? `drop-shadow(0 0 ${glow}px ${col})` : undefined,
+        transition: "fill-opacity .14s ease, stroke-width .14s ease, filter .14s ease, stroke-opacity .14s ease",
+      }}
+      onMouseEnter={() => onHover(seg.id)}
+      onMouseLeave={() => onHover((h) => (h === seg.id ? null : h))}
+      onClick={() => canAssign && onClick(seg.id)}
+      className={canAssign ? "tech-pulse" : undefined}
+    />
+  );
+}
+
+function SegmentContent({ seg, hovered }) {
+  const midR = (RINGS[seg.ring].ri + RINGS[seg.ring].ro) / 2;
+  const midA = (seg.a0 + seg.a1) / 2;
+  const [cx, cy] = pt(CTR, CTR, midR, midA);
+  const col = PATH_COLOR[seg.path];
+  const { isAssigned, canAssign } = seg;
+  const isHover = hovered === seg.id;
+  const isDim = !isAssigned && !canAssign && !isHover;
+  return (
+    <div style={{
+      position: "absolute", left: cx, top: cy, transform: "translate(-50%, -50%)",
+      pointerEvents: "none", opacity: isDim ? 0.55 : 1, transition: "opacity .14s ease",
+      display: "flex", flexDirection: "column", alignItems: "center", gap: 2,
+    }}>
+      {seg.ring === "entry" ? (
+        <PathIcon path={seg.path} color={isAssigned ? "#fff" : col} size={34} dim={isDim} />
+      ) : (
+        <span style={{
+          fontFamily: "'Oswald',sans-serif", fontWeight: 700,
+          fontSize: seg.ring === "layer2" ? 12.5 : 13,
+          letterSpacing: 1.4, textTransform: "uppercase",
+          color: isAssigned ? "#fff" : (canAssign || isHover) ? col : "rgba(143,246,234,0.45)",
+          textShadow: isAssigned ? `0 0 6px ${col}cc` : isHover ? `0 0 6px ${col}aa` : undefined,
+          transition: "color .14s ease",
+        }}>
+          {seg.id.slice(-2)}
+        </span>
+      )}
+    </div>
+  );
+}
+
 export default function TechWheel({ player, onAssign, onClose, levelInfo }) {
   useEscClose(onClose);
   const [hover, setHover] = useState(null);
   const assigned = new Set(player?.techWheel || []);
   const points = player?.abilityPointsAvailable || 0;
-  const isAssignable = (n) =>
-    !assigned.has(n.id) && points > 0 && (n.prereq == null || assigned.has(n.prereq));
-
-  const nodes = Object.values(TECH_NODES);
-  const connectors = nodes.map((n) => {
-    const to = nodePos(n);
-    const from = n.prereq ? nodePos(TECH_NODES[n.prereq]) : { x: CTR, y: CTR };
-    const lit = assigned.has(n.id) && (n.prereq == null || assigned.has(n.prereq));
-    return { id: n.id, from, to, lit, color: PATH_COLOR[n.path] };
-  });
-
+  const segs = buildSegments(assigned, points);
   const hovered = hover ? TECH_NODES[hover] : null;
+  const byRing = { entry: [], layer2: [], layer3: [] };
+  segs.forEach((s) => byRing[s.ring].push(s));
 
   return (
     <motion.div
@@ -83,25 +220,20 @@ export default function TechWheel({ player, onAssign, onClose, levelInfo }) {
       exit={{ opacity: 0, transition: { duration: 0.22, ease: "easeIn" } }}
       transition={{ duration: 0.18, ease: "easeOut" }}
       style={{
-        position: "fixed",
-        inset: 0,
-        zIndex: 60,
-        background: "rgba(4,8,8,0.72)",
-        backdropFilter: "blur(2px)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
+        position: "fixed", inset: 0, zIndex: 60,
+        background: "rgba(4,8,8,0.72)", backdropFilter: "blur(2px)",
+        display: "flex", alignItems: "center", justifyContent: "center",
       }}
     >
       <motion.div
         onClick={(e) => e.stopPropagation()}
-        initial={{ scale: 0.88, opacity: 0 }}
-        animate={{ scale: 1, opacity: 1 }}
+        initial={{ scale: 0.86, rotate: -4, opacity: 0 }}
+        animate={{ scale: 1, rotate: 0, opacity: 1 }}
         exit={{ scale: 0.9, opacity: 0, transition: { duration: 0.2, ease: "easeIn" } }}
         transition={{ type: "spring", stiffness: 240, damping: 22, mass: 0.8 }}
-        style={{ position: "relative", display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}
+        style={{ position: "relative", display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}
       >
-        {/* Floating title */}
+        {/* Title */}
         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4, pointerEvents: "none" }}>
           <span style={{
             fontFamily: "'Oswald',sans-serif", fontSize: 13, fontWeight: 700,
@@ -111,112 +243,71 @@ export default function TechWheel({ player, onAssign, onClose, levelInfo }) {
           <span style={{ width: 64, height: 1.5, background: `linear-gradient(90deg, transparent, ${HOLO}, transparent)`, opacity: 0.9 }} />
         </div>
 
-        {/* The wheel (SVG + node buttons) */}
+        {/* The wheel */}
         <div style={{ position: "relative", width: SIZE, height: SIZE }}>
-          <motion.svg
-            width={SIZE} height={SIZE} viewBox={`0 0 ${SIZE} ${SIZE}`}
-            initial={{ opacity: 0, scale: 0.94 }} animate={{ opacity: 1, scale: 1 }}
-            transition={{ duration: 0.35, ease: "easeOut" }}
-            style={{ overflow: "visible" }}
-          >
-            {/* outer guide rings */}
-            <circle cx={CTR} cy={CTR} r={SIZE / 2 - 8} fill="none" stroke={HOLO} strokeWidth="0.7" opacity="0.22" />
-            <circle cx={CTR} cy={CTR} r={SIZE / 2 - 18} fill="none" stroke={HOLO} strokeWidth="0.4" opacity="0.15" />
+          <svg width={SIZE} height={SIZE} viewBox={`0 0 ${SIZE} ${SIZE}`} style={{ overflow: "visible" }}>
+            {/* outer guide rings (decorative) */}
+            <circle cx={CTR} cy={CTR} r={RINGS.layer3.ro + 4} fill="none" stroke={HOLO} strokeWidth="0.6" opacity="0.22" />
+            <circle cx={CTR} cy={CTR} r={RINGS.layer3.ro + 12} fill="none" stroke={HOLO} strokeWidth="0.35" opacity="0.13" />
 
-            {/* connectors */}
-            {connectors.map((c, i) => (
-              <motion.line
-                key={`c-${c.id}`}
-                x1={c.from.x} y1={c.from.y} x2={c.to.x} y2={c.to.y}
-                stroke={c.lit ? c.color : "rgba(86,211,198,0.22)"}
-                strokeWidth={c.lit ? 2.2 : 1.1}
-                opacity={c.lit ? 0.95 : 0.55}
-                strokeLinecap="round"
-                initial={{ pathLength: 0, opacity: 0 }}
-                animate={{ pathLength: 1, opacity: c.lit ? 0.95 : 0.55 }}
-                transition={{ duration: 0.45, delay: 0.12 + i * 0.025, ease: "easeOut" }}
-                style={c.lit ? { filter: `drop-shadow(0 0 5px ${c.color})` } : undefined}
-              />
-            ))}
-
-            {/* hub */}
-            <motion.g initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.05, duration: 0.25 }}>
-              <circle cx={CTR} cy={CTR} r={32} fill="none" stroke={HOLO} strokeWidth="0.6" opacity="0.45" />
-              <circle cx={CTR} cy={CTR} r={26}
-                fill="rgba(5,12,13,0.92)" stroke={HOLO} strokeWidth="1.6"
+            {/* Hub */}
+            <motion.g
+              initial={{ opacity: 0, scale: 0.4 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ duration: 0.28, ease: "easeOut" }}
+              style={{ transformOrigin: `${CTR}px ${CTR}px` }}
+            >
+              <circle cx={CTR} cy={CTR} r={RINGS.hub.ro} fill="rgba(5,12,13,0.94)" stroke={HOLO} strokeWidth="1.6"
                 style={{ filter: `drop-shadow(0 0 9px ${HOLO}aa)` }} />
-              <text x={CTR} y={CTR - 2} textAnchor="middle" dominantBaseline="central"
-                fontFamily="'Oswald',sans-serif" fontWeight="700" fontSize="11" letterSpacing="2.2" fill={HOLO_HI}>
-                TECH
-              </text>
-              <text x={CTR} y={CTR + 10} textAnchor="middle" dominantBaseline="central"
-                fontFamily="'Oswald',sans-serif" fontWeight="600" fontSize="8" letterSpacing="1.4" fill="rgba(143,246,234,0.55)">
-                {`${assigned.size} / ${nodes.length}`}
-              </text>
+              <circle cx={CTR} cy={CTR} r={RINGS.hub.ro + 5} fill="none" stroke={HOLO} strokeWidth="0.6" opacity="0.4" />
             </motion.g>
-          </motion.svg>
 
-          {/* nodes — HTML overlay */}
-          {nodes.map((n) => {
-            const pos = nodePos(n);
-            const isAssigned = assigned.has(n.id);
-            const canAssign = isAssignable(n);
-            const col = PATH_COLOR[n.path];
-            const sz = n.layer === 1 ? 44 : n.layer === 2 ? 32 : 28;
-            const delay = 0.32 + (n.layer - 1) * 0.07 + (n.id.includes("-b") ? 0.03 : 0);
-            const ringCol = isAssigned || canAssign ? col : "rgba(86,211,198,0.3)";
-            const innerBg = isAssigned
-              ? `radial-gradient(circle at 50% 38%, ${col}55, rgba(5,12,13,0.94) 78%)`
-              : "radial-gradient(circle at 50% 40%, rgba(19,42,44,0.95), rgba(4,10,11,0.96))";
-            const shadow = isAssigned
-              ? `0 0 16px ${col}, inset 0 0 10px ${col}55`
-              : canAssign
-              ? `0 0 12px ${col}aa, inset 0 0 8px rgba(0,0,0,0.5)`
-              : "0 0 6px rgba(0,0,0,0.4), inset 0 0 6px rgba(0,0,0,0.5)";
-            return (
-              <motion.button
-                key={n.id}
-                onClick={() => canAssign && onAssign?.(n.id)}
-                onMouseEnter={() => setHover(n.id)}
-                onMouseLeave={() => setHover((h) => (h === n.id ? null : h))}
-                disabled={!canAssign}
-                initial={{ x: CTR - pos.x, y: CTR - pos.y, opacity: 0, scale: 0.35 }}
-                animate={{ x: 0, y: 0, opacity: 1, scale: 1 }}
-                transition={{ type: "spring", stiffness: 240, damping: 22, mass: 0.8, delay }}
-                whileHover={canAssign ? { scale: 1.14 } : undefined}
-                whileTap={canAssign ? { scale: 0.94 } : undefined}
-                className={canAssign ? "tech-pulse" : undefined}
-                style={{
-                  position: "absolute",
-                  left: pos.x - sz / 2,
-                  top: pos.y - sz / 2,
-                  width: sz,
-                  height: sz,
-                  borderRadius: "50%",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  background: innerBg,
-                  border: `${isAssigned ? 2 : 1.3}px solid ${ringCol}`,
-                  boxShadow: shadow,
-                  color: isAssigned ? HOLO_HI : canAssign ? col : "rgba(143,246,234,0.45)",
-                  cursor: canAssign ? "pointer" : "default",
-                  opacity: isAssigned || canAssign ? 1 : 0.72,
-                  padding: 0,
-                  fontFamily: "'Oswald',sans-serif",
-                }}
-                title={nodeName(n)}
+            {/* Rings — stagger entrance per ring */}
+            {["entry", "layer2", "layer3"].map((ring, ri) => (
+              <motion.g
+                key={ring}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ duration: 0.32, delay: 0.12 + ri * 0.13, ease: "easeOut" }}
               >
-                {n.layer === 1 ? (
-                  <PathGlyph path={n.path} color={isAssigned ? "#fff" : col} size={22} />
-                ) : (
-                  <span style={{ fontWeight: 700, fontSize: 11, letterSpacing: 1, textTransform: "uppercase" }}>
-                    {n.id.slice(-2)}
-                  </span>
-                )}
-              </motion.button>
-            );
-          })}
+                {byRing[ring].map((seg) => (
+                  <Segment key={seg.id} seg={seg} hovered={hover} onHover={setHover} onClick={onAssign} />
+                ))}
+              </motion.g>
+            ))}
+          </svg>
+
+          {/* Hub label (HTML overlay for crisp typography) */}
+          <div style={{
+            position: "absolute", left: CTR, top: CTR, transform: "translate(-50%, -50%)",
+            textAlign: "center", pointerEvents: "none",
+          }}>
+            <div style={{
+              fontFamily: "'Oswald',sans-serif", fontSize: 11, fontWeight: 700,
+              letterSpacing: 2.4, textTransform: "uppercase", color: HOLO_HI,
+              lineHeight: 1.18, textShadow: `0 0 6px ${HOLO}88`,
+            }}>Tech</div>
+            <div style={{
+              fontFamily: "'Oswald',sans-serif", fontSize: 11, fontWeight: 700,
+              letterSpacing: 2.4, textTransform: "uppercase", color: HOLO_HI,
+              lineHeight: 1.18, textShadow: `0 0 6px ${HOLO}88`,
+            }}>Tree</div>
+          </div>
+
+          {/* Segment content overlays — staggered fade matching ring entrance */}
+          {["entry", "layer2", "layer3"].map((ring, ri) => (
+            <motion.div
+              key={`co-${ring}`}
+              style={{ position: "absolute", inset: 0, pointerEvents: "none" }}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ duration: 0.32, delay: 0.22 + ri * 0.13, ease: "easeOut" }}
+            >
+              {byRing[ring].map((seg) => (
+                <SegmentContent key={`c-${seg.id}`} seg={seg} hovered={hover} />
+              ))}
+            </motion.div>
+          ))}
         </div>
 
         {/* Info strip */}
@@ -226,7 +317,8 @@ export default function TechWheel({ player, onAssign, onClose, levelInfo }) {
               <div style={{
                 fontFamily: "'Oswald',sans-serif", fontWeight: 700, fontSize: 14,
                 letterSpacing: 1.5, textTransform: "uppercase",
-                color: PATH_COLOR[hovered.path], textShadow: `0 0 10px ${PATH_COLOR[hovered.path]}88`,
+                color: PATH_COLOR[hovered.path],
+                textShadow: `0 0 10px ${PATH_COLOR[hovered.path]}88`,
               }}>{nodeName(hovered)}</div>
               <div className="pc-prose" style={{ fontSize: 12.5, color: "#cfd6dc", marginTop: 4, lineHeight: 1.5 }}>
                 {nodeText(hovered)}
@@ -236,27 +328,27 @@ export default function TechWheel({ player, onAssign, onClose, levelInfo }) {
             <>
               {levelInfo && (
                 <div style={{
-                  fontFamily: "'Oswald',sans-serif", fontSize: 10.5, letterSpacing: 2, textTransform: "uppercase",
-                  color: "rgba(143,246,234,0.55)",
+                  fontFamily: "'Oswald',sans-serif", fontSize: 10.5, letterSpacing: 2,
+                  textTransform: "uppercase", color: "rgba(143,246,234,0.55)",
                 }}>
                   Level {levelInfo.level}{levelInfo.maxLevel ? ` / ${levelInfo.maxLevel}` : ""}
                   {levelInfo.research != null ? ` · Research ${levelInfo.research}` : ""}
                 </div>
               )}
               <div style={{
-                fontFamily: "'Oswald',sans-serif", fontSize: 11.5, letterSpacing: 1.6, textTransform: "uppercase",
-                color: points > 0 ? HOLO_HI : "rgba(143,246,234,0.45)", marginTop: 6,
-                textShadow: points > 0 ? `0 0 8px ${HOLO}66` : undefined,
+                fontFamily: "'Oswald',sans-serif", fontSize: 11.5, letterSpacing: 1.6,
+                textTransform: "uppercase", color: points > 0 ? HOLO_HI : "rgba(143,246,234,0.45)",
+                marginTop: 6, textShadow: points > 0 ? `0 0 8px ${HOLO}66` : undefined,
               }}>
                 {points > 0
-                  ? `${points} Ability Point${points === 1 ? "" : "s"} to spend — click a glowing node`
+                  ? `${points} Ability Point${points === 1 ? "" : "s"} to spend — click a glowing slice`
                   : "No Ability Points — reach the next Tech Level to earn one"}
               </div>
             </>
           )}
         </div>
 
-        <CloseX onClose={onClose} style={{ position: "absolute", top: 32, right: -10 }} />
+        <CloseX onClose={onClose} style={{ position: "absolute", top: -10, right: -10 }} />
       </motion.div>
     </motion.div>
   );
