@@ -73,9 +73,9 @@ export default function HudShowcase({ onExit }) {
       </AnimatePresence>
       <AnimatePresence>
         {panel === "locations" && <LocationWindow key="locations" view={MOCK_LOC} onClose={() => setPanel(null)} onActivate={() => {}} onContest={() => {}} onRecruit={() => {}} onBuild={() => {}} onUpgrade={() => {}} onRush={() => {}} onSetSlider={() => {}} />}
-        {panel === "research" && <TitledWindow key="research" title="Research" icon={ICON.research} onClose={() => setPanel(null)} width={520}>
-          <TechWheel player={MOCK_PLAYER} onAssign={() => {}} />
-        </TitledWindow>}
+        {panel === "research" && (
+          <TechWheel key="research" player={MOCK_PLAYER} onAssign={() => {}} onClose={() => setPanel(null)} levelInfo={{ level: 2, maxLevel: 4, research: 12 }} />
+        )}
         {panel === "units" && <TitledWindow key="units" title="Units" icon={ICON.units} onClose={() => setPanel(null)}>
           <p className="pc-prose" style={{ margin: 0, fontSize: 13, lineHeight: 1.6, color: C.textDim }}>Your fielded units, their strength and movement, installed chips, and reinforcement options.</p>
         </TitledWindow>}

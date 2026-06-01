@@ -796,19 +796,13 @@ export default function Prototype({ config, onNewGame }) {
 
       <AnimatePresence>
         {showTechWheel && (
-          <TitledWindow
+          <TechWheel
             key="research"
-            title="Research"
-            icon={ICON.research}
+            player={you}
+            onAssign={onAssignTech}
             onClose={() => setShowTechWheel(false)}
-            width={520}
-          >
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6, fontSize: 11, color: HUD.textDim }}>
-              <span>Level {you.techLevel}/{state.maxTechLevel} · Research {you.research}</span>
-              <span style={{ color: HUD.gold, fontWeight: 700 }}>{you.abilityPointsAvailable} Ability Points</span>
-            </div>
-            <TechWheel player={you} onAssign={onAssignTech} />
-          </TitledWindow>
+            levelInfo={{ level: you.techLevel, maxLevel: state.maxTechLevel, research: you.research }}
+          />
         )}
       </AnimatePresence>
 

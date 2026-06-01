@@ -7,7 +7,7 @@ import { motion } from "framer-motion";
 import ControlMeter from "./ControlMeter.jsx";
 
 // Close the active modal on Escape.
-function useEscClose(onClose) {
+export function useEscClose(onClose) {
   useEffect(() => {
     const h = (e) => { if (e.key === "Escape") onClose?.(); };
     window.addEventListener("keydown", h);
