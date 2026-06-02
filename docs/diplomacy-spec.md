@@ -87,9 +87,11 @@ both capitals must be clear.
 - Both parties have a Capital Location (a Location carrying the
   `capital` chip).
 - A **clear path** exists between the two capitals on the hex graph —
-  same routing model as `reinforcementRoute` (§16.5): blocked by
-  enemy-controlled Locations and enemy ZoC; friendly + neutral + your
-  own hexes pass freely. Computed on demand.
+  reuse `reinforcementRoute(state, proposerPid, otherCapitalHex)` from
+  `board.js` exactly as the supply system does. The route is checked at
+  formation time (gate the verb) **and** every round-end (§6.5
+  step 2 — drives the suspend/dissolve cycle). Do not write a new path
+  algorithm.
 - Both parties Standing ≥ Neutral.
 - Both parties not at war with each other.
 - Standard rep gates apply (Menace < Tolerance, Honor ≥ floor).
@@ -131,55 +133,125 @@ suspend/dissolve cycle, and a distinct agreement type.
 
 ### 1.4 Demand Tribute (renamed from Ultimatum)
 
-Mechanics unchanged from §18.7 Ultimatum. UI label is **Demand Tribute**
-(more concrete to the player); engine action key changes from
-`"ultimatum"` to `"demand-tribute"`.
+UI label is **Demand Tribute** (more concrete to the player); engine
+action key is `"demand-tribute"`. A coerced deal: demand items backed
+by the threat of your military.
 
-A coerced deal: demand items backed by your military / Menace. The AI
-weighs cave-vs-resist by power gap and Temperament. Accepting yields
-tribute; refusing escalates to war or a Standing drop. Costs Menace.
+**Enable gate (UI + engine validation):**
 
-**Engine status:** ✗ not present as a verb in `performDiplomacy`. New
-case `"demand-tribute"` (engine semantics per §18.7 unchanged).
+```
+canDemandTribute(state, demander, target) =
+  powerOf(state, demander) >= powerOf(state, target)
+    * CONFIG.diplomacy.demandTribute.minPowerRatio   // default 1.5
+```
+
+Below the threshold, the verb is *visible-disabled* with tooltip
+"Disabled — not strong enough to coerce them."
+
+**AI cave decision** (when target evaluates the demand):
+
+```
+caveScore = powerOf(state, demander) / max(1, powerOf(state, target))
+            - CONFIG.diplomacy.demandTribute.caveBaseRatio          // default 2.0
+            - (factionDef(target).aggression || 0.5)
+              * CONFIG.diplomacy.demandTribute.braveryScale         // default 1.5
+
+cave   if caveScore >= 0 AND tributeValue >= 0
+        (deal-valuation `wouldAccept` still applies — they cave only if
+        the demanded items are within what they can give)
+refuse otherwise — and on refuse:
+  - if state.diplomacy.demandTribute.escalateOnRefusal === "war"
+    (default), immediately declareWar(demander, target, "tribute-refused")
+  - target's Standing toward demander drops 2 tiers
+```
+
+Demander pays Menace per `CONFIG.diplomacy.menace.base` regardless of
+outcome (the threat itself is the hostile act).
+
+**Engine status:** ✗ new verb. Add the gate, cave-decision, and
+escalation in `performDiplomacy`'s `"demand-tribute"` case + a small
+helper `caveOnDemand(state, target, demander, terms)`.
 
 ### 1.5 Sue for peace (deal-evaluated)
 
 Replaces unconditional `make-peace`. Sue for peace is a **peace deal**:
 the player proposes a deal with a `peace` promise as the give item,
-optional side terms (extra scrap, a chip, a research grant…). The AI
-evaluates with `wouldAccept`, weighing:
-- War exhaustion (turns spent in war, units lost) — strong pull toward
-  yes.
-- Who's currently winning — the winning side resists peace until
-  exhausted.
-- Standing — higher Standing increases willingness.
-- Relationship bias as elsewhere.
+optional side terms (scrap, a chip, a research grant).
 
-A refused peace doesn't break anything; the war just continues. No
-Honor hit on refusal by either side (the offer wasn't a promise).
+**War-exhaustion formula** (new — needs the state extension in §6.2):
 
-**Engine status:** ⚠ `make-peace` is unconditional. New verb
-`"sue-for-peace"` calls `wouldAccept` on a peace-promise deal and
-applies it only on acceptance. Old `"make-peace"` may remain as an
-alias for AI-to-AI bookkeeping.
+```
+warExhaustion(state, fid, opponent) =
+  let war = findWar(state, fid, opponent);
+  if (!war) return 0;
+  let duration = state.round - war.since;
+  let myUnitLoss      = war.unitsLost[fid]      || 0;
+  let myLocationLoss  = war.locationsLost[fid]  || 0;
+  let theirUnitLoss   = war.unitsLost[opponent] || 0;
+  let theirLocLoss    = war.locationsLost[opponent] || 0;
+  return duration
+       + myUnitLoss     * CONFIG.diplomacy.war.unitLossWeight      // default 2
+       + myLocationLoss * CONFIG.diplomacy.war.locationLossWeight  // default 4
+       - theirUnitLoss  * 0.5
+       - theirLocLoss   * 1.0;
+```
 
-### 1.6 Open borders — Menace suppression
+Higher score = more eager for peace (I'm losing, and it's dragging on).
 
-`openBorders` is a valid promise item but the engine does not currently
-suppress Menace for transit through the receiver's territory while
-active. Fix:
+**AI acceptance** (when target evaluates the player's peace proposal):
 
-- When the per-attack Menace charge is computed, check whether the
-  attacker holds an **active openBorders promise with the target.** If
-  yes, this is a transit through friendly territory — the Menace
-  component for **mere transit / ZoC pressure** is suppressed.
-- **Actual attacks against the target still charge full Menace.**
-  openBorders only blesses passage, not aggression.
-- Active by default between pact allies (formed automatically with the
-  pact, unless one side explicitly toggles it off — §1.10 below).
+```
+aiAcceptsPeace(state, ai, suer, sideTerms) =
+  let exhaustion = warExhaustion(state, ai, suer);
+  let sideValue  = dealValue(state, ai, sideTerms);            // existing
+  let standing   = getStanding(state, ai, suer);
+  let standingBoost = standing >= D().tiers.neutral
+                    ? CONFIG.diplomacy.suePeace.standingBoost   // default 3
+                    : 0;
+  return (exhaustion + sideValue + standingBoost)
+         >= CONFIG.diplomacy.suePeace.acceptThreshold;          // default 8
+```
 
-**Engine status:** ⚠ the promise is accepted but unused. Wire the
-suppression in `onAttack` / Menace path.
+A refused peace breaks nothing — the war continues, no Honor hit, no
+Standing change.
+
+**Engine status:** ⚠ unconditional `make-peace` exists. Add a new verb
+`"sue-for-peace"` that calls `aiAcceptsPeace`; apply the peace + side
+terms atomically on acceptance. Old `make-peace` remains as the
+internal call for AI-to-AI peace settlement (via `mediate`).
+
+### 1.6 Open borders — cross-system contract
+
+`openBorders` is a tracked agreement state in its own right. Its direct
+gameplay effect is delivered by the **movement / blockade system**
+(separate work track): a faction with an active openBorders agreement
+toward you may move its units through hexes you control and adjacent
+to your units without triggering the blockade stop the movement system
+will introduce.
+
+**The diplomacy agent implements:**
+- The agreement state (`type: "open-borders"` standalone, or
+  `openBorders: true` flag on a pact agreement).
+- The `set-open-borders` verb — start/stop a standalone agreement.
+  Requires Friendly+ Standing; both rep gates clear; not at war.
+- The `toggle-open-borders` verb — flip the pact-default share without
+  dissolving the pact; −`CONFIG.diplomacy.pact.toggleBordersStandingHit`
+  (default 1) Standing per toggle-off; restored on toggle-on.
+- The `defaults true between pacted parties` rule, applied automatically
+  on pact formation.
+- An exported helper **`hasOpenBorders(state, transitingFid, ownerFid)
+  → boolean`** that the movement-blockade system calls. Returns true if
+  any active agreement grants transitingFid passage through ownerFid's
+  territory.
+
+**Boundary:** the movement-blockade system reads `hasOpenBorders`. If
+that system hasn't landed, the helper is still callable and accurate;
+openBorders simply has no observable effect until movement consumes it.
+**This is not a stub** — the diplomacy side is complete, with a
+contracted helper exposed for the consumer.
+
+**Engine status:** ⚠ promise item accepted in deals; agreement state
+not distinguished, no toggle verbs, no `hasOpenBorders` helper.
 
 ### 1.7 Free vassal (new)
 
@@ -200,44 +272,90 @@ Voluntarily release a vassal. The clemency move.
 ### 1.8 Player-initiated pact call
 
 The engine already has `pactCall(state, caller, ally, target)` — used
-internally for AI-to-AI politics. The player should be able to call
-their own pact ally into a war the player is currently fighting.
+internally — but the ally currently always honors (placeholder). Both
+the player surface AND the AI evaluation are gaps.
 
-UI: in the faction detail of a pacted ally, if you have any active
-wars, a "Call into war" option appears with a target picker (your
-active wars). AI evaluates with the standard pact-call logic. On honor:
-the ally declares war on the target. On decline: the ally takes a
-Standing hit with you + Honor ding (existing rule).
+**Player surface:** add a `performDiplomacy` case
+`"pact-call" { ally, target }`. Requires the caller (the active player)
+is pacted with `ally` AND already at war with `target`. Calls a new
+shared helper `evaluatePactCall(state, ally, caller, target)` that
+returns `honor: boolean`.
 
-**Engine status:** ⚠ verb exists internally; needs a `performDiplomacy`
-case `"pact-call"` taking `{ ally, target }` for the player to reach.
+**AI pact-call evaluation** (replaces today's placeholder):
+
+```
+evaluatePactCall(state, ally, caller, target) =
+  // Hard refuses
+  if (arePacted(state, ally, target))               return { honor: false, reason: "pacted with target" };
+  if (vassalLord(state, target) === ally)           return { honor: false, reason: "target is my vassal" };
+  if (!mayEngage(state, ally, target))              return { honor: false, reason: "out of scope" };
+
+  // Soft score
+  let hostilityToTarget   = -getStanding(state, ally, target);     // higher = more hostile
+  let loyaltyToCaller     =  getStanding(state, ally, caller);     // higher = more loyal
+  let targetPowerRatio    = powerOf(state, target) / max(1, powerOf(state, ally));
+
+  let score = hostilityToTarget * CONFIG.diplomacy.pactCall.hostilityWeight   // default 0.3
+            + loyaltyToCaller   * CONFIG.diplomacy.pactCall.loyaltyWeight     // default 0.3
+            - targetPowerRatio  * CONFIG.diplomacy.pactCall.targetPowerWeight; // default 2.0
+
+  return { honor: score >= CONFIG.diplomacy.pactCall.acceptScoreThreshold };  // default 1
+```
+
+Aggressive factions (high `aggression` dial) add a flat +1 to score so
+warlords more readily honor calls; pacifists subtract 1. Both apply
+**after** the score sum.
+
+**Honor path:** `declareWar(ally, target, "pact-call")`; ally's Standing
+toward caller +2 (alliance strengthens).
+
+**Decline path:** caller's Standing toward ally −4; global Honor on ally
+−`CONFIG.diplomacy.honor.breakLoss` (default 5).
+
+**Engine status:** ⚠ partial — verb exists with placeholder
+acceptance. Replace the placeholder with `evaluatePactCall`; add the
+`performDiplomacy` case for player initiation.
 
 ### 1.9 Allied vision (auto + toggle)
 
 A passive perk + an explicit override.
 
-- **Auto-share:** while two factions are pacted, each faction's visible
-  set extends to include the other's visible set (mutual). Implemented
-  as a per-pact flag `vision_share: true` checked in `recomputeVisibility`
-  (or as a post-process union).
-- **Toggle off:** either party may explicitly withhold by calling
-  `toggle-allied-vision { ally, on: false }`. Suspends the auto-share
-  without breaking the pact. Costs a small Standing hit (the ally
-  notices: −1 Standing).
-- **Toggle on:** reverses the suspension; restores Standing.
+**Auto-share:** while two factions are pacted, each faction's visible
+set extends to include the other's visible set (mutual). Implemented
+as a **post-process union step in `recomputeVisibilityFor`**: after
+each faction's per-faction recompute, walk
+`state.diplomacy.agreements` and, for any agreement where
+`type === "pact"` AND `visionShare === true`, union the two parties'
+`visible` sets in-place. Concealment is NOT shared (sharing visible
+hexes shares positions of detected enemies; concealed-but-undetected
+units stay concealed to the borrowing faction).
+
+**Toggle off:** `performDiplomacy("toggle-allied-vision", { ally,
+on: false })` flips `visionShare` to false on the pact agreement.
+Standing of the toggling party's view of the ally drops by
+`CONFIG.diplomacy.pact.toggleVisionStandingHit` (default 1) the same
+round; emit `allied_vision_toggled { agreement, on: false }`.
+
+**Toggle on:** flips back; restores Standing by the same amount.
+
+**Pact formation:** `formPact` initializes `visionShare:
+CONFIG.diplomacy.vision.sharedPactDefault` (default true) on the
+agreement.
 
 **Engine status:** ✗ allied auto-share is not wired today (intel-deal
-revealRegion is one-shot). New: pact agreements gain `visionShare:
-boolean` (default true); visibility recompute unions across active
-true-shares.
+revealRegion is one-shot, not ongoing). Implement per above.
 
-### 1.10 Open borders (auto + toggle, between allies)
+### 1.10 Open borders auto-share (allies)
 
-Mirror of §1.9 for openBorders. Default `true` between pacted parties;
-either party may toggle off, costing a 1-tier Standing hit; toggling
-back on restores.
+Mirror of §1.9 for openBorders. `formPact` initializes `openBorders:
+CONFIG.diplomacy.borders.pactDefault` (default true) on the agreement.
+`toggle-open-borders` flips it, costing
+`CONFIG.diplomacy.pact.toggleBordersStandingHit` (default 1) Standing
+per toggle-off, restored on toggle-on. Emit `open_borders_toggled
+{ agreement, on }`. (Standalone open-borders agreements outside a pact
+are the `set-open-borders` verb from §1.6, not §1.10.)
 
-**Engine status:** ✗. New verb `"toggle-open-borders"`.
+**Engine status:** ✗ new (paired with §1.6).
 
 ---
 
@@ -637,43 +755,108 @@ action ∈ {
 ### 6.2 State extensions
 
 ```js
-state.diplomacy.giftCounter = {};        // §1.2 — { fromPid: { toPid: n } }
-state.diplomacy.agreements[i].type =     // discriminate live agreements
-  "pact" | "trading-pact" | "non-aggression" | "open-borders" |
-  "tribute-flow" | "vision-share" | "deal-promise";
-state.diplomacy.agreements[i].suspended = false;       // trading-pact only
-state.diplomacy.agreements[i].suspendedRounds = 0;     // trading-pact only
-state.diplomacy.agreements[i].visionShare = true;      // pact-flag, toggleable
-state.diplomacy.agreements[i].openBorders = true;      // pact-flag, toggleable
+// §1.2 — { fromPid: { toPid: count-of-gifts-in-window } }
+state.diplomacy.giftCounter = {};
+
+// §1.3, §1.6, §1.9, §1.10 — agreement records gain a type tag and
+// extra fields. EVERY agreement created by the new verbs sets `type`;
+// legacy records without a `type` default to "deal-promise" on read.
+state.diplomacy.agreements[i] = {
+  id, a, b, give, get, promises,                         // existing
+  type: "pact" | "trading-pact" | "non-aggression" |
+        "open-borders" | "tribute-flow" | "vision-share" |
+        "deal-promise",                                  // NEW — required
+  suspended: false,           // trading-pact only — set by route check
+  suspendedRounds: 0,         // trading-pact only — incremented while suspended
+  visionShare: true,          // pact only — toggled by §1.9
+  openBorders: true,          // pact only — toggled by §1.10
+};
+
+// §1.5 — extend `state.diplomacy.wars[i]` (today: { a, b, since })
+state.diplomacy.wars[i] = {
+  a, b, since,                                           // existing
+  unitsLost: { [pid]: count },                           // NEW
+  locationsLost: { [pid]: count },                       // NEW
+  contestsWon: { [pid]: count },                         // NEW
+};
 ```
 
+**State maintenance** (the agent wires these listeners):
+- `declareWar(a, b, ...)` initializes `unitsLost: {}`, `locationsLost:
+  {}`, `contestsWon: {}` on the new war record.
+- `unit_destroyed` event handler: if either the killer's owner and the
+  victim's owner are at war, increment `war.unitsLost[victimOwner]`.
+- `location_captured` event handler (existing event in `events.js`):
+  increment `war.locationsLost[priorController]`.
+- `contest_won` event handler: increment `war.contestsWon[winner]`.
+
+Helper `findWar(state, a, b) → war | null` — looks up the active war
+record between two factions; returns `null` if not at war.
+
 ### 6.3 New / modified CONFIG entries
+
+Complete block (append to the `diplomacy` section of `CONFIG`):
 
 ```js
 diplomacy: {
   ...,
   honor: {
     ...,
-    surpriseAttackLoss: 8,  // §1.1
+    surpriseAttackLoss: 8,        // §1.1
   },
   gift: {
-    windowRounds: 3,        // §1.2
+    windowRounds: 3,              // §1.2
   },
-  tradingPact: {            // §1.3
+  tradingPact: {                  // §1.3
     scrapPerUpkeep: 2,
     permanentResearchOnFormation: 1,
     suspendGraceRounds: 3,
   },
-  vision: {
-    sharedPactDefault: true,    // §1.9
+  demandTribute: {                // §1.4
+    minPowerRatio: 1.5,
+    caveBaseRatio: 2.0,
+    braveryScale: 1.5,
+    escalateOnRefusal: "war",     // "war" | "standing-drop"
+    refuseStandingDropTiers: 2,
   },
-  borders: {
-    pactDefault: true,          // §1.10
+  suePeace: {                     // §1.5
+    acceptThreshold: 8,
+    standingBoost: 3,
+  },
+  war: {                          // §1.5
+    unitLossWeight: 2,
+    locationLossWeight: 4,
+  },
+  freeVassal: {                   // §1.7
+    honorGain: 5,
+    standingToFriendly: 5,        // Standing value to set freed-vassal toward you
+    rivalCoolingTiers: 1,         // tiers their natural rivals cool toward you
+  },
+  pactCall: {                     // §1.8
+    hostilityWeight: 0.3,
+    loyaltyWeight: 0.3,
+    targetPowerWeight: 2.0,
+    acceptScoreThreshold: 1,
+    aggressionScoreBias: 1,       // ±1 to score from caller's aggression dial
+    honorGainOnHonor: 2,          // Standing gain to caller from ally
+    declineStandingHit: 4,        // Standing hit to caller from ally
+  },
+  vision: {                       // §1.9
+    sharedPactDefault: true,
+  },
+  borders: {                      // §1.10
+    pactDefault: true,
+  },
+  pact: {                         // §1.9, §1.10
+    toggleVisionStandingHit: 1,
+    toggleBordersStandingHit: 1,
   },
 },
 ```
 
 ### 6.4 New events
+
+Add to `EVENT_NAMES` in `events.js`:
 
 - `surprise_attack_honor_lost { attacker, target, amount }`
 - `trading_pact_formed { partyA, partyB }`
@@ -681,59 +864,170 @@ diplomacy: {
 - `trading_pact_resumed { agreement }`
 - `trading_pact_dissolved { agreement, reason }`
 - `vassal_freed { lord, vassal }`
-- `pact_call_requested { caller, ally, target }` — outgoing from player
-- `tribute_demanded { demander, target, terms }` — inbox arrival
+- `pact_call_requested { caller, ally, target }`
+- `pact_call_honored { caller, ally, target }`
+- `pact_call_declined { caller, ally, target }`
+- `tribute_demanded { demander, target, terms }`
+- `tribute_caved { demander, target, terms }`
+- `tribute_refused { demander, target, escalation }`
 - `allied_vision_toggled { agreement, on }`
 - `open_borders_toggled { agreement, on }`
+- `gift_counter_decayed { fromPid, toPid, value }`
 
-### 6.5 Round-end pipeline additions
+### 6.5 Round-end pipeline additions (in `runDiplomacyRound`)
 
-In `runDiplomacyRound`:
+Insert in this order, **before** the existing AI-to-AI politics step:
 
 1. **Gift counter decay** — for each `fromPid`, for each `toPid`,
    `giftCounter[fromPid][toPid] = max(0, giftCounter[fromPid][toPid] − 1)`.
+   Drop the entry when it hits 0. Emit `gift_counter_decayed` only at
+   transitions to 0 (avoids event spam).
 2. **Trading pact route check** — for each agreement of type
-   `trading-pact`, recompute the capital-to-capital route; flip
-   `suspended` and increment `suspendedRounds` accordingly. If
-   `suspendedRounds >= suspendGraceRounds`, dissolve (remove the
-   Research floor + agreement).
+   `"trading-pact"`:
+   - Find each party's Capital Location.
+   - Call `reinforcementRoute(state, partyA, partyB_capital_hex)` —
+     **use the existing helper exactly as the supply system does.**
+   - If the route returns null OR `agreement.openBorders === false`
+     across the path, set `suspended = true` and increment
+     `suspendedRounds`. Emit `trading_pact_suspended` if this is the
+     transition.
+   - If the route returns a path and was previously suspended, set
+     `suspended = false`, reset `suspendedRounds = 0`. Emit
+     `trading_pact_resumed`.
+   - If `suspendedRounds >= suspendGraceRounds`, dissolve the
+     agreement: subtract `permanentResearchOnFormation` from each
+     party's `permanentResearch`, call `recomputeResearch`, remove the
+     agreement from the array. Emit `trading_pact_dissolved` with
+     `reason: "route-severed"`.
 
 ### 6.6 Allied vision union (visibility)
 
-In `recomputeVisibility` (or as a post-process step over all factions),
-union each faction's `visible` set with every pact-ally's `visible` set
-where `agreement.visionShare === true`. **Concealment is still per
-faction** — sharing visible hexes does NOT share Detection. (Concealed
-enemies remain concealed to the borrowing faction unless they have
-their own Detection.)
+Add a new function `applySharedVision(state)` in `visibility.js`:
 
-### 6.7 Open borders Menace suppression
+```js
+export function applySharedVision(state) {
+  if (!state.diplomacy?.agreements) return;
+  for (const agr of state.diplomacy.agreements) {
+    if (agr.type !== "pact" || !agr.visionShare) continue;
+    const va = state.visibility[agr.a]; const vb = state.visibility[agr.b];
+    if (!va || !vb) continue;
+    const union = new Set([...va.visible, ...vb.visible]);
+    va.visible = new Set(union); vb.visible = new Set(union);
+    // explored is monotonic — extend both with the union too
+    for (const h of union) { va.explored.add(h); vb.explored.add(h); }
+  }
+}
+```
 
-In `onAttack` / wherever per-attack Menace is computed, the existing
-charge stands. New: a **transit-Menace** charge that previously implicit
-in proximity / ZoC reads is gated to zero while an active openBorders
-agreement exists between the parties. (If no transit-Menace is
-currently charged anywhere, this is a no-op forward-compat hook —
-document and leave for the system that introduces it.)
+Call `applySharedVision(state)` **after** `recomputeVisibilityFor` in:
+- `recomputeVisibilityFor` itself (the multi-faction wrapper) at the
+  end.
+- Any call site that does a single-faction `recomputeVisibility` for a
+  faction in an active pact (cheaper alternative: always call after the
+  pact formation / dissolution / toggle events).
 
----
+**Concealment is NOT shared** — the union is over `visible` hex sets
+only. A concealed-but-undetected unit on a shared hex is invisible to
+the borrowing faction unless it has its own Detection in range. The
+existing `canSee` concealment check already handles this per faction.
 
-## Part 7 — Open items / decisions deferred
+### 6.7 Open borders — system boundary
 
-- **Pact-call AI evaluation factors.** Spec says "the AI evaluates";
-  the existing `pactCall` function honors automatically (placeholder).
-  Needs a proper evaluation: target hostility to ally, war exhaustion,
-  power gap. Out of scope here; the verb surface lands first.
-- **War-exhaustion modeling.** Sue-for-peace relies on it; needs a
-  concrete state machine (turn counter per war, attrition counter, who-
-  controls-more-territory snapshot).
-- **Demand-tribute power-gap formula.** Spec calls it qualitative;
-  needs a numeric threshold ("at least 1.5× power") for the
-  enable/disable gate.
-- **Trading Pact suspension feedback to the AI.** Should an AI-side
-  partner take a Standing hit when their human partner's route is
-  blocked by *their* fault (one of their own units / ZoC blocking the
-  route)? Probably not — but worth confirming during play test.
+The diplomacy agent wires the agreement state (§6.2) and the helper
+**`hasOpenBorders(state, transitingFid, ownerFid) → boolean`** in
+`diplomacy.js`:
+
+```js
+export function hasOpenBorders(state, transitingFid, ownerFid) {
+  for (const agr of state.diplomacy?.agreements || []) {
+    const matches =
+      (agr.a === transitingFid && agr.b === ownerFid) ||
+      (agr.a === ownerFid && agr.b === transitingFid);
+    if (!matches) continue;
+    if (agr.type === "open-borders") return true;
+    if (agr.type === "pact" && agr.openBorders) return true;
+  }
+  return false;
+}
+```
+
+The movement-blockade system (separate work track) imports and calls
+this helper to short-circuit blockade rules. **No further diplomacy-
+side work is required.** Until the movement system consumes the
+helper, openBorders has no observable in-game effect — but the
+diplomacy implementation is complete in itself.
+
+### 6.8 Surprise-attack Honor (§1.1) — wire location
+
+In `onAttack(state, attacker, target)` in `diplomacy.js` (existing
+function), **before** the existing Menace charge:
+
+```js
+const wasAtWar = atWar(state, attacker, target);
+if (!wasAtWar) {
+  // Surprise strike — pay the Honor toll once per war-initiation.
+  state.players[attacker].honor = Math.max(
+    D().honor.min,
+    state.players[attacker].honor - D().honor.surpriseAttackLoss,
+  );
+  emit(state, "surprise_attack_honor_lost", {
+    attacker, target, amount: D().honor.surpriseAttackLoss,
+  });
+}
+// declareWar (called downstream) initializes the war record; the
+// surprise check above must run BEFORE that, so the war record check
+// at the top of this function reads "not yet at war."
+```
+
+### 6.9 Gift diminishing returns (§1.2) — wire location
+
+In `applyDeal` (`src/game/diplomacy.js`), inside the resource-transfer
+branch — when the deal is a one-side gift and the transferred resource
+is scrap, replace the existing `adjustStanding(... giftStandingPerScrap
+* amount ...)` call with:
+
+```js
+const n = (state.diplomacy.giftCounter[fromPid]?.[toPid] || 0);
+const baseGain = scrapAmount * D().ai.giftStandingPerScrap;
+const actualGain = Math.floor(baseGain / (n + 1));
+adjustStanding(state, toPid, fromPid, actualGain, "gift");
+state.diplomacy.giftCounter[fromPid] =
+  state.diplomacy.giftCounter[fromPid] || {};
+state.diplomacy.giftCounter[fromPid][toPid] = n + 1;
+```
+
+### 6.10 Free vassal (§1.7) — wire location
+
+New verb in `performDiplomacy`'s switch:
+
+```js
+case "free-vassal": {
+  const vassal = params.faction;
+  if (vassalLord(state, vassal) !== pid) return { ok: false, reason: "not your vassal" };
+  // Stop tribute flow
+  state.diplomacy.agreements = state.diplomacy.agreements.filter(
+    (agr) => agr.vassalTribute !== vassal,
+  );
+  // Clear vassalage
+  delete state.diplomacy.vassals[vassal];
+  // Honor + Standing effects
+  state.players[pid].honor = Math.min(
+    D().honor.max,
+    state.players[pid].honor + D().freeVassal.honorGain,
+  );
+  setStanding(state, vassal, pid, D().freeVassal.standingToFriendly, "freed");
+  // Cool standing of rivals (factions hostile to the freed party) toward you
+  for (const f of factionIds(state)) {
+    if (f === pid || f === vassal) continue;
+    if (getStanding(state, f, vassal) <= D().tiers.wary) {
+      adjustStanding(state, f, pid,
+        -D().freeVassal.rivalCoolingTiers * 3, "freed-clemency");
+    }
+  }
+  emit(state, "vassal_freed", { lord: pid, vassal });
+  return r();
+}
+```
 
 ---
 
