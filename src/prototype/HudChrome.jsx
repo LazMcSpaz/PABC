@@ -361,7 +361,7 @@ export function CloseX({ onClose, style }) {
 
 // --- framed window -----------------------------------------------------
 // Angular HUD corner brackets drawn just inside a panel's corners.
-function CornerBrackets({ color = C.holo, len = 16, inset = 7, w = 2 }) {
+export function CornerBrackets({ color = C.holo, len = 16, inset = 7, w = 2 }) {
   const b = { position: "absolute", width: len, height: len, pointerEvents: "none", opacity: 0.85 };
   return (
     <>

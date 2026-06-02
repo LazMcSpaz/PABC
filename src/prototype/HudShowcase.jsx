@@ -5,9 +5,21 @@ import { useState } from "react";
 import { AnimatePresence } from "framer-motion";
 import ControlMeter from "./ControlMeter.jsx";
 import TechWheel from "./TechWheel.jsx";
+import EncounterModal from "./EncounterModal.jsx";
 import {
   C, ICON, TopBar, MenuOrb, RadialMenu, LocationWindow, TitledWindow,
 } from "./HudChrome.jsx";
+
+const MOCK_ENCOUNTER = {
+  id: "fe_buried_cache",
+  title: "Buried Cache",
+  text: "Something is buried here. The disturbance is recent — within a season, no longer. Whoever put it here meant to come back.",
+  choices: [
+    { id: "ch_cache_dig", label: "Dig it up", outcomeText: "+2 scrap, +1 Research" },
+    { id: "ch_cache_mark", label: "Mark the spot and wait", outcomeText: "Return in 3 rounds — ambush or trade" },
+    { id: "ch_cache_leave", label: "Leave it where it lies", outcomeText: null },
+  ],
+};
 
 // Mock tech-wheel state for the showcase: Doctrine + Vanguard already held
 // (so Killing Blow / Turrets are now reachable), Industry held too. One
@@ -83,10 +95,22 @@ export default function HudShowcase({ onExit }) {
         {panel === "diplomacy" && <TitledWindow key="diplomacy" title="Diplomacy" icon={ICON.diplomacy} onClose={() => setPanel(null)}>
           <p className="pc-prose" style={{ margin: 0, fontSize: 13, lineHeight: 1.6, color: C.textDim }}>Broker deals, pacts and coalitions with rival factions — manage reputation and pursue a Recognition victory.</p>
         </TitledWindow>}
+        {panel === "encounter" && (
+          <EncounterModal
+            key="encounter"
+            encounter={MOCK_ENCOUNTER}
+            choices={MOCK_ENCOUNTER.choices}
+            eligibleIds={MOCK_ENCOUNTER.choices.map((c) => c.id)}
+            redrawsLeft={1}
+            onRedraw={() => {}}
+            onPick={() => setPanel(null)}
+          />
+        )}
       </AnimatePresence>
-      <div style={{ position: "absolute", bottom: 18, left: 24, color: C.textFaint, zIndex: 20 }}>
+      <div style={{ position: "absolute", bottom: 18, left: 24, color: C.textFaint, zIndex: 20, display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 6 }}>
         <div style={{ fontFamily: C.font, fontSize: 11, letterSpacing: 3, textTransform: "uppercase" }}>HUD Look Pass · v2</div>
-        {onExit && <button className="hud-int" onClick={onExit} style={{ marginTop: 8, fontFamily: C.font, fontSize: 11, letterSpacing: 1.5, textTransform: "uppercase", color: C.textDim, background: "transparent", border: `1px solid ${C.steelHi}`, borderRadius: 5, padding: "5px 14px", cursor: "pointer" }}>← Back to game</button>}
+        <button className="hud-int" onClick={() => setPanel("encounter")} style={{ fontFamily: C.font, fontSize: 10.5, letterSpacing: 1.6, textTransform: "uppercase", color: C.holoHi, background: "rgba(86,211,198,0.08)", border: `1px solid ${C.holo}66`, borderRadius: 5, padding: "5px 12px", cursor: "pointer" }}>Encounter preview</button>
+        {onExit && <button className="hud-int" onClick={onExit} style={{ fontFamily: C.font, fontSize: 11, letterSpacing: 1.5, textTransform: "uppercase", color: C.textDim, background: "transparent", border: `1px solid ${C.steelHi}`, borderRadius: 5, padding: "5px 14px", cursor: "pointer" }}>← Back to game</button>}
       </div>
     </div>
   );
