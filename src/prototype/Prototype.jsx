@@ -32,6 +32,14 @@ import { assignTechNode } from "../game/stats.js";
 import { performDiplomacy } from "../game/diplomacy.js";
 import DiplomacyScreen from "./DiplomacyScreen.jsx";
 import EncounterModal from "./EncounterModal.jsx";
+import MoveConfirmOverlay from "./MoveConfirmOverlay.jsx";
+
+// Local-storage key for the "Don't ask again" preference on move confirm.
+const SKIP_MOVE_CONFIRM_KEY = "pabc.skipMoveConfirm";
+function readSkipMoveConfirm() {
+  try { return typeof localStorage !== "undefined" && localStorage.getItem(SKIP_MOVE_CONFIRM_KEY) === "1"; }
+  catch { return false; }
+}
 import TechWheel from "./TechWheel.jsx";
 import EventFeed from "./EventFeed.jsx";
 import UnitPanel from "./UnitPanel.jsx";
@@ -208,6 +216,8 @@ export default function Prototype({ config, onNewGame }) {
   const [selectedUnitId, setSelectedUnitId] = useState(null);
   const [toast, setToast] = useState(null); // { kind: "error"|"info", text }
   const [encounterPrompt, setEncounterPrompt] = useState(null); // pending move + encounter pick
+  const [pendingMove, setPendingMove] = useState(null);          // { unitUid, origin, dest } awaiting confirm
+  const [skipMoveConfirm, setSkipMoveConfirm] = useState(readSkipMoveConfirm);
   const [contestViz, setContestViz] = useState(null); // contest replay overlay
   const [salvagePrompt, setSalvagePrompt] = useState(null); // interactive salvage
   const [showTechWheel, setShowTechWheel] = useState(false); // §17 wheel overlay
@@ -353,6 +363,20 @@ export default function Prototype({ config, onNewGame }) {
     if (p) setSalvagePrompt(p);
   }
 
+  // Run the actual move once the player has committed (either by
+  // confirming the overlay or because they've opted out of the prompt).
+  // If the destination would draw a field encounter, surface the choice
+  // modal — at that point the move is already locked in.
+  function executeMove(unitUid, destHex) {
+    const enc = peekFieldEncounter(gameRef.current, destHex);
+    if (enc && (enc.choices || []).length > 0) {
+      setEncounterPrompt(buildEncounterPrompt(gameRef.current, unitUid, destHex, 0));
+      return;
+    }
+    const r = runAction("move", { unit: unitUid, to: destHex }, { interactiveLoot: true });
+    if (r.ok) { inspectHex(destHex); maybeOpenLoot(); }
+  }
+
   function onHexClick(hexId) {
     // Reachable hex with selected unit → Move. Don't open inspector.
     if (
@@ -361,15 +385,12 @@ export default function Prototype({ config, onNewGame }) {
       reachable?.has(hexId) &&
       state.units[selectedUnitId]?.node !== hexId
     ) {
-      // Pre-flight: if the move would draw a field encounter, surface
-      // the choice modal first and stash the pending move on it.
-      const enc = peekFieldEncounter(gameRef.current, hexId);
-      if (enc && (enc.choices || []).length > 0) {
-        setEncounterPrompt(buildEncounterPrompt(gameRef.current, selectedUnitId, hexId, 0));
-        return;
+      const origin = state.units[selectedUnitId]?.node;
+      if (skipMoveConfirm) {
+        executeMove(selectedUnitId, hexId);
+      } else {
+        setPendingMove({ unitUid: selectedUnitId, origin, dest: hexId });
       }
-      const r = runAction("move", { unit: selectedUnitId, to: hexId }, { interactiveLoot: true });
-      if (r.ok) { inspectHex(hexId); maybeOpenLoot(); }
       return;
     }
 
@@ -752,33 +773,56 @@ export default function Prototype({ config, onNewGame }) {
         </div>
       )}
 
-      {encounterPrompt && (
-        <EncounterModal
-          encounter={encounterPrompt.encounter}
-          choices={encounterPrompt.choices}
-          eligibleIds={encounterPrompt.eligibleIds}
-          redrawsLeft={encounterPrompt.redrawsLeft}
-          onRedraw={() =>
-            setEncounterPrompt(
-              buildEncounterPrompt(
-                gameRef.current,
+      <AnimatePresence>
+        {pendingMove && (
+          <MoveConfirmOverlay
+            key="move-confirm"
+            originHexId={pendingMove.origin}
+            destHexId={pendingMove.dest}
+            ownerColor={UI_FACTIONS[state.units[pendingMove.unitUid]?.owner]?.color}
+            onConfirm={() => {
+              const m = pendingMove;
+              setPendingMove(null);
+              executeMove(m.unitUid, m.dest);
+            }}
+            onCancel={() => setPendingMove(null)}
+            onSkipFuture={() => {
+              setSkipMoveConfirm(true);
+              try { localStorage.setItem(SKIP_MOVE_CONFIRM_KEY, "1"); } catch {}
+            }}
+          />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {encounterPrompt && (
+          <EncounterModal
+            key="encounter"
+            encounter={encounterPrompt.encounter}
+            choices={encounterPrompt.choices}
+            eligibleIds={encounterPrompt.eligibleIds}
+            redrawsLeft={encounterPrompt.redrawsLeft}
+            onRedraw={() =>
+              setEncounterPrompt(
+                buildEncounterPrompt(
+                  gameRef.current,
+                  encounterPrompt.unitUid,
+                  encounterPrompt.dest,
+                  encounterPrompt.idx + 1,
+                ),
+              )
+            }
+            onPick={(choiceId) =>
+              doMoveWithEncounterChoice(
                 encounterPrompt.unitUid,
                 encounterPrompt.dest,
-                encounterPrompt.idx + 1,
-              ),
-            )
-          }
-          onPick={(choiceId) =>
-            doMoveWithEncounterChoice(
-              encounterPrompt.unitUid,
-              encounterPrompt.dest,
-              choiceId,
-              encounterPrompt.idx,
-            )
-          }
-          onCancel={() => setEncounterPrompt(null)}
-        />
-      )}
+                choiceId,
+                encounterPrompt.idx,
+              )
+            }
+          />
+        )}
+      </AnimatePresence>
 
       {contestViz && (
         <ContestOverlay
