@@ -2,20 +2,27 @@
 // the cursor; press-and-drag pans. A drag is told apart from a click so
 // tapping a hex still selects it. A small control cluster offers button
 // zoom and a recenter that re-fits the whole board.
-import { useCallback, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { theme } from "./data.js";
+import { animatePan } from "./aiReplay/CameraController.js";
 
 const MIN_SCALE = 0.45;
 const MAX_SCALE = 2.4;
 const clamp = (n, lo, hi) => Math.min(hi, Math.max(lo, n));
 
-export default function BoardViewport({ children }) {
+// `cameraTarget` is a content-space point {x,y} (a hex centre) the AI replay
+// wants centred; `cameraPanMs` is the eased pan duration (0 = snap). User
+// drag / wheel still work and simply override the last programmatic pan.
+export default function BoardViewport({ children, cameraTarget = null, cameraPanMs = 350 }) {
   const vpRef = useRef(null);
   const contentRef = useRef(null);
   const drag = useRef(null);
   const moved = useRef(false);
   const [view, setView] = useState({ scale: 1, x: 0, y: 0 });
   const [grabbing, setGrabbing] = useState(false);
+  const viewRef = useRef(view);
+  viewRef.current = view;
+  const panStopRef = useRef(null);
 
   const fitToView = useCallback(() => {
     const vp = vpRef.current;
@@ -34,6 +41,27 @@ export default function BoardViewport({ children }) {
   useLayoutEffect(() => {
     fitToView();
   }, [fitToView]);
+
+  // Programmatic camera pan: ease the content translate so `cameraTarget`
+  // centres in the viewport, keeping the current scale. Driven by the AI
+  // replay; a new target cancels any in-flight pan.
+  useEffect(() => {
+    if (!cameraTarget) return undefined;
+    const vp = vpRef.current;
+    if (!vp) return undefined;
+    if (panStopRef.current) panStopRef.current();
+    const start = { x: viewRef.current.x, y: viewRef.current.y };
+    panStopRef.current = animatePan({
+      start,
+      target: cameraTarget,
+      vw: vp.clientWidth,
+      vh: vp.clientHeight,
+      scale: viewRef.current.scale,
+      durationMs: cameraPanMs,
+      onFrame: ({ x, y }) => setView((v) => ({ ...v, x, y })),
+    });
+    return () => { if (panStopRef.current) panStopRef.current(); };
+  }, [cameraTarget?.x, cameraTarget?.y, cameraPanMs]);
 
   // Wheel zoom — attached natively so preventDefault is honoured (React's
   // synthetic wheel handler is passive and cannot block page scroll).

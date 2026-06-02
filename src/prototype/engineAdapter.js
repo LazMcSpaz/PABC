@@ -6,6 +6,7 @@
 
 import { CONFIG } from "../game/config.js";
 import { reinforcementRoute } from "../game/board.js";
+import { takeAITurn } from "../game/ai.js";
 import {
   LOCATIONS as ENGINE_LOCATIONS,
   CHIPS as ENGINE_CHIPS,
@@ -94,6 +95,24 @@ export function ensureUiConstantsSynced() {
     short: "+1 Tech / turn",
     effect: ENGINE_CHIPS.labs?.desc ?? "+1 Tech score",
   });
+}
+
+// §AI replay — run one AI turn and hand the UI exactly what it needs to
+// replay it: the pre-turn unit positions + owners (the deferred-display
+// baseline) and the slice of events the turn emitted. The engine stays
+// synchronous; the cinematics are the caller's job (useAIReplay). The slice
+// contract — `events === state.log.slice(preTurnLogLen)` — is asserted by the
+// headless harness, the one engine-touching surface of this feature.
+export function runAITurnWithReplay(state) {
+  const preTurnLogLen = state.log.length;
+  const positions = {};
+  const owners = {};
+  for (const u of Object.values(state.units)) {
+    positions[u.uid] = u.node;
+    owners[u.uid] = u.owner;
+  }
+  takeAITurn(state);
+  return { events: state.log.slice(preTurnLogLen), positions, owners, preTurnLogLen };
 }
 
 // --- state shape adaptation -----------------------------------------
