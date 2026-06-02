@@ -37,8 +37,44 @@ import EventFeed from "./EventFeed.jsx";
 import UnitPanel from "./UnitPanel.jsx";
 import ContestOverlay from "./ContestOverlay.jsx";
 import SalvageModal from "./SalvageModal.jsx";
+import { useAIReplay } from "./aiReplay/useAIReplay.js";
+import ReplayLayer from "./aiReplay/ReplayLayer.jsx";
+import { buildHexGeometry } from "./aiReplay/CameraController.js";
+import { getAiTurnSpeed, setAiTurnSpeed, AI_TURN_SPEEDS, AI_TURN_SPEED_LABELS } from "./aiReplay/options.js";
 
 const TAB_H = 44;
+
+// Re-place unit tokens at their DISPLAYED (lagging) hexes during an AI replay
+// so pawns visibly slide rather than teleport. Everything else on the board
+// stays at end-state. Units currently mid-slide (in `hiddenUnitIds`) are drawn
+// by the ReplayLayer instead, so we omit them from the static board.
+function withDisplayedPositions(state, positions, hiddenUnitIds) {
+  if (!positions) return state;
+  const youId = state.youId;
+  const byHex = {};
+  for (const u of Object.values(state.units)) {
+    if (hiddenUnitIds && hiddenUnitIds.has(u.uid)) continue;
+    const hex = positions[u.uid] ?? u.node;
+    (byHex[hex] ||= []).push(u);
+  }
+  const hexes = {};
+  for (const [id, h] of Object.entries(state.hexes)) {
+    if (h.fog !== "visible") { hexes[id] = h; continue; }
+    const list = byHex[id];
+    if (!list || !list.length) {
+      hexes[id] = h.unitId || h.unitIds ? { ...h, unitId: undefined, unitIds: undefined } : h;
+      continue;
+    }
+    const ordered = [...list].sort((a, b) => {
+      const am = a.owner === youId ? 0 : 1;
+      const bm = b.owner === youId ? 0 : 1;
+      if (am !== bm) return am - bm;
+      return a.uid < b.uid ? -1 : 1;
+    });
+    hexes[id] = { ...h, unitIds: ordered.map((u) => u.uid), unitId: ordered[0].uid };
+  }
+  return { ...state, hexes };
+}
 
 // v0.2 §16.6 — human-readable list of the combat-lever modifiers a
 // contest applied, for the resolution overlay.
@@ -204,6 +240,12 @@ export default function Prototype({ config, onNewGame }) {
   const bumpTick = useCallback(() => setTick((t) => t + 1), []);
 
   const state = useMemo(() => adaptState(gameRef.current), [tick]);
+
+  // §AI replay — hex → content-space centre geometry (for camera + pawns).
+  const geomRef = useRef(null);
+  geomRef.current = useMemo(() => buildHexGeometry(state.rows), [state.rows]);
+  const replay = useAIReplay({ gameRef, geomRef, bumpTick });
+
   const [selectedHexId, setSelectedHexId] = useState(null);
   const [selectedUnitId, setSelectedUnitId] = useState(null);
   const [toast, setToast] = useState(null); // { kind: "error"|"info", text }
@@ -215,8 +257,11 @@ export default function Prototype({ config, onNewGame }) {
   const [diploResult, setDiploResult] = useState(null); // last action feedback
   const [menuOpen, setMenuOpen] = useState(false); // radial menu visible
   const [menuPanel, setMenuPanel] = useState(null); // "units"|"market"|"locations"|"settings"
+  const [aiSpeed, setAiSpeed] = useState(getAiTurnSpeed()); // §AI replay speed (persisted)
   const you = state.players[state.youId];
-  const isYourTurn = state.activeId === state.youId && !state.winnerId;
+  // During an AI replay the engine has already advanced (often to the human),
+  // but the player must not act until the cinematics finish — gate on it too.
+  const isYourTurn = state.activeId === state.youId && !state.winnerId && !replay.isReplaying;
   const yourUnits = Object.values(state.units).filter((u) => u.owner === state.youId);
   const yourLocationHexes = Object.values(state.hexes).filter(
     (h) => h.type === "location" && h.control?.sections?.some((s) => s === state.youId),
@@ -258,6 +303,16 @@ export default function Prototype({ config, onNewGame }) {
     }
     return out;
   }, [tick, isYourTurn, selectedUnitId, state]);
+
+  // During an AI replay the board renders pawns at their DISPLAYED (lagging)
+  // hexes; units mid-slide are drawn by the ReplayLayer, so hide them here.
+  const hiddenUnitIds = useMemo(
+    () => new Set(replay.animatedPawns.map((p) => p.uid)),
+    [replay.animatedPawns],
+  );
+  const boardState = replay.displayedPositions
+    ? withDisplayedPositions(state, replay.displayedPositions, hiddenUnitIds)
+    : state;
 
   // --- action handlers ----------------------------------------------
 
@@ -523,11 +578,14 @@ export default function Prototype({ config, onNewGame }) {
   }
 
   function onEndTurn() {
-    if (!isYourTurn) return;
+    if (!isYourTurn || replay.isReplaying) return;
     setSelectedUnitId(null);
+    setSelectedHexId(null);
     endTurn(gameRef.current);
-    driveAIsThroughHumanTurn(gameRef.current);
     bumpTick();
+    // Replay each AI turn cinematically (camera, sliding pawns, popups); the
+    // hook bumps ticks through the sequence and hands control back at the end.
+    replay.runAITurns();
   }
 
   function onMenuPick(key) {
@@ -573,22 +631,32 @@ export default function Prototype({ config, onNewGame }) {
           HUD chrome (resource wheel, faction readout, menu orb) floats
           over it as absolute overlays — see below. */}
       <div style={{ position: "relative", flex: 1, display: "flex", minHeight: 0 }}>
-        <BoardViewport>
+        <BoardViewport cameraTarget={replay.cameraTarget} cameraPanMs={replay.cameraPanMs}>
           <div style={{ position: "relative", padding: 30 }}>
             <Bracket corner="tl" />
             <Bracket corner="tr" />
             <Bracket corner="bl" />
             <Bracket corner="br" />
             <HexBoard
-              state={state}
+              state={boardState}
               selectedHexId={selectedHexId}
               selectedUnitId={selectedUnitId}
               reachable={reachable}
               onSelect={onHexClick}
               onUnitClick={onUnitClick}
             />
+            <ReplayLayer pawns={replay.animatedPawns} overlays={replay.activeOverlays} />
           </div>
         </BoardViewport>
+        {/* Tap-anywhere-to-skip catcher during an AI replay. Skip-now sticks
+            for the rest of the session (only a New Game clears it). */}
+        {replay.isReplaying && (
+          <div
+            onClick={replay.skipNow}
+            title="Tap to skip the AI replay (stays skipped this session)"
+            style={{ position: "absolute", inset: 0, zIndex: 40, cursor: "pointer" }}
+          />
+        )}
         {selectedUnitId && state.units[selectedUnitId] && (
           <UnitPanel
             unit={state.units[selectedUnitId]}
@@ -719,10 +787,36 @@ export default function Prototype({ config, onNewGame }) {
 
       {menuPanel === "settings" && (
         <TitledWindow key="settings" title="Settings" onClose={() => setMenuPanel(null)}>
-          <p className="pc-prose" style={{ margin: 0, fontSize: 13, lineHeight: 1.6, color: HUD.textDim }}>
-            Game options will live here. For now:
-          </p>
-          <div style={{ marginTop: 14 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            <span style={{ fontFamily: HUD.font, fontSize: 13, fontWeight: 700, letterSpacing: 0.6, color: HUD.text }}>
+              AI turn speed
+            </span>
+            <p className="pc-prose" style={{ margin: "0 0 4px", fontSize: 12, lineHeight: 1.5, color: HUD.textDim }}>
+              How fast enemy turns replay — camera pans, sliding pawns, and event popups.
+            </p>
+            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              {AI_TURN_SPEEDS.map((s) => (
+                <label
+                  key={s}
+                  className="hud-int"
+                  style={{ display: "flex", alignItems: "center", gap: 9, padding: "6px 8px", borderRadius: 6, border: "1px solid rgba(86,211,198,0.25)", background: aiSpeed === s ? "rgba(86,211,198,0.12)" : "rgba(0,0,0,0.2)", color: HUD.text, cursor: "pointer", fontSize: 13 }}
+                >
+                  <input
+                    type="radio"
+                    name="aiTurnSpeed"
+                    checked={aiSpeed === s}
+                    onChange={() => { setAiTurnSpeed(s); setAiSpeed(s); }}
+                  />
+                  {AI_TURN_SPEED_LABELS[s]}
+                </label>
+              ))}
+            </div>
+            <p className="pc-prose" style={{ margin: "6px 0 0", fontSize: 11, lineHeight: 1.5, color: HUD.textFaint }}>
+              Tip: tap anywhere during an AI turn to skip it. Skipping stays on for
+              the rest of this session — only a New Game restores the replay.
+            </p>
+          </div>
+          <div style={{ marginTop: 16, borderTop: `1px solid ${theme.border}`, paddingTop: 14 }}>
             <Btn variant="primary" onClick={onNewGame}>Abandon &amp; New Game</Btn>
           </div>
         </TitledWindow>

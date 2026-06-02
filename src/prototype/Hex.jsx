@@ -3,9 +3,7 @@
 import { LOCATIONS, FACTIONS, fullController, ownerColor, theme } from "./data.js";
 import ControlMeter from "./ControlMeter.jsx";
 import GarrisonValue from "./GarrisonValue.jsx";
-
-const HEX_W = 150;
-const HEX_H = Math.round(HEX_W * 1.1547);
+import { HEX_W, HEX_H } from "./hexDims.js";
 
 export { HEX_W, HEX_H };
 

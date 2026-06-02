@@ -1496,6 +1496,28 @@ line("\n  [AI sanity] tech-wheel use + game termination");
     safety > 0 && !!g.winnerId);
 }
 
+// AI-turn replay slice contract (the one engine-touching surface of the
+// cinematic-replay UI): events the UI walks === state.log.slice(preTurnLogLen)
+// after takeAITurn, in order. The UI snapshots positions, runs the turn, and
+// replays exactly this slice — nothing before preTurnLogLen leaks in.
+line("\n  [AI replay] event-slice contract for the cinematic replay");
+{
+  const g = createGame({ seed: 42, humanFactionId: "versari" });
+  startTurn(g);
+  let guard = 12;
+  while (guard-- > 0 && !g.players[activePlayerId(g)].isAI && !g.winnerId) endTurn(g);
+  const pid = activePlayerId(g);
+  const preTurnLogLen = g.log.length;
+  takeAITurn(g);
+  const events = g.log.slice(preTurnLogLen);
+  check("the slice picks up exactly the events takeAITurn appended",
+    g.players[pid].isAI && events.length === g.log.length - preTurnLogLen && events.length > 0);
+  check("the slice is identical (and in order) to the tail of the log",
+    events.every((e, i) => e === g.log[preTurnLogLen + i]));
+  check("nothing before preTurnLogLen is included in the slice",
+    preTurnLogLen === 0 || events[0] !== g.log[preTurnLogLen - 1]);
+}
+
 // =====================================================================
 // §18.3 INFLUENCE & ZONE OF CONTROL — the deterministic scalar field +
 // the derived ZoC owner map. Light-touch: capturing/integrating shifts
