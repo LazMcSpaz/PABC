@@ -124,7 +124,7 @@ export default function MoveConfirmOverlay({ unit, originHexId, destHexId, owner
           travelling pulses + a chevron arrowhead. The origin end fades
           out (no rounded cap) via a linear gradient on each stroke. */}
       <svg
-        style={{ position: "fixed", inset: 0, width: "100%", height: "100%", pointerEvents: "none", overflow: "visible" }}
+        style={{ position: "fixed", inset: 0, width: "100%", height: "100%", pointerEvents: "none", overflow: "visible", opacity: 0.6 }}
       >
         <defs>
           <marker id="mc-head" markerWidth="20" markerHeight="20" refX="13" refY="10" orient="auto" markerUnits="userSpaceOnUse">
@@ -214,7 +214,8 @@ export default function MoveConfirmOverlay({ unit, originHexId, destHexId, owner
       <motion.div
         onClick={(e) => e.stopPropagation()}
         initial={{ opacity: 0, scale: 0.96, x: 4 }}
-        animate={{ opacity: 1, scale: 1, x: 0 }}
+        animate={{ opacity: 0.7, scale: 1, x: 0 }}
+        exit={{ opacity: 0 }}
         transition={{ delay: 0.06, type: "spring", stiffness: 320, damping: 24 }}
         style={{
           position: "fixed",
