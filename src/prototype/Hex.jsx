@@ -27,13 +27,14 @@ const TOKEN_SLOTS = [
   { left: "16%", top: "50%" }, // 9:00  (left)
 ];
 
-function UnitToken({ unit, selected, slot = 0, onClick }) {
+function UnitToken({ unit, selected, slot = 0, onClick, dim = false }) {
   // Fall back for any faction id the UI table doesn't know (so an
   // unexpected owner never blanks the board).
   const faction = FACTIONS[unit.owner] || { name: unit.owner || "Unknown", color: "#888" };
   const pos = TOKEN_SLOTS[Math.min(slot, TOKEN_SLOTS.length - 1)];
   return (
     <div
+      data-unit-uid={unit.uid}
       title={`${unit.name} — ${faction.name}`}
       onClick={(e) => {
         if (!onClick) return;
@@ -58,6 +59,9 @@ function UnitToken({ unit, selected, slot = 0, onClick }) {
         justifyContent: "center",
         zIndex: selected ? 4 : 3,
         cursor: onClick ? "pointer" : undefined,
+        opacity: dim ? 0.3 : 1,
+        filter: dim ? "saturate(0.6) brightness(0.85)" : undefined,
+        transition: "opacity .18s ease, filter .18s ease",
       }}
     >
       <span style={{ fontFamily: theme.fontDisplay, fontSize: 13, fontWeight: 700, color: "#fff" }}>
@@ -88,7 +92,7 @@ function Plaque({ children }) {
   );
 }
 
-export default function Hex({ hex, units, selected, reachable, selectedUnitId, onClick, onUnitClick }) {
+export default function Hex({ hex, units, selected, reachable, selectedUnitId, dimmedUnitUid, onClick, onUnitClick }) {
   // §19 fog state — "visible" (live) | "explored" (remembered, dimmed) |
   // "unexplored" (black). Drives whether live details render at all.
   const fog = hex.fog || "visible";
@@ -233,6 +237,7 @@ export default function Hex({ hex, units, selected, reachable, selectedUnitId, o
           unit={u}
           slot={i}
           selected={u.uid === selectedUnitId}
+          dim={u.uid === dimmedUnitUid}
           onClick={onUnitClick}
         />
       ))}

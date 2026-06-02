@@ -604,6 +604,7 @@ export default function Prototype({ config, onNewGame }) {
               state={state}
               selectedHexId={selectedHexId}
               selectedUnitId={selectedUnitId}
+              dimmedUnitUid={pendingMove?.unitUid}
               reachable={reachable}
               onSelect={onHexClick}
               onUnitClick={onUnitClick}
@@ -777,6 +778,7 @@ export default function Prototype({ config, onNewGame }) {
         {pendingMove && (
           <MoveConfirmOverlay
             key="move-confirm"
+            unit={state.units[pendingMove.unitUid]}
             originHexId={pendingMove.origin}
             destHexId={pendingMove.dest}
             ownerColor={UI_FACTIONS[state.units[pendingMove.unitUid]?.owner]?.color}

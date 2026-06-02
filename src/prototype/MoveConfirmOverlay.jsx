@@ -1,36 +1,72 @@
-// Pre-move confirm. Shows where the unit would leave (ghost ring) and an
-// animated holographic arrow into the destination, plus a tiny prompt
-// asking the player to commit. The "Don't ask again" checkbox persists
-// the preference so future moves skip this step.
+// Pre-move confirm. Shows the unit at its destination (a "preview pawn")
+// connected back to its origin (where the real unit is rendered dimmed —
+// the ghost) by a channelled holographic arrow. A pulse of light travels
+// along the arrow toward the destination while the player decides. A
+// compact prompt sits to the right of the ghost (flips left only if it
+// would clip the viewport).
 //
-// Hex positions are read straight from the DOM (every <Hex/> renders a
-// `data-hex="<id>"` attribute) so we don't need the board's internal
-// layout state. We re-measure on resize / scroll so the arrow tracks the
-// board if the viewport pans.
+// Token positions are read straight from the DOM:
+//   - origin = the dimmed unit token's centre (data-unit-uid)
+//   - dest   = the centre of the destination hex (data-hex)
+// We re-measure on resize / scroll so everything tracks if the board pans.
 import { useEffect, useLayoutEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { C, useEscClose } from "./HudChrome.jsx";
 
-function getHexCenter(hexId) {
-  if (typeof document === "undefined") return null;
-  const el = document.querySelector(`[data-hex="${CSS.escape(hexId)}"]`);
+function getCenter(el) {
   if (!el) return null;
   const r = el.getBoundingClientRect();
-  return { x: r.left + r.width / 2, y: r.top + r.height / 2, w: r.width, h: r.height };
+  return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+}
+function getUnitCenter(uid) {
+  if (typeof document === "undefined") return null;
+  return getCenter(document.querySelector(`[data-unit-uid="${CSS.escape(uid)}"]`));
+}
+function getHexCenter(hexId) {
+  if (typeof document === "undefined") return null;
+  return getCenter(document.querySelector(`[data-hex="${CSS.escape(hexId)}"]`));
 }
 
-export default function MoveConfirmOverlay({ originHexId, destHexId, ownerColor, onConfirm, onCancel, onSkipFuture }) {
+function PreviewToken({ unit, color, x, y, size = 32 }) {
+  const half = size / 2;
+  return (
+    <div style={{
+      position: "fixed",
+      left: x - half, top: y - half,
+      width: size, height: size,
+      borderRadius: "50%",
+      background: `radial-gradient(circle at 36% 30%, ${color}, #14110c 145%)`,
+      border: `2px solid #100d09`,
+      boxShadow: `0 3px 6px rgba(0,0,0,0.6), 0 0 14px ${C.holo}aa, 0 0 8px ${color}77, inset 0 1px 2px rgba(255,255,255,0.3)`,
+      display: "flex", alignItems: "center", justifyContent: "center",
+      pointerEvents: "none",
+      zIndex: 51,
+    }}>
+      <span style={{ fontFamily: C.font, fontSize: 13, fontWeight: 700, color: "#fff" }}>
+        {(unit?.name || "U")[0]}
+      </span>
+    </div>
+  );
+}
+
+export default function MoveConfirmOverlay({ unit, originHexId, destHexId, ownerColor, onConfirm, onCancel, onSkipFuture }) {
   useEscClose(onCancel);
   const [skip, setSkip] = useState(false);
   const [pos, setPos] = useState({ origin: null, dest: null });
 
   useLayoutEffect(() => {
-    setPos({ origin: getHexCenter(originHexId), dest: getHexCenter(destHexId) });
-  }, [originHexId, destHexId]);
+    setPos({
+      origin: unit?.uid ? getUnitCenter(unit.uid) : getHexCenter(originHexId),
+      dest: getHexCenter(destHexId),
+    });
+  }, [unit, originHexId, destHexId]);
 
   useEffect(() => {
     function update() {
-      setPos({ origin: getHexCenter(originHexId), dest: getHexCenter(destHexId) });
+      setPos({
+        origin: unit?.uid ? getUnitCenter(unit.uid) : getHexCenter(originHexId),
+        dest: getHexCenter(destHexId),
+      });
     }
     window.addEventListener("resize", update);
     window.addEventListener("scroll", update, true);
@@ -38,7 +74,7 @@ export default function MoveConfirmOverlay({ originHexId, destHexId, ownerColor,
       window.removeEventListener("resize", update);
       window.removeEventListener("scroll", update, true);
     };
-  }, [originHexId, destHexId]);
+  }, [unit, originHexId, destHexId]);
 
   if (!pos.origin || !pos.dest) return null;
 
@@ -47,28 +83,26 @@ export default function MoveConfirmOverlay({ originHexId, destHexId, ownerColor,
   const dy = dest.y - origin.y;
   const ang = Math.atan2(dy, dx);
   const ux = Math.cos(ang), uy = Math.sin(ang);
-  // Pull endpoints inside the tokens so the arrow doesn't cover them.
-  const inset = 20;
-  const startX = origin.x + ux * inset;
-  const startY = origin.y + uy * inset;
-  const endX = dest.x - ux * inset;
-  const endY = dest.y - uy * inset;
+  // Pull endpoints inside each token (origin sits inside the ghost, dest
+  // inside the preview pawn) so the channel terminates cleanly.
+  const insetStart = 17;
+  const insetEnd = 17;
+  const startX = origin.x + ux * insetStart;
+  const startY = origin.y + uy * insetStart;
+  const endX = dest.x - ux * insetEnd;
+  const endY = dest.y - uy * insetEnd;
 
-  // Place the prompt off to the side of the arrow midpoint, on the
-  // shorter clearance edge of the viewport.
-  // Anchor the prompt next to the *origin* hex, set off perpendicular to
-  // the move direction so it doesn't sit on top of the arrow or the ghost.
-  const perp = { x: -uy, y: ux };
-  const promptW = 188;
-  const promptH = 96;
-  const offsetPx = 58;
+  // Prompt: small, anchored to the right of the ghost (origin), flips
+  // left only if it would clip the viewport right edge.
+  const promptW = 168;
+  const promptH = 78;
+  const gap = 36;
   const vw = (typeof window !== "undefined" ? window.innerWidth : 1440);
   const vh = (typeof window !== "undefined" ? window.innerHeight : 900);
-  let px = origin.x + perp.x * offsetPx - promptW / 2;
-  let py = origin.y + perp.y * offsetPx - promptH / 2;
-  if (px < 12 || px + promptW > vw - 12 || py < 12 || py + promptH > vh - 12) {
-    px = origin.x - perp.x * offsetPx - promptW / 2;
-    py = origin.y - perp.y * offsetPx - promptH / 2;
+  let px = origin.x + gap;
+  let py = origin.y - promptH / 2;
+  if (px + promptW > vw - 12) {
+    px = origin.x - gap - promptW;
   }
   px = Math.max(8, Math.min(px, vw - promptW - 8));
   py = Math.max(8, Math.min(py, vh - promptH - 8));
@@ -78,157 +112,154 @@ export default function MoveConfirmOverlay({ originHexId, destHexId, ownerColor,
     onConfirm();
   }
 
-  const ghostColor = ownerColor || C.holoHi;
-  const arrowColor = C.holo;
-  const arrowHi = C.holoHi;
+  const tokenColor = ownerColor || C.holoHi;
+  const PULSES = 3; // staggered pulses for a continuous flowing channel
 
   return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      transition={{ duration: 0.16 }}
-      style={{
-        position: "fixed", inset: 0, zIndex: 50,
-        background: "rgba(4,8,8,0.36)", backdropFilter: "blur(1.5px)",
-      }}
+    <div
       onClick={onCancel}
+      style={{ position: "fixed", inset: 0, zIndex: 50, background: "transparent" }}
     >
-      {/* Ghost ring at the origin — pulses to mark where the unit left */}
-      <motion.div
-        initial={{ opacity: 0, scale: 0.6 }}
-        animate={{ opacity: [0.85, 0.5, 0.85], scale: [1, 1.08, 1] }}
-        transition={{ duration: 1.7, repeat: Infinity, ease: "easeInOut" }}
-        style={{
-          position: "fixed",
-          left: origin.x - 19,
-          top: origin.y - 19,
-          width: 38, height: 38,
-          borderRadius: "50%",
-          border: `2px dashed ${ghostColor}`,
-          background: `radial-gradient(circle at 50% 40%, ${ghostColor}26, transparent 70%)`,
-          boxShadow: `0 0 16px ${ghostColor}aa, inset 0 0 10px ${ghostColor}55`,
-          pointerEvents: "none",
-        }}
-      />
-
-      {/* Arrow — dashed teal line with marching ants + drop-shadow glow */}
+      {/* Holographic channelled arrow — outer teal edges, dark inner core,
+          travelling pulses + a chevron arrowhead. */}
       <svg
         style={{ position: "fixed", inset: 0, width: "100%", height: "100%", pointerEvents: "none", overflow: "visible" }}
       >
         <defs>
-          <marker id="mc-head" markerWidth="14" markerHeight="14" refX="9" refY="7" orient="auto" markerUnits="userSpaceOnUse">
-            <path d="M0 0 L14 7 L0 14 L4 7 Z" fill={arrowHi} style={{ filter: `drop-shadow(0 0 4px ${arrowColor})` }} />
+          {/* Bright arrowhead with subtle inner outline */}
+          <marker id="mc-head" markerWidth="20" markerHeight="20" refX="13" refY="10" orient="auto" markerUnits="userSpaceOnUse">
+            <path d="M0 1 L18 10 L0 19 L6 10 Z" fill={C.holo}
+              style={{ filter: `drop-shadow(0 0 5px ${C.holo})` }} />
+            <path d="M3 4 L14 10 L3 16 L7 10 Z" fill="rgba(8,16,28,0.6)" />
           </marker>
         </defs>
-        {/* fainter glow underlay */}
+
+        {/* Wide soft glow underlay */}
         <line x1={startX} y1={startY} x2={endX} y2={endY}
-          stroke={arrowColor} strokeWidth="6" opacity="0.18"
-          style={{ filter: `blur(2px)` }} />
-        {/* primary marching-ants line */}
-        <motion.line
-          x1={startX} y1={startY} x2={endX} y2={endY}
-          stroke={arrowColor} strokeWidth="2.6"
-          strokeLinecap="round"
-          strokeDasharray="9 6"
-          markerEnd="url(#mc-head)"
-          initial={{ strokeDashoffset: 0 }}
-          animate={{ strokeDashoffset: -30 }}
-          transition={{ duration: 1, ease: "linear", repeat: Infinity }}
-          style={{ filter: `drop-shadow(0 0 5px ${arrowColor})` }}
-        />
+          stroke={C.holo} strokeWidth="18" strokeLinecap="round"
+          opacity="0.14" style={{ filter: "blur(3px)" }} />
+
+        {/* Outer body — the teal channel edges (full width) */}
+        <line x1={startX} y1={startY} x2={endX} y2={endY}
+          stroke={C.holo} strokeWidth="11" strokeLinecap="round"
+          opacity="0.85" markerEnd="url(#mc-head)"
+          style={{ filter: `drop-shadow(0 0 4px ${C.holo})` }} />
+
+        {/* Inner core — dark/low-opacity centre that exposes the edges */}
+        <line x1={startX} y1={startY} x2={endX} y2={endY}
+          stroke="rgba(8,16,28,0.7)" strokeWidth="6.5" strokeLinecap="round" />
+
+        {/* Faint centerline highlight */}
+        <line x1={startX} y1={startY} x2={endX} y2={endY}
+          stroke={C.holoHi} strokeWidth="0.7" strokeLinecap="round" opacity="0.55" />
+
+        {/* Travelling pulses — staggered so light flows continuously */}
+        {Array.from({ length: PULSES }).map((_, i) => {
+          const delay = (i / PULSES) * 1.4;
+          return (
+            <motion.circle
+              key={i}
+              cx={startX} cy={startY} r="3.4"
+              fill={C.holoHi}
+              style={{ filter: `drop-shadow(0 0 7px ${C.holoHi}) drop-shadow(0 0 4px ${C.holo})` }}
+              initial={{ x: 0, y: 0, opacity: 0 }}
+              animate={{
+                x: [0, dx, dx],
+                y: [0, dy, dy],
+                opacity: [0, 1, 1, 0],
+              }}
+              transition={{
+                duration: 1.4,
+                repeat: Infinity,
+                ease: "linear",
+                delay,
+                times: [0, 0.08, 0.92, 1],
+              }}
+            />
+          );
+        })}
       </svg>
 
-      {/* Confirm prompt — small low-opacity holo chip anchored next to the
-          origin. Decorative outcroppings on the top edge break up the
-          rectangle so it reads as device chrome rather than a dialog. */}
+      {/* Preview pawn — the unit, rendered at the destination. The real
+          unit token at the origin is dimmed (ghost) via the dimmedUnitUid
+          prop threaded through HexBoard / Hex / UnitToken. */}
+      <PreviewToken unit={unit} color={tokenColor} x={dest.x} y={dest.y} />
+
+      {/* Compact confirm prompt — anchored beside the ghost. */}
       <motion.div
         onClick={(e) => e.stopPropagation()}
-        initial={{ opacity: 0, scale: 0.96, y: 3 }}
-        animate={{ opacity: 1, scale: 1, y: 0 }}
-        transition={{ delay: 0.08, type: "spring", stiffness: 300, damping: 24 }}
+        initial={{ opacity: 0, scale: 0.96, x: 4 }}
+        animate={{ opacity: 1, scale: 1, x: 0 }}
+        transition={{ delay: 0.06, type: "spring", stiffness: 320, damping: 24 }}
         style={{
           position: "fixed",
           left: px, top: py,
           width: promptW,
-          padding: "9px 11px 8px",
+          padding: "7px 9px 7px",
           background: "linear-gradient(158deg, rgba(16,28,29,0.78), rgba(6,12,13,0.82))",
           border: `1px solid ${C.holo}99`,
           borderTopLeftRadius: 0,
           borderTopRightRadius: 5,
           borderBottomLeftRadius: 5,
           borderBottomRightRadius: 5,
-          boxShadow: `0 0 10px rgba(86,211,198,0.18), 0 4px 12px rgba(0,0,0,0.4)`,
+          boxShadow: `0 0 8px rgba(86,211,198,0.16), 0 3px 10px rgba(0,0,0,0.35)`,
           color: "#cfd6dc",
+          zIndex: 52,
         }}
       >
-        {/* Top-left outcropping — small angled tab */}
+        {/* Top-left tab outcropping */}
         <div style={{
           position: "absolute", top: -1, left: -1,
-          width: 34, height: 6,
+          width: 28, height: 5,
           background: C.holo,
-          clipPath: "polygon(0 0, 100% 0, 88% 100%, 0 100%)",
-          boxShadow: `0 0 5px ${C.holo}77`,
-        }} />
-        {/* Mid-right accent notch */}
-        <div style={{
-          position: "absolute", top: -1, right: 18,
-          width: 14, height: 4,
-          background: C.holo,
-          clipPath: "polygon(15% 0, 85% 0, 100% 100%, 0 100%)",
-          opacity: 0.7,
+          clipPath: "polygon(0 0, 100% 0, 86% 100%, 0 100%)",
+          boxShadow: `0 0 4px ${C.holo}77`,
         }} />
         {/* Bottom-right chevron */}
         <div style={{
-          position: "absolute", bottom: -1, right: 10,
-          width: 18, height: 4,
+          position: "absolute", bottom: -1, right: 8,
+          width: 14, height: 3,
           background: C.holo,
-          clipPath: "polygon(0 0, 100% 0, 86% 100%, 14% 100%)",
+          clipPath: "polygon(0 0, 100% 0, 85% 100%, 15% 100%)",
           opacity: 0.55,
         }} />
 
-        <div style={{
-          fontFamily: C.font, fontSize: 9, fontWeight: 600,
-          letterSpacing: 2, textTransform: "uppercase",
-          color: C.holoHi, marginBottom: 7, marginLeft: 2,
-          opacity: 0.85,
-        }}>Confirm Move</div>
-        <div style={{ display: "flex", gap: 6, marginBottom: 7 }}>
+        <div style={{ display: "flex", gap: 5, marginBottom: 5 }}>
           <button onClick={onCancel} className="hud-int" style={{
             flex: 1,
-            fontFamily: C.font, fontSize: 10, fontWeight: 700,
-            letterSpacing: 1.2, textTransform: "uppercase",
-            padding: "6px 8px", borderRadius: 4,
+            fontFamily: C.font, fontSize: 9.5, fontWeight: 700,
+            letterSpacing: 1, textTransform: "uppercase",
+            padding: "5px 6px", borderRadius: 3,
             border: `1px solid ${C.holo}55`,
             background: "rgba(86,211,198,0.05)",
             color: C.holoHi, cursor: "pointer",
           }}>Cancel</button>
           <button onClick={confirm} className="hud-int" style={{
             flex: 1,
-            fontFamily: C.font, fontSize: 10, fontWeight: 700,
-            letterSpacing: 1.2, textTransform: "uppercase",
-            color: "#08100f", padding: "6px 8px", borderRadius: 4,
+            fontFamily: C.font, fontSize: 9.5, fontWeight: 700,
+            letterSpacing: 1, textTransform: "uppercase",
+            color: "#08100f", padding: "5px 6px", borderRadius: 3,
             border: `1px solid ${C.holo}`,
             background: `linear-gradient(180deg, ${C.holoHi}, ${C.holo})`,
-            boxShadow: `0 0 10px ${C.holo}55`,
+            boxShadow: `0 0 8px ${C.holo}55`,
             cursor: "pointer",
-          }}>Confirm</button>
+          }}>Move</button>
         </div>
         <label style={{
-          display: "flex", alignItems: "center", gap: 6,
-          fontFamily: C.font, fontSize: 9, letterSpacing: 0.4,
-          color: "rgba(143,246,234,0.62)", cursor: "pointer", userSelect: "none",
-          marginLeft: 2,
+          display: "flex", alignItems: "center", gap: 5,
+          fontFamily: C.font, fontSize: 8.5, letterSpacing: 0.4,
+          color: "rgba(143,246,234,0.6)", cursor: "pointer", userSelect: "none",
+          marginLeft: 1,
         }}>
           <input
             type="checkbox"
             checked={skip}
             onChange={(e) => setSkip(e.target.checked)}
-            style={{ accentColor: C.holo, width: 11, height: 11 }}
+            style={{ accentColor: C.holo, width: 10, height: 10 }}
           />
           Don't ask again
         </label>
       </motion.div>
-    </motion.div>
+    </div>
   );
 }
