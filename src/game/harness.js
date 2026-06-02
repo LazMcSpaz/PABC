@@ -15,6 +15,10 @@ import {
   recognitionScore, recognitionMet, wouldAccept, dealValue, performDiplomacy,
   getStanding, atWar, arePacted, vassalLord, mayEngage, areNeighbours,
   tolerance, passesRepGates, factionIds,
+  // diplomacy-spec.md additions
+  findWar, warExhaustion, aiAcceptsPeace, evaluatePactCall,
+  canDemandTribute, caveOnDemand, hasOpenBorders, formTradingPact,
+  findPactAgreement, honorOf, powerOf,
 } from "./diplomacy.js";
 import { setStanding } from "./standing.js";
 import { factionDef, MINOR_FACTIONS } from "./content.js";
@@ -2236,6 +2240,267 @@ line("\n§18 DIPLOMACY CAPSTONE");
     check("a pact offer is accepted when Standing + rep gates pass",
       performDiplomacy(g, "versari", "propose-pact", { faction: "plainers" }).accepted === true);
   }
+}
+
+// =====================================================================
+// DIPLOMACY ENGINE (diplomacy-spec.md Parts 1 + 6) — the new verbs, AI
+// evaluation, war tracking, and the open-borders contract.
+// =====================================================================
+line("\nDIPLOMACY ENGINE  (diplomacy-spec Parts 1 + 6)");
+const DH = CONFIG.diplomacy;
+
+// §1.1 — surprise-attack Honor
+line("\n  [§1.1] surprise-attack Honor");
+{
+  const g = createGame({ seed }); ensureDiplomacy(g);
+  const a = "versari", b = "lakers";
+  const h0 = honorOf(g, a);
+  onAttack(g, a, b); // no prior war → treacherous strike
+  check("surprise attack (no prior war) drops attacker Honor by 8",
+    honorOf(g, a) === h0 - DH.honor.surpriseAttackLoss && atWar(g, a, b));
+  const h1 = honorOf(g, a);
+  onAttack(g, a, b); // already at war
+  check("a second attack in the same war doesn't ding Honor again", honorOf(g, a) === h1);
+}
+{
+  const g = createGame({ seed }); ensureDiplomacy(g);
+  const a = "versari", b = "lakers";
+  const h0 = honorOf(g, a);
+  declareWar(g, a, b, "player"); // declare first, no pact
+  onAttack(g, a, b);
+  check("declaring war first (no pact) costs no surprise Honor", honorOf(g, a) === h0);
+}
+{
+  const g = createGame({ seed }); ensureDiplomacy(g);
+  const a = "versari", b = "lakers";
+  formPact(g, a, b, "test");
+  const h0 = honorOf(g, a);
+  declareWar(g, a, b, "player"); // breaks the pact → −breakLoss only
+  check("declaring war on a pacted ally costs only the pact-break (−5)",
+    honorOf(g, a) === h0 - DH.honor.breakLoss);
+}
+
+// §1.2 — gift diminishing returns
+line("\n  [§1.2] gift diminishing returns");
+{
+  const g = createGame({ seed }); ensureDiplomacy(g);
+  const from = "versari", to = "lakers";
+  g.players[from].resource = 200;
+  setStanding(g, to, from, -12); setStanding(g, from, to, -2); // room below cap; no pact
+  const gains = [];
+  for (let i = 0; i < 4; i++) {
+    const before = getStanding(g, to, from);
+    performDiplomacy(g, from, "gift", { faction: to, amount: 8 }); // baseGain 4
+    gains.push(getStanding(g, to, from) - before);
+  }
+  check("gift gains diminish floor(baseGain/(n+1)) → 4,2,1,1",
+    JSON.stringify(gains) === JSON.stringify([4, 2, 1, 1]));
+}
+{
+  const g = createGame({ seed }); ensureDiplomacy(g);
+  const from = "versari", to = "lakers";
+  g.players[from].resource = 200;
+  setStanding(g, to, from, -12); setStanding(g, from, to, -2);
+  performDiplomacy(g, from, "gift", { faction: to, amount: 8 }); // counter → 1
+  runDiplomacyRound(g); // decay → 0
+  const before = getStanding(g, to, from);
+  performDiplomacy(g, from, "gift", { faction: to, amount: 8 });
+  check("an idle round decays the gift counter, refreshing the gain rate (full 4)",
+    getStanding(g, to, from) - before === 4);
+}
+
+// §1.3 — Trading Pact
+line("\n  [§1.3] Trading Pact");
+{
+  const g = createGame({ seed }); ensureDiplomacy(g);
+  const a = "versari", b = "goldgrass";
+  const isCap = (l) => (l.chips || []).some((c) => g.chips[c]?.chipId === "capital");
+  const capA = Object.values(g.locations).find((l) => l.controller === a && isCap(l));
+  const capB = Object.values(g.locations).find((l) => l.controller === b && isCap(l));
+  // Guarantee a clear capital-to-capital route: keep ONLY the two capitals
+  // controlled (every other Location neutral) and clear the stale ZoC so
+  // nothing walls the path between them.
+  for (const loc of Object.values(g.locations)) if (loc !== capA && loc !== capB) loc.controller = null;
+  g.world.zoc = {};
+  setStanding(g, a, b, 0); setStanding(g, b, a, 0);
+  g.players[a].menace = 0; g.players[b].menace = 0; g.players[a].honor = 6; g.players[b].honor = 6;
+  const permA = g.players[a].permanentResearch || 0, permB = g.players[b].permanentResearch || 0;
+  const res = formTradingPact(g, a, b);
+  check("Trading Pact forms with capitals + clear route + Neutral+", res.ok);
+  check("Trading Pact grants +1 permanent Research to each party",
+    (g.players[a].permanentResearch || 0) === permA + 1 && (g.players[b].permanentResearch || 0) === permB + 1);
+  const sa = g.players[a].resource, sb = g.players[b].resource;
+  runDiplomacyRound(g);
+  check("Trading Pact flows +2 scrap/round to each party while clear",
+    g.players[a].resource >= sa + DH.tradingPact.scrapPerUpkeep && g.players[b].resource >= sb + DH.tradingPact.scrapPerUpkeep);
+
+  // Sever the route (a loses all territory → no supply source) → suspend → dissolve.
+  for (const loc of Object.values(g.locations)) if (loc.controller === a) loc.controller = null;
+  runDiplomacyRound(g);
+  const agr = g.diplomacy.agreements.find((x) => x.type === "trading-pact");
+  check("a severed route suspends the Trading Pact", !!agr && agr.suspended === true);
+  runDiplomacyRound(g); runDiplomacyRound(g); // reach the grace limit (3 suspended rounds)
+  check("3 suspended rounds auto-dissolve the Trading Pact + remove the Research floor",
+    !g.diplomacy.agreements.some((x) => x.type === "trading-pact") && (g.players[a].permanentResearch || 0) === permA);
+}
+
+// §1.4 — Demand Tribute
+line("\n  [§1.4] Demand Tribute");
+{
+  const g = createGame({ seed }); ensureDiplomacy(g);
+  const strong = "versari", weak = "lakers";
+  g.players[strong].vp += 30; // overwhelming power lead
+  g.players[weak].resource = 10;
+  check("Demand Tribute is power-gated (strong enough → allowed)", canDemandTribute(g, strong, weak));
+  const r = performDiplomacy(g, strong, "demand-tribute", { faction: weak, amount: 5 });
+  check("a much-stronger demander makes the target cave (tribute transferred)",
+    r.ok && r.caved && g.players[weak].resource === 5 && g.players[strong].resource >= 5);
+}
+{
+  const g = createGame({ seed }); ensureDiplomacy(g);
+  const strong = "versari", target = "lakers";
+  g.players[target].resource = 10;
+  // Tune the power ratio to ~1.7 — passes the 1.5 gate but the target is brave
+  // enough to refuse (ratio < caveBaseRatio 2.0), escalating to war.
+  const base = powerOf(g, target);
+  const cur = powerOf(g, strong);
+  g.players[strong].vp += Math.max(0, Math.ceil((1.7 * base - cur) / DH.coalition.vpWeight));
+  check("Demand Tribute gate passes at a 1.7× power lead", canDemandTribute(g, strong, target));
+  const r = performDiplomacy(g, strong, "demand-tribute", { faction: target, amount: 5 });
+  check("a brave target near parity refuses tribute and the demand escalates to war",
+    r.refused === true && atWar(g, strong, target));
+}
+
+// §1.5 — Sue for peace
+line("\n  [§1.5] Sue for peace (deal-evaluated)");
+{
+  const g = createGame({ seed }); ensureDiplomacy(g);
+  const suer = "versari", ai = "lakers";
+  declareWar(g, suer, ai, "test");
+  const war = findWar(g, suer, ai);
+  war.unitsLost[ai] = 5; war.locationsLost[ai] = 2; // the AI is bleeding
+  g.round = 6; // duration 5
+  check("warExhaustion rises with duration + own losses", warExhaustion(g, ai, suer) >= 8);
+  const r = performDiplomacy(g, suer, "sue-for-peace", { faction: ai });
+  check("sue-for-peace accepted when the AI is exhausted (war ends)",
+    r.accepted === true && !atWar(g, suer, ai));
+}
+{
+  const g = createGame({ seed }); ensureDiplomacy(g);
+  const suer = "versari", ai = "lakers";
+  declareWar(g, suer, ai, "test"); // fresh
+  findWar(g, suer, ai).unitsLost[suer] = 3; // the AI is winning
+  const r = performDiplomacy(g, suer, "sue-for-peace", { faction: ai });
+  check("sue-for-peace refused when the AI is fresh + winning (war intact, no penalty)",
+    r.accepted === false && atWar(g, suer, ai));
+}
+
+// §1.7 — Free vassal
+line("\n  [§1.7] Free vassal");
+{
+  const g = createGame({ seed }); ensureDiplomacy(g);
+  const lord = "versari", vassal = "lakers";
+  vassalize(g, lord, vassal, "test");
+  check("vassalization establishes the tribute flow", g.diplomacy.agreements.some((a) => a.vassalTribute === vassal));
+  const h0 = honorOf(g, lord);
+  const r = performDiplomacy(g, lord, "free-vassal", { faction: vassal });
+  check("free-vassal: +5 lord Honor, vassal freed to Friendly, tribute flow stops",
+    r.ok && vassalLord(g, vassal) === null &&
+    honorOf(g, lord) === Math.min(DH.honor.max, h0 + DH.freeVassal.honorGain) &&
+    getStanding(g, vassal, lord) === DH.freeVassal.standingToFriendly &&
+    !g.diplomacy.agreements.some((a) => a.vassalTribute === vassal));
+}
+
+// §1.8 — Pact call
+line("\n  [§1.8] Player-initiated pact call");
+{
+  const g = createGame({ seed }); ensureDiplomacy(g);
+  const caller = "versari", ally = "lakers", target = "plainers";
+  formPact(g, caller, ally, "test");
+  declareWar(g, caller, target, "test");
+  setStanding(g, ally, target, -8); setStanding(g, ally, caller, 10);
+  check("evaluatePactCall honors when ally hates the target + loves the caller",
+    evaluatePactCall(g, ally, caller, target).honor === true);
+  const r = performDiplomacy(g, caller, "pact-call", { ally, target });
+  check("pact-call honored → ally joins the war", r.honored === true && atWar(g, ally, target));
+}
+{
+  const g = createGame({ seed }); ensureDiplomacy(g);
+  const caller = "versari", ally = "lakers", target = "plainers";
+  formPact(g, caller, ally, "test");
+  declareWar(g, caller, target, "test");
+  setStanding(g, ally, target, 5); setStanding(g, ally, caller, -2);
+  g.players[target].vp += 40; // a strong target the ally won't risk
+  const sBefore = getStanding(g, caller, ally);
+  check("evaluatePactCall declines when ally is friendly to a strong target",
+    evaluatePactCall(g, ally, caller, target).honor === false);
+  const r = performDiplomacy(g, caller, "pact-call", { ally, target });
+  check("pact-call declined → caller Standing toward ally drops",
+    r.honored === false && getStanding(g, caller, ally) === sBefore - DH.pactCall.declineStandingHit);
+}
+
+// §1.9 — Allied vision
+line("\n  [§1.9] Allied vision auto-share + toggle");
+{
+  const g = createGame({ seed }); ensureDiplomacy(g);
+  const a = "versari", b = "lakers";
+  const hexes = Object.keys(g.board.hexes);
+  g.visibility[a].visible = new Set([hexes[0]]);
+  g.visibility[b].visible = new Set([hexes[1]]);
+  formPact(g, a, b, "test"); // applySharedVision unions on formation
+  check("pact auto-shares vision (both factions see the union)",
+    g.visibility[a].visible.has(hexes[1]) && g.visibility[b].visible.has(hexes[0]));
+  const s0 = getStanding(g, a, b);
+  const r = performDiplomacy(g, a, "toggle-allied-vision", { faction: b, on: false });
+  const agr = findPactAgreement(g, a, b);
+  check("toggle-allied-vision off flips visionShare + costs 1 Standing",
+    r.ok && agr.visionShare === false && getStanding(g, a, b) === s0 - DH.pact.toggleVisionStandingHit);
+}
+
+// §1.6 / §1.10 — Open borders
+line("\n  [§1.6/§1.10] Open borders contract");
+{
+  const g = createGame({ seed }); ensureDiplomacy(g);
+  const a = "versari", b = "lakers";
+  check("hasOpenBorders is false with no agreement", !hasOpenBorders(g, a, b));
+  formPact(g, a, b, "test");
+  check("pacted parties have open borders by default (§1.10)",
+    hasOpenBorders(g, a, b) && hasOpenBorders(g, b, a));
+  performDiplomacy(g, a, "toggle-open-borders", { faction: b, on: false });
+  check("toggle-open-borders off removes the pact passage", !hasOpenBorders(g, a, b));
+}
+{
+  const g = createGame({ seed }); ensureDiplomacy(g);
+  const a = "versari", b = "lakers";
+  g.players[a].menace = 0; g.players[b].menace = 0; g.players[a].honor = 6; g.players[b].honor = 6;
+  setStanding(g, a, b, 0); setStanding(g, b, a, 0);
+  check("set-open-borders refused below Friendly",
+    !performDiplomacy(g, a, "set-open-borders", { faction: b, on: true }).ok);
+  setStanding(g, a, b, 6); setStanding(g, b, a, 6);
+  check("set-open-borders grants standalone passage at Friendly+",
+    performDiplomacy(g, a, "set-open-borders", { faction: b, on: true }).ok && hasOpenBorders(g, a, b));
+  check("set-open-borders off removes standalone passage",
+    performDiplomacy(g, a, "set-open-borders", { faction: b, on: false }).ok && !hasOpenBorders(g, a, b));
+}
+
+// §6.2 — war-record listeners (combat feeds the war record)
+line("\n  [§6.2] war-record listeners");
+{
+  const g = createGame({ seed }); startTurn(g); ensureDiplomacy(g);
+  const me = g.turnOrder[0], foe = g.turnOrder[1];
+  declareWar(g, me, foe, "test");
+  const terrain = Object.values(g.board.hexes).find((h) => h.type === "terrain" && !g.locations[h.id]).id;
+  const atk = Object.values(g.units).find((u) => u.owner === me);
+  const vic = Object.values(g.units).find((u) => u.owner === foe);
+  atk.node = terrain; atk.moveRemaining = atk.movement; atk.baseStrength = 12;
+  vic.node = terrain; vic.baseStrength = 1;
+  recomputeStats(g); g.players[me].actions.remaining = 5; g.rng.roll = () => 6;
+  performAction(g, "contest", { unit: atk.uid, target: vic.uid });
+  const war = findWar(g, me, foe);
+  check("unit_destroyed in a war increments war.unitsLost for the victim's owner",
+    !!war && (war.unitsLost[foe] || 0) >= 1);
+  check("contest_won credits war.contestsWon for the winner",
+    !!war && (war.contestsWon[me] || 0) >= 1);
 }
 
 line(`\n  v0.2 verification: ${v2pass} passed, ${v2fail} failed`);
