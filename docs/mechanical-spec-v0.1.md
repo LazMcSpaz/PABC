@@ -1819,6 +1819,15 @@ you promised non-aggression → promise broken → Honor + Standing hit).
 
 ### 18.7 Diplomatic actions (the verbs)
 
+> **Updated by `docs/diplomacy-spec.md`** — the final pass renamed
+> Ultimatum → **Demand Tribute**, added the surprise-attack Honor model,
+> Gift diminishing returns, **Trading Pact** (replaces the old Trade
+> Route — requires a clear capital-to-capital route, grants +2 scrap/turn
+> each + 1 permanent Research on formation), Free Vassal, and the
+> allied-vision / open-borders auto-share toggles. Read the diplomacy
+> spec for the action catalog, gating model, and UI design; the rest of
+> §18.7 below remains the conceptual reference.
+
 Three axes, so a player always has moves whether at war or at peace. Each
 action is either a **deal** (§18.6) or a **state operation** on
 Standing/war-state; effects are spelled out to remove ambiguity.
