@@ -45,12 +45,13 @@ export function useAIReplay({ gameRef, geomRef, bumpTick }) {
   const [cameraTarget, setCameraTarget] = useState(null);
   const [cameraPanMs, setCameraPanMs] = useState(CADENCE.normal.pan);
   const [isReplaying, setIsReplaying] = useState(false);
+  const [turnBanner, setTurnBanner] = useState(null); // { name, color } of the AI now replaying
 
   const posRef = useRef(null);          // {uid: hexId} — displayed positions, source of truth
   const ownersRef = useRef({});         // {uid: owner} snapshot (survives unit death)
   const lastHexRef = useRef({});        // {uid: hexId} last-known hex (survives unit death)
   const driverRef = useRef(null);
-  const skipSessionRef = useRef(false); // sticky tap-to-skip for the rest of the session
+  const skipCurrentRef = useRef(false); // tap-to-skip: skip the REST of THIS end-turn's AI sequence
   const onAllDoneRef = useRef(null);
   const runNextRef = useRef(null);
 
@@ -69,10 +70,12 @@ export function useAIReplay({ gameRef, geomRef, bumpTick }) {
   const finish = useCallback(() => {
     driverRef.current = null;
     posRef.current = null;
+    skipCurrentRef.current = false; // reset for the next end-turn — skip is per-sequence
     setDisplayedPositions(null);
     setAnimatedPawns([]);
     setActiveOverlays([]);
     setCameraTarget(null);
+    setTurnBanner(null);
     setIsReplaying(false);
     bumpTick();
     const cb = onAllDoneRef.current;
@@ -127,11 +130,19 @@ export function useAIReplay({ gameRef, geomRef, bumpTick }) {
     const game = gameRef.current;
     if (game.winnerId || !game.players[activePlayerId(game)]?.isAI) return finish();
 
-    // Tapped to skip somewhere in the sequence → drain the rest instantly.
-    if (skipSessionRef.current) {
+    // Tapped to skip → drain the rest of THIS sequence instantly (the next
+    // end-turn replays normally; finish() clears the flag).
+    if (skipCurrentRef.current) {
       drainSync();
       return finish();
     }
+
+    // Announce whose turn is about to replay (banner over the board).
+    const actingPid = activePlayerId(game);
+    setTurnBanner({
+      name: UI_FACTIONS[actingPid]?.name || actingPid,
+      color: UI_FACTIONS[actingPid]?.color || "#888",
+    });
 
     // Snapshot pre-turn positions, run the AI turn, and take the event slice
     // — all via the engineAdapter wrapper (owners + last hex survive death).
@@ -170,7 +181,7 @@ export function useAIReplay({ gameRef, geomRef, bumpTick }) {
       onAllDone && onAllDone();
       return;
     }
-    const speed = skipSessionRef.current ? "skip" : getAiTurnSpeed();
+    const speed = getAiTurnSpeed();
     if (speed === "skip") {
       drainSync();
       finish();
@@ -185,11 +196,13 @@ export function useAIReplay({ gameRef, geomRef, bumpTick }) {
   // so its timers don't fire setState on an unmounted tree.
   useEffect(() => () => { if (driverRef.current) driverRef.current.cancel(); }, []);
 
-  // Tap-to-skip: drain the current turn now and make every later AI turn this
-  // session run in skip mode. Sticky until a new game (a fresh hook instance).
+  // Tap-to-skip: skip the REST of this end-turn's AI sequence (drain to the
+  // human instantly). NOT sticky — the next time the human ends a turn, the
+  // replay runs again at the chosen speed. For a permanent skip, pick the
+  // "skip" speed tier in Settings.
   const skipNow = useCallback(() => {
     if (!isReplaying) return;
-    skipSessionRef.current = true;
+    skipCurrentRef.current = true;
     if (driverRef.current) driverRef.current.skip();
   }, [isReplaying]);
 
@@ -200,6 +213,7 @@ export function useAIReplay({ gameRef, geomRef, bumpTick }) {
     cameraTarget,
     cameraPanMs,
     isReplaying,
+    turnBanner,
     runAITurns,
     skipNow,
   };

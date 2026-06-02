@@ -57,18 +57,24 @@ export function createAIReplayDriver(events, { speed = "normal", helpers, callba
   let pendingDeclared = null; // last contest_declared payload, paired on outcome
 
   async function run() {
-    for (const ev of events) {
-      if (cancelled) break;
-      await handleEvent(ev);
-      if (!skipped && !cancelled) await wait(cad.gap);
+    try {
+      for (const ev of events) {
+        if (cancelled) break;
+        await handleEvent(ev);
+        if (!skipped && !cancelled) await wait(cad.gap);
+      }
+    } catch (err) {
+      // A malformed event must never strand the replay (and the human's turn).
+      if (typeof console !== "undefined") console.error("AI replay error:", err);
+    } finally {
+      // Safety net: every moved unit ends at its true position even if a hop
+      // was skipped, the player tapped to skip, or a handler threw.
+      for (const uid of movedUnits) {
+        const node = helpers.unitNode(uid);
+        if (node) callbacks.setPosition(uid, node);
+      }
+      if (!cancelled) callbacks.onComplete();
     }
-    // Safety net: every moved unit ends at its true position even if a hop was
-    // skipped or the player tapped to skip mid-slide.
-    for (const uid of movedUnits) {
-      const node = helpers.unitNode(uid);
-      if (node) callbacks.setPosition(uid, node);
-    }
-    if (!cancelled) callbacks.onComplete();
   }
 
   async function handleEvent(ev) {

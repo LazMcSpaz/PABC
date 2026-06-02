@@ -104,7 +104,7 @@ function Tag({ color, children }) {
   );
 }
 
-export default function UnitPanel({ unit, hex, canAct, reinforce, scrap, onReinforce, onClose }) {
+export default function UnitPanel({ unit, hex, canAct, reinforce, scrap, raidTargets = [], onReinforce, onContest, onClose }) {
   if (!unit) return null;
   const faction = UI_FACTIONS[unit.owner];
   const factionColor = faction?.color || C.holo;
@@ -114,6 +114,7 @@ export default function UnitPanel({ unit, hex, canAct, reinforce, scrap, onReinf
   };
   const canReinforce = canAct && reinforce && reinforce.deficit > 0;
   const affordable = reinforce && scrap >= reinforce.cost;
+  const canRaid = canAct && raidTargets.length > 0;
   const locationLabel = hex?.locationId
     ? hex.locationId.replace(/[A-Z]/g, (c) => " " + c).trim()
     : hex?.type;
@@ -285,13 +286,40 @@ export default function UnitPanel({ unit, hex, canAct, reinforce, scrap, onReinf
             </button>
           )}
 
+          {/* §16 field raid — attack an enemy unit sharing this hex. */}
+          {canRaid && raidTargets.map((t) => {
+            const tf = UI_FACTIONS[t.owner];
+            return (
+              <button
+                key={t.uid}
+                onClick={() => onContest?.({ unit: unit.uid, target: t.uid })}
+                className="hud-int"
+                style={{
+                  fontFamily: C.font, fontSize: 10, fontWeight: 700,
+                  letterSpacing: 1.2, textTransform: "uppercase",
+                  color: "#fff", padding: "6px 8px", borderRadius: 4,
+                  border: `1px solid ${STOPPED}`,
+                  background: `linear-gradient(180deg, #e0654a, ${STOPPED})`,
+                  boxShadow: `0 0 10px ${STOPPED}55`,
+                  cursor: "pointer", textAlign: "center", lineHeight: 1.2,
+                }}
+              >
+                Attack {tf?.short || t.owner} · Str {t.effectiveStrength ?? t.strength}
+              </button>
+            );
+          })}
+
           <div style={{
             fontFamily: C.font, fontSize: 8.5, letterSpacing: 0.5, lineHeight: 1.45,
             color: "rgba(143,246,234,0.45)",
             marginTop: "auto",
           }}>
             <span style={{ color: READY, fontWeight: 700 }}>Green</span> hex to move ·
-            location to <span style={{ color: C.holoHi }}>Contest / Activate / Recruit</span>
+            {canRaid ? (
+              <> <span style={{ color: STOPPED }}>Attack</span> the enemy sharing this hex</>
+            ) : (
+              <> location to <span style={{ color: C.holoHi }}>Contest / Activate / Recruit</span></>
+            )}
           </div>
         </div>
       </div>
