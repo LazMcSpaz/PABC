@@ -104,15 +104,29 @@ function PathIcon({ path, color, size = 30, dim = false }) {
   return <PathGlyph path={path} color={color} size={size} />;
 }
 
+// node id → branch key ("a1" / "a2" / "b1" / "b2") for layer 2+ nodes.
+function branchKey(node) {
+  return node.id.slice(-2);
+}
 function nodeName(node) {
   if (!node) return "";
   if (node.layer === 1) return TECH_PATHS[node.path].entryName;
-  return `${TECH_PATHS[node.path].name} · ${node.id.slice(-2).toUpperCase()}`;
+  const meta = TECH_PATHS[node.path].nodes?.[branchKey(node)];
+  return meta?.name || branchKey(node).toUpperCase();
 }
 function nodeText(node) {
   if (!node) return "";
   if (node.layer === 1) return TECH_PATHS[node.path].entryText;
-  return "Branch ability — to be designed.";
+  const meta = TECH_PATHS[node.path].nodes?.[branchKey(node)];
+  return meta?.text || "Branch ability — to be designed.";
+}
+// "Military · Aggression" for branch nodes; empty for entries.
+function nodeSubtitle(node) {
+  if (!node || node.layer === 1) return "";
+  const branch = branchKey(node).startsWith("a") ? "a" : "b";
+  const path = TECH_PATHS[node.path];
+  const branchName = path?.branches?.[branch]?.name;
+  return branchName ? `${path.name} · ${branchName}` : path?.name || "";
 }
 
 function buildSegments(assigned, points) {
@@ -320,6 +334,12 @@ export default function TechWheel({ player, onAssign, onClose, levelInfo }) {
                 color: PATH_COLOR[hovered.path],
                 textShadow: `0 0 10px ${PATH_COLOR[hovered.path]}88`,
               }}>{nodeName(hovered)}</div>
+              {nodeSubtitle(hovered) && (
+                <div style={{
+                  fontFamily: "'Oswald',sans-serif", fontSize: 9.5, letterSpacing: 1.8,
+                  textTransform: "uppercase", color: "rgba(143,246,234,0.55)", marginTop: 2,
+                }}>{nodeSubtitle(hovered)}</div>
+              )}
               <div className="pc-prose" style={{ fontSize: 12.5, color: "#cfd6dc", marginTop: 4, lineHeight: 1.5 }}>
                 {nodeText(hovered)}
               </div>
