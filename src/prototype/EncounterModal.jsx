@@ -7,64 +7,106 @@
 import { motion } from "framer-motion";
 import { C, CornerBrackets, useEscClose } from "./HudChrome.jsx";
 
-function ImageFrame() {
+// The image goes in here at a 2:3 ratio. The outer chrome is a slightly
+// raised holo bezel; the inner display is recessed (inset shadows + dark
+// fill) so the whole thing reads as a screen mounted in a device, with
+// real depth, rather than a flat rectangle.
+function ImageFrame({ imageUrl }) {
   return (
     <div style={{
       position: "relative",
       width: "100%",
-      aspectRatio: "4 / 5",
-      border: `1px solid ${C.holo}`,
-      borderRadius: 7,
-      background: "linear-gradient(168deg, rgba(14,28,30,0.96), rgba(6,12,13,0.97))",
-      boxShadow: `0 0 18px rgba(86,211,198,0.22), inset 0 0 28px rgba(86,211,198,0.08)`,
-      overflow: "hidden",
+      aspectRatio: "2 / 3",
+      // Outer chrome — light at top + dark at bottom for a subtle bezel
+      padding: 8,
+      borderRadius: 8,
+      background: "linear-gradient(160deg, rgba(28,46,48,0.86) 0%, rgba(10,20,22,0.92) 100%)",
+      border: `1px solid ${C.holo}cc`,
+      boxShadow: `
+        0 0 22px rgba(86,211,198,0.28),
+        inset 0 1px 0 rgba(143,246,234,0.18),
+        inset 0 -1px 0 rgba(0,0,0,0.55),
+        inset 0 0 14px rgba(86,211,198,0.06)
+      `,
     }}>
-      <CornerBrackets color={C.holo} len={12} inset={5} w={1.5} />
-      {/* faint reference grid */}
+      <CornerBrackets color={C.holoHi} len={12} inset={4} w={1.5} />
+
+      {/* Inset display screen — visibly recessed inside the chrome */}
       <div style={{
-        position: "absolute", inset: 4,
-        backgroundImage: `linear-gradient(rgba(86,211,198,0.06) 1px, transparent 1px), linear-gradient(90deg, rgba(86,211,198,0.06) 1px, transparent 1px)`,
-        backgroundSize: "22px 22px",
-        pointerEvents: "none",
-      }} />
-      {/* drifting scanlines clipped to the inner display area */}
-      <div className="hud-scanlines" style={{ position: "absolute", inset: 4, borderRadius: 4 }} />
-      {/* No-signal placeholder — pulsing reticle */}
-      <div style={{
-        position: "absolute", inset: 0, display: "flex", flexDirection: "column",
-        alignItems: "center", justifyContent: "center", gap: 10, pointerEvents: "none",
+        position: "relative",
+        width: "100%",
+        height: "100%",
+        background: "linear-gradient(170deg, rgba(8,16,17,0.97), rgba(3,7,8,0.99))",
+        border: `1px solid rgba(86,211,198,0.55)`,
+        borderRadius: 3,
+        boxShadow: `
+          inset 0 0 24px rgba(0,0,0,0.88),
+          inset 0 2px 4px rgba(0,0,0,0.7),
+          inset 0 0 8px rgba(86,211,198,0.16)
+        `,
+        overflow: "hidden",
       }}>
-        <motion.svg
-          width="56" height="56" viewBox="0 0 24 24" fill="none"
-          stroke={C.holoHi} strokeWidth="1"
-          animate={{ opacity: [0.4, 0.7, 0.4] }}
-          transition={{ duration: 2.4, repeat: Infinity, ease: "easeInOut" }}
-        >
-          <circle cx="12" cy="12" r="10" />
-          <circle cx="12" cy="12" r="4.5" />
-          <path d="M2 12h4M18 12h4M12 2v4M12 18v4" strokeLinecap="round" />
-        </motion.svg>
-        <span style={{
-          fontFamily: C.font, fontSize: 9.5, letterSpacing: 2.8,
-          textTransform: "uppercase", color: "rgba(143,246,234,0.42)",
-        }}>No Signal</span>
-      </div>
-      {/* status bar */}
-      <div style={{
-        position: "absolute", bottom: 6, left: 8, right: 8,
-        display: "flex", justifyContent: "space-between",
-        fontFamily: C.font, fontSize: 8, letterSpacing: 1.4,
-        textTransform: "uppercase", color: "rgba(143,246,234,0.55)",
-        pointerEvents: "none",
-      }}>
-        <span>CAM_01</span>
-        <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-          <span style={{
-            display: "inline-block", width: 6, height: 6, borderRadius: "50%",
-            background: "#e0654a", boxShadow: "0 0 5px #e0654a",
+        {imageUrl ? (
+          <img src={imageUrl} alt="" style={{
+            position: "absolute", inset: 0, width: "100%", height: "100%",
+            objectFit: "cover", filter: "brightness(0.95)",
           }} />
-          REC
-        </span>
+        ) : (
+          <>
+            {/* faint reference grid */}
+            <div style={{
+              position: "absolute", inset: 0,
+              backgroundImage: `linear-gradient(rgba(86,211,198,0.06) 1px, transparent 1px), linear-gradient(90deg, rgba(86,211,198,0.06) 1px, transparent 1px)`,
+              backgroundSize: "22px 22px", pointerEvents: "none",
+            }} />
+            <div className="hud-scanlines" style={{ position: "absolute", inset: 0 }} />
+            <div style={{
+              position: "absolute", inset: 0, display: "flex", flexDirection: "column",
+              alignItems: "center", justifyContent: "center", gap: 10, pointerEvents: "none",
+            }}>
+              <motion.svg
+                width="56" height="56" viewBox="0 0 24 24" fill="none"
+                stroke={C.holoHi} strokeWidth="1"
+                animate={{ opacity: [0.4, 0.7, 0.4] }}
+                transition={{ duration: 2.4, repeat: Infinity, ease: "easeInOut" }}
+              >
+                <circle cx="12" cy="12" r="10" />
+                <circle cx="12" cy="12" r="4.5" />
+                <path d="M2 12h4M18 12h4M12 2v4M12 18v4" strokeLinecap="round" />
+              </motion.svg>
+              <span style={{
+                fontFamily: C.font, fontSize: 9.5, letterSpacing: 2.8,
+                textTransform: "uppercase", color: "rgba(143,246,234,0.42)",
+              }}>No Signal</span>
+            </div>
+          </>
+        )}
+        {/* Always-on top/bottom HUD strips on the inner display */}
+        <div style={{
+          position: "absolute", top: 0, left: 0, right: 0, height: 16,
+          background: "linear-gradient(180deg, rgba(86,211,198,0.10), transparent)",
+          borderBottom: "1px solid rgba(86,211,198,0.18)",
+          pointerEvents: "none",
+        }} />
+        <div style={{
+          position: "absolute", bottom: 0, left: 0, right: 0, height: 18,
+          background: "linear-gradient(0deg, rgba(0,0,0,0.5), transparent)",
+          borderTop: "1px solid rgba(86,211,198,0.18)",
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          padding: "0 7px",
+          fontFamily: C.font, fontSize: 8, letterSpacing: 1.4,
+          textTransform: "uppercase", color: "rgba(143,246,234,0.6)",
+          pointerEvents: "none",
+        }}>
+          <span>CAM_01</span>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+            <span style={{
+              display: "inline-block", width: 5, height: 5, borderRadius: "50%",
+              background: "#e0654a", boxShadow: "0 0 5px #e0654a",
+            }} />
+            REC
+          </span>
+        </div>
       </div>
     </div>
   );
@@ -131,7 +173,7 @@ export default function EncounterModal({ encounter, choices, eligibleIds, redraw
             transition={{ delay: 0.1, duration: 0.32, ease: "easeOut" }}
             style={{ width: 220, flexShrink: 0 }}
           >
-            <ImageFrame />
+            <ImageFrame imageUrl={encounter.imagePath || encounter.imageUrl} />
           </motion.div>
 
           <div className="pc-scroll" style={{
@@ -180,11 +222,6 @@ export default function EncounterModal({ encounter, choices, eligibleIds, redraw
                       fontFamily: C.font, fontSize: 13.5, fontWeight: 700,
                       letterSpacing: 0.8, textTransform: "uppercase",
                     }}>{c.label}</div>
-                    {c.outcomeText && (
-                      <div className="pc-prose" style={{ fontSize: 11.5, color: "#cfd6dc", marginTop: 4, lineHeight: 1.45 }}>
-                        {c.outcomeText}
-                      </div>
-                    )}
                     {!eligible && (
                       <div style={{
                         fontFamily: C.font, fontSize: 9, letterSpacing: 1.6,
