@@ -94,9 +94,9 @@ export default function MoveConfirmOverlay({ unit, originHexId, destHexId, owner
 
   // Prompt: small, anchored to the right of the ghost (origin), flips
   // left only if it would clip the viewport right edge.
-  const promptW = 168;
-  const promptH = 78;
-  const gap = 36;
+  const promptW = 138;
+  const promptH = 56;
+  const gap = 30;
   const vw = (typeof window !== "undefined" ? window.innerWidth : 1440);
   const vh = (typeof window !== "undefined" ? window.innerHeight : 900);
   let px = origin.x + gap;
@@ -121,37 +121,59 @@ export default function MoveConfirmOverlay({ unit, originHexId, destHexId, owner
       style={{ position: "fixed", inset: 0, zIndex: 50, background: "transparent" }}
     >
       {/* Holographic channelled arrow — outer teal edges, dark inner core,
-          travelling pulses + a chevron arrowhead. */}
+          travelling pulses + a chevron arrowhead. The origin end fades
+          out (no rounded cap) via a linear gradient on each stroke. */}
       <svg
         style={{ position: "fixed", inset: 0, width: "100%", height: "100%", pointerEvents: "none", overflow: "visible" }}
       >
         <defs>
-          {/* Bright arrowhead with subtle inner outline */}
           <marker id="mc-head" markerWidth="20" markerHeight="20" refX="13" refY="10" orient="auto" markerUnits="userSpaceOnUse">
             <path d="M0 1 L18 10 L0 19 L6 10 Z" fill={C.holo}
               style={{ filter: `drop-shadow(0 0 5px ${C.holo})` }} />
             <path d="M3 4 L14 10 L3 16 L7 10 Z" fill="rgba(8,16,28,0.6)" />
           </marker>
+          {/* Fade-from-origin gradients — opacity rises from 0 at the
+              start to full by ~28% along the channel. */}
+          <linearGradient id="mc-outer" gradientUnits="userSpaceOnUse" x1={startX} y1={startY} x2={endX} y2={endY}>
+            <stop offset="0%" stopColor={C.holo} stopOpacity="0" />
+            <stop offset="28%" stopColor={C.holo} stopOpacity="0.88" />
+            <stop offset="100%" stopColor={C.holo} stopOpacity="0.88" />
+          </linearGradient>
+          <linearGradient id="mc-inner" gradientUnits="userSpaceOnUse" x1={startX} y1={startY} x2={endX} y2={endY}>
+            <stop offset="0%" stopColor="#08101c" stopOpacity="0" />
+            <stop offset="28%" stopColor="#08101c" stopOpacity="0.7" />
+            <stop offset="100%" stopColor="#08101c" stopOpacity="0.7" />
+          </linearGradient>
+          <linearGradient id="mc-glow" gradientUnits="userSpaceOnUse" x1={startX} y1={startY} x2={endX} y2={endY}>
+            <stop offset="0%" stopColor={C.holo} stopOpacity="0" />
+            <stop offset="28%" stopColor={C.holo} stopOpacity="0.16" />
+            <stop offset="100%" stopColor={C.holo} stopOpacity="0.16" />
+          </linearGradient>
+          <linearGradient id="mc-hi" gradientUnits="userSpaceOnUse" x1={startX} y1={startY} x2={endX} y2={endY}>
+            <stop offset="0%" stopColor={C.holoHi} stopOpacity="0" />
+            <stop offset="35%" stopColor={C.holoHi} stopOpacity="0.55" />
+            <stop offset="100%" stopColor={C.holoHi} stopOpacity="0.55" />
+          </linearGradient>
         </defs>
 
-        {/* Wide soft glow underlay */}
+        {/* Wide soft glow underlay (fading) */}
         <line x1={startX} y1={startY} x2={endX} y2={endY}
-          stroke={C.holo} strokeWidth="18" strokeLinecap="round"
-          opacity="0.14" style={{ filter: "blur(3px)" }} />
+          stroke="url(#mc-glow)" strokeWidth="18" strokeLinecap="butt"
+          style={{ filter: "blur(3px)" }} />
 
-        {/* Outer body — the teal channel edges (full width) */}
+        {/* Outer body — teal channel edges, with the arrowhead at the end */}
         <line x1={startX} y1={startY} x2={endX} y2={endY}
-          stroke={C.holo} strokeWidth="11" strokeLinecap="round"
-          opacity="0.85" markerEnd="url(#mc-head)"
+          stroke="url(#mc-outer)" strokeWidth="11" strokeLinecap="butt"
+          markerEnd="url(#mc-head)"
           style={{ filter: `drop-shadow(0 0 4px ${C.holo})` }} />
 
         {/* Inner core — dark/low-opacity centre that exposes the edges */}
         <line x1={startX} y1={startY} x2={endX} y2={endY}
-          stroke="rgba(8,16,28,0.7)" strokeWidth="6.5" strokeLinecap="round" />
+          stroke="url(#mc-inner)" strokeWidth="6.5" strokeLinecap="butt" />
 
         {/* Faint centerline highlight */}
         <line x1={startX} y1={startY} x2={endX} y2={endY}
-          stroke={C.holoHi} strokeWidth="0.7" strokeLinecap="round" opacity="0.55" />
+          stroke="url(#mc-hi)" strokeWidth="0.7" strokeLinecap="butt" />
 
         {/* Travelling pulses — staggered so light flows continuously */}
         {Array.from({ length: PULSES }).map((_, i) => {
@@ -185,7 +207,10 @@ export default function MoveConfirmOverlay({ unit, originHexId, destHexId, owner
           prop threaded through HexBoard / Hex / UnitToken. */}
       <PreviewToken unit={unit} color={tokenColor} x={dest.x} y={dest.y} />
 
-      {/* Compact confirm prompt — anchored beside the ghost. */}
+      {/* Compact confirm prompt — anchored beside the ghost. Only the
+          Move button + a teal "Don't ask again" check live inside; the
+          cancel control is a small × floating outside the top-right
+          corner so the box itself stays minimal. */}
       <motion.div
         onClick={(e) => e.stopPropagation()}
         initial={{ opacity: 0, scale: 0.96, x: 4 }}
@@ -195,13 +220,13 @@ export default function MoveConfirmOverlay({ unit, originHexId, destHexId, owner
           position: "fixed",
           left: px, top: py,
           width: promptW,
-          padding: "7px 9px 7px",
+          padding: "6px 8px 6px",
           background: "linear-gradient(158deg, rgba(16,28,29,0.78), rgba(6,12,13,0.82))",
           border: `1px solid ${C.holo}99`,
           borderTopLeftRadius: 0,
-          borderTopRightRadius: 5,
-          borderBottomLeftRadius: 5,
-          borderBottomRightRadius: 5,
+          borderTopRightRadius: 4,
+          borderBottomLeftRadius: 4,
+          borderBottomRightRadius: 4,
           boxShadow: `0 0 8px rgba(86,211,198,0.16), 0 3px 10px rgba(0,0,0,0.35)`,
           color: "#cfd6dc",
           zIndex: 52,
@@ -210,53 +235,76 @@ export default function MoveConfirmOverlay({ unit, originHexId, destHexId, owner
         {/* Top-left tab outcropping */}
         <div style={{
           position: "absolute", top: -1, left: -1,
-          width: 28, height: 5,
+          width: 26, height: 5,
           background: C.holo,
           clipPath: "polygon(0 0, 100% 0, 86% 100%, 0 100%)",
           boxShadow: `0 0 4px ${C.holo}77`,
         }} />
         {/* Bottom-right chevron */}
         <div style={{
-          position: "absolute", bottom: -1, right: 8,
-          width: 14, height: 3,
+          position: "absolute", bottom: -1, right: 7,
+          width: 12, height: 3,
           background: C.holo,
           clipPath: "polygon(0 0, 100% 0, 85% 100%, 15% 100%)",
           opacity: 0.55,
         }} />
 
-        <div style={{ display: "flex", gap: 5, marginBottom: 5 }}>
-          <button onClick={onCancel} className="hud-int" style={{
-            flex: 1,
-            fontFamily: C.font, fontSize: 9.5, fontWeight: 700,
-            letterSpacing: 1, textTransform: "uppercase",
-            padding: "5px 6px", borderRadius: 3,
-            border: `1px solid ${C.holo}55`,
-            background: "rgba(86,211,198,0.05)",
-            color: C.holoHi, cursor: "pointer",
-          }}>Cancel</button>
-          <button onClick={confirm} className="hud-int" style={{
-            flex: 1,
-            fontFamily: C.font, fontSize: 9.5, fontWeight: 700,
-            letterSpacing: 1, textTransform: "uppercase",
-            color: "#08100f", padding: "5px 6px", borderRadius: 3,
-            border: `1px solid ${C.holo}`,
-            background: `linear-gradient(180deg, ${C.holoHi}, ${C.holo})`,
-            boxShadow: `0 0 8px ${C.holo}55`,
+        {/* Floating × outside top-right corner */}
+        <button
+          onClick={onCancel}
+          title="Cancel move"
+          style={{
+            position: "absolute",
+            top: -10, right: -10,
+            width: 20, height: 20,
+            borderRadius: "50%",
+            background: "rgba(6,14,15,0.92)",
+            border: `1px solid ${C.holo}aa`,
+            color: C.holoHi,
             cursor: "pointer",
-          }}>Move</button>
-        </div>
-        <label style={{
-          display: "flex", alignItems: "center", gap: 5,
-          fontFamily: C.font, fontSize: 8.5, letterSpacing: 0.4,
-          color: "rgba(143,246,234,0.6)", cursor: "pointer", userSelect: "none",
-          marginLeft: 1,
-        }}>
-          <input
-            type="checkbox"
-            checked={skip}
-            onChange={(e) => setSkip(e.target.checked)}
-            style={{ accentColor: C.holo, width: 10, height: 10 }}
-          />
+            display: "flex", alignItems: "center", justifyContent: "center",
+            fontFamily: C.font, fontSize: 13, lineHeight: 1, fontWeight: 700,
+            boxShadow: `0 0 6px rgba(86,211,198,0.28)`,
+            padding: 0,
+          }}
+          className="hud-int"
+        >×</button>
+
+        {/* Confirm button — shorter (auto-width, centred) */}
+        <button onClick={confirm} className="hud-int" style={{
+          display: "block",
+          margin: "0 auto 6px",
+          fontFamily: C.font, fontSize: 10, fontWeight: 700,
+          letterSpacing: 1.4, textTransform: "uppercase",
+          color: "#08100f", padding: "4px 16px", borderRadius: 3,
+          border: `1px solid ${C.holo}`,
+          background: `linear-gradient(180deg, ${C.holoHi}, ${C.holo})`,
+          boxShadow: `0 0 8px ${C.holo}55`,
+          cursor: "pointer",
+        }}>Move</button>
+
+        {/* Don't ask again — custom teal checkbox (not OS-white) */}
+        <label
+          onClick={() => setSkip((v) => !v)}
+          style={{
+            display: "flex", alignItems: "center", gap: 6,
+            fontFamily: C.font, fontSize: 8.5, letterSpacing: 0.4,
+            color: "rgba(143,246,234,0.62)", cursor: "pointer", userSelect: "none",
+            marginLeft: 1,
+          }}
+        >
+          <span style={{
+            width: 10, height: 10,
+            border: `1px solid ${C.holo}99`,
+            borderRadius: 2,
+            background: skip ? C.holo : "rgba(86,211,198,0.08)",
+            boxShadow: skip ? `0 0 5px ${C.holo}88` : undefined,
+            display: "inline-flex", alignItems: "center", justifyContent: "center",
+            flexShrink: 0,
+            transition: "background .12s ease, box-shadow .12s ease",
+          }}>
+            {skip && <span style={{ fontFamily: C.font, fontSize: 8, color: "#08100f", fontWeight: 800, lineHeight: 1 }}>✓</span>}
+          </span>
           Don't ask again
         </label>
       </motion.div>
