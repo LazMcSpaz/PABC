@@ -15,6 +15,7 @@ import {
   buildableChips, upgradeOption, slotCapacity, slotsUsed, locationOutput,
 } from "../game/economy.js";
 import { isUnitVisibleTo } from "../game/visibility.js";
+import { strengthCap, bayCapacity } from "../game/stats.js";
 import { factionDef } from "../game/content.js";
 import {
   recognitionScore, threatScore, tolerance, trustFloor, standingTier, getStanding,
@@ -508,7 +509,7 @@ function factionWants(def) {
 function hasStationedUnitWithBay(state, loc, slots) {
   for (const u of Object.values(state.units)) {
     if (u.owner !== loc.controller || u.node !== loc.hexId) continue;
-    if (slotsUsed(state, u.chips) + slots <= CONFIG.unit.baySlots) return true;
+    if (slotsUsed(state, u.chips) + slots <= bayCapacity(u)) return true;
   }
   return false;
 }
@@ -519,7 +520,7 @@ function hasStationedUnitWithBay(state, loc, slots) {
 export function reinforcePreview(state, unitUid) {
   const unit = state.units[unitUid];
   if (!unit) return null;
-  const cap = unit.veteran ? CONFIG.unit.veteranStrengthCap : CONFIG.unit.baseStrengthCap;
+  const cap = strengthCap(unit);
   const deficit = cap - unit.baseStrength;
   const loc = state.locations[unit.node];
   const onFriendlyLoc = !!(loc && loc.controller === unit.owner);

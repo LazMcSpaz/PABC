@@ -24,7 +24,11 @@ export const CONFIG = {
     baseMovement: 2, // v0.2 §16.2 — was 1; movement is now its own budget
     baySlots: 2,
     baseStrengthCap: 4, // v0.2 §16.3 — base Strength doubles as HP, capped here
-    veteranStrengthCap: 8, // §16.7 combining (deferred)
+    // §16.7 — combined units (NOT veterans) get the doubled cap and a third
+    // bay slot. Veterancy is +1 contest roll only; it does NOT raise the cap.
+    combinedStrengthCap: 8,
+    combinedBaySlots: 3,
+    combineMovementPenalty: 1, // base Movement -1 for a combined unit
   },
   baseUnitCap: 3, // v0.2 §16.3 — cap = baseUnitCap + Training Grounds
   startingUnits: 2, // v0.2 §16.3

@@ -1212,16 +1212,24 @@ defenderTotal = defenderValue                       (§9: garrison + chips + def
   whichever comes first**. ("Survived" = participated in a contest and
   was not destroyed.) Losing a Veteran therefore stings — by design.
 
-### 16.7 Combining units *(deferred — designed, not in first slice)*
+### 16.7 Combining units
 
-Merge two of your units sharing a hex into one:
-- new base-Strength **cap 8** (sum of the two, then capped);
-- **3 Bay slots** (so merging two 2-chip units sacrifices one chip —
-  salvaged back to you);
-- a **base `Movement` penalty** (−1, large groups coordinate poorly).
+Merge two of your units sharing a hex into one (1 Action):
+- new base Strength = **sum of the two, capped at 8** (NOT auto-set to 8);
+- **3 Bay slots** (so merging two 2-chip units displaces one chip —
+  salvaged back to you via the standard salvage flow);
+- a **base `Movement` penalty** (−1, large groups coordinate poorly);
+- **veterancy survives** if either parent was a Veteran; contest counts
+  (won / survived) carry over as the max of the two parents.
+- A combined unit **cannot recombine** — the cap is already at the ceiling.
+
 Because Concentration and board presence usually favor keeping units
 separate, combining is mainly a **unit-cap relief valve**: consolidate
 to free a slot for a fresh recruit. Niche by intent.
+
+> **Veterancy clarification.** Veteran is **+1 to contest rolls**, period.
+> It does NOT raise a unit's base-Strength cap (cap-8 belongs to §16.7
+> combined units only). An earlier engine pass conflated the two; fixed.
 
 ### 16.8 Tuning watch-list
 

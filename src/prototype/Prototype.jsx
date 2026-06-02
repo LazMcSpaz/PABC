@@ -27,7 +27,7 @@ import { hasTechNode } from "../game/tech.js";
 import { evalCond } from "../game/dsl.js";
 import { adaptState, reinforcePreview, engineChipIdToUi, previewLocationContest, previewAttackerStrength } from "./engineAdapter.js";
 import { resolveSalvage } from "../game/contest.js";
-import { assignTechNode } from "../game/stats.js";
+import { assignTechNode, bayCapacity } from "../game/stats.js";
 import { performDiplomacy } from "../game/diplomacy.js";
 import DiplomacyScreen from "./DiplomacyScreen.jsx";
 import EncounterModal from "./EncounterModal.jsx";
@@ -478,7 +478,7 @@ export default function Prototype({ config, onNewGame }) {
       kind: e.kind === "loot" ? "loot" : "death",
       killerName: killer?.name || "Victor",
       killerColor: UI_FACTIONS[killer?.owner]?.color,
-      baySlots: CONFIG.unit.baySlots,
+      baySlots: killer ? bayCapacity(killer) : CONFIG.unit.baySlots,
       unitChips: (killer?.chips || []).map(info),
       salvagedChips: e.chips.map(info),
     };

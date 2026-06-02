@@ -8,7 +8,7 @@ import { bfsDistances, reinforcementRoute } from "./board.js";
 import { CONFIG } from "./config.js";
 import { FACTIONS, CHIPS, ABILITIES, chipDefOf, factionDef } from "./content.js";
 import { validateContest, runContest } from "./contest.js";
-import { recomputeStats } from "./stats.js";
+import { recomputeStats, strengthCap, bayCapacity } from "./stats.js";
 import { recomputeVisibility } from "./visibility.js";
 import { applyEffects } from "./effects.js";
 import { drawFieldEncounter, resolveMarkerOnHex } from "./encounters.js";
@@ -93,7 +93,7 @@ function tryPickupLoot(state, unit, hex, ctx) {
     return;
   }
   const used = (uids) => uids.reduce((n, c) => n + (chipDefOf(state, c)?.slots ?? 1), 0);
-  let free = CONFIG.unit.baySlots - used(unit.chips);
+  let free = bayCapacity(unit) - used(unit.chips);
   const taken = [];
   const rest = [];
   for (const c of loot) {
@@ -157,15 +157,11 @@ function runRecruit(state, { pid, player, params }) {
 // `mode:"field"` dispatches a convoy that arrives in N round-ends, where
 // N is the supply distance through friendly/neutral hexes (re-targets a
 // moving unit, §16.5). Both cost 1 Action.
-function unitStrengthCap(unit) {
-  return unit.veteran ? CONFIG.unit.veteranStrengthCap : CONFIG.unit.baseStrengthCap;
-}
-
 function validateReinforce(state, { pid, player, params }) {
   const unit = state.units[params.unit];
   if (!unit) return fail("no such unit");
   if (unit.owner !== pid) return fail("not your unit");
-  const cap = unitStrengthCap(unit);
+  const cap = strengthCap(unit);
   const deficit = cap - unit.baseStrength;
   if (deficit <= 0) return fail("unit is already at full Strength");
   const cost = CONFIG.heal.scrapPerStrength * deficit;
@@ -188,7 +184,7 @@ function validateReinforce(state, { pid, player, params }) {
 
 function runReinforce(state, { pid, player, params }) {
   const unit = state.units[params.unit];
-  const cap = unitStrengthCap(unit);
+  const cap = strengthCap(unit);
   const deficit = cap - unit.baseStrength;
   const cost = CONFIG.heal.scrapPerStrength * deficit;
   player.resource -= cost;
@@ -396,12 +392,90 @@ function runActivate(state, { pid, player, params, ctx }) {
   return { location: loc.hexId, ability: ability.id };
 }
 
+// --- Combine (§16.7) ------------------------------------------------
+// Merge two co-located friendly units into one: the survivor gets the SUM
+// of their base Strengths (capped at 8), a third bay slot, a -1 Movement
+// penalty, and carries veterancy + contest counts from whichever parent
+// had them. Excess chips (over the combined unit's 3-slot bay) salvage
+// back to the player via the standard pendingSalvage flow.
+function slotsOf(state, chipUid) {
+  return chipDefOf(state, chipUid)?.slots ?? 1;
+}
+
+function validateCombine(state, { pid, params }) {
+  const a = state.units[params.unitA];
+  const b = state.units[params.unitB];
+  if (!a || !b) return fail("no such unit");
+  if (a.uid === b.uid) return fail("cannot combine a unit with itself");
+  if (a.owner !== pid || b.owner !== pid) return fail("not your unit");
+  if (a.node !== b.node) return fail("units must share a hex");
+  // A combined unit cannot recombine — the cap is already at the ceiling
+  // and the bay is already maxed, so it would only be a no-op + a free chip
+  // ejection. Disallow to keep the action's effect honest.
+  if (a.combined || b.combined) return fail("a combined unit cannot recombine");
+  // Combining a unit that has already moved this turn is fine — Move and
+  // Combine are independent; the survivor inherits a's moveRemaining
+  // (cleared to 0 to prevent same-turn double-action via reset).
+  return { ok: true };
+}
+
+function runCombine(state, { pid, params, ctx }) {
+  const a = state.units[params.unitA];
+  const b = state.units[params.unitB];
+  const cap = CONFIG.unit.combinedStrengthCap;
+  // Sum then cap — explicit per §16.7. NOT auto-set to cap regardless of input.
+  a.baseStrength = Math.min(cap, a.baseStrength + b.baseStrength);
+  a.combined = true;
+  a.baseMovement = Math.max(1, a.baseMovement - CONFIG.unit.combineMovementPenalty);
+  a.moveRemaining = 0; // spent its action; no same-turn re-cycling
+  a.veteran = a.veteran || b.veteran; // veterancy survives if either had it
+  a.contestsWon = Math.max(a.contestsWon, b.contestsWon);
+  a.contestsSurvived = Math.max(a.contestsSurvived, b.contestsSurvived);
+
+  // Merge chip bays. Combined bay holds 3 slots; any excess salvages back.
+  const merged = [...a.chips, ...b.chips];
+  const bayCap = CONFIG.unit.combinedBaySlots;
+  const fit = [];
+  const salvaged = [];
+  let used = 0;
+  for (const c of merged) {
+    const sl = slotsOf(state, c);
+    if (used + sl <= bayCap) { fit.push(c); used += sl; }
+    else salvaged.push(c);
+  }
+  a.chips = fit;
+
+  // Remove the absorbed unit.
+  const absorbedUid = b.uid;
+  const hex = a.node;
+  delete state.units[absorbedUid];
+
+  recomputeStats(state);
+  emit(state, "units_combined", {
+    player: pid, survivor: a.uid, absorbed: absorbedUid, hex,
+    baseStrength: a.baseStrength, salvaged: [...salvaged],
+  });
+
+  // Hand the displaced chips back via the standard salvage flow. The owner
+  // can re-equip them on the survivor (no room without ejecting more) or
+  // any other unit / Location in their territory via the usual salvage UI.
+  if (salvaged.length) {
+    state.pendingSalvage = state.pendingSalvage || [];
+    state.pendingSalvage.push({
+      kind: "combine", killerUid: a.uid, hex, chips: salvaged,
+    });
+  }
+
+  return { survivor: a.uid, absorbed: absorbedUid, salvaged };
+}
+
 // --- dispatch --------------------------------------------------------
 const ACTIONS = {
   move: { cost: 0, validate: validateMove, run: runMove }, // §16.2 — free of Actions
   recruit: { cost: 1, validate: validateRecruit, run: runRecruit },
   reinforce: { cost: 1, validate: validateReinforce, run: runReinforce },
   contest: { cost: 1, validate: validateContest, run: runContest },
+  combine: { cost: 1, validate: validateCombine, run: runCombine }, // §16.7
   // §20.4–20.7 — economic directives, free of the Action budget (the
   // strategic cost is the slider split + scrap, not an Action).
   build: { cost: 0, validate: validateBuild, run: runBuild },

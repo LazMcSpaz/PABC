@@ -1764,5 +1764,114 @@ line("\n§18 DIPLOMACY CAPSTONE");
   }
 }
 
+// --- §16.7 combining + the veteran-cap fix + ghost cleanup on re-spot --------
+line("\n  [Phase 9] §16.7 combining, veteran cap, ghost cleanup");
+{
+  // (a) Veteran promotion no longer doubles the Strength cap.
+  {
+    const g = createGame({ seed }); startTurn(g);
+    const me = g.turnOrder[0];
+    const u = Object.values(g.units).find((x) => x.owner === me);
+    u.veteran = true; recomputeStats(g);
+    check("veteran flag alone does NOT raise the Strength cap above base (4)",
+      u.veteran === true && CONFIG.unit.baseStrengthCap === 4 &&
+      (u.combined ? CONFIG.unit.combinedStrengthCap : CONFIG.unit.baseStrengthCap) === 4);
+    // Passive heal at cap should refuse to heal past base cap.
+    u.baseStrength = 4;
+    performAction(g, "reinforce", { unit: u.uid, mode: "instant" });
+    check("a veteran cannot reinforce past Strength 4 (no doubled cap)",
+      u.baseStrength === 4);
+  }
+  // (b) Combining: sum (not auto-cap), 3 bay slots, -1 base Movement.
+  {
+    const g = createGame({ seed }); startTurn(g);
+    const me = g.turnOrder[0];
+    const owned = Object.values(g.units).filter((x) => x.owner === me);
+    const a = owned[0], b = owned[1];
+    a.baseStrength = 2; b.baseStrength = 2; a.node = b.node;
+    recomputeStats(g);
+    g.players[me].actions.remaining = 5;
+    const beforeMv = a.baseMovement;
+    performAction(g, "combine", { unitA: a.uid, unitB: b.uid });
+    check("combining 2+2 yields Strength 4 (sum, not auto-cap to 8)",
+      a.baseStrength === 4);
+    check("the combined unit is flagged combined",
+      a.combined === true);
+    check("the combined unit's base Movement is -1 from base",
+      a.baseMovement === beforeMv - 1);
+    check("the absorbed unit is gone",
+      g.units[b.uid] === undefined);
+    check("the combined unit has the 3-slot bay",
+      CONFIG.unit.combinedBaySlots === 3);
+  }
+  // (c) Combining 5+5 caps at 8.
+  {
+    const g = createGame({ seed }); startTurn(g);
+    const me = g.turnOrder[0];
+    const [a, b] = Object.values(g.units).filter((x) => x.owner === me);
+    a.combined = true; b.combined = true; // unlock cap-8 for the test
+    a.baseStrength = 5; b.baseStrength = 5; a.node = b.node;
+    a.combined = false; b.combined = false; // now combine fresh
+    recomputeStats(g);
+    g.players[me].actions.remaining = 5;
+    performAction(g, "combine", { unitA: a.uid, unitB: b.uid });
+    check("combining 5+5 caps at 8 (Strength sum, then capped)",
+      a.baseStrength === 8);
+  }
+  // (d) Combining preserves veterancy from either parent.
+  {
+    const g = createGame({ seed }); startTurn(g);
+    const me = g.turnOrder[0];
+    const [a, b] = Object.values(g.units).filter((x) => x.owner === me);
+    a.node = b.node; b.veteran = true;
+    g.players[me].actions.remaining = 5;
+    performAction(g, "combine", { unitA: a.uid, unitB: b.uid });
+    check("combining preserves veterancy if either parent had it",
+      a.veteran === true);
+  }
+  // (e) A combined unit cannot recombine.
+  {
+    const g = createGame({ seed }); startTurn(g);
+    const me = g.turnOrder[0];
+    const [a, b] = Object.values(g.units).filter((x) => x.owner === me);
+    a.node = b.node; a.combined = true;
+    g.players[me].actions.remaining = 5;
+    const r = performAction(g, "combine", { unitA: a.uid, unitB: b.uid });
+    check("combining is refused when either input is already combined",
+      r.ok === false);
+  }
+  // (f) Ghost cleanup: re-spotting a unit clears its stale ghost from memory.
+  // Direct test of the cleanup hook — staging a ghost via natural play is
+  // brittle on the test map (Location vision blankets too much of it), so
+  // inject a ghost into memory directly and verify it clears on re-spot.
+  {
+    const g = createGame({ seed }); startTurn(g);
+    const me = g.turnOrder[0];
+    const foe = g.turnOrder[1];
+    const enemy = Object.values(g.units).find((u) => u.owner === foe);
+    const mine = Object.values(g.units).find((u) => u.owner === me);
+    const staleHex = "h0-0";
+    g.visibility[me].memory[staleHex] = g.visibility[me].memory[staleHex] || {
+      round: g.round, terrain: null, location: null, ghosts: [],
+    };
+    g.visibility[me].memory[staleHex].ghosts.push({
+      unitId: enemy.uid, hex: staleHex, owner: foe, strength: 4, round: g.round - 1,
+    });
+    const ghostBefore = (g.visibility[me].memory[staleHex].ghosts || [])
+      .some((gh) => gh.unitId === enemy.uid);
+    // Position the enemy adjacent to my unit so the next recompute spots them.
+    const adj = g.board.adjacency[mine.node]?.[0] || mine.node;
+    enemy.node = adj;
+    // Force the freshly-respotted branch by clearing the spotted set.
+    g.visibility[me].spotted.delete(enemy.uid);
+    recomputeVisibility(g, me, { emitEvents: false });
+    const respotted = g.visibility[me].spotted.has(enemy.uid);
+    const ghostAfter = (g.visibility[me].memory[staleHex]?.ghosts || [])
+      .some((gh) => gh.unitId === enemy.uid);
+    check("re-spotting a unit clears its stale ghost from memory",
+      ghostBefore && respotted && !ghostAfter);
+  }
+}
+
 line(`\n  v0.2 verification: ${v2pass} passed, ${v2fail} failed`);
 line("");

@@ -28,6 +28,7 @@ export function makeUnit(uid, owner, node, factionName) {
     contestsWon: 0,
     contestsSurvived: 0,
     veteran: false,
+    combined: false, // §16.7 — true after merging with another unit
     chips: [],
     immobilizedUntil: null,
   };

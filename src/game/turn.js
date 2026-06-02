@@ -2,7 +2,7 @@
 // Upkeep work (action reset, modifier expiry, Loyalty tick, scrap
 // production) and Cleanup.
 import { emit } from "./events.js";
-import { recomputeStats, recomputeResearch } from "./stats.js";
+import { recomputeStats, recomputeResearch, strengthCap } from "./stats.js";
 import { recomputeInfluence } from "./influence.js";
 import { recomputeVisibility } from "./visibility.js";
 import { reinforcementRoute } from "./board.js";
@@ -122,7 +122,7 @@ function passiveHeal(state, pid) {
     if (u.owner !== pid) continue;
     const loc = state.locations[u.node];
     if (!loc || loc.controller !== pid) continue;
-    const cap = u.veteran ? CONFIG.unit.veteranStrengthCap : CONFIG.unit.baseStrengthCap;
+    const cap = strengthCap(u);
     if (u.baseStrength >= cap) continue;
     const before = u.baseStrength;
     u.baseStrength = Math.min(cap, u.baseStrength + CONFIG.heal.passivePerTurn);
@@ -218,7 +218,7 @@ function sweepReinforcements(state) {
     r.traveled = (r.traveled || 0) + 1;
     const route = reinforcementRoute(state, r.owner, unit.node);
     if (route && r.traveled >= route.dist) {
-      const cap = unit.veteran ? CONFIG.unit.veteranStrengthCap : CONFIG.unit.baseStrengthCap;
+      const cap = strengthCap(unit);
       const before = unit.baseStrength;
       unit.baseStrength = Math.min(cap, unit.baseStrength + r.amount);
       recomputeStats(state);

@@ -5,6 +5,17 @@ import { CONFIG } from "./config.js";
 import { emit } from "./events.js";
 import { TECH_NODES, hasTechNode, prereqMet } from "./tech.js";
 
+// §16.6/§16.7 — a unit's effective Strength cap. Veterancy gives +1 to
+// contest rolls only and does NOT raise the cap; only §16.7 combining does.
+export function strengthCap(unit) {
+  return unit.combined ? CONFIG.unit.combinedStrengthCap : CONFIG.unit.baseStrengthCap;
+}
+
+// §16.7 — a unit's bay slot capacity. Combined units get the third slot.
+export function bayCapacity(unit) {
+  return unit.combined ? CONFIG.unit.combinedBaySlots : CONFIG.unit.baySlots;
+}
+
 export function recomputeStats(state) {
   for (const unit of Object.values(state.units)) {
     let strength = unit.baseStrength;

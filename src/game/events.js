@@ -24,10 +24,10 @@ export const EVENT_NAMES = new Set([
   // §18.3 Influence & Zone of Control
   "zone_changed",
   "reward_granted",
-  // v0.2 §16 — attrition, salvage, reinforcement, veterancy
+  // v0.2 §16 — attrition, salvage, reinforcement, veterancy, combining
   "unit_destroyed", "unit_salvaged", "base_strength_changed",
   "unit_reinforced", "reinforcement_requested", "reinforcement_arrived",
-  "veteran_promoted",
+  "veteran_promoted", "units_combined",
   "loot_dropped", "loot_claimed",
   // Layer 5 — encounter & quest system (spec §15.13)
   "encounter_delivered", "trigger_fired",

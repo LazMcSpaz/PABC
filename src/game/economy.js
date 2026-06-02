@@ -10,7 +10,7 @@
 import { CONFIG } from "./config.js";
 import { CHIPS, chipDefOf } from "./content.js";
 import { emit } from "./events.js";
-import { recomputeStats, recomputeResearch } from "./stats.js";
+import { recomputeStats, recomputeResearch, bayCapacity } from "./stats.js";
 import { recomputeInfluence } from "./influence.js";
 import { hasTechNode } from "./tech.js";
 
@@ -119,7 +119,7 @@ export function upgradeOption(state, loc, chipUid) {
 export function stationedUnitWithBay(state, loc, slots) {
   for (const u of Object.values(state.units)) {
     if (u.owner !== loc.controller || u.node !== loc.hexId) continue;
-    if (slotsUsed(state, u.chips) + slots <= CONFIG.unit.baySlots) return u;
+    if (slotsUsed(state, u.chips) + slots <= bayCapacity(u)) return u;
   }
   return null;
 }
@@ -176,7 +176,7 @@ export function completeBuildIfDone(state, loc) {
     if (def?.kind === "unit") {
       const u = ab.targetUnit && state.units[ab.targetUnit];
       const target = u && u.node === loc.hexId && u.owner === loc.controller &&
-        slotsUsed(state, u.chips) + (def.slots || 1) <= CONFIG.unit.baySlots
+        slotsUsed(state, u.chips) + (def.slots || 1) <= bayCapacity(u)
         ? u
         : stationedUnitWithBay(state, loc, def.slots || 1);
       if (!target) {

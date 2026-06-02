@@ -265,6 +265,11 @@ export function recomputeVisibility(state, fid, { emitEvents = true } = {}) {
     if (u.owner === fid) continue;
     if (canSee(state, fid, u, false)) seenNow.add(u.uid);
   }
+  // §19.11 — re-spotting a unit clears any stale ghost of it from memory.
+  // The ghost is information about "where the unit was when I last saw it";
+  // seeing the unit again on a different hex makes that snapshot obsolete.
+  // (Done outside the emitEvents block — it's logic, not notification.)
+  for (const uid of seenNow) if (!vis.spotted.has(uid)) clearGhostsOfUnit(vis, uid);
   if (emitEvents) {
     for (const uid of seenNow) if (!vis.spotted.has(uid)) {
       const u = state.units[uid];
@@ -276,6 +281,18 @@ export function recomputeVisibility(state, fid, { emitEvents = true } = {}) {
   }
   vis.spotted = seenNow;
   return vis;
+}
+
+// Remove every ghost of `uid` from a faction's memory. Used when the unit
+// is freshly re-spotted, so the player isn't shown two contradictory
+// records (the live sighting + the stale ghost at a stale hex).
+function clearGhostsOfUnit(vis, uid) {
+  for (const hex of Object.keys(vis.memory)) {
+    const mem = vis.memory[hex];
+    if (!mem?.ghosts?.length) continue;
+    const kept = mem.ghosts.filter((g) => g.unitId !== uid);
+    if (kept.length !== mem.ghosts.length) mem.ghosts = kept;
+  }
 }
 
 // Recompute several factions at once (capture, shared-vision grants).
