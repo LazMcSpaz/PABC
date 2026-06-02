@@ -19,7 +19,7 @@ import { startTurn, endTurn } from "../game/turn.js";
 import { performAction } from "../game/actions.js";
 import { takeAITurn } from "../game/ai.js";
 import { activePlayerId } from "../game/targeting.js";
-import { bfsDistances } from "../game/board.js";
+import { bfsDistances, movementField } from "../game/board.js";
 import { CHIPS as ENGINE_CHIPS, LOCATIONS as ENGINE_LOCATIONS } from "../game/content.js";
 import { CONFIG } from "../game/config.js";
 import { NEUTRAL } from "./data.js";
@@ -306,12 +306,9 @@ export default function Prototype({ config, onNewGame }) {
     const unit = state.units[selectedUnitId];
     const budget = unit?.moveRemaining ?? unit?.effectiveMovement ?? 0;
     if (!unit || unit.immobilized || budget <= 0) return null;
-    const dists = bfsDistances(gameRef.current.board.adjacency, unit.node);
-    const out = new Set();
-    for (const [hex, d] of Object.entries(dists)) {
-      if (d > 0 && d <= budget) out.add(hex);
-    }
-    return out;
+    // §16.2 — terrain-aware reachability (forest costs +1, mountains halt).
+    const field = movementField(gameRef.current, unit.node, budget);
+    return new Set(Object.keys(field));
   }, [tick, isYourTurn, selectedUnitId, state]);
 
   // During an AI replay the board renders pawns at their DISPLAYED (lagging)

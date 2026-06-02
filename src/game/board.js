@@ -109,6 +109,48 @@ export function isCover(hex) {
   return !!(hex && hex.cover);
 }
 
+// §16.2 terrain movement — the hexes a unit can reach this turn from `start`
+// with `budget` movement points, honouring per-hex entry costs:
+//   • forest (cover): costs CONFIG.movement.forestCost (default 2 = "−1 speed")
+//   • mountain (elevation): you may step ONTO one when ≥1 point remains, but it
+//     HALTS the move (you arrive with 0) — "mountains slow you to 1, no matter
+//     what". You therefore cannot move THROUGH a mountain in one turn.
+//   • everything else: 1.
+// Returns a map hexId → movement points REMAINING after arriving (start
+// excluded). Best-first expansion; budgets are tiny so this is cheap and
+// deterministic. (Roads will later lower the entry cost here.)
+export function movementField(state, start, budget) {
+  const adj = state.board.adjacency;
+  const hexes = state.board.hexes;
+  const halts = CONFIG.movement.mountainHalts;
+  const forestCost = CONFIG.movement.forestCost;
+  const best = { [start]: budget };
+  const queue = [start];
+  while (queue.length) {
+    // expand the frontier hex with the most movement left first
+    let bi = 0;
+    for (let i = 1; i < queue.length; i++) if (best[queue[i]] > best[queue[bi]]) bi = i;
+    const cur = queue.splice(bi, 1)[0];
+    const rem = best[cur];
+    if (rem <= 0) continue;                                       // out of movement
+    if (cur !== start && halts && isElevation(hexes[cur])) continue; // mountains are terminal
+    for (const nb of adj[cur] || []) {
+      let nrem;
+      if (halts && isElevation(hexes[nb])) {
+        nrem = 0;                       // climbing a mountain ends the move
+      } else {
+        const cost = isCover(hexes[nb]) ? forestCost : 1;
+        if (rem < cost) continue;       // not enough movement to enter
+        nrem = rem - cost;
+      }
+      if (nrem > (best[nb] ?? -1)) { best[nb] = nrem; queue.push(nb); }
+    }
+  }
+  const out = {};
+  for (const hex in best) if (hex !== start) out[hex] = best[hex];
+  return out;
+}
+
 // §19.4 — stamp deterministic elevation / cover features onto the board.
 // Only terrain ("wasteland") hexes are eligible: Locations stay
 // feature-free (so a contested Location hex never silently conceals an

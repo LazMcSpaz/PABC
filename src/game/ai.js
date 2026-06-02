@@ -7,7 +7,7 @@
 import { performAction } from "./actions.js";
 import { endTurn } from "./turn.js";
 import { activePlayerId } from "./targeting.js";
-import { bfsDistances } from "./board.js";
+import { bfsDistances, movementField } from "./board.js";
 import { LOCATIONS } from "./content.js";
 import { CONFIG } from "./config.js";
 import { buildableChips, slotCapacity, slotsUsed, stationedUnitWithBay } from "./economy.js";
@@ -278,8 +278,12 @@ function nearestFrontier(state, pid, reachable) {
 function pickMoveTarget(state, pid, unit) {
   const dists = bfsDistances(state.board.adjacency, unit.node);
   const budget = unit.moveRemaining ?? unit.movement;
+  // §16.2 — reachability respects terrain entry costs (forest/mountain); we
+  // still score by hop distance, so filter the bfs map by what's actually
+  // reachable this turn.
+  const field = movementField(state, unit.node, budget);
   const reachable = Object.entries(dists)
-    .filter(([hex, d]) => d > 0 && d <= budget && hex !== unit.node);
+    .filter(([hex, d]) => d > 0 && hex !== unit.node && hex in field);
   if (!reachable.length) return null;
 
   const goals = knownGoalHexes(state, pid);
