@@ -611,17 +611,20 @@ export default function Prototype({ config, onNewGame }) {
             />
           </div>
         </BoardViewport>
-        {selectedUnitId && state.units[selectedUnitId] && (
-          <UnitPanel
-            unit={state.units[selectedUnitId]}
-            hex={state.hexes[state.units[selectedUnitId].node]}
-            canAct={isYourTurn && state.units[selectedUnitId].owner === state.youId}
-            reinforce={reinforcePreview(gameRef.current, selectedUnitId)}
-            scrap={you.scrap}
-            onReinforce={onReinforce}
-            onClose={() => setSelectedUnitId(null)}
-          />
-        )}
+        <AnimatePresence>
+          {selectedUnitId && state.units[selectedUnitId] && (
+            <UnitPanel
+              key="unit-panel"
+              unit={state.units[selectedUnitId]}
+              hex={state.hexes[state.units[selectedUnitId].node]}
+              canAct={isYourTurn && state.units[selectedUnitId].owner === state.youId}
+              reinforce={reinforcePreview(gameRef.current, selectedUnitId)}
+              scrap={you.scrap}
+              onReinforce={onReinforce}
+              onClose={() => setSelectedUnitId(null)}
+            />
+          )}
+        </AnimatePresence>
         <EventFeed engineState={gameRef.current} tick={tick} />
       </div>
 
