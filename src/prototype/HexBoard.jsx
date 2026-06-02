@@ -8,6 +8,7 @@ export default function HexBoard({
   state,
   selectedHexId,
   selectedUnitId,
+  dimmedUnitUid,
   reachable,
   onSelect,
   onUnitClick,
@@ -41,6 +42,7 @@ export default function HexBoard({
                 selected={hexId === selectedHexId}
                 reachable={reachable?.has(hexId) || false}
                 selectedUnitId={selectedUnitId}
+                dimmedUnitUid={dimmedUnitUid}
                 onClick={() => onSelect(hexId)}
                 onUnitClick={onUnitClick}
               />
