@@ -13,30 +13,11 @@ import { activePlayerId } from "../../game/targeting.js";
 import { FACTIONS as UI_FACTIONS, NEUTRAL } from "../data.js";
 import { CHIPS as ENGINE_CHIPS, LOCATIONS as ENGINE_LOCATIONS } from "../../game/content.js";
 import { runAITurnWithReplay } from "../engineAdapter.js";
+import { displayRoute } from "../../game/movement.js";
 import { createAIReplayDriver, CADENCE } from "./AIReplayDriver.js";
 import { getAiTurnSpeed } from "./options.js";
 
 const AI_DRIVE_GUARD = 12; // matches the synchronous driver's bound
-
-// Shortest hex path from `from` to `to` over the adjacency graph. The engine
-// doesn't record the route taken; any shortest path is a faithful slide.
-function shortestPath(adjacency, from, to) {
-  if (from === to) return [from];
-  const prev = { [from]: null };
-  const q = [from];
-  while (q.length) {
-    const cur = q.shift();
-    if (cur === to) break;
-    for (const nb of adjacency[cur] || []) {
-      if (prev[nb] === undefined) { prev[nb] = cur; q.push(nb); }
-    }
-  }
-  if (prev[to] === undefined) return [from, to];
-  const path = [];
-  let c = to;
-  while (c != null) { path.unshift(c); c = prev[c]; }
-  return path;
-}
 
 export function useAIReplay({ gameRef, geomRef, bumpTick }) {
   const [displayedPositions, setDisplayedPositions] = useState(null);
@@ -96,7 +77,7 @@ export function useAIReplay({ gameRef, geomRef, bumpTick }) {
       viewer: () => viewer,
       center,
       isVisible,
-      path: (from, to) => shortestPath(game.board.adjacency, from, to),
+      path: (from, to) => displayRoute(game, from, to), // §16.2 terrain/road-aware route
       unitNode: (uid) => game.units[uid]?.node ?? lastHexRef.current[uid] ?? null,
       lastUnitHex: (uid) => lastHexRef.current[uid] ?? null,
       unitColor: (uid) => UI_FACTIONS[ownerOf(uid)]?.color || "#888",

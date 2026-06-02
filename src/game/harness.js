@@ -7,7 +7,7 @@ import { performAction } from "./actions.js";
 import { applyEffect } from "./effects.js";
 import { recomputeStats, recomputeResearch, assignTechNode } from "./stats.js";
 import { recomputeInfluence, zocOwner, inZoC } from "./influence.js";
-import { reinforcementRoute, bfsDistances, movementField } from "./board.js";
+import { reinforcementRoute, bfsDistances, movementField, movementRoute } from "./board.js";
 import { passesFreely, movementBlockers, unitReach } from "./movement.js";
 import { recomputeVisibility, isUnitVisibleTo, revealRegion, unitVision, isHexVisible } from "./visibility.js";
 import {
@@ -642,6 +642,33 @@ line("\n  [Blockade] non-passing units and enemy Locations stop a move");
   setStanding(g, me, foe, friendly); setStanding(g, foe, me, friendly);
   check("friendly+ factions pass freely", passesFreely(g, me, foe));
   check("a friendly faction's unit is NOT a blocker", !movementBlockers(g, me).has(nb));
+}
+
+// --- §16.2 route — the move arrow follows the actual least-cost path ---
+line("\n  [Route] the move path follows real movement rules");
+{
+  // Diamond: A→{B forest, X plains}→D. The cheaper lane is A→X→D.
+  const mk = () => ({
+    board: {
+      adjacency: { A: ["B", "X"], B: ["A", "D"], X: ["A", "D"], D: ["B", "X"] },
+      hexes: { A: { id: "A" }, B: { id: "B", cover: true }, X: { id: "X" }, D: { id: "D" } },
+    },
+  });
+  check("route takes the cheaper lane around a forest (A→X→D, not A→B→D)",
+    JSON.stringify(movementRoute(mk(), "A", 3, "D")) === JSON.stringify(["A", "X", "D"]));
+  check("route is null when the destination is out of budget",
+    movementRoute(mk(), "A", 1, "D") === null);
+
+  // A mountain is a dead-end the route may end on but not pass through.
+  const mk2 = () => ({
+    board: {
+      adjacency: { A: ["M"], M: ["A", "Z"], Z: ["M"] },
+      hexes: { A: { id: "A" }, M: { id: "M", elevation: true }, Z: { id: "Z" } },
+    },
+  });
+  check("route may end on a mountain but cannot pass through it",
+    JSON.stringify(movementRoute(mk2(), "A", 5, "M")) === JSON.stringify(["A", "M"]) &&
+    movementRoute(mk2(), "A", 5, "Z") === null);
 }
 
 // --- Phase 2: two units, cap 3, cheaper recruit ---

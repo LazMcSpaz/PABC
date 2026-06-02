@@ -20,7 +20,7 @@ import { performAction } from "../game/actions.js";
 import { takeAITurn } from "../game/ai.js";
 import { activePlayerId } from "../game/targeting.js";
 import { bfsDistances } from "../game/board.js";
-import { unitReach } from "../game/movement.js";
+import { unitReach, unitMovePath } from "../game/movement.js";
 import { CHIPS as ENGINE_CHIPS, LOCATIONS as ENGINE_LOCATIONS } from "../game/content.js";
 import { CONFIG } from "../game/config.js";
 import { NEUTRAL } from "./data.js";
@@ -889,6 +889,7 @@ export default function Prototype({ config, onNewGame }) {
             unit={state.units[pendingMove.unitUid]}
             originHexId={pendingMove.origin}
             destHexId={pendingMove.dest}
+            pathHexIds={unitMovePath(gameRef.current, gameRef.current.units[pendingMove.unitUid], pendingMove.dest)}
             ownerColor={UI_FACTIONS[state.units[pendingMove.unitUid]?.owner]?.color}
             onConfirm={() => {
               const m = pendingMove;

@@ -126,18 +126,18 @@ export function isRoad(hex) {
 //   • `blockedThrough` (a Set of hexIds): you may ENTER such a hex but it HALTS
 //     you there (a foreign unit's blockade, or an enemy Location §16.2) — the
 //     caller computes these via diplomacy (see movement.js).
-// Returns a map hexId → movement points REMAINING after arriving (start
-// excluded; a halting hex stores 0). Best-first; budgets are tiny.
-export function movementField(state, start, budget, { blockedThrough } = {}) {
+// Best-first expansion (maximise movement left = minimise cost), tracking a
+// predecessor for each hex so the exact ROUTE can be reconstructed. Returns
+// { best: {hex: remaining}, prev: {hex: cameFrom} } including `start`.
+function expandMovement(state, start, budget, blocked) {
   const adj = state.board.adjacency;
   const hexes = state.board.hexes;
   const halts = CONFIG.movement.mountainHalts;
   const forestCost = CONFIG.movement.forestCost;
-  const blocked = blockedThrough || null;
   const best = { [start]: budget };
+  const prev = { [start]: null };
   const queue = [start];
   while (queue.length) {
-    // expand the frontier hex with the most movement left first
     let bi = 0;
     for (let i = 1; i < queue.length; i++) if (best[queue[i]] > best[queue[bi]]) bi = i;
     const cur = queue.splice(bi, 1)[0];
@@ -151,12 +151,33 @@ export function movementField(state, start, budget, { blockedThrough } = {}) {
       // A mountain (no road) or a blockaded hex halts you on entry: enter, stop.
       const terminal = mountain || (blocked && blocked.has(nb));
       const nrem = terminal ? 0 : rem - cost;
-      if (nrem > (best[nb] ?? -1)) { best[nb] = nrem; queue.push(nb); }
+      if (nrem > (best[nb] ?? -1)) { best[nb] = nrem; prev[nb] = cur; queue.push(nb); }
     }
   }
+  return { best, prev };
+}
+
+// Reachable hexes → { hexId: movement points remaining } (start excluded; a
+// halting hex stores 0).
+export function movementField(state, start, budget, { blockedThrough } = {}) {
+  const { best } = expandMovement(state, start, budget, blockedThrough || null);
   const out = {};
   for (const hex in best) if (hex !== start) out[hex] = best[hex];
   return out;
+}
+
+// §16.2 — the exact least-cost ROUTE a unit takes from `start` to `dest` under
+// the same rules as movementField (so the UI arrow and the actual move agree).
+// Returns the ordered hex list [start, …, dest], or null if `dest` isn't
+// reachable within `budget`. Pass a large budget for a budget-agnostic route
+// (e.g. replay display).
+export function movementRoute(state, start, budget, dest, { blockedThrough } = {}) {
+  if (dest === start) return [start];
+  const { best, prev } = expandMovement(state, start, budget, blockedThrough || null);
+  if (best[dest] === undefined) return null;
+  const path = [];
+  for (let c = dest; c != null; c = prev[c]) path.unshift(c);
+  return path;
 }
 
 // §19.4 — stamp deterministic elevation / cover features onto the board.

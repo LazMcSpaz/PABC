@@ -5,9 +5,11 @@
 // the occupied/enemy hex but stop there (a chokepoint blockade). Enemy-
 // controlled Location hexes block the same way.
 import { CONFIG } from "./config.js";
-import { movementField } from "./board.js";
+import { movementField, movementRoute } from "./board.js";
 import { getStanding } from "./standing.js";
 import { arePacted, vassalLord } from "./diplomacy.js";
+
+const BIG_BUDGET = 999; // budget-agnostic routing for display
 
 // May `a`'s units move freely THROUGH `b`'s units / Locations? True for the
 // same faction, an alliance (pact or vassalage either way), or MUTUAL Friendly+
@@ -46,4 +48,22 @@ export function unitReach(state, unit) {
   return movementField(state, unit.node, budget, {
     blockedThrough: movementBlockers(state, unit.owner),
   });
+}
+
+// The exact ROUTE `unit` takes to reach `dest` this turn (same rules as
+// unitReach) — for the move-preview arrow. [start, …, dest] or null.
+export function unitMovePath(state, unit, dest) {
+  if (!unit) return null;
+  const budget = unit.moveRemaining ?? unit.movement ?? 0;
+  return movementRoute(state, unit.node, budget, dest, {
+    blockedThrough: movementBlockers(state, unit.owner),
+  });
+}
+
+// A budget- and blockade-agnostic terrain/road route from `from` to `to`, for
+// REPLAY display (the move already happened; we just want a sensible lane the
+// pawn visibly follows around mountains / along roads). Falls back to a direct
+// hop if no terrain route exists.
+export function displayRoute(state, from, to) {
+  return movementRoute(state, from, BIG_BUDGET, to, {}) || [from, to];
 }
