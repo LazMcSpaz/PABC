@@ -8,6 +8,7 @@ import { applyEffect } from "./effects.js";
 import { recomputeStats, recomputeResearch, assignTechNode } from "./stats.js";
 import { recomputeInfluence, zocOwner, inZoC } from "./influence.js";
 import { reinforcementRoute, bfsDistances, movementField } from "./board.js";
+import { passesFreely, movementBlockers, unitReach } from "./movement.js";
 import { recomputeVisibility, isUnitVisibleTo, revealRegion, unitVision, isHexVisible } from "./visibility.js";
 import {
   ensureDiplomacy, menaceFromAttack, onAttack,
@@ -577,12 +578,70 @@ line("\n  [Terrain] movement costs (forest +1, mountains halt)");
   const u = Object.values(g.units).find((x) => x.owner === me);
   const nb = (g.board.adjacency[u.node] || []).find((h) => !g.locations[h]);
   if (nb) {
-    g.board.hexes[nb].cover = true; g.board.hexes[nb].elevation = false;
+    g.board.hexes[nb].cover = true; g.board.hexes[nb].elevation = false; g.board.hexes[nb].road = false;
     u.moveRemaining = 2; recomputeStats(g);
     const r = performAction(g, "move", { unit: u.uid, to: nb });
     check("Move onto a forest hex (cost 2) zeroes a budget-2 unit's movement",
       r.ok && u.node === nb && u.moveRemaining === 0);
   }
+}
+
+// --- §16.2 roads — a hex modifier that negates terrain MOVEMENT cost ---
+line("\n  [Roads] negate terrain movement cost (forest + mountain)");
+{
+  const mk = (B, C) => ({
+    board: {
+      adjacency: { A: ["B"], B: ["A", "C"], C: ["B", "D"], D: ["C"] },
+      hexes: { A: { id: "A" }, B: { id: "B", ...B }, C: { id: "C", ...C }, D: { id: "D" } },
+    },
+  });
+  const forestRoad = movementField(mk({ cover: true, road: true }, {}), "A", 2);
+  check("a road through forest costs 1 (B rem1, C still reachable)",
+    forestRoad.B === 1 && "C" in forestRoad);
+  const mtnRoad = movementField(mk({}, { elevation: true, road: true }), "A", 3);
+  check("a road through a mountain does NOT halt (C rem1, D reachable)",
+    mtnRoad.C === 1 && "D" in mtnRoad);
+  // Setup lays road corridors between the faction capitals.
+  const g = createGame({ seed });
+  const roads = Object.values(g.board.hexes).filter((h) => h.road).length;
+  check("setup lays a road network between capitals", roads > 0);
+}
+
+// --- §16.2 blockade — foreign units / enemy Locations halt movement ---
+line("\n  [Blockade] non-passing units and enemy Locations stop a move");
+{
+  const mkLine = () => ({
+    board: {
+      adjacency: { A: ["B"], B: ["A", "C"], C: ["B", "D"], D: ["C"] },
+      hexes: { A: { id: "A" }, B: { id: "B" }, C: { id: "C" }, D: { id: "D" } },
+    },
+  });
+  const blocked = movementField(mkLine(), "A", 3, { blockedThrough: new Set(["B"]) });
+  check("a blockaded hex is enterable but terminal (B rem0, C/D unreachable)",
+    blocked.B === 0 && !("C" in blocked) && !("D" in blocked));
+
+  const g = createGame({ seed });
+  const me = g.turnOrder[0];
+  const foe = g.turnOrder.find((p) => p !== me && !g.players[p].isMinor) || g.turnOrder[1];
+  const myU = Object.values(g.units).find((u) => u.owner === me);
+  const foeU = Object.values(g.units).find((u) => u.owner === foe);
+  // Park the enemy on a clean plain neighbour, with the mover holding 3 moves.
+  const nb = (g.board.adjacency[myU.node] || []).find((h) => !g.locations[h]);
+  foeU.node = nb;
+  g.board.hexes[nb].cover = false; g.board.hexes[nb].elevation = false; g.board.hexes[nb].road = false;
+  myU.moveRemaining = 3; recomputeStats(g);
+
+  setStanding(g, me, foe, 0); setStanding(g, foe, me, 0); // neutral both ways
+  check("neutral factions do not pass freely", !passesFreely(g, me, foe));
+  check("an enemy unit's hex is a movement blocker", movementBlockers(g, me).has(nb));
+  check("you may enter a blockaded hex but halt there (remaining 0 despite budget 3)",
+    unitReach(g, myU)[nb] === 0);
+
+  // Friendly+ standing lets units pass through freely (no blockade).
+  const friendly = CONFIG.diplomacy.tiers.friendly;
+  setStanding(g, me, foe, friendly); setStanding(g, foe, me, friendly);
+  check("friendly+ factions pass freely", passesFreely(g, me, foe));
+  check("a friendly faction's unit is NOT a blocker", !movementBlockers(g, me).has(nb));
 }
 
 // --- Phase 2: two units, cap 3, cheaper recruit ---

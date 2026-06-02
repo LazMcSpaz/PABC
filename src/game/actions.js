@@ -4,7 +4,8 @@
 // covers the framework plus Move and Recruit.
 import { emit } from "./events.js";
 import { activePlayerId } from "./targeting.js";
-import { bfsDistances, reinforcementRoute, movementField } from "./board.js";
+import { bfsDistances, reinforcementRoute } from "./board.js";
+import { unitReach } from "./movement.js";
 import { CONFIG } from "./config.js";
 import { FACTIONS, CHIPS, ABILITIES, chipDefOf, factionDef } from "./content.js";
 import { validateContest, runContest } from "./contest.js";
@@ -43,9 +44,10 @@ function validateMove(state, { pid, params }) {
     return fail("unit is immobilized");
   if (!state.board.hexes[params.to]) return fail("no such hex");
   if (params.to === unit.node) return fail("unit is already on that hex");
-  // v0.2 §16.2 — Move spends the per-turn move budget (not Actions), and the
-  // budget is consumed by terrain entry costs (§16.2 forest/mountain).
-  const field = movementField(state, unit.node, unit.moveRemaining);
+  // v0.2 §16.2 — Move spends the per-turn move budget (not Actions), consumed
+  // by terrain entry costs and roads, and stopped by blockades (a non-passing
+  // foreign unit / enemy Location halts you on that hex).
+  const field = unitReach(state, unit);
   if (!(params.to in field))
     return fail(`out of range (moves left ${unit.moveRemaining})`);
   return { ok: true };
@@ -54,10 +56,10 @@ function validateMove(state, { pid, params }) {
 function runMove(state, { params, ctx }) {
   const unit = state.units[params.unit];
   const from = unit.node;
-  const field = movementField(state, from, unit.moveRemaining);
+  const field = unitReach(state, unit);
   unit.node = params.to;
-  // Terrain-aware deduction: the field already accounts for forest cost and
-  // the mountain halt, so the remaining budget at the destination is exact.
+  // The field already accounts for forest/road cost, the mountain halt and any
+  // blockade stop, so the remaining budget at the destination is exact.
   unit.moveRemaining = Math.max(0, field[params.to] ?? 0);
   unit.movedSinceUpkeep = true; // §16.6 fortify — moving voids "dug in"
   emit(state, "unit_moved", { unit: unit.uid, from, to: params.to });

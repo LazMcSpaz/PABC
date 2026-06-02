@@ -108,22 +108,32 @@ export function isElevation(hex) {
 export function isCover(hex) {
   return !!(hex && hex.cover);
 }
+// §16.2 roads — a per-hex MOVEMENT modifier (not its own terrain). A road
+// negates terrain movement cost: a road hex costs 1 to enter and never halts,
+// even through forest or mountain. Roads do NOT affect cover/visibility — a
+// road through a forest still conceals and a mountain still blocks sight.
+export function isRoad(hex) {
+  return !!(hex && hex.road);
+}
 
 // §16.2 terrain movement — the hexes a unit can reach this turn from `start`
-// with `budget` movement points, honouring per-hex entry costs:
+// with `budget` movement points, honouring per-hex entry costs and stoppers:
 //   • forest (cover): costs CONFIG.movement.forestCost (default 2 = "−1 speed")
-//   • mountain (elevation): you may step ONTO one when ≥1 point remains, but it
-//     HALTS the move (you arrive with 0) — "mountains slow you to 1, no matter
-//     what". You therefore cannot move THROUGH a mountain in one turn.
+//   • mountain (elevation): you may step ONTO one (≥1 point) but it HALTS the
+//     move (arrive with 0) — "speed 1, no matter what"; no passing through.
+//   • road: negates the above — costs 1, never halts (fast lane / chokepoint).
 //   • everything else: 1.
+//   • `blockedThrough` (a Set of hexIds): you may ENTER such a hex but it HALTS
+//     you there (a foreign unit's blockade, or an enemy Location §16.2) — the
+//     caller computes these via diplomacy (see movement.js).
 // Returns a map hexId → movement points REMAINING after arriving (start
-// excluded). Best-first expansion; budgets are tiny so this is cheap and
-// deterministic. (Roads will later lower the entry cost here.)
-export function movementField(state, start, budget) {
+// excluded; a halting hex stores 0). Best-first; budgets are tiny.
+export function movementField(state, start, budget, { blockedThrough } = {}) {
   const adj = state.board.adjacency;
   const hexes = state.board.hexes;
   const halts = CONFIG.movement.mountainHalts;
   const forestCost = CONFIG.movement.forestCost;
+  const blocked = blockedThrough || null;
   const best = { [start]: budget };
   const queue = [start];
   while (queue.length) {
@@ -132,17 +142,15 @@ export function movementField(state, start, budget) {
     for (let i = 1; i < queue.length; i++) if (best[queue[i]] > best[queue[bi]]) bi = i;
     const cur = queue.splice(bi, 1)[0];
     const rem = best[cur];
-    if (rem <= 0) continue;                                       // out of movement
-    if (cur !== start && halts && isElevation(hexes[cur])) continue; // mountains are terminal
+    if (rem <= 0) continue; // out of movement — also how halting hexes (rem 0) stop
     for (const nb of adj[cur] || []) {
-      let nrem;
-      if (halts && isElevation(hexes[nb])) {
-        nrem = 0;                       // climbing a mountain ends the move
-      } else {
-        const cost = isCover(hexes[nb]) ? forestCost : 1;
-        if (rem < cost) continue;       // not enough movement to enter
-        nrem = rem - cost;
-      }
+      const road = isRoad(hexes[nb]);
+      const mountain = halts && isElevation(hexes[nb]) && !road; // road negates the halt
+      const cost = mountain ? 1 : (isCover(hexes[nb]) && !road ? forestCost : 1);
+      if (rem < cost) continue; // not enough movement to enter
+      // A mountain (no road) or a blockaded hex halts you on entry: enter, stop.
+      const terminal = mountain || (blocked && blocked.has(nb));
+      const nrem = terminal ? 0 : rem - cost;
       if (nrem > (best[nb] ?? -1)) { best[nb] = nrem; queue.push(nb); }
     }
   }
@@ -166,6 +174,52 @@ export function assignTerrainFeatures(rng, hexes) {
   let i = 0;
   for (; i < nElev && i < shuffled.length; i++) hexes[shuffled[i]].elevation = true;
   for (let j = 0; j < nCover && i + j < shuffled.length; j++) hexes[shuffled[i + j]].cover = true;
+}
+
+// Shortest hex path from `a` to `b` (inclusive) over `adjacency`, or [] if
+// disconnected. BFS with parent reconstruction; deterministic.
+export function shortestPathHexes(adjacency, a, b) {
+  if (a === b) return [a];
+  const prev = { [a]: null };
+  const q = [a];
+  while (q.length) {
+    const cur = q.shift();
+    if (cur === b) break;
+    for (const nb of adjacency[cur] || []) if (prev[nb] === undefined) { prev[nb] = cur; q.push(nb); }
+  }
+  if (prev[b] === undefined) return [];
+  const path = [];
+  for (let c = b; c != null; c = prev[c]) path.unshift(c);
+  return path;
+}
+
+// §16.2 roads — lay a deterministic road network: a minimum spanning tree
+// (Prim's, by hop distance) over the given `hubHexes` — the faction capitals —
+// with each tree edge's shortest path stamped `road`. The result is a few main
+// corridors between the powers (negating terrain movement cost along them), so
+// the wilderness off-road still matters and the roads become contested lanes.
+// Operates on the live `hexes` map (sets hexes[id].road = true).
+export function assignRoads(adjacency, hexes, hubHexes) {
+  const hubs = [...new Set(hubHexes)].filter((h) => hexes[h]);
+  if (hubs.length < 2) return;
+  const distCache = {};
+  const distFrom = (h) => (distCache[h] ||= bfsDistances(adjacency, h));
+  const inTree = new Set([hubs[0]]);
+  while (inTree.size < hubs.length) {
+    let best = null;
+    for (const a of inTree) {
+      const da = distFrom(a);
+      for (const b of hubs) {
+        if (inTree.has(b)) continue;
+        const d = da[b];
+        if (d === undefined) continue;
+        if (!best || d < best.d || (d === best.d && b < best.b)) best = { a, b, d };
+      }
+    }
+    if (!best) break;
+    inTree.add(best.b);
+    for (const hex of shortestPathHexes(adjacency, best.a, best.b)) hexes[hex].road = true;
+  }
 }
 
 // Constrained-random layout: place the 10 Locations, then fill the rest
