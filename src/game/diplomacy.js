@@ -29,9 +29,11 @@ export function ensureDiplomacy(state) {
       threatScores: {}, // pid -> number
       recognition: {}, // pid -> number (cached)
       giftCounter: {}, // §1.2 — { fromPid: { toPid: gifts-in-window } }
+      pendingCalls: [], // AI→human pact-call inbox: { id, from, target, since, expiresOnRound }
     };
   }
   if (!state.diplomacy.giftCounter) state.diplomacy.giftCounter = {};
+  if (!state.diplomacy.pendingCalls) state.diplomacy.pendingCalls = [];
   for (const p of Object.values(state.players)) {
     if (p.menace == null) p.menace = 0;
     if (p.honor == null) p.honor = CONFIG.diplomacy.honor.start;
@@ -475,6 +477,41 @@ export function evaluatePactCall(state, ally, caller, target) {
   if (agg >= 0.6) score += pc.aggressionScoreBias;
   else if (agg <= 0.4) score -= pc.aggressionScoreBias;
   return { honor: score >= pc.acceptScoreThreshold, score };
+}
+
+// --- §1.8 incoming pact-call inbox (AI → human) ---------------------
+// The HUMAN can't be auto-evaluated — they decide. So an AI ally calling the
+// human into its war does NOT resolve synchronously: it enqueues a pending
+// call the player answers via the `respond-pact-call` verb. (AI→AI calls still
+// resolve immediately via evaluatePactCall / resolvePactCall.)
+function queueHumanPactCalls(state) {
+  const human = state.humanFactionId;
+  if (!human) return; // headless / all-AI game has no inbox
+  const pc = D().pactCall;
+  state.diplomacy.pendingCalls = state.diplomacy.pendingCalls || [];
+  for (const caller of factionIds(state)) {
+    if (caller === human || !arePacted(state, caller, human)) continue; // must be your ally
+    // a war the caller is in whose target the human isn't already fighting/allied with
+    const war = state.diplomacy.wars.find((w) => {
+      const t = w.a === caller ? w.b : w.b === caller ? w.a : null;
+      return t && t !== human && !atWar(state, human, t) && !arePacted(state, human, t);
+    });
+    if (!war) continue;
+    const target = war.a === caller ? war.b : war.a;
+    if (state.diplomacy.pendingCalls.some((c) => c.from === caller && c.target === target)) continue;
+    state.diplomacy.pendingCalls.push({
+      id: `call-${caller}-${target}-${state.round}`,
+      from: caller, target, since: state.round, expiresOnRound: state.round + pc.callExpiryRounds,
+    });
+    emit(state, "pact_call_requested", { caller, ally: human, target });
+  }
+}
+
+// Drop inbox calls the player let lapse (no penalty — silence isn't a refusal).
+function expirePactCalls(state) {
+  const calls = state.diplomacy.pendingCalls;
+  if (!calls?.length) return;
+  state.diplomacy.pendingCalls = calls.filter((c) => state.round <= c.expiresOnRound);
 }
 
 // --- §1.5 war exhaustion + peace acceptance --------------------------
@@ -945,6 +982,8 @@ export function runDiplomacyRound(state) {
   // BEFORE the AI-to-AI politics step.
   giftCounterDecay(state);
   tradingPactRoundCheck(state);
+  expirePactCalls(state);     // §1.8 — drop lapsed inbox calls
+  queueHumanPactCalls(state); // §1.8 — AI allies call the human into their wars
   runAIPolitics(state);
   vassalTick(state);
   recomputeCoalitions(state);
@@ -1121,6 +1160,24 @@ export function performDiplomacy(state, pid, action, params = {}) {
       adjustStanding(state, pid, ally, -D().pactCall.declineStandingHit, "pact-declined");
       if (state.players[ally]) adjustHonor(state, ally, -D().honor.breakLoss, "pact-declined");
       emit(state, "pact_call_declined", { caller: pid, ally, target });
+      return r({ honored: false });
+    }
+
+    // §1.8 — answer an AI ally's pact call from the inbox (accept / refuse).
+    case "respond-pact-call": {
+      const call = (state.diplomacy.pendingCalls || []).find((c) => c.id === params.callId);
+      if (!call) return { ok: false, reason: "no such pending call" };
+      const caller = call.from, target = call.target;
+      state.diplomacy.pendingCalls = state.diplomacy.pendingCalls.filter((c) => c !== call);
+      if (params.accept) {
+        declareWar(state, pid, target, "pact-call");
+        adjustStanding(state, pid, caller, D().pactCall.honorGainOnHonor, "pact-honored");
+        emit(state, "pact_call_honored", { caller, ally: pid, target });
+        return r({ honored: true });
+      }
+      adjustStanding(state, caller, pid, -D().pactCall.declineStandingHit, "pact-declined");
+      if (state.players[pid]) adjustHonor(state, pid, -D().honor.breakLoss, "pact-declined");
+      emit(state, "pact_call_declined", { caller, ally: pid, target });
       return r({ honored: false });
     }
 

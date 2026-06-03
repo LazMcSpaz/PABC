@@ -645,6 +645,13 @@ export default function Prototype({ config, onNewGame }) {
     const targetId = params?.faction || params?.ally || params?.b;
     const name = state.players[targetId] ? (UI_FACTIONS[targetId]?.name || targetId) : targetId;
     let msg = "";
+    if (action === "respond-pact-call") {
+      // The player answered an inbox call — frame it from their side.
+      msg = !r.ok ? (r.reason || "no effect") : r.honored ? "You answer the call to arms." : "You refuse the call.";
+      setDiploResult({ ...r, msg });
+      bumpTick();
+      return;
+    }
     if (!r.ok) msg = r.reason || "no effect";
     else if (r.accepted === false) msg = `${name} declines — ${r.reason || ""}`;
     else if (r.accepted === true) msg = `${name} agrees.`;

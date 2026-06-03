@@ -550,6 +550,17 @@ function adaptDiplomacy(state, viewer) {
     // §3.2 — warring-pair picker for the Mediate pane. Only pairs
     // involving neither the viewer nor their vassal show.
     warringPairs: pickWarringPairs(state, viewer),
+    // §1.8 — incoming pact-call inbox: AI allies calling you into their wars.
+    // Each carries live accept/refuse consequence previews (computed off the
+    // current state, not a stored snapshot — always honest).
+    pendingCalls: (dip.pendingCalls || []).map((c) => ({
+      id: c.id,
+      from: c.from, fromName: factionDef(c.from)?.name || c.from,
+      target: c.target, targetName: factionDef(c.target)?.name || c.target,
+      expiresOnRound: c.expiresOnRound,
+      ifAccept: `Declare war on ${factionDef(c.target)?.name || c.target}`,
+      ifRefuse: `−${CONFIG.diplomacy.pactCall.declineStandingHit} Standing with ${factionDef(c.from)?.name || c.from} · −${CONFIG.diplomacy.honor.breakLoss} Honor`,
+    })),
   };
 }
 

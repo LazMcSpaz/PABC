@@ -221,6 +221,7 @@ export const CONFIG = {
       aggressionScoreBias: 1, // ±1 to score from the ally's aggression dial
       honorGainOnHonor: 2, // ally→caller Standing gain on honoring
       declineStandingHit: 4, // caller→ally Standing hit on declining
+      callExpiryRounds: 2, // an AI→human pact call sits in the inbox this many rounds
     },
     vision: { sharedPactDefault: true }, // §1.9 — pacts auto-share vision by default
     borders: { pactDefault: true }, // §1.10 — pacts auto-open borders by default
