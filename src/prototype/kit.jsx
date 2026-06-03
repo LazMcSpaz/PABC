@@ -179,6 +179,12 @@ const BTN_VARIANTS = {
     color: theme.text,
     boxShadow: "0 2px 0 rgba(0,0,0,0.45)",
   },
+  danger: {
+    background: "linear-gradient(180deg, #d8553f, #a5331f)",
+    border: "1px solid #6e1f12",
+    color: "#fff",
+    boxShadow: "0 2px 0 #5a1a0f, 0 4px 10px rgba(0,0,0,0.42)",
+  },
 };
 
 export function Btn({ children, onClick, variant = "ghost", disabled, full, size = "md", style }) {

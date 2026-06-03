@@ -49,48 +49,64 @@ function PreviewToken({ unit, color, x, y, size = 32 }) {
   );
 }
 
-export default function MoveConfirmOverlay({ unit, originHexId, destHexId, ownerColor, onConfirm, onCancel, onSkipFuture }) {
+export default function MoveConfirmOverlay({ unit, originHexId, destHexId, pathHexIds, ownerColor, onConfirm, onCancel, onSkipFuture }) {
   useEscClose(onCancel);
   const [skip, setSkip] = useState(false);
-  const [pos, setPos] = useState({ origin: null, dest: null });
+  const [pts, setPts] = useState(null); // screen-space centres along the route
+  const pathKey = (pathHexIds && pathHexIds.length >= 2 ? pathHexIds : [originHexId, destHexId]).join(",");
 
+  // Measure each hex centre along the unit's actual route (origin uses the
+  // unit token's centre). Re-measured on resize / scroll so it tracks panning.
   useLayoutEffect(() => {
-    setPos({
-      origin: unit?.uid ? getUnitCenter(unit.uid) : getHexCenter(originHexId),
-      dest: getHexCenter(destHexId),
-    });
-  }, [unit, originHexId, destHexId]);
-
-  useEffect(() => {
-    function update() {
-      setPos({
-        origin: unit?.uid ? getUnitCenter(unit.uid) : getHexCenter(originHexId),
-        dest: getHexCenter(destHexId),
-      });
+    const hexes = pathHexIds && pathHexIds.length >= 2 ? pathHexIds : [originHexId, destHexId];
+    function measure() {
+      const arr = hexes.map((h, i) =>
+        (i === 0 && unit?.uid) ? (getUnitCenter(unit.uid) || getHexCenter(h)) : getHexCenter(h));
+      return arr.every(Boolean) ? arr : null;
     }
+    setPts(measure());
+    const update = () => setPts(measure());
     window.addEventListener("resize", update);
     window.addEventListener("scroll", update, true);
     return () => {
       window.removeEventListener("resize", update);
       window.removeEventListener("scroll", update, true);
     };
-  }, [unit, originHexId, destHexId]);
+  }, [unit, originHexId, destHexId, pathKey]);
 
-  if (!pos.origin || !pos.dest) return null;
+  if (!pts || pts.length < 2) return null;
 
-  const { origin, dest } = pos;
-  const dx = dest.x - origin.x;
-  const dy = dest.y - origin.y;
-  const ang = Math.atan2(dy, dx);
-  const ux = Math.cos(ang), uy = Math.sin(ang);
-  // Pull endpoints inside each token (origin sits inside the ghost, dest
-  // inside the preview pawn) so the channel terminates cleanly.
-  const insetStart = 17;
-  const insetEnd = 17;
-  const startX = origin.x + ux * insetStart;
-  const startY = origin.y + uy * insetStart;
-  const endX = dest.x - ux * insetEnd;
-  const endY = dest.y - uy * insetEnd;
+  const origin = pts[0];
+  const dest = pts[pts.length - 1];
+  // Pull the endpoints inside each token (origin inside the ghost, dest inside
+  // the preview pawn) along the first/last segment so the channel terminates
+  // cleanly; interior waypoints follow the route verbatim.
+  const inset = 17;
+  const unitDir = (a, b) => {
+    const ang = Math.atan2(b.y - a.y, b.x - a.x);
+    return { x: Math.cos(ang), y: Math.sin(ang) };
+  };
+  const d0 = unitDir(pts[0], pts[1]);
+  const dN = unitDir(pts[pts.length - 2], pts[pts.length - 1]);
+  const start = { x: origin.x + d0.x * inset, y: origin.y + d0.y * inset };
+  const end = { x: dest.x - dN.x * inset, y: dest.y - dN.y * inset };
+  // The drawn channel: inset start, the interior waypoints, inset end.
+  const poly = [start, ...pts.slice(1, -1), end];
+  const polyStr = poly.map((p) => `${p.x},${p.y}`).join(" ");
+  const startX = start.x, startY = start.y, endX = end.x, endY = end.y;
+  // Pulse keyframes: travel through every waypoint, timed by cumulative length.
+  const offX = poly.map((p) => p.x - start.x);
+  const offY = poly.map((p) => p.y - start.y);
+  let total = 0;
+  const cum = [0];
+  for (let i = 1; i < poly.length; i++) {
+    total += Math.hypot(poly[i].x - poly[i - 1].x, poly[i].y - poly[i - 1].y);
+    cum.push(total);
+  }
+  const times = total > 0 ? cum.map((c) => c / total) : poly.map((_, i) => i / (poly.length - 1));
+  // Fade in over the first leg, then stay lit for the whole route (each repeat
+  // loops back to the dark start). Keeps the pulse visible on single-leg moves.
+  const pulseOpacity = poly.map((_, i) => (i === 0 ? 0 : 1));
 
   // Prompt: small, anchored to the right of the ghost (origin), flips
   // left only if it would clip the viewport right edge.
@@ -156,26 +172,26 @@ export default function MoveConfirmOverlay({ unit, originHexId, destHexId, owner
           </linearGradient>
         </defs>
 
-        {/* Wide soft glow underlay (fading) */}
-        <line x1={startX} y1={startY} x2={endX} y2={endY}
-          stroke="url(#mc-glow)" strokeWidth="18" strokeLinecap="butt"
+        {/* Wide soft glow underlay (fading) — follows the route */}
+        <polyline points={polyStr} fill="none"
+          stroke="url(#mc-glow)" strokeWidth="18" strokeLinecap="round" strokeLinejoin="round"
           style={{ filter: "blur(3px)" }} />
 
         {/* Outer body — teal channel edges, with the arrowhead at the end */}
-        <line x1={startX} y1={startY} x2={endX} y2={endY}
-          stroke="url(#mc-outer)" strokeWidth="11" strokeLinecap="butt"
+        <polyline points={polyStr} fill="none"
+          stroke="url(#mc-outer)" strokeWidth="11" strokeLinecap="butt" strokeLinejoin="round"
           markerEnd="url(#mc-head)"
           style={{ filter: `drop-shadow(0 0 4px ${C.holo})` }} />
 
         {/* Inner core — dark/low-opacity centre that exposes the edges */}
-        <line x1={startX} y1={startY} x2={endX} y2={endY}
-          stroke="url(#mc-inner)" strokeWidth="6.5" strokeLinecap="butt" />
+        <polyline points={polyStr} fill="none"
+          stroke="url(#mc-inner)" strokeWidth="6.5" strokeLinecap="butt" strokeLinejoin="round" />
 
         {/* Faint centerline highlight */}
-        <line x1={startX} y1={startY} x2={endX} y2={endY}
-          stroke="url(#mc-hi)" strokeWidth="0.7" strokeLinecap="butt" />
+        <polyline points={polyStr} fill="none"
+          stroke="url(#mc-hi)" strokeWidth="0.7" strokeLinecap="butt" strokeLinejoin="round" />
 
-        {/* Travelling pulses — staggered so light flows continuously */}
+        {/* Travelling pulses — staggered, flowing along every leg of the route */}
         {Array.from({ length: PULSES }).map((_, i) => {
           const delay = (i / PULSES) * 1.4;
           return (
@@ -185,18 +201,8 @@ export default function MoveConfirmOverlay({ unit, originHexId, destHexId, owner
               fill={C.holoHi}
               style={{ filter: `drop-shadow(0 0 7px ${C.holoHi}) drop-shadow(0 0 4px ${C.holo})` }}
               initial={{ x: 0, y: 0, opacity: 0 }}
-              animate={{
-                x: [0, dx, dx],
-                y: [0, dy, dy],
-                opacity: [0, 1, 1, 0],
-              }}
-              transition={{
-                duration: 1.4,
-                repeat: Infinity,
-                ease: "linear",
-                delay,
-                times: [0, 0.08, 0.92, 1],
-              }}
+              animate={{ x: offX, y: offY, opacity: pulseOpacity }}
+              transition={{ duration: 1.4, repeat: Infinity, ease: "linear", delay, times }}
             />
           );
         })}

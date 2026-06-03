@@ -2,7 +2,7 @@
 // everything else lives in peripheral bars — a top faction bar and a
 // bottom tab dock — with a floating tabbed window for hex inspection.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AnimatePresence } from "framer-motion";
+import { AnimatePresence, motion } from "framer-motion";
 import "./prototype.css";
 import { FACTIONS as UI_FACTIONS, LOCATIONS as UI_LOCATIONS, valueOf, fullController, theme } from "./data.js";
 import { Btn } from "./kit.jsx";
@@ -20,6 +20,7 @@ import { performAction } from "../game/actions.js";
 import { takeAITurn } from "../game/ai.js";
 import { activePlayerId } from "../game/targeting.js";
 import { bfsDistances } from "../game/board.js";
+import { unitReach, unitMovePath } from "../game/movement.js";
 import { CHIPS as ENGINE_CHIPS, LOCATIONS as ENGINE_LOCATIONS } from "../game/content.js";
 import { CONFIG } from "../game/config.js";
 import { NEUTRAL } from "./data.js";
@@ -306,12 +307,9 @@ export default function Prototype({ config, onNewGame }) {
     const unit = state.units[selectedUnitId];
     const budget = unit?.moveRemaining ?? unit?.effectiveMovement ?? 0;
     if (!unit || unit.immobilized || budget <= 0) return null;
-    const dists = bfsDistances(gameRef.current.board.adjacency, unit.node);
-    const out = new Set();
-    for (const [hex, d] of Object.entries(dists)) {
-      if (d > 0 && d <= budget) out.add(hex);
-    }
-    return out;
+    // §16.2 — terrain/road/blockade-aware reachability (shared with the engine).
+    const field = unitReach(gameRef.current, gameRef.current.units[selectedUnitId]);
+    return new Set(Object.keys(field));
   }, [tick, isYourTurn, selectedUnitId, state]);
 
   // During an AI replay the board renders pawns at their DISPLAYED (lagging)
@@ -323,6 +321,18 @@ export default function Prototype({ config, onNewGame }) {
   const boardState = replay.displayedPositions
     ? withDisplayedPositions(state, replay.displayedPositions, hiddenUnitIds)
     : state;
+
+  // §16 field raids — enemy units sharing the selected unit's hex are
+  // contestable directly (no Location needed). Surfaced in the UnitPanel.
+  const raidTargets = useMemo(() => {
+    const u = selectedUnitId ? state.units[selectedUnitId] : null;
+    if (!u || u.owner !== state.youId) return [];
+    // §9 — the engine forces the contest onto the garrison while any neutral
+    // section stands, so don't offer a field raid that would be rejected.
+    const h = state.hexes[u.node];
+    if (h?.type === "location" && h.control?.sections?.includes("neutral")) return [];
+    return Object.values(state.units).filter((t) => t.node === u.node && t.owner !== state.youId);
+  }, [state, selectedUnitId]);
 
   // --- action handlers ----------------------------------------------
 
@@ -670,15 +680,16 @@ export default function Prototype({ config, onNewGame }) {
             <ReplayLayer pawns={replay.animatedPawns} overlays={replay.activeOverlays} />
           </div>
         </BoardViewport>
-        {/* Tap-anywhere-to-skip catcher during an AI replay. Skip-now sticks
-            for the rest of the session (only a New Game clears it). */}
+        {/* Tap-anywhere-to-skip catcher during an AI replay. Skips the rest of
+            THIS round's AI turns; the next round replays normally. */}
         {replay.isReplaying && (
           <div
             onClick={replay.skipNow}
-            title="Tap to skip the AI replay (stays skipped this session)"
+            title="Tap to skip the rest of this round's AI turns"
             style={{ position: "absolute", inset: 0, zIndex: 40, cursor: "pointer" }}
           />
         )}
+        {replay.isReplaying && replay.turnBanner && <TurnBanner banner={replay.turnBanner} />}
         {selectedUnitId && state.units[selectedUnitId] && (
           <UnitPanel
             unit={state.units[selectedUnitId]}
@@ -686,7 +697,9 @@ export default function Prototype({ config, onNewGame }) {
             canAct={isYourTurn && state.units[selectedUnitId].owner === state.youId}
             reinforce={reinforcePreview(gameRef.current, selectedUnitId)}
             scrap={you.scrap}
+            raidTargets={raidTargets}
             onReinforce={onReinforce}
+            onContest={onContest}
             onClose={() => setSelectedUnitId(null)}
           />
         )}
@@ -834,8 +847,9 @@ export default function Prototype({ config, onNewGame }) {
               ))}
             </div>
             <p className="pc-prose" style={{ margin: "6px 0 0", fontSize: 11, lineHeight: 1.5, color: HUD.textFaint }}>
-              Tip: tap anywhere during an AI turn to skip it. Skipping stays on for
-              the rest of this session — only a New Game restores the replay.
+              Tip: tap anywhere during an AI turn to skip the rest of that round&rsquo;s
+              enemy turns — the next round still replays. Choose <em>Skip — instant</em>
+              above to turn the replay off for good.
             </p>
           </div>
           <div style={{ marginTop: 16, borderTop: `1px solid ${theme.border}`, paddingTop: 14 }}>
@@ -875,6 +889,7 @@ export default function Prototype({ config, onNewGame }) {
             unit={state.units[pendingMove.unitUid]}
             originHexId={pendingMove.origin}
             destHexId={pendingMove.dest}
+            pathHexIds={unitMovePath(gameRef.current, gameRef.current.units[pendingMove.unitUid], pendingMove.dest)}
             ownerColor={UI_FACTIONS[state.units[pendingMove.unitUid]?.owner]?.color}
             onConfirm={() => {
               const m = pendingMove;
@@ -958,6 +973,39 @@ export default function Prototype({ config, onNewGame }) {
       {state.winnerId && !contestViz && !salvagePrompt && (
         <EndOverlay state={state} onNewGame={onNewGame} />
       )}
+    </div>
+  );
+}
+
+// §AI replay — a top-centre announcement of whose turn is replaying. Re-keys
+// on the faction name so each AI re-announces with a fade/slide.
+function TurnBanner({ banner }) {
+  return (
+    <div style={{ position: "fixed", top: 70, left: "50%", transform: "translateX(-50%)", zIndex: 60, pointerEvents: "none" }}>
+      <AnimatePresence mode="wait">
+        <motion.div
+          key={banner.name}
+          initial={{ opacity: 0, y: -14, scale: 0.96 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          exit={{ opacity: 0, y: -10 }}
+          transition={{ duration: 0.26, ease: "easeOut" }}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            padding: "8px 20px",
+            borderRadius: 8,
+            background: "rgba(14,17,22,0.92)",
+            border: `1.5px solid ${banner.color}`,
+            boxShadow: `0 6px 22px rgba(0,0,0,0.6), 0 0 18px ${banner.color}55`,
+          }}
+        >
+          <span style={{ width: 12, height: 12, borderRadius: "50%", background: banner.color, boxShadow: `0 0 10px ${banner.color}` }} />
+          <span style={{ fontFamily: theme.fontDisplay, fontSize: 15, fontWeight: 800, letterSpacing: 1, color: theme.text, textTransform: "uppercase" }}>
+            {banner.name}&rsquo;s Turn
+          </span>
+        </motion.div>
+      </AnimatePresence>
     </div>
   );
 }

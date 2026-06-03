@@ -5,7 +5,7 @@ import { FACTIONS, MINOR_FACTIONS, LOCATIONS, CAPITAL, ABILITIES, REACTIVES, fac
 import { FIELD_ENCOUNTERS } from "./content/index.js";
 import { makeRng } from "./rng.js";
 import { createIdGen } from "./ids.js";
-import { buildHexGrid, generateLayout, assignTerrainFeatures, bfsDistances } from "./board.js";
+import { buildHexGrid, generateLayout, assignTerrainFeatures, assignRoads, bfsDistances } from "./board.js";
 import { recomputeInfluence } from "./influence.js";
 import { recomputeVisibility } from "./visibility.js";
 import { ensureDiplomacy, seedStanding } from "./diplomacy.js";
@@ -63,12 +63,16 @@ export function createGame({
   for (const [id, hex] of Object.entries(grid.hexes)) {
     // v0.2 §16.6 — `terrain` is null for now; "mountain" gives defenders
     // +1. §19.4 adds `elevation` / `cover` flags (stamped below).
-    hexes[id] = { id, row: hex.row, col: hex.col, type: layout.type[id], terrain: null, elevation: false, cover: false };
+    hexes[id] = { id, row: hex.row, col: hex.col, type: layout.type[id], terrain: null, elevation: false, cover: false, road: false };
   }
   // §19.4 — stamp deterministic elevation / cover onto terrain hexes. Uses
   // an ISOLATED rng (derived from seed) so the main rng stream — and every
   // existing seed-dependent test — is byte-for-byte unchanged.
   assignTerrainFeatures(makeRng((seed ^ 0x9e3779b9) >>> 0), hexes);
+  // §16.2 — lay road corridors between the faction capitals (deterministic
+  // MST over the start hexes). Roads negate terrain movement cost along the
+  // lane (a fast, contestable highway); cover/visibility are unaffected.
+  assignRoads(grid.adjacency, hexes, Object.values(layout.factionStart));
 
   // --- players ---
   const players = {};

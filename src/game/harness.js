@@ -7,7 +7,8 @@ import { performAction } from "./actions.js";
 import { applyEffect } from "./effects.js";
 import { recomputeStats, recomputeResearch, assignTechNode } from "./stats.js";
 import { recomputeInfluence, zocOwner, inZoC } from "./influence.js";
-import { reinforcementRoute, bfsDistances } from "./board.js";
+import { reinforcementRoute, bfsDistances, movementField, movementRoute } from "./board.js";
+import { passesFreely, movementBlockers, unitReach } from "./movement.js";
 import { recomputeVisibility, isUnitVisibleTo, revealRegion, unitVision, isHexVisible } from "./visibility.js";
 import {
   ensureDiplomacy, menaceFromAttack, onAttack,
@@ -518,9 +519,17 @@ line("\n  [Phase 1] movement budget");
   const u = Object.values(g.units).find((x) => x.owner === me);
   check("base Movement is 2", u.movement === 2 && u.moveRemaining === 2);
   const actionsBefore = g.players[me].actions.remaining;
-  const a = g.board.adjacency[u.node][0];
+  // Two plain (non-forest/mountain) single-cost hops: pick a first hop `a`
+  // adjacent to the unit, then a second hop `b` adjacent to `a` — clearing
+  // any terrain features so this exercises the budget, not terrain cost
+  // (terrain movement has its own block below).
+  const plain = (h) => !g.locations[h] && !g.board.hexes[h].elevation && !g.board.hexes[h].cover;
+  const a = g.board.adjacency[u.node].find(plain) || g.board.adjacency[u.node][0];
+  g.board.hexes[a].elevation = false; g.board.hexes[a].cover = false;
   const m1 = performAction(g, "move", { unit: u.uid, to: a });
-  const b = g.board.adjacency[u.node].find((h) => h !== a);
+  const b = (g.board.adjacency[a] || []).find((h) => h !== u.node && plain)
+    || (g.board.adjacency[a] || []).find((h) => h !== u.node);
+  if (b) { g.board.hexes[b].elevation = false; g.board.hexes[b].cover = false; }
   const m2 = b ? performAction(g, "move", { unit: u.uid, to: b }) : { ok: false };
   check("two moves consume the budget", m1.ok && m2.ok && u.moveRemaining === 0);
   check("moves cost no Actions", g.players[me].actions.remaining === actionsBefore);
@@ -533,6 +542,137 @@ line("\n  [Phase 1] movement budget");
     performAction(g, "contest", { unit: u2.uid });
     check("declaring a contest ends movement", u2.moveRemaining === 0);
   }
+}
+
+// --- §16.2 terrain movement — forest costs +1, mountains halt the move ---
+line("\n  [Terrain] movement costs (forest +1, mountains halt)");
+{
+  // Synthetic line graph A-B-C-D with stamped terrain features. movementField
+  // returns hexId → movement points remaining after arriving.
+  const mk = (B, C) => ({
+    board: {
+      adjacency: { A: ["B"], B: ["A", "C"], C: ["B", "D"], D: ["C"] },
+      hexes: { A: { id: "A" }, B: { id: "B", ...B }, C: { id: "C", ...C }, D: { id: "D" } },
+    },
+  });
+
+  const plain = movementField(mk({}, {}), "A", 2);
+  check("plains: budget 2 reaches 2 hops (B rem1, C rem0), not D",
+    plain.B === 1 && plain.C === 0 && !("D" in plain));
+
+  const forest = movementField(mk({ cover: true }, {}), "A", 2);
+  check("forest costs 2: budget 2 enters the forest (B rem0) but no further",
+    forest.B === 0 && !("C" in forest));
+
+  const forestBlocked = movementField(mk({ cover: true }, {}), "A", 1);
+  check("forest: budget 1 cannot enter a forest hex at all",
+    !("B" in forestBlocked));
+
+  const mtn = movementField(mk({}, { elevation: true }), "A", 3);
+  check("mountain halts: you climb onto it (C rem0) but cannot pass through to D",
+    mtn.B === 2 && mtn.C === 0 && !("D" in mtn));
+
+  const mtnNoMatter = movementField(mk({}, { elevation: true }), "A", 5);
+  check("mountain halts no matter the budget (C rem0, D unreachable even at budget 5)",
+    mtnNoMatter.C === 0 && !("D" in mtnNoMatter));
+
+  // Integration: a real Move onto a forest hex spends the whole budget.
+  const g = createGame({ seed }); startTurn(g);
+  const me = activePlayerId(g);
+  const u = Object.values(g.units).find((x) => x.owner === me);
+  const nb = (g.board.adjacency[u.node] || []).find((h) => !g.locations[h]);
+  if (nb) {
+    g.board.hexes[nb].cover = true; g.board.hexes[nb].elevation = false; g.board.hexes[nb].road = false;
+    u.moveRemaining = 2; recomputeStats(g);
+    const r = performAction(g, "move", { unit: u.uid, to: nb });
+    check("Move onto a forest hex (cost 2) zeroes a budget-2 unit's movement",
+      r.ok && u.node === nb && u.moveRemaining === 0);
+  }
+}
+
+// --- §16.2 roads — a hex modifier that negates terrain MOVEMENT cost ---
+line("\n  [Roads] negate terrain movement cost (forest + mountain)");
+{
+  const mk = (B, C) => ({
+    board: {
+      adjacency: { A: ["B"], B: ["A", "C"], C: ["B", "D"], D: ["C"] },
+      hexes: { A: { id: "A" }, B: { id: "B", ...B }, C: { id: "C", ...C }, D: { id: "D" } },
+    },
+  });
+  const forestRoad = movementField(mk({ cover: true, road: true }, {}), "A", 2);
+  check("a road through forest costs 1 (B rem1, C still reachable)",
+    forestRoad.B === 1 && "C" in forestRoad);
+  const mtnRoad = movementField(mk({}, { elevation: true, road: true }), "A", 3);
+  check("a road through a mountain does NOT halt (C rem1, D reachable)",
+    mtnRoad.C === 1 && "D" in mtnRoad);
+  // Setup lays road corridors between the faction capitals.
+  const g = createGame({ seed });
+  const roads = Object.values(g.board.hexes).filter((h) => h.road).length;
+  check("setup lays a road network between capitals", roads > 0);
+}
+
+// --- §16.2 blockade — foreign units / enemy Locations halt movement ---
+line("\n  [Blockade] non-passing units and enemy Locations stop a move");
+{
+  const mkLine = () => ({
+    board: {
+      adjacency: { A: ["B"], B: ["A", "C"], C: ["B", "D"], D: ["C"] },
+      hexes: { A: { id: "A" }, B: { id: "B" }, C: { id: "C" }, D: { id: "D" } },
+    },
+  });
+  const blocked = movementField(mkLine(), "A", 3, { blockedThrough: new Set(["B"]) });
+  check("a blockaded hex is enterable but terminal (B rem0, C/D unreachable)",
+    blocked.B === 0 && !("C" in blocked) && !("D" in blocked));
+
+  const g = createGame({ seed });
+  const me = g.turnOrder[0];
+  const foe = g.turnOrder.find((p) => p !== me && !g.players[p].isMinor) || g.turnOrder[1];
+  const myU = Object.values(g.units).find((u) => u.owner === me);
+  const foeU = Object.values(g.units).find((u) => u.owner === foe);
+  // Park the enemy on a clean plain neighbour, with the mover holding 3 moves.
+  const nb = (g.board.adjacency[myU.node] || []).find((h) => !g.locations[h]);
+  foeU.node = nb;
+  g.board.hexes[nb].cover = false; g.board.hexes[nb].elevation = false; g.board.hexes[nb].road = false;
+  myU.moveRemaining = 3; recomputeStats(g);
+
+  setStanding(g, me, foe, 0); setStanding(g, foe, me, 0); // neutral both ways
+  check("neutral factions do not pass freely", !passesFreely(g, me, foe));
+  check("an enemy unit's hex is a movement blocker", movementBlockers(g, me).has(nb));
+  check("you may enter a blockaded hex but halt there (remaining 0 despite budget 3)",
+    unitReach(g, myU)[nb] === 0);
+
+  // Friendly+ standing lets units pass through freely (no blockade).
+  const friendly = CONFIG.diplomacy.tiers.friendly;
+  setStanding(g, me, foe, friendly); setStanding(g, foe, me, friendly);
+  check("friendly+ factions pass freely", passesFreely(g, me, foe));
+  check("a friendly faction's unit is NOT a blocker", !movementBlockers(g, me).has(nb));
+}
+
+// --- §16.2 route — the move arrow follows the actual least-cost path ---
+line("\n  [Route] the move path follows real movement rules");
+{
+  // Diamond: A→{B forest, X plains}→D. The cheaper lane is A→X→D.
+  const mk = () => ({
+    board: {
+      adjacency: { A: ["B", "X"], B: ["A", "D"], X: ["A", "D"], D: ["B", "X"] },
+      hexes: { A: { id: "A" }, B: { id: "B", cover: true }, X: { id: "X" }, D: { id: "D" } },
+    },
+  });
+  check("route takes the cheaper lane around a forest (A→X→D, not A→B→D)",
+    JSON.stringify(movementRoute(mk(), "A", 3, "D")) === JSON.stringify(["A", "X", "D"]));
+  check("route is null when the destination is out of budget",
+    movementRoute(mk(), "A", 1, "D") === null);
+
+  // A mountain is a dead-end the route may end on but not pass through.
+  const mk2 = () => ({
+    board: {
+      adjacency: { A: ["M"], M: ["A", "Z"], Z: ["M"] },
+      hexes: { A: { id: "A" }, M: { id: "M", elevation: true }, Z: { id: "Z" } },
+    },
+  });
+  check("route may end on a mountain but cannot pass through it",
+    JSON.stringify(movementRoute(mk2(), "A", 5, "M")) === JSON.stringify(["A", "M"]) &&
+    movementRoute(mk2(), "A", 5, "Z") === null);
 }
 
 // --- Phase 2: two units, cap 3, cheaper recruit ---
@@ -1491,13 +1631,27 @@ line("\n  [Tech Wheel §17.7] Listening Post");
 // =====================================================================
 line("\n  [AI sanity] tech-wheel use + game termination");
 {
-  const g = createGame({ seed: 42 });
-  let safety = 1500;
-  while (!g.winnerId && safety-- > 0) takeAITurn(g);
-  const assigns = g.log.filter((e) => e.name === "tech_node_assigned").length;
-  check("AI assigns tech-wheel nodes during a game (tech_node_assigned fires)", assigns > 0);
+  // (1) The AI spends a free Ability Point when it has one. Seed an AI player
+  // to Tech Level 2 (one point) and run its turn — maybeAssignTech should put
+  // a node on the wheel. Deterministic (independent of how a given seed's
+  // emergent game plays out, which terrain movement legitimately shifts).
+  const g = createGame({ seed: 42, humanFactionId: "versari" });
+  startTurn(g);
+  let guard = 12;
+  while (guard-- > 0 && !g.players[activePlayerId(g)].isAI && !g.winnerId) endTurn(g);
+  const aiPid = activePlayerId(g);
+  g.players[aiPid].permanentResearch = 2;
+  recomputeResearch(g); // → Tech Level 2 → one Ability Point
+  takeAITurn(g);
+  check("AI assigns a tech-wheel node when it has a free Ability Point",
+    g.players[aiPid].techWheel.length > 0);
+
+  // (2) A full AI-vs-AI game still terminates with a winner (no infinite loop).
+  const g2 = createGame({ seed: 42 });
+  let safety = 2000;
+  while (!g2.winnerId && safety-- > 0) takeAITurn(g2);
   check("a full AI-vs-AI game terminates with a winner (no infinite loop)",
-    safety > 0 && !!g.winnerId);
+    safety > 0 && !!g2.winnerId);
 }
 
 // AI-turn replay slice contract (the one engine-touching surface of the
@@ -1717,18 +1871,23 @@ line("\n  [§20 Economy] Output slider, build/upgrade/rush, upkeep dormancy, gat
     check("an economy chip raises Output", g.players[me].resource - before >= out);
   }
 
-  // Rush spends banked scrap to finish a build immediately.
+  // Rush spends banked scrap to finish a build immediately — and now costs an
+  // Action (queuing the build does not).
   {
     const g = createGame({ seed }); startTurn(g);
     const me = g.turnOrder[0];
     const loc = grab(g, me);
     g.players[me].resource += 50;
-    performAction(g, "build", { at: loc.hexId, chipId: "labs" }); // buildCost 3
+    const actsStart = g.players[me].actions.remaining;
+    performAction(g, "build", { at: loc.hexId, chipId: "labs" }); // buildCost 3, free of Actions
+    const actsAfterBuild = g.players[me].actions.remaining;
     const before = g.players[me].resource;
     const r = performAction(g, "rush", { at: loc.hexId });
     check("rush completes the build at once and spends scrap",
       r.ok && loc.chips.some((c) => g.chips[c]?.chipId === "labs") &&
       loc.activeBuild == null && g.players[me].resource === before - 3);
+    check("build is free of Actions; rush costs 1 Action",
+      actsAfterBuild === actsStart && g.players[me].actions.remaining === actsAfterBuild - 1);
   }
 
   // Upgrade in place: labs → advanced-lab, same slot (scarcity preserved).

@@ -32,6 +32,15 @@ export const CONFIG = {
 
   contestDieSides: 6, // 1d6 per side, defender wins ties
 
+  // §16.2 terrain movement — per-hex entry costs over the base 1/hex.
+  // Forest (cover) costs extra; mountains (elevation) HALT a move (you may
+  // climb onto one but advance no further that turn — "speed 1 in mountains").
+  // (Roads, when added, will reduce these.)
+  movement: {
+    forestCost: 2,     // entering a cover/forest hex costs this (vs 1) — "−1 speed"
+    mountainHalts: true, // entering an elevation/mountain hex ends the move
+  },
+
   // v0.2 §16.4 attrition
   attrition: { routMargin: 4 }, // margin >= this spills a casualty to a 2nd stacked unit
   // v0.2 §16.5 healing / reinforcement

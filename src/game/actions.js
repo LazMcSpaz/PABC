@@ -5,6 +5,7 @@
 import { emit } from "./events.js";
 import { activePlayerId } from "./targeting.js";
 import { bfsDistances, reinforcementRoute } from "./board.js";
+import { unitReach } from "./movement.js";
 import { CONFIG } from "./config.js";
 import { FACTIONS, CHIPS, ABILITIES, chipDefOf, factionDef } from "./content.js";
 import { validateContest, runContest } from "./contest.js";
@@ -43,20 +44,23 @@ function validateMove(state, { pid, params }) {
     return fail("unit is immobilized");
   if (!state.board.hexes[params.to]) return fail("no such hex");
   if (params.to === unit.node) return fail("unit is already on that hex");
-  const dist = bfsDistances(state.board.adjacency, unit.node)[params.to];
-  if (dist === undefined) return fail("hex is unreachable");
-  // v0.2 §16.2 — Move spends the per-turn move budget, not Actions.
-  if (dist > unit.moveRemaining)
-    return fail(`out of range (${dist} > moves left ${unit.moveRemaining})`);
+  // v0.2 §16.2 — Move spends the per-turn move budget (not Actions), consumed
+  // by terrain entry costs and roads, and stopped by blockades (a non-passing
+  // foreign unit / enemy Location halts you on that hex).
+  const field = unitReach(state, unit);
+  if (!(params.to in field))
+    return fail(`out of range (moves left ${unit.moveRemaining})`);
   return { ok: true };
 }
 
 function runMove(state, { params, ctx }) {
   const unit = state.units[params.unit];
   const from = unit.node;
-  const dist = bfsDistances(state.board.adjacency, from)[params.to];
+  const field = unitReach(state, unit);
   unit.node = params.to;
-  unit.moveRemaining = Math.max(0, unit.moveRemaining - dist);
+  // The field already accounts for forest/road cost, the mountain halt and any
+  // blockade stop, so the remaining budget at the destination is exact.
+  unit.moveRemaining = Math.max(0, field[params.to] ?? 0);
   unit.movedSinceUpkeep = true; // §16.6 fortify — moving voids "dug in"
   emit(state, "unit_moved", { unit: unit.uid, from, to: params.to });
 
@@ -470,11 +474,14 @@ const ACTIONS = {
   recruit: { cost: 1, validate: validateRecruit, run: runRecruit },
   reinforce: { cost: 1, validate: validateReinforce, run: runReinforce },
   contest: { cost: 1, validate: validateContest, run: runContest },
-  // §20.4–20.7 — economic directives, free of the Action budget (the
-  // strategic cost is the slider split + scrap, not an Action).
+  // §20.4–20.7 — economic directives. Queuing a build/upgrade and setting the
+  // slider are free (the cost is the slider split + scrap); RUSH costs 1 Action
+  // since it actively converts banked scrap into immediate construction.
   build: { cost: 0, validate: validateBuild, run: runBuild },
   upgrade: { cost: 0, validate: validateUpgrade, run: runUpgrade },
-  rush: { cost: 0, validate: validateRush, run: runRush },
+  // Rushing is an active push of banked scrap into construction — it costs 1
+  // Action (and scrap). Queuing a build/upgrade and the slider stay free.
+  rush: { cost: 1, validate: validateRush, run: runRush },
   "set-slider": { cost: 0, validate: validateSetSlider, run: runSetSlider },
   activate: { cost: activateActionCost, validate: validateActivate, run: runActivate },
   // §17.7 / §17.5 Intelligence A2 + B2 — deploy a Listening Post, run a Saboteur.
