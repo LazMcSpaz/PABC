@@ -34,6 +34,9 @@ import { performDiplomacy } from "../game/diplomacy.js";
 import DiplomacyDrawer from "./DiplomacyDrawer.jsx";
 import EncounterModal from "./EncounterModal.jsx";
 import MoveConfirmOverlay from "./MoveConfirmOverlay.jsx";
+import { WikiProvider } from "./RichText.jsx";
+import WikiModal from "./WikiModal.jsx";
+import { WIKI_ENTRIES } from "../game/content/index.js";
 
 // Local-storage key for the "Don't ask again" preference on move confirm.
 const SKIP_MOVE_CONFIRM_KEY = "pabc.skipMoveConfirm";
@@ -263,6 +266,28 @@ export default function Prototype({ config, onNewGame }) {
   const [skipMoveConfirm, setSkipMoveConfirm] = useState(readSkipMoveConfirm);
   const [contestViz, setContestViz] = useState(null); // contest replay overlay
   const [salvagePrompt, setSalvagePrompt] = useState(null); // interactive salvage
+
+  // Wiki — a clickable [[term]] anywhere in flavor text opens this modal.
+  // We keep a small history so the in-modal cross-links have a back button.
+  const [wikiHistory, setWikiHistory] = useState([]); // ids visited before current
+  const [wikiOpen, setWikiOpen] = useState(null);     // id currently shown
+  const openWikiEntry = useCallback((id) => {
+    setWikiHistory((h) => (wikiOpen ? [...h, wikiOpen] : h));
+    setWikiOpen(id);
+  }, [wikiOpen]);
+  const navigateWiki = useCallback((id) => openWikiEntry(id), [openWikiEntry]);
+  const backWiki = useCallback(() => {
+    setWikiHistory((h) => {
+      if (!h.length) return h;
+      const last = h[h.length - 1];
+      setWikiOpen(last);
+      return h.slice(0, -1);
+    });
+  }, []);
+  const closeWiki = useCallback(() => {
+    setWikiOpen(null);
+    setWikiHistory([]);
+  }, []);
   const [showTechWheel, setShowTechWheel] = useState(false); // §17 wheel overlay
   const [showDiplomacy, setShowDiplomacy] = useState(false); // §18 diplomacy screen
   const [diploResult, setDiploResult] = useState(null); // last action feedback
@@ -672,6 +697,7 @@ export default function Prototype({ config, onNewGame }) {
   }
 
   return (
+    <WikiProvider entries={WIKI_ENTRIES} openEntry={openWikiEntry}>
     <div
       className="pc-root"
       style={{
@@ -1003,7 +1029,16 @@ export default function Prototype({ config, onNewGame }) {
       {state.winnerId && !contestViz && !salvagePrompt && (
         <EndOverlay state={state} onNewGame={onNewGame} />
       )}
+
+      <WikiModal
+        openEntryId={wikiOpen}
+        history={wikiHistory}
+        onClose={closeWiki}
+        onNavigate={navigateWiki}
+        onBack={backWiki}
+      />
     </div>
+    </WikiProvider>
   );
 }
 

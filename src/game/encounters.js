@@ -269,6 +269,14 @@ function hexMatches(state, hex, f) {
   else if (f.hasAbility === "none") { if (loc?.abilityId) return false; }
   else if (f.hasAbility && loc?.abilityId !== f.hasAbility) return false;
 
+  // Terrain sub-type + road. The terrain+roads work track sets these on
+  // each hex; until then `h.terrain` is null and `h.road` is undefined,
+  // so a content author asking for a specific terrain or road simply
+  // gets no matches — the filter degrades cleanly.
+  if (f.terrain && f.terrain !== "any" && h.terrain !== f.terrain) return false;
+  if (f.hasRoad === true && !h.road) return false;
+  if (f.hasRoad === false && h.road) return false;
+
   return true;
 }
 
@@ -289,6 +297,17 @@ EFFECTS.PLACE_ENCOUNTER = function (state, e, ctx) {
 };
 
 EFFECTS.DELIVER_ENCOUNTER = function (state, e, ctx) {
+  // Per-beat gating — the author can attach a `condition` to the routing
+  // effect itself. If it evaluates false, the next beat is silently
+  // skipped (the choice's other effects still run). Lets a choice
+  // probe "if you have a medic chip, you advance to the rescue beat;
+  // otherwise the encounter just ends."
+  if (e.condition != null && !evalCond(state, e.condition, ctx)) {
+    emit(state, "encounter_delivery_skipped", {
+      encounterId: e.encounterId, reason: "condition_false",
+    });
+    return;
+  }
   deliverEncounter(state, e.encounterId, {
     mode: e.mode, recipient: e.recipient,
   }, ctx);

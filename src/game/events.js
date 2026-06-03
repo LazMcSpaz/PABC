@@ -30,7 +30,7 @@ export const EVENT_NAMES = new Set([
   "veteran_promoted",
   "loot_dropped", "loot_claimed",
   // Layer 5 — encounter & quest system (spec §15.13)
-  "encounter_delivered", "trigger_fired",
+  "encounter_delivered", "encounter_delivery_skipped", "trigger_fired",
   "quest_started", "quest_advanced", "quest_completed",
   "standing_changed", "track_changed", "deferred_resolved",
   // §20 Economy & City Development (APPEND-ONLY — distinct keys so a parallel

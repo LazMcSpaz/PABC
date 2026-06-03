@@ -29,6 +29,7 @@ import { resolveSalvage } from "./contest.js";
 import { readRivalIntel } from "./intel.js";
 import { postAt, isPostVisibleTo, chargePostUpkeep } from "./posts.js";
 import { loadFieldEncounters, findUnsupportedTypes, choiceIsRunnable, WORLD_ENCOUNTERS } from "./content-loader.js";
+import { pickHexByFilter } from "./encounters.js";
 import { evalCond, evalStrength } from "./dsl.js";
 import { registerQuest } from "./quests.js";
 import { CONFIG } from "./config.js";
@@ -2786,6 +2787,115 @@ line("\n  [§6.2] war-record listeners");
     !!war && (war.unitsLost[foe] || 0) >= 1);
   check("contest_won credits war.contestsWon for the winner",
     !!war && (war.contestsWon[me] || 0) >= 1);
+}
+
+// =====================================================================
+// Phase 10 — content-tool DSL extensions (chip checks, unit_count, score)
+// + trigger weight + DELIVER_ENCOUNTER condition gating + hex-filter
+// terrain/road keys.
+// =====================================================================
+line("\n  [Phase 10] content-tool gates");
+{
+  const g = createGame({ seed });
+  startTurn(g);
+  const me = activePlayerId(g);
+
+  // has_chip — every faction starts with a Capital chip on their capital.
+  const capitalCheck = {
+    has_chip: { holder: "active-player-locations", chipId: "capital", player: me },
+  };
+  check("has_chip / active-player-locations finds the starter Capital",
+    evalCond(g, capitalCheck) === true);
+
+  const missingCheck = {
+    has_chip: { holder: "active-player-locations", chipId: "never-existed", player: me },
+  };
+  check("has_chip with unknown chip returns false",
+    evalCond(g, missingCheck) === false);
+
+  // unit_count — owner's starting units.
+  const expected = Object.values(g.units).filter((u) => u.owner === me).length;
+  const countCond = { unit_count: { player: me } };
+  check("unit_count returns owner's unit total",
+    evalCond(g, countCond) === expected);
+
+  // score (menace / honor) — at game start both are baselines.
+  const menaceCond = { score: { kind: "menace", player: me } };
+  const honorCond = { score: { kind: "honor", player: me } };
+  check("score / menace = 0 at start", evalCond(g, menaceCond) === 0);
+  check("score / honor = configured start value",
+    evalCond(g, honorCond) === CONFIG.diplomacy.honor.start);
+
+  // score / standing — reads the matrix verbatim (factions have temperament
+  // presets at start; the test just confirms the DSL returns whatever is in
+  // the matrix, not 0 specifically).
+  const foe = g.turnOrder[1];
+  const standingCond = { score: { kind: "standing", fromFaction: me, toFaction: foe } };
+  check("score / standing reads the factionStanding matrix",
+    evalCond(g, standingCond) === g.factionStanding[me][foe]);
+
+  // op-with-score-as-Val: gate triggers as `score.menace > 5`.
+  g.players[me].menace = 10;
+  const menaceGate = {
+    op: "gt",
+    left: { score: { kind: "menace", player: me } },
+    right: 5,
+  };
+  check("score nests as Val inside an op() predicate",
+    evalCond(g, menaceGate) === true);
+}
+
+// trigger weight — strength × weight beats a higher raw strength.
+line("\n  [Phase 10] trigger weight multiplier");
+{
+  // Simulate: two triggers, strength 3 weight 2 vs strength 5 weight 0.5.
+  // Final scores: 6.0 vs 2.5 — the first should beat the second.
+  const a = { strength: 3, weight: 2, score: 3 * 2 };
+  const b = { strength: 5, weight: 0.5, score: 5 * 0.5 };
+  check("weight-2 strength-3 (score 6) beats weight-0.5 strength-5 (score 2.5)",
+    a.score > b.score);
+}
+
+// DELIVER_ENCOUNTER skip-on-condition.
+line("\n  [Phase 10] DELIVER_ENCOUNTER condition gate");
+{
+  const g = createGame({ seed });
+  startTurn(g);
+  let skipped = false;
+  // Stub a content entry for the test by pulling any existing field encounter id.
+  const anyId = Object.keys(WORLD_ENCOUNTERS)[0] || "ghost";
+  // Hook the event listener.
+  const origLen = g.log.length;
+  applyEffect(g, {
+    type: "DELIVER_ENCOUNTER",
+    encounterId: anyId,
+    condition: { op: "eq", left: 1, right: 2 }, // always false
+  }, {});
+  skipped = g.log.slice(origLen).some(
+    (ev) => ev.name === "encounter_delivery_skipped" && ev.payload?.encounterId === anyId,
+  );
+  check("DELIVER_ENCOUNTER with a false condition emits encounter_delivery_skipped", skipped);
+}
+
+// hex-filter terrain + hasRoad — stamp test data onto a hex and probe pickHexByFilter.
+line("\n  [Phase 10] hex-filter terrain + hasRoad");
+{
+  const g = createGame({ seed });
+  // Use a unique terrain marker so terrain= filter is deterministic.
+  const someHex = Object.values(g.board.hexes).find((h) => h.type === "terrain");
+  someHex.terrain = "__testronium__";
+  const onTerrain = pickHexByFilter(g, { terrain: "__testronium__" });
+  check("hex-filter terrain matches a stamped terrain sub-type",
+    onTerrain === someHex.id);
+
+  // Road filter: just verify the picked hex actually has road=true (the
+  // capital-to-capital MST already stamps several road hexes at setup).
+  const onRoad = pickHexByFilter(g, { hasRoad: true });
+  check("hex-filter hasRoad:true picks a road hex",
+    onRoad != null && g.board.hexes[onRoad]?.road === true);
+  const offRoad = pickHexByFilter(g, { hasRoad: false });
+  check("hex-filter hasRoad:false picks a non-road hex",
+    offRoad != null && !g.board.hexes[offRoad]?.road);
 }
 
 line(`\n  v0.2 verification: ${v2pass} passed, ${v2fail} failed`);

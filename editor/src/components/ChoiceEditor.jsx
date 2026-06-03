@@ -1,5 +1,6 @@
 import { DslBuilder } from "./DslBuilder.jsx";
 import { EffectList } from "./EffectEditor.jsx";
+import { HelpTip } from "./Field.jsx";
 import { newId } from "../lib/id.js";
 
 export function ChoiceList({ choices, onChange, context, maxChoices = 3 }) {
@@ -41,8 +42,11 @@ export function ChoiceList({ choices, onChange, context, maxChoices = 3 }) {
               onChange={(e) => setAt(i, { ...c, label: e.target.value })}
               className="flex-1 font-semibold"
             />
+            <HelpTip k="choice.label" />
             <div className="flex items-center gap-1">
-              <label className="text-xs text-slate-400">defer rounds</label>
+              <label className="text-xs text-slate-400 inline-flex items-center gap-1">
+                defer rounds <HelpTip k="choice.deferredDelay" />
+              </label>
               <input
                 type="number"
                 value={c.deferredDelay ?? ""}
@@ -78,8 +82,13 @@ export function ChoiceList({ choices, onChange, context, maxChoices = 3 }) {
             />
           </label>
 
+          <div className="flex items-center gap-1">
+            <span className="text-xs uppercase tracking-wide text-slate-400">
+              condition (optional — hides choice if false)
+            </span>
+            <HelpTip k="choice.condition" />
+          </div>
           <DslBuilder
-            label="condition (optional — hides choice if false)"
             value={c.condition}
             onChange={(v) => setAt(i, { ...c, condition: v })}
             allowNull

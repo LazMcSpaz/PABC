@@ -14,21 +14,24 @@ export function Header({
   syncState,
 }) {
   return (
-    <header className="bg-slate-900 border-b border-slate-800 px-4 py-3 flex items-center gap-3 sticky top-0 z-10">
-      <span className="text-amber-400 font-semibold tracking-tight">
-        Ashland Conquest
-      </span>
-      <span className="text-slate-500">·</span>
-      <span className="text-slate-300 text-sm">Content Editor</span>
+    <header className="bg-slate-900 border-b border-slate-800 px-3 py-3 flex flex-wrap items-center gap-2 sticky top-0 z-10">
+      <div className="flex items-center gap-2 mr-auto sm:mr-0">
+        <span className="text-amber-400 font-semibold tracking-tight">
+          Ashland
+        </span>
+        <span className="text-slate-500 hidden sm:inline">·</span>
+        <span className="text-slate-300 text-sm hidden sm:inline">Content Editor</span>
+      </div>
 
       <select
-        className="ml-4 w-72 text-sm"
+        className="sm:ml-4 w-full sm:w-72 text-sm order-3 sm:order-2"
         value={current?.key ?? ""}
         onChange={(e) => {
           if (!e.target.value) return;
           const [kind, id] = e.target.value.split(":", 2);
           onSelect({ kind, id });
         }}
+        style={{ fontSize: 16 }}
       >
         <option value="">— select content —</option>
 
@@ -55,33 +58,48 @@ export function Header({
             </option>
           ))}
         </optgroup>
+
+        <optgroup label="Wiki">
+          {(index?.wikiEntries ?? []).map((w) => (
+            <option key={`wiki:${w.id}`} value={`wiki:${w.id}`}>
+              {w.term} {w.category ? `· ${w.category}` : ""}
+            </option>
+          ))}
+        </optgroup>
       </select>
 
-      <div className="ml-2 flex items-center gap-1">
+      <div className="order-4 sm:order-3 ml-0 sm:ml-2 flex items-center gap-1 flex-wrap">
         <button
           type="button"
-          className="px-2 py-1 text-xs rounded bg-slate-800 hover:bg-slate-700 border border-slate-700"
+          className="px-2 py-1.5 text-xs rounded bg-slate-800 hover:bg-slate-700 border border-slate-700"
           onClick={() => onNew("quest")}
         >
           + quest
         </button>
         <button
           type="button"
-          className="px-2 py-1 text-xs rounded bg-slate-800 hover:bg-slate-700 border border-slate-700"
+          className="px-2 py-1.5 text-xs rounded bg-slate-800 hover:bg-slate-700 border border-slate-700"
           onClick={() => onNew("world")}
         >
           + world
         </button>
         <button
           type="button"
-          className="px-2 py-1 text-xs rounded bg-slate-800 hover:bg-slate-700 border border-slate-700"
+          className="px-2 py-1.5 text-xs rounded bg-slate-800 hover:bg-slate-700 border border-slate-700"
           onClick={() => onNew("field")}
         >
           + field
         </button>
         <button
           type="button"
-          className="px-2 py-1 text-xs rounded bg-slate-800 hover:bg-slate-700 border border-slate-700"
+          className="px-2 py-1.5 text-xs rounded bg-slate-800 hover:bg-slate-700 border border-slate-700"
+          onClick={() => onNew("wiki")}
+        >
+          + wiki
+        </button>
+        <button
+          type="button"
+          className="px-2 py-1.5 text-xs rounded bg-slate-800 hover:bg-slate-700 border border-slate-700"
           onClick={onImport}
           title="Import JSON content"
         >
@@ -89,7 +107,7 @@ export function Header({
         </button>
       </div>
 
-      <div className="ml-auto flex items-center gap-2">
+      <div className="order-2 sm:order-4 ml-auto flex items-center gap-2 flex-wrap">
         {!supabaseConfigured && (
           <span className="text-xs text-rose-400">supabase not configured</span>
         )}

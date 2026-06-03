@@ -62,7 +62,7 @@ export function FieldEncounterEditor({ value, onChange, context }) {
   return (
     <div className="flex flex-col gap-4">
       <SectionCard title="Field encounter">
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Field label="id">
             <TextInput value={value.id} onChange={(v) => set("id", v)} />
           </Field>
@@ -138,7 +138,7 @@ function BeatEditor({ beat, onChange, onDelete, isHead, context }) {
           )
         }
       >
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Field label="id">
             <TextInput
               value={beat.id}

@@ -1,10 +1,33 @@
-export function Field({ label, hint, children, className = "" }) {
+import { tip as tipFor } from "../lib/tips.js";
+
+// `tip` is a key in tips.js — the lookup happens here so call sites
+// stay compact (`tip="trigger.condition"` rather than spelling out the
+// body inline).
+export function Field({ label, hint, tip, children, className = "" }) {
   return (
     <label className={`flex flex-col gap-1 ${className}`}>
-      <span className="text-xs uppercase tracking-wide text-slate-400">{label}</span>
+      <span className="text-xs uppercase tracking-wide text-slate-400 inline-flex items-center gap-1">
+        {label}
+        {tip && <HelpTip k={tip} />}
+      </span>
       {children}
       {hint && <span className="text-xs text-slate-500">{hint}</span>}
     </label>
+  );
+}
+
+// "?" affordance — `k` is a tips.js key, `body` is raw override text.
+export function HelpTip({ k, body }) {
+  const text = body ?? (k ? tipFor(k) : null);
+  if (!text) return null;
+  return (
+    <span
+      title={text}
+      className="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-slate-700 text-slate-300 text-[9px] font-bold leading-none cursor-help select-none border border-slate-600"
+      aria-label="help"
+    >
+      ?
+    </span>
   );
 }
 

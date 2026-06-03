@@ -6,6 +6,7 @@
 // right half holds the narrative + choices.
 import { motion } from "framer-motion";
 import { C, CornerBrackets, useEscClose } from "./HudChrome.jsx";
+import { RichText } from "./RichText.jsx";
 
 // The image goes in here at a 2:3 ratio. The outer chrome is a slightly
 // raised holo bezel; the inner display is recessed (inset shadows + dark
@@ -188,7 +189,7 @@ export default function EncounterModal({ encounter, choices, eligibleIds, redraw
                 transition={{ delay: 0.14, duration: 0.28 }}
                 style={{ fontSize: 13, color: "#d0d7dd", lineHeight: 1.6, whiteSpace: "pre-wrap" }}
               >
-                {encounter.text}
+                <RichText>{encounter.text}</RichText>
               </motion.div>
             )}
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -221,7 +222,7 @@ export default function EncounterModal({ encounter, choices, eligibleIds, redraw
                     <div style={{
                       fontFamily: C.font, fontSize: 13.5, fontWeight: 700,
                       letterSpacing: 0.8, textTransform: "uppercase",
-                    }}>{c.label}</div>
+                    }}><RichText>{c.label}</RichText></div>
                     {!eligible && (
                       <div style={{
                         fontFamily: C.font, fontSize: 9, letterSpacing: 1.6,

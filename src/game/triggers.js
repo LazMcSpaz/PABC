@@ -27,6 +27,11 @@ function getTriggers() {
       cooldown: def.triggerCooldown || 0,
       condition: def.triggerCondition,
       strength: def.triggerStrength,
+      // Rarity multiplier — content authors expose this as the 5-tier
+      // dropdown (Common 2.0, Normal 1.0, Uncommon 0.6, Rare 0.3,
+      // Mythic 0.1). Missing weight = 1.0 (back-compat for existing
+      // content). Final score = strength × weight.
+      weight: def.triggerWeight == null ? 1 : Number(def.triggerWeight) || 1,
       encounter: def,
     });
   }
@@ -44,16 +49,18 @@ export function evaluateTriggers(state, ctx = {}) {
     if (t.condition != null && !evalCond(state, t.condition, ctx)) continue;
     const strength = t.strength == null ? 1 : evalStrength(state, t.strength, ctx);
     if (strength <= 0) continue;
-    eligible.push({ trigger: t, strength });
+    const score = strength * t.weight;
+    if (score <= 0) continue;
+    eligible.push({ trigger: t, strength, score });
   }
 
-  eligible.sort((a, b) => b.strength - a.strength);
+  eligible.sort((a, b) => b.score - a.score);
   const fired = pickTopK(state, eligible, FIRE_PER_ROUND);
 
-  for (const { trigger, strength } of fired) {
+  for (const { trigger, strength, score } of fired) {
     state.triggerCooldowns[trigger.id] = state.round + trigger.cooldown;
     emit(state, "trigger_fired", {
-      trigger: trigger.id, strength, round: state.round,
+      trigger: trigger.id, strength, weight: trigger.weight, score, round: state.round,
     });
     // Real delivery — encounters.js routes by mode (private / public /
     // placement) and emits encounter_delivered itself.
@@ -67,9 +74,9 @@ export function evaluateTriggers(state, ctx = {}) {
 // via the seeded RNG so reproducibility is preserved.
 function pickTopK(state, sorted, k) {
   if (sorted.length <= k) return sorted;
-  const cutoff = sorted[k - 1].strength;
-  const above = sorted.filter((e) => e.strength > cutoff);
-  const tied = sorted.filter((e) => e.strength === cutoff);
+  const cutoff = sorted[k - 1].score;
+  const above = sorted.filter((e) => e.score > cutoff);
+  const tied = sorted.filter((e) => e.score === cutoff);
   const slots = k - above.length;
   if (slots >= tied.length) return [...above, ...tied];
   const shuffled = state.rng.shuffle(tied);

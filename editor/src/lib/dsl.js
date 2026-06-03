@@ -25,6 +25,12 @@ export function emptyCond(form = "op") {
       return { controls_count: { player: "active" } };
     case "control_duration":
       return { control_duration: { player: "active", hex: "" } };
+    case "has_chip":
+      return { has_chip: { holder: "active-player-units", chipId: "", player: "active" } };
+    case "unit_count":
+      return { unit_count: { player: "active" } };
+    case "score":
+      return { score: { kind: "menace", player: "active" } };
     case "literal":
       return true;
     default:
@@ -44,6 +50,9 @@ export function condForm(c) {
     if ("quest_completed" in c) return "quest_completed";
     if ("controls_count" in c) return "controls_count";
     if ("control_duration" in c) return "control_duration";
+    if ("has_chip" in c) return "has_chip";
+    if ("unit_count" in c) return "unit_count";
+    if ("score" in c) return "score";
   }
   return "unknown";
 }
@@ -87,6 +96,19 @@ export function validateCond(c, errors = [], path = "") {
     case "control_duration":
       if (!c.control_duration?.player) errors.push(`${path}.control_duration.player required`);
       if (!c.control_duration?.hex) errors.push(`${path}.control_duration.hex required`);
+      return errors;
+    case "has_chip":
+      if (!c.has_chip?.holder) errors.push(`${path}.has_chip.holder required`);
+      if (!c.has_chip?.chipId) errors.push(`${path}.has_chip.chipId required`);
+      return errors;
+    case "unit_count":
+      if (!c.unit_count?.player) errors.push(`${path}.unit_count.player required`);
+      return errors;
+    case "score":
+      if (!c.score?.kind) errors.push(`${path}.score.kind required`);
+      if (c.score?.kind === "standing" && (!c.score.fromFaction || !c.score.toFaction)) {
+        errors.push(`${path}.score: standing needs fromFaction and toFaction`);
+      }
       return errors;
     default:
       errors.push(`${path}: unknown DSL form ${JSON.stringify(c)}`);

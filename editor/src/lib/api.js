@@ -20,17 +20,19 @@ const decodeJson = (v) => {
 // ----- Navigator index -----
 
 export async function listAll() {
-  const [worlds, fields, quests] = await Promise.all([
+  const [worlds, fields, quests, wikis] = await Promise.all([
     sb()
       .from("world_encounters")
       .select("id, title, mode, triggerCondition")
       .order("id"),
     sb().from("field_encounters").select("id, title, copies").order("id"),
     sb().from("quests").select("id, title, mode").order("id"),
+    sb().from("wiki_entries").select("id, term, category").order("term"),
   ]);
   if (worlds.error) throw worlds.error;
   if (fields.error) throw fields.error;
   if (quests.error) throw quests.error;
+  // wiki_entries may not exist yet (pre-0007 schema) — tolerate.
 
   // Hide sub-beats: their sentinels are copies=0 (field) or
   // triggerCondition===false (world). They're only reachable via
@@ -46,6 +48,7 @@ export async function listAll() {
     worldEncounters,
     fieldEncounters,
     quests: quests.data ?? [],
+    wikiEntries: wikis.error ? [] : wikis.data ?? [],
   };
 }
 
@@ -236,6 +239,43 @@ export async function saveQuest(quest) {
 
   await replaceEffects("quest_claim_reward", quest.id, claimRewards);
   await replaceEffects("quest_shared_reward", quest.id, sharedRewards);
+}
+
+// ----- Wiki entries -----
+
+export async function loadWikiEntry(id) {
+  const { data: row, error } = await sb()
+    .from("wiki_entries")
+    .select("*")
+    .eq("id", id)
+    .single();
+  if (error) throw error;
+  return {
+    id: row.id,
+    term: row.term,
+    aliases: decodeJson(row.aliases) ?? [],
+    category: row.category ?? "",
+    body: row.body ?? "",
+    imagePath: row.imagePath ?? null,
+  };
+}
+
+export async function saveWikiEntry(entry) {
+  const row = {
+    id: entry.id,
+    term: entry.term,
+    aliases: encodeJson(entry.aliases ?? []),
+    category: entry.category || null,
+    body: entry.body ?? "",
+    imagePath: entry.imagePath ?? null,
+  };
+  const { error } = await sb().from("wiki_entries").upsert(row);
+  if (error) throw error;
+}
+
+export async function deleteWikiEntry(id) {
+  const { error } = await sb().from("wiki_entries").delete().eq("id", id);
+  if (error) throw error;
 }
 
 export async function deleteQuest(id) {

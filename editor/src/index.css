@@ -6,6 +6,9 @@
   body {
     font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
       "Helvetica Neue", Arial, sans-serif;
+    /* Cover the iOS notch / nav bar when launched as a PWA. */
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
   }
   input[type="text"],
   input[type="number"],
@@ -13,6 +16,21 @@
   textarea,
   select {
     @apply bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm text-slate-100;
+  }
+  /* iOS Safari auto-zooms when focusing an input below 16px font-size.
+     Bump touch-screen inputs to 16px to keep the layout stable while
+     editing on a phone. Desktop pointer users keep the 14px text-sm. */
+  @media (pointer: coarse) {
+    input[type="text"],
+    input[type="number"],
+    input[type="password"],
+    textarea,
+    select {
+      font-size: 16px;
+    }
+    button {
+      min-height: 36px;
+    }
   }
   input[type="text"]:focus,
   input[type="number"]:focus,

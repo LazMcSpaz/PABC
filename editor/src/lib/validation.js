@@ -174,6 +174,7 @@ export function validateEffect(effect, ctx, errors = [], path = "effect") {
       }
       if (p.recipient != null && p.recipient !== "")
         requireRecipient(p.recipient, errors, `${path}.recipient`);
+      if (p.condition != null) validateCond(p.condition, errors, `${path}.condition`);
       break;
     case "ADJUST_BASE_STRENGTH":
       if (!Number.isFinite(Number(p.amount)))
@@ -246,6 +247,12 @@ export function validateWorldEncounter(story, ctx) {
     !Number.isInteger(Number(story.triggerCooldown))
   ) {
     errors.push("world_encounter.triggerCooldown must be integer");
+  }
+  if (story.triggerWeight != null) {
+    const w = Number(story.triggerWeight);
+    if (!Number.isFinite(w) || w <= 0 || w > 5) {
+      errors.push("world_encounter.triggerWeight must be a number in (0, 5]");
+    }
   }
   if (story.mode === "placement" && story.placementFilter != null) {
     validateHexFilter(story.placementFilter, errors, "placementFilter");
@@ -320,5 +327,16 @@ export function validateQuest(quest, ctx) {
   (quest.sharedRewards ?? []).forEach((e, i) =>
     validateEffect(e, ctx, errors, `sharedReward[${i}]`),
   );
+  return errors;
+}
+
+export function validateWikiEntry(entry, _ctx) {
+  const errors = [];
+  if (!entry.id) errors.push("wiki.id required");
+  if (!entry.term?.trim()) errors.push("wiki.term required");
+  if (!entry.body?.trim()) errors.push("wiki.body required");
+  if (entry.aliases && !Array.isArray(entry.aliases)) {
+    errors.push("wiki.aliases must be an array of strings");
+  }
   return errors;
 }

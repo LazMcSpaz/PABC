@@ -8,6 +8,13 @@
 // control_duration) return ints — both usable as Vals in `op` predicates.
 
 import { resolveTargets } from "./targeting.js";
+import {
+  menaceOf,
+  honorOf,
+  tolerance as dipTolerance,
+  trustFloor as dipTrustFloor,
+  recognitionScore,
+} from "./diplomacy.js";
 
 // Resolve a dot-path string against the engine state. Unknown paths
 // return null. `null` in any numeric comparison renders the predicate
@@ -127,6 +134,114 @@ export function evalCond(state, cond, ctx = {}) {
       }
     }
     return 0;
+  }
+
+  // `has_chip` — true if a chip with `chipId` is installed in the scope
+  // requested by `holder`. Holders:
+  //   - "active-player-units"     : any unit owned by the resolved player
+  //   - "active-player-locations" : any location owned by the resolved player
+  //   - "any-unit-on-hex"         : any unit on `hex`
+  //   - "any-location-on-hex"     : the location on `hex` (if any)
+  if (cond.has_chip) {
+    const h = cond.has_chip;
+    const chipId = h.chipId;
+    if (!chipId) return false;
+    const hex = h.hex != null && typeof h.hex === "string" && h.hex.includes(".")
+      ? resolvePath(state, h.hex) : h.hex;
+    const pid = h.player ? resolvePlayer(state, h.player, ctx) : ctx.sourcePlayer ?? null;
+    const chipMatches = (uid) => state.chips?.[uid]?.chipId === chipId;
+    switch (h.holder) {
+      case "active-player-units": {
+        if (!pid) return false;
+        for (const u of Object.values(state.units)) {
+          if (u.owner !== pid) continue;
+          if ((u.chips || []).some(chipMatches)) return true;
+        }
+        return false;
+      }
+      case "active-player-locations": {
+        if (!pid) return false;
+        for (const loc of Object.values(state.locations)) {
+          if (loc.controller !== pid) continue;
+          if ((loc.chips || []).some(chipMatches)) return true;
+        }
+        return false;
+      }
+      case "any-unit-on-hex": {
+        if (!hex) return false;
+        for (const u of Object.values(state.units)) {
+          if (u.node !== hex) continue;
+          if ((u.chips || []).some(chipMatches)) return true;
+        }
+        return false;
+      }
+      case "any-location-on-hex": {
+        if (!hex) return false;
+        const loc = Object.values(state.locations).find((l) => l.hexId === hex);
+        if (!loc) return false;
+        return (loc.chips || []).some(chipMatches);
+      }
+      default:
+        return false;
+    }
+  }
+
+  // `unit_count` — returns the count of units owned by `player`, optionally
+  // filtered by `unitType` (the `type` field on the unit record).
+  if (cond.unit_count) {
+    const pid = resolvePlayer(state, cond.unit_count.player, ctx);
+    if (!pid) return 0;
+    const t = cond.unit_count.unitType || null;
+    let n = 0;
+    for (const u of Object.values(state.units)) {
+      if (u.owner !== pid) continue;
+      if (t && u.type !== t) continue;
+      n++;
+    }
+    return n;
+  }
+
+  // `score` — returns a diplomacy / reputation scalar.
+  //   kind: "menace" | "honor" | "recognition"
+  //         (subject-keyed; resolved via `player`/`faction` token)
+  //   kind: "standing"
+  //         (matrix-keyed; `fromFaction` × `toFaction`)
+  //   kind: "tolerance"
+  //         (observer's Tolerance toward subject — needs both fids)
+  //   kind: "trust_floor"
+  //         (observer's Trust-floor — just the observer fid)
+  if (cond.score) {
+    const s = cond.score;
+    switch (s.kind) {
+      case "menace": {
+        const fid = resolvePlayer(state, s.player ?? s.faction ?? "active", ctx);
+        return fid ? menaceOf(state, fid) : 0;
+      }
+      case "honor": {
+        const fid = resolvePlayer(state, s.player ?? s.faction ?? "active", ctx);
+        return fid ? honorOf(state, fid) : 0;
+      }
+      case "recognition": {
+        const fid = resolvePlayer(state, s.player ?? s.faction ?? "active", ctx);
+        return fid ? recognitionScore(state, fid).total : 0;
+      }
+      case "standing": {
+        const from = resolvePlayer(state, s.fromFaction ?? "active", ctx);
+        const to = resolvePlayer(state, s.toFaction, ctx);
+        return state.factionStanding?.[from]?.[to] ?? 0;
+      }
+      case "tolerance": {
+        const observer = resolvePlayer(state, s.observer ?? "active", ctx);
+        const toward = resolvePlayer(state, s.toward ?? s.player ?? s.faction ?? "active", ctx);
+        return observer && toward ? dipTolerance(state, observer, toward) : 0;
+      }
+      case "trust_floor": {
+        const observer = resolvePlayer(state, s.observer ?? s.player ?? s.faction ?? "active", ctx);
+        return observer ? dipTrustFloor(state, observer) : 0;
+      }
+      default:
+        return 0;
+    }
   }
 
   return false;
