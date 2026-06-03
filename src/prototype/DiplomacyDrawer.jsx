@@ -351,8 +351,9 @@ function btnHoloStyle() {
 // Landing view — §3.2
 // =======================================================================
 
-function LandingView({ dip, onSelectFaction, onClose }) {
+function LandingView({ dip, onSelectFaction, onAction, onClose }) {
   const rec = dip.recognition;
+  const inbox = dip.pendingCalls || [];
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
       {/* Header */}
@@ -416,6 +417,48 @@ function LandingView({ dip, onSelectFaction, onClose }) {
               {dip.coalitionAgainstYou.join(", ")} have aligned against your rise. Their walls are higher; your reach is shorter.
             </div>
           </Card>
+        )}
+
+        {/* §1.8 — pact-call inbox: allies calling you into their wars. */}
+        {inbox.length > 0 && (
+          <>
+            <SectionLabel color="#c9b24e">Calls to Arms</SectionLabel>
+            {inbox.map((c) => (
+              <Card key={c.id} accent="#c9b24e">
+                <div className="pc-prose" style={{ fontSize: 12, lineHeight: 1.5, marginBottom: 8 }}>
+                  <b style={{ color: C.holoHi }}>{c.fromName}</b> calls you to war against{" "}
+                  <b style={{ color: "#d2453f" }}>{c.targetName}</b>.
+                </div>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button
+                    className="hud-int"
+                    onClick={() => onAction("respond-pact-call", { callId: c.id, accept: true })}
+                    title={c.ifAccept}
+                    style={{
+                      flex: 1, fontFamily: C.font, fontSize: 10, fontWeight: 700,
+                      letterSpacing: 1, textTransform: "uppercase", color: "#08100f",
+                      padding: "6px 8px", borderRadius: 4, border: `1px solid #5fc27a`,
+                      background: "linear-gradient(180deg, #7bd496, #4faf6e)", cursor: "pointer",
+                    }}
+                  >Answer ({c.ifAccept})</button>
+                  <button
+                    className="hud-int"
+                    onClick={() => onAction("respond-pact-call", { callId: c.id, accept: false })}
+                    title={c.ifRefuse}
+                    style={{
+                      flex: 1, fontFamily: C.font, fontSize: 10, fontWeight: 700,
+                      letterSpacing: 1, textTransform: "uppercase", color: "#fff",
+                      padding: "6px 8px", borderRadius: 4, border: `1px solid #6e1f12`,
+                      background: "linear-gradient(180deg, #d8553f, #a5331f)", cursor: "pointer",
+                    }}
+                  >Refuse</button>
+                </div>
+                <div style={{ fontFamily: C.font, fontSize: 8.5, letterSpacing: 0.4, color: "rgba(143,246,234,0.5)", marginTop: 6 }}>
+                  Refusing: {c.ifRefuse}
+                </div>
+              </Card>
+            ))}
+          </>
         )}
 
         <SectionLabel>The Other Powers</SectionLabel>
@@ -1208,6 +1251,7 @@ export default function DiplomacyDrawer({
               <LandingView
                 dip={dip}
                 onSelectFaction={setSelFid}
+                onAction={onAction}
                 onClose={onClose}
               />
             </motion.div>

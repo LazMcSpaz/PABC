@@ -2598,6 +2598,59 @@ line("\n  [§1.8] Player-initiated pact call");
     r.honored === false && getStanding(g, caller, ally) === sBefore - DH.pactCall.declineStandingHit);
 }
 
+// §1.8 — incoming pact-call inbox (AI ally → human)
+line("\n  [§1.8] incoming pact-call inbox");
+{
+  const human = "versari", ally = "lakers", target = "plainers";
+  // queue: an AI ally at war queues a call to the human (not resolved at once)
+  const g = createGame({ seed, humanFactionId: human }); ensureDiplomacy(g);
+  formPact(g, human, ally, "test");
+  declareWar(g, ally, target, "test"); // ally at war; human is not
+  runDiplomacyRound(g);
+  const call = g.diplomacy.pendingCalls.find((c) => c.from === ally && c.target === target);
+  check("an AI ally at war queues a pact call to the human inbox", !!call);
+
+  // accept → human joins the war, call cleared, ally Standing rises
+  const sUp = getStanding(g, human, ally);
+  const ra = performDiplomacy(g, human, "respond-pact-call", { callId: call.id, accept: true });
+  check("answering an inbox call declares war + clears it + warms the ally",
+    ra.ok && ra.honored === true && atWar(g, human, target) &&
+    !g.diplomacy.pendingCalls.some((c) => c.id === call.id) &&
+    getStanding(g, human, ally) === sUp + DH.pactCall.honorGainOnHonor);
+}
+{
+  // refuse → Honor + the caller's Standing toward you drop, no war
+  const human = "versari", ally = "lakers", target = "plainers";
+  const g = createGame({ seed, humanFactionId: human }); ensureDiplomacy(g);
+  formPact(g, human, ally, "test");
+  declareWar(g, ally, target, "test");
+  runDiplomacyRound(g);
+  const call = g.diplomacy.pendingCalls.find((c) => c.from === ally);
+  const h0 = honorOf(g, human), s0 = getStanding(g, ally, human);
+  const rr = performDiplomacy(g, human, "respond-pact-call", { callId: call.id, accept: false });
+  check("refusing an inbox call costs Honor + the ally's Standing, and no war starts",
+    rr.ok && rr.honored === false && !atWar(g, human, target) &&
+    honorOf(g, human) === h0 - DH.honor.breakLoss &&
+    getStanding(g, ally, human) === s0 - DH.pactCall.declineStandingHit);
+}
+{
+  // expiry → an unanswered call lapses (no penalty) once the war is gone
+  const human = "versari", ally = "lakers", target = "plainers";
+  const g = createGame({ seed, humanFactionId: human }); ensureDiplomacy(g);
+  formPact(g, human, ally, "test");
+  declareWar(g, ally, target, "test");
+  runDiplomacyRound(g);
+  const call = g.diplomacy.pendingCalls.find((c) => c.from === ally);
+  // the war ends (so it won't be re-queued), then time passes the expiry
+  g.diplomacy.wars = g.diplomacy.wars.filter(
+    (w) => !((w.a === ally && w.b === target) || (w.a === target && w.b === ally)));
+  g.round = call.expiresOnRound + 1;
+  const h0 = honorOf(g, human);
+  runDiplomacyRound(g);
+  check("an unanswered inbox call lapses after expiry with no Honor penalty",
+    !g.diplomacy.pendingCalls.some((c) => c.id === call.id) && honorOf(g, human) === h0);
+}
+
 // §1.9 — Allied vision
 line("\n  [§1.9] Allied vision auto-share + toggle");
 {
