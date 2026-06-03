@@ -129,6 +129,27 @@ parser. A match (alias → term → id, case-insensitive) becomes a
 clickable span that opens the wiki modal. Unresolved markers render as
 plain text with a faded hint so authors can spot typos.
 
+### Text-token substitution
+
+Player-facing text fields (encounter beat text, choice label, choice
+outcome text) also support dynamic tokens of the form
+`{kind:selector}`. Tokens resolve at display time against current
+state — so `{faction:lowest-standing-with-active}` always names the
+faction currently most hostile to the player reading the card.
+
+Registry lives in `src/game/textTokens.js` (engine) mirrored by
+`editor/src/lib/textTokens.js` (picker labels). The editor's
+`+ variable` button next to text fields inserts the right token at
+the cursor — authors don't type these by hand.
+
+Unknown selectors fall back to a generic word (`"someone"`,
+`"a place"`, `"a unit"`) so text never reads as broken even if a
+token can't be resolved in the current state.
+
+Tokens are resolved BEFORE `[[wiki]]` markup is parsed, so a future
+resolver returning a wiki-linkable name (`"[[Versari]]"`) would
+still cross-link correctly.
+
 ---
 
 ## 2. Effect type names — **locked, 23 total**

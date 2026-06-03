@@ -14,6 +14,18 @@ export const WikiContext = createContext({
   openEntry: () => {},
 });
 
+// Tokens like `{faction:lowest-standing-with-active}` get resolved before
+// the [[wiki]] parser runs. Provider passes a resolver bound to current
+// state; if none is provided, tokens render verbatim (which is fine for
+// the editor preview where state-resolution doesn't apply).
+export const TokenContext = createContext({
+  resolve: (text) => text,
+});
+
+export function TokenProvider({ resolve, children }) {
+  return <TokenContext.Provider value={{ resolve }}>{children}</TokenContext.Provider>;
+}
+
 export function WikiProvider({ entries, openEntry, children }) {
   // Build the alias-and-term lookup once per entries change. Lower-case
   // for case-insensitive matching.
@@ -30,8 +42,13 @@ export function WikiProvider({ entries, openEntry, children }) {
 }
 
 export function RichText({ children, style }) {
-  const text = typeof children === "string" ? children : "";
+  const raw = typeof children === "string" ? children : "";
   const wiki = useContext(WikiContext);
+  const tokens = useContext(TokenContext);
+  // Resolve {kind:selector} tokens first so the [[wiki]] parser sees
+  // already-substituted text. Resolution failures fall back to a
+  // generic word in the engine — never blank.
+  const text = tokens.resolve ? tokens.resolve(raw) : raw;
   const parts = splitMarkup(text);
 
   return (

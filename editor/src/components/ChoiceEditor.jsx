@@ -1,6 +1,6 @@
 import { DslBuilder } from "./DslBuilder.jsx";
 import { EffectList } from "./EffectEditor.jsx";
-import { HelpTip } from "./Field.jsx";
+import { HelpTip, TextInputWithVariables, TextAreaWithVariables } from "./Field.jsx";
 import { newId } from "../lib/id.js";
 
 export function ChoiceList({ choices, onChange, context, maxChoices = 3 }) {
@@ -33,52 +33,52 @@ export function ChoiceList({ choices, onChange, context, maxChoices = 3 }) {
           key={c.id ?? i}
           className="border border-slate-800 rounded-lg p-3 bg-slate-900/30 flex flex-col gap-3"
         >
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <span className="text-xs text-slate-500">#{i}</span>
-            <input
-              type="text"
-              value={c.label ?? ""}
-              placeholder="choice label"
-              onChange={(e) => setAt(i, { ...c, label: e.target.value })}
-              className="flex-1 font-semibold"
-            />
-            <HelpTip k="choice.label" />
-            <div className="flex items-center gap-1">
-              <label className="text-xs text-slate-400 inline-flex items-center gap-1">
-                defer rounds <HelpTip k="choice.deferredDelay" />
-              </label>
-              <input
-                type="number"
-                value={c.deferredDelay ?? ""}
-                placeholder=""
-                onChange={(e) =>
-                  setAt(i, {
-                    ...c,
-                    deferredDelay: e.target.value === "" ? null : Number(e.target.value),
-                  })
-                }
-                className="w-16"
-              />
-            </div>
+            <span className="text-xs uppercase tracking-wide text-slate-400 inline-flex items-center gap-1">
+              label <HelpTip k="choice.label" />
+            </span>
             <button
               type="button"
               onClick={() => remove(i)}
-              className="text-rose-400 hover:text-rose-300 text-xs"
+              className="ml-auto text-rose-400 hover:text-rose-300 text-xs"
             >
               remove
             </button>
+          </div>
+          <TextInputWithVariables
+            value={c.label}
+            onChange={(v) => setAt(i, { ...c, label: v })}
+            placeholder="choice label"
+          />
+
+          <div className="flex items-center gap-1">
+            <label className="text-xs uppercase tracking-wide text-slate-400 inline-flex items-center gap-1">
+              defer rounds <HelpTip k="choice.deferredDelay" />
+            </label>
+            <input
+              type="number"
+              value={c.deferredDelay ?? ""}
+              placeholder=""
+              onChange={(e) =>
+                setAt(i, {
+                  ...c,
+                  deferredDelay: e.target.value === "" ? null : Number(e.target.value),
+                })
+              }
+              className="w-16"
+            />
           </div>
 
           <label className="flex flex-col gap-1">
             <span className="text-xs uppercase tracking-wide text-slate-400">
               outcome text (narrative shown after choosing)
             </span>
-            <textarea
-              value={c.outcomeText ?? ""}
-              onChange={(e) => setAt(i, { ...c, outcomeText: e.target.value })}
+            <TextAreaWithVariables
+              value={c.outcomeText}
+              onChange={(v) => setAt(i, { ...c, outcomeText: v })}
               rows={3}
               placeholder="What the player sees after picking this choice. Effects fire alongside."
-              className="w-full"
             />
           </label>
 
