@@ -30,6 +30,7 @@ import { readRivalIntel } from "./intel.js";
 import { postAt, isPostVisibleTo, chargePostUpkeep } from "./posts.js";
 import { loadFieldEncounters, findUnsupportedTypes, choiceIsRunnable, WORLD_ENCOUNTERS } from "./content-loader.js";
 import { pickHexByFilter } from "./encounters.js";
+import { resolveTokens } from "./textTokens.js";
 import { evalCond, evalStrength } from "./dsl.js";
 import { registerQuest } from "./quests.js";
 import { CONFIG } from "./config.js";
@@ -2896,6 +2897,54 @@ line("\n  [Phase 10] hex-filter terrain + hasRoad");
   const offRoad = pickHexByFilter(g, { hasRoad: false });
   check("hex-filter hasRoad:false picks a non-road hex",
     offRoad != null && !g.board.hexes[offRoad]?.road);
+}
+
+// =====================================================================
+// Phase 11 — text-token resolver. Substitutes {kind:selector} tokens
+// in flavor text using current state. Unknown / unresolvable tokens
+// fall back to a generic word so text never reads as broken.
+// =====================================================================
+line("\n  [Phase 11] text-token resolver");
+{
+  const g = createGame({ seed });
+  startTurn(g);
+  const me = activePlayerId(g);
+
+  // {faction:active} resolves to the active player's faction name.
+  const activeName = factionDef(me).name;
+  check("{faction:active} resolves to the active player's faction name",
+    resolveTokens(g, "Hail, {faction:active}.") === `Hail, ${activeName}.`);
+
+  // Unknown selector falls back to "someone".
+  check("unknown faction selector falls back to 'someone'",
+    resolveTokens(g, "{faction:nonsense}") === "someone");
+
+  // Unknown kind passes through unchanged.
+  check("unknown kind leaves the token as-is",
+    resolveTokens(g, "{weather:rain}") === "{weather:rain}");
+
+  // Text with no token returns unchanged.
+  check("text without tokens passes through verbatim",
+    resolveTokens(g, "no tokens here") === "no tokens here");
+
+  // Lowest-standing — set a clear minimum and verify it picks that faction.
+  const foe = g.turnOrder[1];
+  if (g.factionStanding && g.factionStanding[foe]) {
+    g.factionStanding[foe][me] = -99;
+    const foeName = factionDef(foe).name;
+    check("{faction:lowest-standing-with-active} picks the faction with smallest standing toward active",
+      resolveTokens(g, "{faction:lowest-standing-with-active}") === foeName);
+  }
+
+  // {location:active-capital} should find the starter capital.
+  const capRes = resolveTokens(g, "meet at {location:active-capital}");
+  check("{location:active-capital} resolves to a known Location name",
+    capRes.startsWith("meet at ") && !capRes.endsWith("a place"));
+
+  // Multiple tokens in one string.
+  const both = resolveTokens(g, "{faction:active} marches on {location:active-capital}");
+  check("multiple tokens resolve independently in one pass",
+    both.includes(activeName) && !both.includes("{"));
 }
 
 line(`\n  v0.2 verification: ${v2pass} passed, ${v2fail} failed`);

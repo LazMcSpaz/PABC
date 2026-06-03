@@ -34,9 +34,10 @@ import { performDiplomacy } from "../game/diplomacy.js";
 import DiplomacyDrawer from "./DiplomacyDrawer.jsx";
 import EncounterModal from "./EncounterModal.jsx";
 import MoveConfirmOverlay from "./MoveConfirmOverlay.jsx";
-import { WikiProvider } from "./RichText.jsx";
+import { WikiProvider, TokenProvider } from "./RichText.jsx";
 import WikiModal from "./WikiModal.jsx";
 import { WIKI_ENTRIES } from "../game/content/index.js";
+import { resolveTokens } from "../game/textTokens.js";
 
 // Local-storage key for the "Don't ask again" preference on move confirm.
 const SKIP_MOVE_CONFIRM_KEY = "pabc.skipMoveConfirm";
@@ -696,8 +697,19 @@ export default function Prototype({ config, onNewGame }) {
     bumpTick();
   }
 
+  // Bind the token resolver to live engine state. Re-fires on every
+  // engine tick so a {faction:lowest-standing-with-active} read mid-game
+  // reflects current standings.
+  const resolveText = useCallback(
+    (text) => resolveTokens(gameRef.current, text, {
+      sourcePlayer: encounterPrompt?.encounter?.recipient,
+    }),
+    [tick, encounterPrompt?.encounter?.recipient],
+  );
+
   return (
     <WikiProvider entries={WIKI_ENTRIES} openEntry={openWikiEntry}>
+    <TokenProvider resolve={resolveText}>
     <div
       className="pc-root"
       style={{
@@ -1038,6 +1050,7 @@ export default function Prototype({ config, onNewGame }) {
         onBack={backWiki}
       />
     </div>
+    </TokenProvider>
     </WikiProvider>
   );
 }

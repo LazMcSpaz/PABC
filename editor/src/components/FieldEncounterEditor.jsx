@@ -3,7 +3,7 @@ import {
   Field,
   TextInput,
   NumberInput,
-  TextArea,
+  TextAreaWithVariables,
   SectionCard,
   SectionIntro,
   IconButton,
@@ -181,9 +181,9 @@ function BeatEditor({ beat, onChange, onDelete, isHead, context }) {
         <Field
           label="text"
           tip="beat.text"
-          hint="What the player reads. Wrap terms in [[double brackets]] to make them clickable wiki links."
+          hint="What the player reads. Wrap terms in [[double brackets]] for clickable wiki links. Tap '+ variable' to insert dynamic tokens like {faction:lowest-standing-with-active}."
         >
-          <TextArea
+          <TextAreaWithVariables
             value={beat.text}
             onChange={(v) => set("text", v)}
             rows={5}

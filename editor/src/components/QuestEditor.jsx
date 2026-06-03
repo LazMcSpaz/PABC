@@ -6,7 +6,7 @@ import {
   SectionCard,
   SectionIntro,
   IconButton,
-  TextArea,
+  TextAreaWithVariables,
   NumberInput,
 } from "./Field.jsx";
 import { ChoiceList } from "./ChoiceEditor.jsx";
@@ -222,9 +222,9 @@ function BeatEditor({
         <Field
           label="text"
           tip="beat.text"
-          hint="What the player reads on this beat. Wrap terms in [[double brackets]] to make them clickable wiki links."
+          hint="What the player reads. Wrap terms in [[double brackets]] for clickable wiki links. Tap '+ variable' to insert dynamic tokens like {faction:lowest-standing-with-active}."
         >
-          <TextArea
+          <TextAreaWithVariables
             value={beat.text}
             onChange={(v) => set("text", v)}
             rows={4}

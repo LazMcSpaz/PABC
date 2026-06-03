@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { tip as tipFor } from "../lib/tips.js";
+import { VariablePicker } from "./VariablePicker.jsx";
 
 // `tip` is a key in tips.js — the lookup happens here so call sites
 // stay compact (`tip="trigger.condition"` rather than spelling out the
@@ -77,9 +78,10 @@ export function HelpTip({ k, body }) {
   );
 }
 
-export function TextInput({ value, onChange, placeholder, className = "" }) {
+export function TextInput({ value, onChange, placeholder, className = "", inputRef }) {
   return (
     <input
+      ref={inputRef}
       type="text"
       value={value ?? ""}
       placeholder={placeholder}
@@ -144,15 +146,48 @@ export function Toggle({ value, onChange, label }) {
   );
 }
 
-export function TextArea({ value, onChange, rows = 4, placeholder = "" }) {
+export function TextArea({ value, onChange, rows = 4, placeholder = "", inputRef }) {
   return (
     <textarea
+      ref={inputRef}
       value={value ?? ""}
       onChange={(e) => onChange(e.target.value)}
       rows={rows}
       placeholder={placeholder}
       className="w-full"
     />
+  );
+}
+
+// TextArea + an "+ variable" button. Use for any player-facing text
+// field where a token like {faction:lowest-standing-with-active} would
+// be useful — beat text, choice labels, choice outcome text.
+export function TextAreaWithVariables({ value, onChange, rows = 4, placeholder = "" }) {
+  const ref = useRef(null);
+  return (
+    <div className="flex flex-col gap-1.5">
+      <TextArea
+        inputRef={ref}
+        value={value}
+        onChange={onChange}
+        rows={rows}
+        placeholder={placeholder}
+      />
+      <div className="flex justify-end">
+        <VariablePicker targetRef={ref} onInsert={onChange} />
+      </div>
+    </div>
+  );
+}
+
+// Single-line variant for shorter player-facing strings (choice labels).
+export function TextInputWithVariables({ value, onChange, placeholder }) {
+  const ref = useRef(null);
+  return (
+    <div className="flex items-stretch gap-1.5">
+      <TextInput inputRef={ref} value={value} onChange={onChange} placeholder={placeholder} />
+      <VariablePicker targetRef={ref} onInsert={onChange} />
+    </div>
   );
 }
 
