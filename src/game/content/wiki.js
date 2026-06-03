@@ -4,7 +4,4 @@
 // Schema: docs/content-schema-v0.1.md.
 // Generated at 2026-06-03T12:25:01.876Z.
 
-export { WORLD_ENCOUNTERS } from "./world-encounters.js";
-export { FIELD_ENCOUNTERS } from "./field-encounters.js";
-export { QUESTS } from "./quests.js";
-export { WIKI_ENTRIES } from "./wiki.js";
+export const WIKI_ENTRIES = {};

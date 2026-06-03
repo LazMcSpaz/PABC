@@ -2,7 +2,7 @@
 // Do not edit by hand — any changes here will be overwritten on the next
 // editor save. Source of truth lives in the Supabase content tables.
 // Schema: docs/content-schema-v0.1.md.
-// Generated at 2026-05-20T21:27:51.953Z.
+// Generated at 2026-06-03T12:25:01.876Z.
 
 export const FIELD_ENCOUNTERS = {
   "fe_buried_cache": {
@@ -116,7 +116,9 @@ export const FIELD_ENCOUNTERS = {
     ],
     "copies": 2,
     "id": "fe_buried_cache",
-    "text": "Something is buried here. The disturbance is recent — within a season, no longer. Whoever put it here meant to come back."
+    "imagePath": null,
+    "text": "Something is buried here. The disturbance is recent — within a season, no longer. Whoever put it here meant to come back.",
+    "title": "Buried Cache"
   },
   "fe_burned_camp": {
     "art": "The remains of a small camp at dawn. Three lean-tos, one collapsed and burned. A cooking pot lies on its side. No bodies, but the ground tells a story to anyone who can read it.",
@@ -196,7 +198,9 @@ export const FIELD_ENCOUNTERS = {
     ],
     "copies": 1,
     "id": "fe_burned_camp",
-    "text": "The camp burned two nights ago. There are no bodies and not enough scorch for a real fight. Whoever was here left in a hurry, but they left on their feet. One of your crew finds a token in the ashes — Free Plainer work, recently made."
+    "imagePath": null,
+    "text": "The camp burned two nights ago. There are no bodies and not enough scorch for a real fight. Whoever was here left in a hurry, but they left on their feet. One of your crew finds a token in the ashes — Free Plainer work, recently made.",
+    "title": "Burned Camp"
   },
   "fe_dambaran_widow": {
     "art": "A woman in worn travel clothes sits on the steps of a small trading post. Her hands are folded. A child sleeps against her shoulder. A bundled package sits at her feet.",
@@ -311,7 +315,9 @@ export const FIELD_ENCOUNTERS = {
     ],
     "copies": 1,
     "id": "fe_dambaran_widow",
-    "text": "She came from Dambar on foot, which means she came a long way for the reason in her hands. Her husband was Dambaran lineage and the institution did not love him for it. The package is for someone she will not name. She asks if you'd carry it east. She has nothing to pay with that you would take."
+    "imagePath": null,
+    "text": "She came from Dambar on foot, which means she came a long way for the reason in her hands. Her husband was Dambaran lineage and the institution did not love him for it. The package is for someone she will not name. She asks if you'd carry it east. She has nothing to pay with that you would take.",
+    "title": "Dambaran Widow"
   },
   "fe_grain_silo": {
     "art": "Wide low-angle shot of a row of derelict grain silos against a flat horizon at dusk. One silo door hangs open. A small group of figures stands at the base, looking up. Dry palette — wheat, rust, slate.",
@@ -417,7 +423,9 @@ export const FIELD_ENCOUNTERS = {
     ],
     "copies": 2,
     "id": "fe_grain_silo",
-    "text": "The silos are older than anyone alive. A grain-belt farmer waves you over. She says the third one from the left has been humming for two days. Not loud. Just a sound that wasn't there before. She wants to know if it's worth opening."
+    "imagePath": null,
+    "text": "The silos are older than anyone alive. A grain-belt farmer waves you over. She says the third one from the left has been humming for two days. Not loud. Just a sound that wasn't there before. She wants to know if it's worth opening.",
+    "title": "Grain Silo"
   },
   "fe_lakers_trader": {
     "art": "A weathered trader in lake-country leathers leans against a wagon stacked with crates marked in unfamiliar script. Behind him, two guards look bored. A small fire burns nearby.",
@@ -516,7 +524,9 @@ export const FIELD_ENCOUNTERS = {
     ],
     "copies": 2,
     "id": "fe_lakers_trader",
-    "text": "He came down from the lakes the long way and he's tired. The crates hold something his people make and yours don't. He wants Scrap, but he'd also take a favor — something specific, something he won't name yet."
+    "imagePath": null,
+    "text": "He came down from the lakes the long way and he's tired. The crates hold something his people make and yours don't. He wants Scrap, but he'd also take a favor — something specific, something he won't name yet.",
+    "title": "Lakers Trader"
   },
   "fe_old_world_terminal": {
     "art": "Interior of a half-collapsed concrete structure. A bank of dead screens covered in dust. One screen flickers faintly. Cables snake into the dark.",
@@ -605,7 +615,9 @@ export const FIELD_ENCOUNTERS = {
     ],
     "copies": 1,
     "id": "fe_old_world_terminal",
-    "text": "Something in here is still drawing power. Not much, but some. The screen flickers in a pattern that might be deliberate. A Versari scholar would spend a year on this. You have about an hour."
+    "imagePath": null,
+    "text": "Something in here is still drawing power. Not much, but some. The screen flickers in a pattern that might be deliberate. A Versari scholar would spend a year on this. You have about an hour.",
+    "title": "Old World Terminal"
   },
   "fe_pirate_parley": {
     "art": "Two figures stand twenty paces apart on open ground. One is clearly a Free Plainer — patched coat, visible blade. The other waits with empty hands raised. A small landship sits in the distance, hatch open.",
@@ -756,7 +768,9 @@ export const FIELD_ENCOUNTERS = {
     ],
     "copies": 1,
     "id": "fe_pirate_parley",
-    "text": "She calls herself a captain and she might be telling the truth. She has a proposal: she'll leave your supply lines alone for a season if you'll do her one favor in that same time. She won't tell you the favor in advance. She says that's the point."
+    "imagePath": null,
+    "text": "She calls herself a captain and she might be telling the truth. She has a proposal: she'll leave your supply lines alone for a season if you'll do her one favor in that same time. She won't tell you the favor in advance. She says that's the point.",
+    "title": "Pirate Parley"
   },
   "fe_rail_walker": {
     "art": "A solitary figure in heavy coat walks along an exposed rail line stretching to vanishing point. Behind them, a hand-pulled cart of salvaged components. Overcast sky, no other figures.",
@@ -838,7 +852,9 @@ export const FIELD_ENCOUNTERS = {
     ],
     "copies": 2,
     "id": "fe_rail_walker",
-    "text": "He walks the rails for a living. Says he's been doing it since before the Versari started running landships on them, and he'll be doing it after, whoever that turns out to be. He has news from three settlements east. He'll trade it for something — your choice what."
+    "imagePath": null,
+    "text": "He walks the rails for a living. Says he's been doing it since before the Versari started running landships on them, and he'll be doing it after, whoever that turns out to be. He has news from three settlements east. He'll trade it for something — your choice what.",
+    "title": "Rail Walker"
   },
   "fe_reader_at_well": {
     "art": "An older woman seated cross-legged beside a stone well in a small plains settlement. Her eyes are closed. A handful of villagers wait at a respectful distance.",
@@ -926,7 +942,9 @@ export const FIELD_ENCOUNTERS = {
     ],
     "copies": 1,
     "id": "fe_reader_at_well",
-    "text": "She doesn't introduce herself, and nobody else does it for her. She opens her eyes when your unit approaches and says something is moving through the south country that she can't put a name to. Not an army. Not weather. She isn't asking for help. She's telling you because telling people is part of what she does."
+    "imagePath": null,
+    "text": "She doesn't introduce herself, and nobody else does it for her. She opens her eyes when your unit approaches and says something is moving through the south country that she can't put a name to. Not an army. Not weather. She isn't asking for help. She's telling you because telling people is part of what she does.",
+    "title": "Reader At Well"
   },
   "fe_two_factions_arguing": {
     "art": "A wide shot of a small frontier crossroads. Two groups face each other across an old paved road — Goldgrass on one side, Lakers on the other. No weapons drawn, but hands rest near them. Locals watch from doorways.",
@@ -1015,7 +1033,9 @@ export const FIELD_ENCOUNTERS = {
     ],
     "copies": 1,
     "id": "fe_two_factions_arguing",
-    "text": "The Goldgrass side says the well belongs to the settlement and the settlement belongs to the coalition. The Laker side says the well was dug by a Laker engineer twelve summers back and the paperwork, if anyone cared to find it, would prove it. Neither side is wrong, exactly. They're waiting for someone to tip the scale."
+    "imagePath": null,
+    "text": "The Goldgrass side says the well belongs to the settlement and the settlement belongs to the coalition. The Laker side says the well was dug by a Laker engineer twelve summers back and the paperwork, if anyone cared to find it, would prove it. Neither side is wrong, exactly. They're waiting for someone to tip the scale.",
+    "title": "Two Factions Arguing"
   },
   "fe_versari_courier": {
     "art": "A young Versari courier in dust-stained academic dress stands beside a small one-person rail trolley. They carry a sealed leather satchel. Their tattoo is partially visible at the collar.",
@@ -1104,7 +1124,9 @@ export const FIELD_ENCOUNTERS = {
     ],
     "copies": 2,
     "id": "fe_versari_courier",
-    "text": "The courier is polite in the way Versari are polite — meaning they want something. The satchel needs to reach Dambar and their trolley has lost a wheel. They will remember whoever helps them. They are also very clear that they will remember whoever doesn't."
+    "imagePath": null,
+    "text": "The courier is polite in the way Versari are polite — meaning they want something. The satchel needs to reach Dambar and their trolley has lost a wheel. They will remember whoever helps them. They are also very clear that they will remember whoever doesn't.",
+    "title": "Versari Courier"
   },
   "fe_water_sense": {
     "art": "A Laker navigator stands at the edge of a dry riverbed at twilight, head tilted as if listening. Hands loose at sides. The riverbed is cracked, long dry — but the navigator's posture says otherwise.",
@@ -1193,6 +1215,8 @@ export const FIELD_ENCOUNTERS = {
     ],
     "copies": 1,
     "id": "fe_water_sense",
-    "text": "He came inland on a trade run two months ago and never went home. He says the water under this country talks louder than the water on the lakes ever did. He says he can show you where to dig — for a price, or for nothing, depending on who's asking."
+    "imagePath": null,
+    "text": "He came inland on a trade run two months ago and never went home. He says the water under this country talks louder than the water on the lakes ever did. He says he can show you where to dig — for a price, or for nothing, depending on who's asking.",
+    "title": "Water Sense"
   }
 };
