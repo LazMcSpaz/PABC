@@ -90,7 +90,7 @@ function Plaque({ children }) {
   );
 }
 
-export default function Hex({ hex, units, selected, reachable, selectedUnitId, dimmedUnitUid, onClick, onUnitClick }) {
+export default function Hex({ hex, units, selected, reachable, selectedUnitId, dimmedUnitUid, factionHighlight, onClick, onUnitClick }) {
   // §19 fog state — "visible" (live) | "explored" (remembered, dimmed) |
   // "unexplored" (black). Drives whether live details render at all.
   const fog = hex.fog || "visible";
@@ -101,6 +101,9 @@ export default function Hex({ hex, units, selected, reachable, selectedUnitId, d
   const ctrl = isLocation ? fullController(hex.control?.sections) : null;
   // §18.3 — soft ZoC tint (only present on visible hexes via the adapter).
   const zocColor = hex.zocOwner ? ownerColor(hex.zocOwner) : null;
+  // Diplomacy drawer asks us to glow this faction-held Location while
+  // its detail view is open.
+  const factionGlow = factionHighlight && ctrl ? ownerColor(ctrl) : null;
 
   let rim = "#4a4231";
   if (isUnexplored) rim = "#1b1813";
@@ -110,6 +113,7 @@ export default function Hex({ hex, units, selected, reachable, selectedUnitId, d
   if (selected) rim = theme.accent;
 
   let filter = "drop-shadow(0 4px 4px rgba(0,0,0,0.55))";
+  if (factionGlow) filter = `drop-shadow(0 0 14px ${factionGlow}) ` + filter;
   if (selected) filter = `drop-shadow(0 0 9px ${theme.accent}) ` + filter;
   else if (reachable) filter = `drop-shadow(0 0 8px ${theme.good}cc) ` + filter;
   else if (ctrl) filter = `drop-shadow(0 0 6px ${ownerColor(ctrl)}88) ` + filter;
@@ -123,6 +127,7 @@ export default function Hex({ hex, units, selected, reachable, selectedUnitId, d
     <div
       className="pc-hex-cell"
       data-hex={hex.id}
+      data-loc={isLocation ? hex.locationId : undefined}
       onClick={onClick}
       style={{ width: HEX_W, height: HEX_H, position: "relative", filter, cursor }}
     >

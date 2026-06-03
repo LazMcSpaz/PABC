@@ -31,7 +31,7 @@ import { adaptState, reinforcePreview, engineChipIdToUi, previewLocationContest,
 import { resolveSalvage } from "../game/contest.js";
 import { assignTechNode } from "../game/stats.js";
 import { performDiplomacy } from "../game/diplomacy.js";
-import DiplomacyScreen from "./DiplomacyScreen.jsx";
+import DiplomacyDrawer from "./DiplomacyDrawer.jsx";
 import EncounterModal from "./EncounterModal.jsx";
 import MoveConfirmOverlay from "./MoveConfirmOverlay.jsx";
 
@@ -266,6 +266,9 @@ export default function Prototype({ config, onNewGame }) {
   const [showTechWheel, setShowTechWheel] = useState(false); // §17 wheel overlay
   const [showDiplomacy, setShowDiplomacy] = useState(false); // §18 diplomacy screen
   const [diploResult, setDiploResult] = useState(null); // last action feedback
+  // Drawer asks the host to glow a faction's locations on the map while
+  // its detail view is open. `null` means no highlight.
+  const [highlightedFactionId, setHighlightedFactionId] = useState(null);
   const [menuOpen, setMenuOpen] = useState(false); // radial menu visible
   const [menuPanel, setMenuPanel] = useState(null); // "units"|"market"|"locations"|"settings"
   const [aiSpeed, setAiSpeed] = useState(getAiTurnSpeed()); // §AI replay speed (persisted)
@@ -632,15 +635,21 @@ export default function Prototype({ config, onNewGame }) {
     setMenuPanel(key);
   }
 
-  // §18.7 — issue a diplomatic verb (free of the Action budget). Surfaces a
-  // short accept/decline result, then refreshes the screen.
+  // §18.7 — issue a diplomatic verb (free of the Action budget). All 18
+  // verbs dispatch through performDiplomacy now; the prototype layer just
+  // routes params + surfaces the accept/decline result.
   function onDiplomacy(action, params) {
-    const r = performDiplomacy(gameRef.current, state.youId, action, params || {});
-    const name = state.players[params?.faction] ? (UI_FACTIONS[params.faction]?.name || params.faction) : params?.faction;
+    const game = gameRef.current;
+    const youId = state.youId;
+    const r = performDiplomacy(game, youId, action, params || {});
+    const targetId = params?.faction || params?.ally || params?.b;
+    const name = state.players[targetId] ? (UI_FACTIONS[targetId]?.name || targetId) : targetId;
     let msg = "";
     if (!r.ok) msg = r.reason || "no effect";
     else if (r.accepted === false) msg = `${name} declines — ${r.reason || ""}`;
     else if (r.accepted === true) msg = `${name} agrees.`;
+    else if (r.honored === true) msg = `${name} answers the call.`;
+    else if (r.honored === false) msg = `${name} refuses the call.`;
     else msg = `Done${name ? ` — ${name}` : ""}.`;
     setDiploResult({ ...r, msg });
     bumpTick();
@@ -673,6 +682,7 @@ export default function Prototype({ config, onNewGame }) {
               selectedHexId={selectedHexId}
               selectedUnitId={selectedUnitId}
               dimmedUnitUid={pendingMove?.unitUid}
+              highlightedFactionId={highlightedFactionId}
               reachable={reachable}
               onSelect={onHexClick}
               onUnitClick={onUnitClick}
@@ -961,14 +971,18 @@ export default function Prototype({ config, onNewGame }) {
         )}
       </AnimatePresence>
 
-      {showDiplomacy && (
-        <DiplomacyScreen
-          dip={state.diplomacy}
-          lastResult={diploResult}
-          onAction={onDiplomacy}
-          onClose={() => { setShowDiplomacy(false); setDiploResult(null); }}
-        />
-      )}
+      <AnimatePresence>
+        {showDiplomacy && (
+          <DiplomacyDrawer
+            key="diplo-drawer"
+            dip={state.diplomacy}
+            lastResult={diploResult}
+            onAction={onDiplomacy}
+            onClose={() => { setShowDiplomacy(false); setDiploResult(null); setHighlightedFactionId(null); }}
+            onHighlightFaction={setHighlightedFactionId}
+          />
+        )}
+      </AnimatePresence>
 
       {state.winnerId && !contestViz && !salvagePrompt && (
         <EndOverlay state={state} onNewGame={onNewGame} />
