@@ -1982,14 +1982,17 @@ line("\n  [§20 Economy] Output slider, build/upgrade/rush, upkeep dormancy, gat
 // =====================================================================
 line("\n§19 EXPLORATION, VISION & FOG OF WAR");
 
-// A minimal line-graph state for deterministic LoS unit tests (a-b-c-d).
+// A minimal line-graph state for deterministic LoS unit tests (a-b-c-d). The
+// test unit carries visionBonus:1 so its effective sight is radius 2 — these
+// tests exercise LoS MECHANICS (ridge-block, cover-cost) at a known radius,
+// independent of the unit base value (CONFIG.fog.unitVision).
 function miniLine() {
   return {
     board: {
       hexes: { a: { id: "a" }, b: { id: "b" }, c: { id: "c" }, d: { id: "d" } },
       adjacency: { a: ["b"], b: ["a", "c"], c: ["b", "d"], d: ["c"] },
     },
-    units: { u1: { uid: "u1", owner: "X", node: "a", chips: [] } },
+    units: { u1: { uid: "u1", owner: "X", node: "a", chips: [], visionBonus: 1 } },
     locations: {},
     players: { X: { id: "X", techWheel: [] }, Y: { id: "Y", techWheel: [] } },
     chips: {},
@@ -2022,6 +2025,22 @@ function miniLine() {
     check("LoS: a unit sees within its radius (a,b,c at radius 2)",
       m.visibility.X.visible.has("a") && m.visibility.X.visible.has("b") && m.visibility.X.visible.has("c"));
     check("LoS: d (dist 3) is beyond radius 2", !m.visibility.X.visible.has("d"));
+  }
+  {
+    // §19.3 base unit vision is radius 1 (own hex + the ring); high ground and
+    // Vision upgrades each add +1 on top.
+    const m = miniLine();
+    m.units.u1.visionBonus = 0; // strip the test's radius-2 bonus → bare base
+    recomputeVisibility(m, "X", { emitEvents: false });
+    check("base unit vision is radius 1 (sees a,b; not c)",
+      m.visibility.X.visible.has("b") && !m.visibility.X.visible.has("c"));
+    m.board.hexes.a.elevation = true; // on high ground → +1
+    recomputeVisibility(m, "X", { emitEvents: false });
+    check("a unit on high ground sees +1 (reaches c)", m.visibility.X.visible.has("c"));
+    m.board.hexes.a.elevation = false;
+    m.units.u1.visionBonus = 1; // a Vision upgrade → +1
+    recomputeVisibility(m, "X", { emitEvents: false });
+    check("a Vision upgrade adds to the base (radius 2 reaches c)", m.visibility.X.visible.has("c"));
   }
   {
     const m = miniLine();

@@ -103,7 +103,10 @@ export const CONFIG = {
   // elevation/cover; concealment + ambush. All TBD-in-spec; demo defaults
   // here. Built for a larger map — nothing keys off the 30-hex field.
   fog: {
-    unitVision: 2, // §19.3 base sight radius of a unit
+    unitVision: 1, // §19.3 base sight radius of a unit — its own hex + the ring
+                   // around it. +1 on high ground (elevationVisionBonus), +
+                   // Vision chips/upgrades (unit.visionBonus / chip `vision`),
+                   // + Watch Network's faction-wide bonus. Scouting is a choice.
     unitDetection: 0, // §19.5 a plain unit has NO Detection — concealment hides
                       // even point-blank; Detection comes from scout/recon/
                       // watchtower chips + the Intelligence vision path (§19.7).
