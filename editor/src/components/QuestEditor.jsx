@@ -4,6 +4,7 @@ import {
   TextInput,
   Select,
   SectionCard,
+  SectionIntro,
   IconButton,
   TextArea,
   NumberInput,
@@ -77,24 +78,42 @@ export function QuestEditor({ value, onChange, context }) {
   return (
     <div className="flex flex-col gap-4">
       <SectionCard title="Quest">
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <Field label="id" tip="quest.id">
-            <TextInput value={value.id} onChange={(v) => set("id", v)} />
-          </Field>
-          <Field label="title" tip="quest.title">
-            <TextInput value={value.title} onChange={(v) => set("title", v)} />
-          </Field>
-          <Field
-            label="mode"
-            tip={`quest.mode.${value.mode || "single-player"}`}
-          >
-            <Select
-              value={value.mode}
-              onChange={(v) => set("mode", v)}
-              options={QUEST_MODES}
-            />
-          </Field>
-        </div>
+        <SectionIntro>
+          A quest is a multi-step storyline. Each <em>beat</em> is one screen
+          the player reads; beats can require earlier beats to be completed
+          first (set in the Delivery section). When the player finishes the
+          last beat, the quest's completion rewards fire.
+        </SectionIntro>
+
+        <Field
+          label="id"
+          tip="quest.id"
+          hint="Unique identifier. Use lower-case with underscores; prefix `q_` by convention. Don't change after saving — beats and effects reference this."
+        >
+          <TextInput value={value.id} onChange={(v) => set("id", v)} />
+        </Field>
+        <Field
+          label="title"
+          tip="quest.title"
+          hint="Player-facing name in the quest log. Leave blank to auto-generate from the id."
+        >
+          <TextInput value={value.title} onChange={(v) => set("title", v)} />
+        </Field>
+        <Field
+          label="mode"
+          tip={`quest.mode.${value.mode || "single-player"}`}
+          hint={
+            value.mode === "global"
+              ? "All players experience the beats simultaneously. Use for world events."
+              : "Only the claimant runs the beats. Use for personal storylines."
+          }
+        >
+          <Select
+            value={value.mode}
+            onChange={(v) => set("mode", v)}
+            options={QUEST_MODES}
+          />
+        </Field>
       </SectionCard>
 
       <SectionCard
@@ -170,42 +189,58 @@ function BeatEditor({
           </IconButton>
         }
       >
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <Field label="id" tip="beat.id">
-            <TextInput value={beat.id} onChange={(v) => set("id", v)} />
-          </Field>
-          <Field label="ordinal" tip="beat.ordinal">
-            <NumberInput
-              value={beat.ordinal}
-              onChange={(v) => set("ordinal", v)}
-            />
-          </Field>
-          <div className="col-span-2">
-            <EncounterImageEditor
-              kind="beat"
-              id={beat.id}
-              imagePath={beat.imagePath}
-              onChange={(v) => set("imagePath", v)}
-            />
-          </div>
-          <Field label="text" className="col-span-2">
-            <TextArea
-              value={beat.text}
-              onChange={(v) => set("text", v)}
-              rows={4}
-            />
-          </Field>
-          <Field
-            label="art (free-text direction notes)"
-            className="col-span-2"
-          >
-            <TextInput
-              value={beat.art}
-              onChange={(v) => set("art", v)}
-              placeholder="optional art-direction notes"
-            />
-          </Field>
-        </div>
+        <SectionIntro>
+          A beat is one screen of the quest. Write what the player reads,
+          attach optional choices below, and decide in the Delivery section
+          how this beat is unlocked (auto / hex-discovered / conditional)
+          and which earlier beats must complete first.
+        </SectionIntro>
+
+        <Field
+          label="id"
+          tip="beat.id"
+          hint="Unique identifier within this quest. Other beats and effects route here by id."
+        >
+          <TextInput value={beat.id} onChange={(v) => set("id", v)} />
+        </Field>
+        <Field
+          label="ordinal"
+          tip="beat.ordinal"
+          hint="Display order in the quest log. Lower numbers come first. Doesn't gate anything — use prerequisites for that."
+        >
+          <NumberInput
+            value={beat.ordinal}
+            onChange={(v) => set("ordinal", v)}
+          />
+        </Field>
+        <EncounterImageEditor
+          kind="beat"
+          id={beat.id}
+          imagePath={beat.imagePath}
+          onChange={(v) => set("imagePath", v)}
+        />
+        <Field
+          label="text"
+          tip="beat.text"
+          hint="What the player reads on this beat. Wrap terms in [[double brackets]] to make them clickable wiki links."
+        >
+          <TextArea
+            value={beat.text}
+            onChange={(v) => set("text", v)}
+            rows={4}
+          />
+        </Field>
+        <Field
+          label="art (direction notes)"
+          tip="beat.art"
+          hint="Free-text notes for whoever generates the illustration — not shown in-game."
+        >
+          <TextInput
+            value={beat.art}
+            onChange={(v) => set("art", v)}
+            placeholder="optional art-direction notes"
+          />
+        </Field>
       </SectionCard>
 
       <SectionCard title="Choices (up to 3)">
@@ -217,39 +252,66 @@ function BeatEditor({
       </SectionCard>
 
       <SectionCard title="Delivery">
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <SectionIntro>
+          How and when this beat unlocks. <strong>Auto</strong> fires it as
+          soon as prerequisites complete; <strong>discovered</strong> places
+          it on a hex matching the filter and waits for a unit to step on
+          it; <strong>conditional</strong> only fires when a logic
+          expression evaluates true. The prerequisites list below restricts
+          this further to "these earlier beats must already be done".
+        </SectionIntro>
+
+        <Field
+          label="deliver"
+          tip={`beat.deliver.${beat.deliver || "auto"}`}
+          hint={
+            beat.deliver === "discovered"
+              ? "Lands on a hex (filtered below) and waits for a unit."
+              : beat.deliver === "conditional"
+              ? "Only fires when the condition you build below is true."
+              : "Fires automatically as soon as the prereqs complete."
+          }
+        >
+          <Select
+            value={beat.deliver}
+            onChange={(v) => set("deliver", v)}
+            options={BEAT_DELIVER_MODES}
+          />
+        </Field>
+        <Field
+          label="mode"
+          tip={`beat.mode.${beat.mode || "private"}`}
+          hint={
+            beat.mode === "public"
+              ? "All players see and resolve this beat together."
+              : "Only the claimant (or chosen recipient) sees it."
+          }
+        >
+          <Select
+            value={beat.mode}
+            onChange={(v) => set("mode", v)}
+            options={BEAT_MODES}
+          />
+        </Field>
+        {beat.mode === "private" && (
           <Field
-            label="deliver"
-            tip={`beat.deliver.${beat.deliver || "auto"}`}
+            label="recipient"
+            tip="encounter.recipient"
+            hint="`claimant` = whoever picked up the quest. The parameterised tokens compute the recipient from current state."
           >
-            <Select
-              value={beat.deliver}
-              onChange={(v) => set("deliver", v)}
-              options={BEAT_DELIVER_MODES}
+            <RecipientPicker
+              value={beat.recipient}
+              onChange={(v) => set("recipient", v)}
             />
           </Field>
-          <Field
-            label="mode"
-            tip={`beat.mode.${beat.mode || "private"}`}
-          >
-            <Select
-              value={beat.mode}
-              onChange={(v) => set("mode", v)}
-              options={BEAT_MODES}
-            />
-          </Field>
-          {beat.mode === "private" && (
-            <Field label="recipient" className="col-span-2" tip="encounter.recipient">
-              <RecipientPicker
-                value={beat.recipient}
-                onChange={(v) => set("recipient", v)}
-              />
-            </Field>
-          )}
-        </div>
+        )}
 
         {beat.deliver === "conditional" && (
-          <Field label="deliverCondition" tip="beat.deliverCondition">
+          <Field
+            label="deliver condition"
+            tip="beat.deliverCondition"
+            hint="Logic expression evaluated at round-end. Beat stays dormant while this is false."
+          >
             <DslBuilder
               value={beat.deliverCondition}
               onChange={(v) => set("deliverCondition", v)}
@@ -257,7 +319,11 @@ function BeatEditor({
           </Field>
         )}
         {beat.deliver === "discovered" && (
-          <Field label="placementFilter" tip="beat.placementFilter">
+          <Field
+            label="placement filter"
+            tip="beat.placementFilter"
+            hint="Which hexes are valid landing spots. Empty filter = any hex."
+          >
             <HexFilterBuilder
               value={beat.placementFilter}
               onChange={(v) => set("placementFilter", v)}

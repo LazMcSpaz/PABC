@@ -5,6 +5,7 @@ import {
   NumberInput,
   TextArea,
   SectionCard,
+  SectionIntro,
   IconButton,
 } from "./Field.jsx";
 import { ChoiceList } from "./ChoiceEditor.jsx";
@@ -62,24 +63,41 @@ export function FieldEncounterEditor({ value, onChange, context }) {
   return (
     <div className="flex flex-col gap-4">
       <SectionCard title="Field encounter">
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <Field label="id" tip="field.id">
-            <TextInput value={value.id} onChange={(v) => set("id", v)} />
-          </Field>
-          <Field label="title (player-facing; blank = prettified id)" tip="field.title">
-            <TextInput
-              value={value.title}
-              onChange={(v) => set("title", v)}
-              placeholder="e.g. The Grain Silo"
-            />
-          </Field>
-          <Field label="copies (deck count)" tip="field.copies">
-            <NumberInput
-              value={value.copies}
-              onChange={(v) => set("copies", v)}
-            />
-          </Field>
-        </div>
+        <SectionIntro>
+          Field encounters are cards in a shared deck. When a player's unit
+          moves into an Encounter hex, the engine draws from this deck and
+          presents what the card describes. Use <code className="text-amber-400">copies</code> to
+          control how many of each card go into the deck at game start.
+        </SectionIntro>
+
+        <Field
+          label="id"
+          tip="field.id"
+          hint="Unique identifier. Use lower-case with underscores; prefix `fe_` by convention. Don't change after saving."
+        >
+          <TextInput value={value.id} onChange={(v) => set("id", v)} />
+        </Field>
+        <Field
+          label="title"
+          tip="field.title"
+          hint="Player-facing name on the card. Leave blank to auto-generate from the id."
+        >
+          <TextInput
+            value={value.title}
+            onChange={(v) => set("title", v)}
+            placeholder="e.g. The Grain Silo"
+          />
+        </Field>
+        <Field
+          label="copies (deck count)"
+          tip="field.copies"
+          hint="How many copies seed the deck. More copies = more likely to draw. Sub-beats are saved with 0 automatically — don't touch that."
+        >
+          <NumberInput
+            value={value.copies}
+            onChange={(v) => set("copies", v)}
+          />
+        </Field>
       </SectionCard>
 
       <SectionCard
@@ -138,42 +156,50 @@ function BeatEditor({ beat, onChange, onDelete, isHead, context }) {
           )
         }
       >
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <Field label="id" tip="beat.id">
-            <TextInput
-              value={beat.id}
-              onChange={(v) => set("id", v)}
-              {...(isHead ? { placeholder: "head id (also story id)" } : {})}
-            />
-          </Field>
-          <div />
-          <div className="col-span-2">
-            <EncounterImageEditor
-              kind="field"
-              id={beat.id}
-              imagePath={beat.imagePath}
-              onChange={(v) => set("imagePath", v)}
-            />
-          </div>
-          <Field label="text" className="col-span-2" tip="beat.text">
-            <TextArea
-              value={beat.text}
-              onChange={(v) => set("text", v)}
-              rows={5}
-            />
-          </Field>
-          <Field
-            label="art (free-text direction notes)"
-            className="col-span-2"
-            tip="beat.art"
-          >
-            <TextInput
-              value={beat.art}
-              onChange={(v) => set("art", v)}
-              placeholder="optional art-direction notes"
-            />
-          </Field>
-        </div>
+        <SectionIntro>
+          A beat is one screen the player reads. The head beat opens the
+          encounter; sub-beats are reached via a choice's DELIVER_ENCOUNTER
+          effect. Each beat has its own text, optional image, and choices.
+        </SectionIntro>
+        <Field
+          label="id"
+          tip="beat.id"
+          hint="The head beat shares the encounter id. Sub-beats look like `parent_id/2`."
+        >
+          <TextInput
+            value={beat.id}
+            onChange={(v) => set("id", v)}
+            {...(isHead ? { placeholder: "head id (also story id)" } : {})}
+          />
+        </Field>
+        <EncounterImageEditor
+          kind="field"
+          id={beat.id}
+          imagePath={beat.imagePath}
+          onChange={(v) => set("imagePath", v)}
+        />
+        <Field
+          label="text"
+          tip="beat.text"
+          hint="What the player reads. Wrap terms in [[double brackets]] to make them clickable wiki links."
+        >
+          <TextArea
+            value={beat.text}
+            onChange={(v) => set("text", v)}
+            rows={5}
+          />
+        </Field>
+        <Field
+          label="art (direction notes)"
+          tip="beat.art"
+          hint="Free-text notes for whoever generates the illustration — not shown in-game."
+        >
+          <TextInput
+            value={beat.art}
+            onChange={(v) => set("art", v)}
+            placeholder="optional art-direction notes"
+          />
+        </Field>
       </SectionCard>
 
       <SectionCard title="Choices (up to 3)">

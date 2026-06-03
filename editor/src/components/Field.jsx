@@ -174,6 +174,20 @@ export function SectionCard({ title, children, actions }) {
   );
 }
 
+// Always-visible explainer block at the top of a section. Use to tell a
+// first-time author what this kind of content does in the game, in plain
+// language. Brief — 1-3 sentences max.
+export function SectionIntro({ children }) {
+  return (
+    <div className="bg-amber-500/5 border border-amber-500/25 rounded p-3 text-sm text-slate-300 leading-relaxed">
+      <div className="text-[10px] uppercase tracking-[0.18em] text-amber-400/80 mb-1.5 font-semibold">
+        Quick guide
+      </div>
+      {children}
+    </div>
+  );
+}
+
 export function IconButton({ onClick, children, title, variant = "default" }) {
   const styles = {
     default: "bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700",

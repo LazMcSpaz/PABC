@@ -6,6 +6,7 @@ import {
   Select,
   TextArea,
   SectionCard,
+  SectionIntro,
   IconButton,
   Toggle,
 } from "./Field.jsx";
@@ -69,45 +70,73 @@ export function WorldEncounterEditor({ value, onChange, context }) {
   return (
     <div className="flex flex-col gap-4">
       <SectionCard title="World encounter">
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <Field label="id" tip="encounter.id">
-            <TextInput value={value.id} onChange={(v) => set("id", v)} />
-          </Field>
-          <Field label="title (player-facing; blank = prettified id)" tip="encounter.title">
-            <TextInput
-              value={value.title}
-              onChange={(v) => set("title", v)}
-              placeholder="e.g. The Versari Courier"
-            />
-          </Field>
+        <SectionIntro>
+          World encounters are events the engine fires at end-of-round when
+          their conditions are met. Each round, the top two highest-scoring
+          eligible encounters fire — set <code className="text-amber-400">strength</code> and {" "}
+          <code className="text-amber-400">rarity</code> below to control how
+          often this one wins. Inside the encounter, a tree of beats and
+          choices plays out what the player sees and does.
+        </SectionIntro>
+
+        <Field
+          label="id"
+          tip="encounter.id"
+          hint="Unique identifier. Use lower-case with underscores; prefix `we_` by convention. Don't change after saving — choices in other encounters may route here."
+        >
+          <TextInput value={value.id} onChange={(v) => set("id", v)} />
+        </Field>
+
+        <Field
+          label="title"
+          tip="encounter.title"
+          hint="Player-facing name on the encounter card. Leave blank to auto-generate from the id."
+        >
+          <TextInput
+            value={value.title}
+            onChange={(v) => set("title", v)}
+            placeholder="e.g. The Versari Courier"
+          />
+        </Field>
+
+        <Field
+          label="mode"
+          tip={`encounter.mode.${value.mode || "private"}`}
+          hint={
+            value.mode === "placement"
+              ? "Lands on a hex (filtered below) and sits there until a unit triggers it."
+              : value.mode === "public"
+              ? "Every player sees it at once. They either each pick individually, or one player picks for the group (toggle below)."
+              : "Fires to one player only — no hex on the map. Use for governance events (e.g. 'a delegation arrives at your capital')."
+          }
+        >
+          <Select
+            value={value.mode}
+            onChange={(v) => set("mode", v)}
+            options={ENCOUNTER_MODES}
+          />
+        </Field>
+
+        {value.mode !== "placement" && (
           <Field
-            label="mode"
-            tip={`encounter.mode.${value.mode || "private"}`}
+            label="recipient"
+            tip="encounter.recipient"
+            hint="Who the encounter is delivered to. `active` = the current player. The parameterised forms compute the recipient from state at trigger time."
           >
-            <Select
-              value={value.mode}
-              onChange={(v) => set("mode", v)}
-              options={ENCOUNTER_MODES}
+            <RecipientPicker
+              value={value.recipient}
+              onChange={(v) => set("recipient", v)}
             />
           </Field>
-          {value.mode !== "placement" && (
-            <Field label="recipient" className="col-span-2" tip="encounter.recipient">
-              <RecipientPicker
-                value={value.recipient}
-                onChange={(v) => set("recipient", v)}
-              />
-            </Field>
-          )}
-          {value.mode === "public" && (
-            <div className="col-span-2">
-              <Toggle
-                value={value.publicGroupChoice}
-                onChange={(v) => set("publicGroupChoice", v)}
-                label="one player chooses for the group"
-              />
-            </div>
-          )}
-        </div>
+        )}
+
+        {value.mode === "public" && (
+          <Toggle
+            value={value.publicGroupChoice}
+            onChange={(v) => set("publicGroupChoice", v)}
+            label="one player chooses for the group"
+          />
+        )}
       </SectionCard>
 
       <SectionCard
@@ -149,25 +178,52 @@ export function WorldEncounterEditor({ value, onChange, context }) {
       )}
 
       <SectionCard title="Trigger">
-        <Field label="condition (required)" tip="trigger.condition">
+        <SectionIntro>
+          The trigger decides <strong>when</strong> this encounter is eligible
+          and <strong>how badly it wants to fire</strong>. At end-of-round the
+          engine scores every eligible trigger as <code className="text-amber-400">strength × rarity</code> and
+          fires the top two. Cooldown then locks this one out for a few
+          rounds so it doesn't dominate.
+        </SectionIntro>
+
+        <Field
+          label="condition"
+          tip="trigger.condition"
+          hint="When is this encounter even allowed to fire? Build a logic expression — e.g. 'active player has 3+ alignment' or 'round > 5'. If you don't gate it, it's eligible every round."
+        >
           <DslBuilder
             value={value.triggerCondition}
             onChange={(v) => set("triggerCondition", v)}
           />
         </Field>
-        <Field label="strength (1..5 or cascade)" tip="trigger.strength">
+
+        <Field
+          label="strength"
+          tip="trigger.strength"
+          hint="How urgent is this encounter right now? Use a plain number 1–5, or a cascade that picks a number based on current state."
+        >
           <StrengthBuilder
             value={value.triggerStrength}
             onChange={(v) => set("triggerStrength", v)}
           />
         </Field>
-        <Field label="rarity" tip="trigger.weight">
+
+        <Field
+          label="rarity"
+          tip="trigger.weight"
+          hint="Multiplier on strength. `Mythic` (0.1×) basically only fires when the strength cascade pushes it to 5 in an otherwise quiet round. Most encounters should be Normal."
+        >
           <WeightTierPicker
             value={value.triggerWeight}
             onChange={(v) => set("triggerWeight", v)}
           />
         </Field>
-        <Field label="cooldown (rounds)" tip="trigger.cooldown">
+
+        <Field
+          label="cooldown (rounds)"
+          tip="trigger.cooldown"
+          hint="After firing, how many rounds before this can fire again. Use 0 for evergreen encounters."
+        >
           <NumberInput
             value={value.triggerCooldown}
             onChange={(v) => set("triggerCooldown", v)}
@@ -177,13 +233,27 @@ export function WorldEncounterEditor({ value, onChange, context }) {
 
       {value.mode === "placement" && (
         <SectionCard title="Placement">
-          <Field label="expiresIn (rounds)" tip="placement.expiresIn">
+          <SectionIntro>
+            Placement-mode encounters land on a specific hex and wait there.
+            The filter below decides which hexes qualify; the engine picks
+            one matching hex at random when the encounter fires.
+          </SectionIntro>
+
+          <Field
+            label="expires in (rounds)"
+            tip="placement.expiresIn"
+            hint="After this many rounds without anyone triggering it, the encounter is silently removed."
+          >
             <NumberInput
               value={value.expiresIn}
               onChange={(v) => set("expiresIn", v)}
             />
           </Field>
-          <Field label="hexFilter" tip="placement.hexFilter">
+          <Field
+            label="hex filter"
+            tip="placement.hexFilter"
+            hint="Which hexes are valid landing spots. Empty filter = any hex. Add constraints one row at a time."
+          >
             <HexFilterBuilder
               value={value.placementFilter}
               onChange={(v) => set("placementFilter", v)}
@@ -209,44 +279,61 @@ function BeatEditor({ beat, onChange, onDelete, isHead, context }) {
           )
         }
       >
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <Field label="id">
-            <TextInput
-              value={beat.id}
-              onChange={(v) => set("id", v)}
-              {...(isHead ? { placeholder: "head id (also story id)" } : {})}
-            />
-          </Field>
-          <div />
-          <div className="col-span-2">
-            <EncounterImageEditor
-              kind="world"
-              id={beat.id}
-              imagePath={beat.imagePath}
-              onChange={(v) => set("imagePath", v)}
-            />
-          </div>
-          <Field label="text" className="col-span-2">
-            <TextArea
-              value={beat.text}
-              onChange={(v) => set("text", v)}
-              rows={5}
-            />
-          </Field>
-          <Field
-            label="art (free-text direction notes)"
-            className="col-span-2"
-          >
-            <TextInput
-              value={beat.art}
-              onChange={(v) => set("art", v)}
-              placeholder="optional art-direction notes"
-            />
-          </Field>
-        </div>
+        <SectionIntro>
+          A beat is one screen the player reads. The head beat opens the
+          encounter; sub-beats are reached by routing a choice's effect to
+          them. Each beat has its own text, optional image, and up to three
+          choices the player can pick from.
+        </SectionIntro>
+
+        <Field
+          label="id"
+          tip="beat.id"
+          hint="The head beat shares the encounter id. Sub-beats look like `parent_id/2`."
+        >
+          <TextInput
+            value={beat.id}
+            onChange={(v) => set("id", v)}
+            {...(isHead ? { placeholder: "head id (also story id)" } : {})}
+          />
+        </Field>
+        <EncounterImageEditor
+          kind="world"
+          id={beat.id}
+          imagePath={beat.imagePath}
+          onChange={(v) => set("imagePath", v)}
+        />
+        <Field
+          label="text"
+          tip="beat.text"
+          hint="What the player reads. Wrap terms in [[double brackets]] to make them clickable wiki links."
+        >
+          <TextArea
+            value={beat.text}
+            onChange={(v) => set("text", v)}
+            rows={5}
+          />
+        </Field>
+        <Field
+          label="art (direction notes)"
+          tip="beat.art"
+          hint="Free-text notes for whoever generates the illustration — not shown in-game."
+        >
+          <TextInput
+            value={beat.art}
+            onChange={(v) => set("art", v)}
+            placeholder="optional art-direction notes"
+          />
+        </Field>
       </SectionCard>
 
       <SectionCard title="Choices (up to 3)">
+        <SectionIntro>
+          Each choice is a button the player can tap. Pick a label, optional
+          gate, and a list of effects that fire when chosen. To branch into a
+          sub-beat, add a <code className="text-amber-400">DELIVER_ENCOUNTER</code> effect
+          pointing at the next beat.
+        </SectionIntro>
         <ChoiceList
           choices={beat.choices ?? []}
           onChange={(v) => set("choices", v)}
