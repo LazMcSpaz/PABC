@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from "react";
 import { tip as tipFor } from "../lib/tips.js";
 
 // `tip` is a key in tips.js — the lookup happens here so call sites
@@ -16,17 +17,62 @@ export function Field({ label, hint, tip, children, className = "" }) {
   );
 }
 
-// "?" affordance — `k` is a tips.js key, `body` is raw override text.
+// "?" affordance. Tap (mobile) or click (desktop) opens a popover with
+// the help text — `title` attributes don't fire on touch, so the old
+// hover-only behaviour was invisible on phone.
+//
+// `k` is a tips.js key, `body` is raw override text.
 export function HelpTip({ k, body }) {
   const text = body ?? (k ? tipFor(k) : null);
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e) => {
+      if (rootRef.current && !rootRef.current.contains(e.target)) setOpen(false);
+    };
+    const onKey = (e) => { if (e.key === "Escape") setOpen(false); };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("touchstart", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("touchstart", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
   if (!text) return null;
   return (
-    <span
-      title={text}
-      className="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-slate-700 text-slate-300 text-[9px] font-bold leading-none cursor-help select-none border border-slate-600"
-      aria-label="help"
-    >
-      ?
+    <span ref={rootRef} className="relative inline-flex items-center" onClick={(e) => e.preventDefault()}>
+      <button
+        type="button"
+        onClick={(e) => {
+          // Stop the surrounding <label> from focusing its child input.
+          e.preventDefault();
+          e.stopPropagation();
+          setOpen((v) => !v);
+        }}
+        aria-label="help"
+        className={`inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-bold leading-none cursor-help select-none border ${
+          open
+            ? "bg-amber-500 text-slate-950 border-amber-400"
+            : "bg-slate-700 text-slate-200 border-slate-600 hover:bg-slate-600"
+        }`}
+      >
+        ?
+      </button>
+      {open && (
+        <span
+          role="tooltip"
+          className="absolute left-0 top-full mt-1 z-30 w-64 max-w-[80vw] rounded border border-slate-700 bg-slate-950 text-slate-200 text-xs leading-relaxed p-2 shadow-lg normal-case tracking-normal"
+          style={{ fontWeight: 400 }}
+          onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}
+        >
+          {text}
+        </span>
+      )}
     </span>
   );
 }
