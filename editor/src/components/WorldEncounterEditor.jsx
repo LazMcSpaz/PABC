@@ -15,7 +15,7 @@ import { HexFilterBuilder } from "./HexFilterBuilder.jsx";
 import { ChoiceList } from "./ChoiceEditor.jsx";
 import { EncounterImageEditor } from "./EncounterImageEditor.jsx";
 import { BeatTreeView } from "./BeatTreeView.jsx";
-import { ENCOUNTER_MODES } from "../lib/schema.js";
+import { ENCOUNTER_MODES, WEIGHT_TIERS, weightTierFor } from "../lib/schema.js";
 import { newId } from "../lib/id.js";
 import { subBeatId } from "../lib/story.js";
 
@@ -70,17 +70,20 @@ export function WorldEncounterEditor({ value, onChange, context }) {
     <div className="flex flex-col gap-4">
       <SectionCard title="World encounter">
         <div className="grid grid-cols-2 gap-3">
-          <Field label="id">
+          <Field label="id" tip="encounter.id">
             <TextInput value={value.id} onChange={(v) => set("id", v)} />
           </Field>
-          <Field label="title (player-facing; blank = prettified id)">
+          <Field label="title (player-facing; blank = prettified id)" tip="encounter.title">
             <TextInput
               value={value.title}
               onChange={(v) => set("title", v)}
               placeholder="e.g. The Versari Courier"
             />
           </Field>
-          <Field label="mode">
+          <Field
+            label="mode"
+            tip={`encounter.mode.${value.mode || "private"}`}
+          >
             <Select
               value={value.mode}
               onChange={(v) => set("mode", v)}
@@ -88,7 +91,7 @@ export function WorldEncounterEditor({ value, onChange, context }) {
             />
           </Field>
           {value.mode !== "placement" && (
-            <Field label="recipient" className="col-span-2">
+            <Field label="recipient" className="col-span-2" tip="encounter.recipient">
               <RecipientPicker
                 value={value.recipient}
                 onChange={(v) => set("recipient", v)}
@@ -146,19 +149,25 @@ export function WorldEncounterEditor({ value, onChange, context }) {
       )}
 
       <SectionCard title="Trigger">
-        <Field label="condition (required)">
+        <Field label="condition (required)" tip="trigger.condition">
           <DslBuilder
             value={value.triggerCondition}
             onChange={(v) => set("triggerCondition", v)}
           />
         </Field>
-        <Field label="strength (1..5 or cascade)">
+        <Field label="strength (1..5 or cascade)" tip="trigger.strength">
           <StrengthBuilder
             value={value.triggerStrength}
             onChange={(v) => set("triggerStrength", v)}
           />
         </Field>
-        <Field label="cooldown (rounds)">
+        <Field label="rarity" tip="trigger.weight">
+          <WeightTierPicker
+            value={value.triggerWeight}
+            onChange={(v) => set("triggerWeight", v)}
+          />
+        </Field>
+        <Field label="cooldown (rounds)" tip="trigger.cooldown">
           <NumberInput
             value={value.triggerCooldown}
             onChange={(v) => set("triggerCooldown", v)}
@@ -168,13 +177,13 @@ export function WorldEncounterEditor({ value, onChange, context }) {
 
       {value.mode === "placement" && (
         <SectionCard title="Placement">
-          <Field label="expiresIn (rounds)">
+          <Field label="expiresIn (rounds)" tip="placement.expiresIn">
             <NumberInput
               value={value.expiresIn}
               onChange={(v) => set("expiresIn", v)}
             />
           </Field>
-          <Field label="hexFilter">
+          <Field label="hexFilter" tip="placement.hexFilter">
             <HexFilterBuilder
               value={value.placementFilter}
               onChange={(v) => set("placementFilter", v)}
@@ -245,5 +254,36 @@ function BeatEditor({ beat, onChange, onDelete, isHead, context }) {
         />
       </SectionCard>
     </>
+  );
+}
+
+// Five-tier rarity picker. Authors pick from named tiers
+// (Common / Normal / Uncommon / Rare / Mythic). Existing content with
+// some other numeric value is preserved and shown as "Custom".
+function WeightTierPicker({ value, onChange }) {
+  const current = weightTierFor(value);
+  return (
+    <div className="flex items-center gap-2 flex-wrap">
+      {WEIGHT_TIERS.map((t) => (
+        <button
+          key={t.key}
+          type="button"
+          onClick={() => onChange(t.value)}
+          className={`px-2 py-1 text-xs rounded border ${
+            current.key === t.key
+              ? "bg-amber-500 text-slate-950 border-amber-400 font-semibold"
+              : "bg-slate-800 text-slate-200 border-slate-700 hover:bg-slate-700"
+          }`}
+          title={`${t.label} — multiplier ${t.value}`}
+        >
+          {t.label}
+        </button>
+      ))}
+      {current.key === "custom" && (
+        <span className="text-xs text-slate-500">
+          custom: ×{current.value.toFixed(2)} (snap to a tier to discard)
+        </span>
+      )}
+    </div>
   );
 }

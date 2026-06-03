@@ -247,6 +247,12 @@ export function validateWorldEncounter(story, ctx) {
   ) {
     errors.push("world_encounter.triggerCooldown must be integer");
   }
+  if (story.triggerWeight != null) {
+    const w = Number(story.triggerWeight);
+    if (!Number.isFinite(w) || w <= 0 || w > 5) {
+      errors.push("world_encounter.triggerWeight must be a number in (0, 5]");
+    }
+  }
   if (story.mode === "placement" && story.placementFilter != null) {
     validateHexFilter(story.placementFilter, errors, "placementFilter");
   }

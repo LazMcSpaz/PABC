@@ -1,7 +1,14 @@
 import { useState } from "react";
-import { DSL_OPS, DSL_PATHS } from "../lib/schema.js";
+import {
+  DSL_OPS,
+  DSL_PATHS,
+  SCORE_KINDS,
+  CHIP_HOLDERS,
+  FACTION_IDS,
+} from "../lib/schema.js";
 import { emptyCond, condForm } from "../lib/dsl.js";
 import { RecipientPicker } from "./RecipientPicker.jsx";
+import { HelpTip } from "./Field.jsx";
 
 const FORM_LABELS = {
   all: "ALL (and)",
@@ -13,7 +20,19 @@ const FORM_LABELS = {
   quest_completed: "quest_completed",
   controls_count: "controls_count (int)",
   control_duration: "control_duration (int)",
+  has_chip: "has_chip",
+  unit_count: "unit_count (int)",
+  score: "score (int)",
   literal: "literal true/false",
+};
+
+const FORM_TIP_KEYS = {
+  op: "dsl.op",
+  has_flag: "dsl.has_flag",
+  has_chip: "dsl.has_chip",
+  unit_count: "dsl.unit_count",
+  score: "dsl.score",
+  controls_count: "dsl.controls_count",
 };
 
 export function DslBuilder({ value, onChange, allowNull = false, label }) {
@@ -51,6 +70,7 @@ export function DslBuilder({ value, onChange, allowNull = false, label }) {
 
 function CondNode({ value, onChange }) {
   const form = condForm(value);
+  const tipKey = FORM_TIP_KEYS[form];
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center gap-2 flex-wrap">
@@ -65,6 +85,7 @@ function CondNode({ value, onChange }) {
             </option>
           ))}
         </select>
+        {tipKey && <HelpTip k={tipKey} />}
       </div>
       <FormBody form={form} value={value} onChange={onChange} />
     </div>
@@ -202,6 +223,169 @@ function FormBody({ form, value, onChange }) {
               className="w-32"
             />
           </Row>
+        </div>
+      );
+    case "has_chip":
+      return (
+        <div className="flex flex-col gap-2 pl-4 border-l border-slate-800">
+          <Row label="holder">
+            <select
+              value={value.has_chip?.holder ?? "active-player-units"}
+              onChange={(e) =>
+                onChange({ has_chip: { ...value.has_chip, holder: e.target.value } })
+              }
+            >
+              {CHIP_HOLDERS.map((h) => (
+                <option key={h} value={h}>
+                  {h}
+                </option>
+              ))}
+            </select>
+          </Row>
+          <Row label="chipId">
+            <input
+              type="text"
+              value={value.has_chip?.chipId ?? ""}
+              placeholder="e.g. medic, training_grounds"
+              onChange={(e) =>
+                onChange({ has_chip: { ...value.has_chip, chipId: e.target.value } })
+              }
+              className="w-48"
+            />
+          </Row>
+          {(value.has_chip?.holder ?? "").startsWith("active-player") && (
+            <Row label="player">
+              <RecipientPicker
+                value={value.has_chip?.player ?? "active"}
+                onChange={(v) =>
+                  onChange({ has_chip: { ...value.has_chip, player: v } })
+                }
+              />
+            </Row>
+          )}
+          {(value.has_chip?.holder ?? "").endsWith("-on-hex") && (
+            <Row label="hex">
+              <input
+                type="text"
+                value={value.has_chip?.hex ?? ""}
+                placeholder="hex id or state path"
+                onChange={(e) =>
+                  onChange({ has_chip: { ...value.has_chip, hex: e.target.value } })
+                }
+                className="w-48"
+              />
+            </Row>
+          )}
+        </div>
+      );
+    case "unit_count":
+      return (
+        <div className="flex flex-col gap-2 pl-4 border-l border-slate-800">
+          <Row label="player">
+            <RecipientPicker
+              value={value.unit_count?.player ?? "active"}
+              onChange={(v) =>
+                onChange({ unit_count: { ...value.unit_count, player: v } })
+              }
+            />
+          </Row>
+          <Row label="unitType">
+            <input
+              type="text"
+              value={value.unit_count?.unitType ?? ""}
+              placeholder="(any) — or specific type id"
+              onChange={(e) =>
+                onChange({
+                  unit_count: {
+                    ...value.unit_count,
+                    unitType: e.target.value || undefined,
+                  },
+                })
+              }
+              className="w-48"
+            />
+          </Row>
+        </div>
+      );
+    case "score":
+      return (
+        <div className="flex flex-col gap-2 pl-4 border-l border-slate-800">
+          <Row label="kind">
+            <select
+              value={value.score?.kind ?? "menace"}
+              onChange={(e) =>
+                onChange({ score: { ...value.score, kind: e.target.value } })
+              }
+            >
+              {SCORE_KINDS.map((k) => (
+                <option key={k} value={k}>
+                  {k}
+                </option>
+              ))}
+            </select>
+          </Row>
+          {(value.score?.kind === "menace" ||
+            value.score?.kind === "honor" ||
+            value.score?.kind === "recognition") && (
+            <Row label="player">
+              <RecipientPicker
+                value={value.score?.player ?? "active"}
+                onChange={(v) =>
+                  onChange({ score: { ...value.score, player: v } })
+                }
+              />
+            </Row>
+          )}
+          {value.score?.kind === "standing" && (
+            <>
+              <Row label="fromFaction">
+                <RecipientPicker
+                  value={value.score?.fromFaction ?? "active"}
+                  onChange={(v) =>
+                    onChange({ score: { ...value.score, fromFaction: v } })
+                  }
+                />
+              </Row>
+              <Row label="toFaction">
+                <RecipientPicker
+                  value={value.score?.toFaction}
+                  onChange={(v) =>
+                    onChange({ score: { ...value.score, toFaction: v } })
+                  }
+                />
+              </Row>
+            </>
+          )}
+          {value.score?.kind === "tolerance" && (
+            <>
+              <Row label="observer">
+                <RecipientPicker
+                  value={value.score?.observer ?? "active"}
+                  onChange={(v) =>
+                    onChange({ score: { ...value.score, observer: v } })
+                  }
+                />
+              </Row>
+              <Row label="toward">
+                <RecipientPicker
+                  value={value.score?.toward}
+                  onChange={(v) =>
+                    onChange({ score: { ...value.score, toward: v } })
+                  }
+                />
+              </Row>
+            </>
+          )}
+          {value.score?.kind === "trust_floor" && (
+            <Row label="observer">
+              <RecipientPicker
+                value={value.score?.observer ?? "active"}
+                onChange={(v) =>
+                  onChange({ score: { ...value.score, observer: v } })
+                }
+              />
+            </Row>
+          )}
         </div>
       );
     case "literal":

@@ -2,7 +2,9 @@ import {
   HEX_TYPE_OPTIONS,
   STRATEGIC_VALUE_OPTIONS,
   FACTION_IDS,
+  TERRAIN_OPTIONS,
 } from "../lib/schema.js";
+import { HelpTip } from "./Field.jsx";
 
 export function HexFilterBuilder({ value, onChange, allowNull = true }) {
   const filter = value ?? {};
@@ -115,6 +117,34 @@ export function HexFilterBuilder({ value, onChange, allowNull = true }) {
           placeholder="ability id, 'any', or 'none'"
           onChange={(e) => set("hasAbility", e.target.value || null)}
         />
+      </Row>
+
+      <Row label={<>terrain <HelpTip k="hexFilter.terrain" /></>}>
+        <select
+          value={filter.terrain ?? ""}
+          onChange={(e) => set("terrain", e.target.value || null)}
+        >
+          <option value="">(any)</option>
+          {TERRAIN_OPTIONS.map((o) => (
+            <option key={o} value={o}>
+              {o}
+            </option>
+          ))}
+        </select>
+      </Row>
+
+      <Row label={<>hasRoad <HelpTip k="hexFilter.hasRoad" /></>}>
+        <select
+          value={filter.hasRoad == null ? "" : String(filter.hasRoad)}
+          onChange={(e) => {
+            const v = e.target.value;
+            set("hasRoad", v === "" ? null : v === "true");
+          }}
+        >
+          <option value="">(any)</option>
+          <option value="true">on road</option>
+          <option value="false">off road</option>
+        </select>
       </Row>
 
       {allowNull && Object.keys(filter).length > 0 && (

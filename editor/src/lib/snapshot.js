@@ -82,6 +82,7 @@ export async function loadSnapshot() {
     triggerCondition: decodeJson(row.triggerCondition),
     triggerStrength: decodeJson(row.triggerStrength),
     triggerCooldown: row.triggerCooldown,
+    triggerWeight: row.triggerWeight == null ? 1 : Number(row.triggerWeight),
     placementFilter: decodeJson(row.placementFilter),
     choices: choicesByParent.get(`world_encounter:${row.id}`) ?? [],
   }));

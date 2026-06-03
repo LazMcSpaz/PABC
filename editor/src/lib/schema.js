@@ -60,7 +60,13 @@ export const HEX_FILTER_KEYS = [
   "factionAffiliation",
   "strategicValue",
   "hasAbility",
+  "terrain",
+  "hasRoad",
 ];
+
+// Terrain sub-types the roads work-track stamps on hex.terrain. Free-text
+// stays allowed so future terrains land without an editor patch.
+export const TERRAIN_OPTIONS = ["mountain", "forest", "rubble", "wetland", "any"];
 
 export const HEX_TYPE_OPTIONS = ["location", "encounter", "terrain", "any"];
 export const STRATEGIC_VALUE_OPTIONS = ["low", "medium", "high", "veryHigh"];
@@ -77,8 +83,45 @@ export const DSL_FORMS = [
   "quest_completed",
   "controls_count",
   "control_duration",
+  "has_chip",
+  "unit_count",
+  "score",
   "literal",
 ];
+
+// Score kinds the engine's `score` form supports (src/game/dsl.js).
+export const SCORE_KINDS = [
+  "menace",
+  "honor",
+  "recognition",
+  "standing",
+  "tolerance",
+  "trust_floor",
+];
+
+// Chip-check holder scopes for the `has_chip` form.
+export const CHIP_HOLDERS = [
+  "active-player-units",
+  "active-player-locations",
+  "any-unit-on-hex",
+  "any-location-on-hex",
+];
+
+// Rarity tiers — friendlier than a raw 0.1–5.0 number. Order is display
+// order; first entry is the default for new encounters.
+export const WEIGHT_TIERS = [
+  { key: "normal",   label: "Normal",   value: 1.0 },
+  { key: "common",   label: "Common",   value: 2.0 },
+  { key: "uncommon", label: "Uncommon", value: 0.6 },
+  { key: "rare",     label: "Rare",     value: 0.3 },
+  { key: "mythic",   label: "Mythic",   value: 0.1 },
+];
+
+export function weightTierFor(value) {
+  if (value == null) return WEIGHT_TIERS[0];
+  return WEIGHT_TIERS.find((t) => Math.abs(t.value - Number(value)) < 0.01)
+    ?? { key: "custom", label: `Custom ${value}`, value: Number(value) };
+}
 
 export const DSL_PATHS = [
   "world.raidCounts.versari",

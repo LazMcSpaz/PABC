@@ -12,6 +12,7 @@ import {
 import { RecipientPicker } from "./RecipientPicker.jsx";
 import { DslBuilder } from "./DslBuilder.jsx";
 import { HexFilterBuilder } from "./HexFilterBuilder.jsx";
+import { HelpTip } from "./Field.jsx";
 import { newId } from "../lib/id.js";
 
 export function EffectList({ effects, onChange, context }) {
@@ -620,6 +621,13 @@ function EffectParams({ type, params, onChange, context }) {
               value={params.recipient}
               onChange={(v) => set("recipient", v)}
               allowEmpty
+            />
+          </ParamRow>
+          <ParamRow label={<>gate <HelpTip k="deliver.condition" /></>}>
+            <DslBuilder
+              value={params.condition}
+              onChange={(v) => set("condition", v)}
+              allowNull
             />
           </ParamRow>
         </div>
