@@ -20,24 +20,33 @@ const decodeJson = (v) => {
 // ----- Navigator index -----
 
 export async function listAll() {
+  // Use `select("*")` to match snapshot.js — that flow works in the wild,
+  // so the navigator should too. (The old column-specific selects broke
+  // silently against any project missing one of the listed columns —
+  // e.g. older field_encounters tables predating migration 0005's
+  // `title` column would return an error on `select("id, title, copies")`
+  // and the entire navigator went empty.)
   const [worlds, fields, quests, wikis] = await Promise.all([
-    sb()
-      .from("world_encounters")
-      .select("id, title, mode, triggerCondition")
-      .order("id"),
-    sb().from("field_encounters").select("id, title, copies").order("id"),
-    sb().from("quests").select("id, title, mode").order("id"),
-    sb().from("wiki_entries").select("id, term, category").order("term"),
+    sb().from("world_encounters").select("*").order("id"),
+    sb().from("field_encounters").select("*").order("id"),
+    sb().from("quests").select("*").order("id"),
+    sb().from("wiki_entries").select("*").order("term"),
   ]);
-  if (worlds.error) throw worlds.error;
-  if (fields.error) throw fields.error;
-  if (quests.error) throw quests.error;
-  // wiki_entries may not exist yet (pre-0007 schema) — tolerate.
 
-  // Sub-beats are not hidden any more — the navigator tags them so
-  // authors can still see their DB has rows. (Previously silently
-  // filtering by copies=0 / triggerCondition=false made data invisible
-  // when something went wrong.) See lib/story.js for sentinel encoding.
+  // Per-table errors no longer kill the whole load. Surface what's left
+  // and report the per-table errors so the diagnostic can show them.
+  const errors = {};
+  for (const [key, r] of [
+    ["world_encounters", worlds],
+    ["field_encounters", fields],
+    ["quests", quests],
+    ["wiki_entries", wikis],
+  ]) {
+    if (r.error) errors[key] = r.error.message ?? String(r.error);
+  }
+
+  // Sub-beats are not hidden — tagged in the picker via _isSubBeat so
+  // they don't silently vanish if a save corrupted the sentinel.
   const worldEncounters = (worlds.data ?? []).map((r) => ({
     ...r,
     _isSubBeat: decodeJsonSafe(r.triggerCondition) === false,
@@ -51,7 +60,8 @@ export async function listAll() {
     worldEncounters,
     fieldEncounters,
     quests: quests.data ?? [],
-    wikiEntries: wikis.error ? [] : wikis.data ?? [],
+    wikiEntries: wikis.data ?? [],
+    _errors: errors,
   };
 }
 
