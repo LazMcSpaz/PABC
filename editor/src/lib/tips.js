@@ -94,6 +94,44 @@ export const TIPS = {
   "wiki.body":
     "Body text. Use [[term]] to cross-link to another entry, or [[term|display]] to show different visible text. Plain newlines are preserved.",
 
+  // --- quest top-level ---
+  "quest.id":
+    "Stable identifier the engine uses to reference this quest (START_QUEST, ADVANCE_QUEST, COMPLETE_QUEST). Lower-case; can't be changed without rewiring callers.",
+  "quest.title":
+    "Player-facing name shown on the quest log. Leave blank to auto-generate from the id.",
+  "quest.mode.single-player":
+    "Only the claimant runs this quest's beats. Use for personal storylines.",
+  "quest.mode.global":
+    "All players experience the beats simultaneously. Use for world events (the rains stop, a comet falls).",
+
+  // --- quest beat ---
+  "beat.ordinal":
+    "Display order among beats. Lower numbers come first. Has no effect on gating — use prerequisites for that.",
+  "beat.deliver.auto":
+    "The beat fires automatically when its prerequisites are met and the round-end pipeline reaches it.",
+  "beat.deliver.discovered":
+    "The beat sits on a hex (filtered by placementFilter) until a player's unit enters it.",
+  "beat.deliver.conditional":
+    "The beat only fires when the deliverCondition DSL evaluates true. Use for one-off triggers like 'when player has 5 alignment'.",
+  "beat.mode.private":
+    "Only the claimant (or chosen recipient) sees and resolves this beat.",
+  "beat.mode.public":
+    "All players see and resolve this beat together.",
+  "beat.deliverCondition":
+    "DSL gate evaluated at round-end. False = beat stays dormant. Only used with deliver=conditional.",
+  "beat.placementFilter":
+    "Hex constraints for where this beat appears. Only used with deliver=discovered. Empty = anywhere.",
+  "beat.prereqs":
+    "Other beats that must already be completed before this one becomes eligible. Engine-level gating, separate from the choice-driven decision tree.",
+
+  // --- field encounter ---
+  "field.id":
+    "Stable identifier. Lower-case, prefixed `fe_` by convention. Referenced by PLACE_ENCOUNTER / DELIVER_ENCOUNTER.",
+  "field.title":
+    "Player-facing name on the encounter card. Leave blank to auto-generate from the id.",
+  "field.copies":
+    "How many copies of this card seed the field-encounter deck at game start. 0 marks a sub-beat that never appears standalone (set automatically when authoring sub-beats).",
+
   // --- weight tiers (per-row) ---
   "weight.common":
     "2.0× multiplier. Fires aggressively — wins ties at the cutoff.",

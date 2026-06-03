@@ -77,14 +77,17 @@ export function QuestEditor({ value, onChange, context }) {
   return (
     <div className="flex flex-col gap-4">
       <SectionCard title="Quest">
-        <div className="grid grid-cols-3 gap-3">
-          <Field label="id">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <Field label="id" tip="quest.id">
             <TextInput value={value.id} onChange={(v) => set("id", v)} />
           </Field>
-          <Field label="title">
+          <Field label="title" tip="quest.title">
             <TextInput value={value.title} onChange={(v) => set("title", v)} />
           </Field>
-          <Field label="mode">
+          <Field
+            label="mode"
+            tip={`quest.mode.${value.mode || "single-player"}`}
+          >
             <Select
               value={value.mode}
               onChange={(v) => set("mode", v)}
@@ -168,10 +171,10 @@ function BeatEditor({
         }
       >
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <Field label="id">
+          <Field label="id" tip="beat.id">
             <TextInput value={beat.id} onChange={(v) => set("id", v)} />
           </Field>
-          <Field label="ordinal">
+          <Field label="ordinal" tip="beat.ordinal">
             <NumberInput
               value={beat.ordinal}
               onChange={(v) => set("ordinal", v)}
@@ -215,14 +218,20 @@ function BeatEditor({
 
       <SectionCard title="Delivery">
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <Field label="deliver">
+          <Field
+            label="deliver"
+            tip={`beat.deliver.${beat.deliver || "auto"}`}
+          >
             <Select
               value={beat.deliver}
               onChange={(v) => set("deliver", v)}
               options={BEAT_DELIVER_MODES}
             />
           </Field>
-          <Field label="mode">
+          <Field
+            label="mode"
+            tip={`beat.mode.${beat.mode || "private"}`}
+          >
             <Select
               value={beat.mode}
               onChange={(v) => set("mode", v)}
@@ -230,7 +239,7 @@ function BeatEditor({
             />
           </Field>
           {beat.mode === "private" && (
-            <Field label="recipient" className="col-span-2">
+            <Field label="recipient" className="col-span-2" tip="encounter.recipient">
               <RecipientPicker
                 value={beat.recipient}
                 onChange={(v) => set("recipient", v)}
@@ -240,7 +249,7 @@ function BeatEditor({
         </div>
 
         {beat.deliver === "conditional" && (
-          <Field label="deliverCondition">
+          <Field label="deliverCondition" tip="beat.deliverCondition">
             <DslBuilder
               value={beat.deliverCondition}
               onChange={(v) => set("deliverCondition", v)}
@@ -248,7 +257,7 @@ function BeatEditor({
           </Field>
         )}
         {beat.deliver === "discovered" && (
-          <Field label="placementFilter">
+          <Field label="placementFilter" tip="beat.placementFilter">
             <HexFilterBuilder
               value={beat.placementFilter}
               onChange={(v) => set("placementFilter", v)}

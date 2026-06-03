@@ -63,17 +63,17 @@ export function FieldEncounterEditor({ value, onChange, context }) {
     <div className="flex flex-col gap-4">
       <SectionCard title="Field encounter">
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <Field label="id">
+          <Field label="id" tip="field.id">
             <TextInput value={value.id} onChange={(v) => set("id", v)} />
           </Field>
-          <Field label="title (player-facing; blank = prettified id)">
+          <Field label="title (player-facing; blank = prettified id)" tip="field.title">
             <TextInput
               value={value.title}
               onChange={(v) => set("title", v)}
               placeholder="e.g. The Grain Silo"
             />
           </Field>
-          <Field label="copies (deck count)">
+          <Field label="copies (deck count)" tip="field.copies">
             <NumberInput
               value={value.copies}
               onChange={(v) => set("copies", v)}
@@ -139,7 +139,7 @@ function BeatEditor({ beat, onChange, onDelete, isHead, context }) {
         }
       >
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <Field label="id">
+          <Field label="id" tip="beat.id">
             <TextInput
               value={beat.id}
               onChange={(v) => set("id", v)}
@@ -155,7 +155,7 @@ function BeatEditor({ beat, onChange, onDelete, isHead, context }) {
               onChange={(v) => set("imagePath", v)}
             />
           </div>
-          <Field label="text" className="col-span-2">
+          <Field label="text" className="col-span-2" tip="beat.text">
             <TextArea
               value={beat.text}
               onChange={(v) => set("text", v)}
@@ -165,6 +165,7 @@ function BeatEditor({ beat, onChange, onDelete, isHead, context }) {
           <Field
             label="art (free-text direction notes)"
             className="col-span-2"
+            tip="beat.art"
           >
             <TextInput
               value={beat.art}
