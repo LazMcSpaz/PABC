@@ -569,6 +569,195 @@ function FactionRow({ f, onClick }) {
 // Faction Detail view — §3.3
 // =======================================================================
 
+// Intel Brief — qualitative read of the relationship dressed up as an
+// intelligence dispatch. The player never sees raw Menace/Honor numbers
+// or the words "tolerance" / "floor"; the underlying engine truth is
+// folded into the prose from `sentenceLong` plus a couple of extra
+// "field reads" we synthesize from the gate flags.
+function IntelBrief({ f, tierColor }) {
+  const extras = [];
+  if (f.menaceBeyondTolerance) {
+    extras.push("Your war record has crossed what they can stomach — overtures will fall on closed ears until you ease off.");
+  } else if (f.menaceMarker > 0.7) {
+    extras.push("Their watchers flag your campaigns; another move and they may pull back from the table.");
+  }
+  if (f.honorBelowFloor) {
+    extras.push("Their councils name you oath-breaker; no pact or deal of weight will hold your name on it.");
+  } else if (f.honorMarker < 0.4) {
+    extras.push("There are murmurings about whether your word is worth the breath it takes.");
+  }
+  return (
+    <div style={{
+      position: "relative",
+      background: "linear-gradient(158deg, rgba(16,28,29,0.7), rgba(8,15,16,0.78))",
+      border: `1px solid ${C.holo}55`,
+      borderLeft: `3px solid ${tierColor}`,
+      borderRadius: 7,
+      padding: "11px 13px 12px",
+      boxShadow: `inset 0 0 14px rgba(86,211,198,0.05)`,
+    }}>
+      <div style={{
+        display: "flex", alignItems: "baseline", justifyContent: "space-between",
+        marginBottom: 7,
+      }}>
+        <span style={{
+          fontFamily: C.font, fontSize: 9, fontWeight: 700,
+          letterSpacing: 2.4, textTransform: "uppercase",
+          color: C.holoHi,
+        }}>▸ Intel Brief</span>
+        <span style={{
+          fontFamily: C.font, fontSize: 8, fontWeight: 600,
+          letterSpacing: 1.8, textTransform: "uppercase",
+          color: "rgba(143,246,234,0.45)",
+        }}>Field Report</span>
+      </div>
+      <div className="pc-prose" style={{
+        fontSize: 12.5, lineHeight: 1.55, color: "#e6ddc8",
+        fontStyle: "italic",
+      }}>
+        {f.sentenceLong}
+        {extras.length > 0 && (
+          <>
+            {" "}{extras.join(" ")}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Verb → category lookup. Keeps the actions panel from being a flat
+// wall of buttons.
+const VERB_CATEGORY = {
+  // Diplomacy — overtures, custom deals, mediation.
+  "gift":                  "diplomacy",
+  "propose-deal":          "diplomacy",
+  "propose-pact":          "diplomacy",
+  "mediate":               "diplomacy",
+  // Trade & borders — passive economic / movement agreements.
+  "trading-pact":          "trade",
+  "dissolve-trading-pact": "trade",
+  "set-open-borders":      "trade",
+  "toggle-open-borders":   "trade",
+  "toggle-allied-vision":  "trade",
+  // War & peace — opening, ending, calling allies into wars.
+  "declare-war":           "war",
+  "make-peace":            "war",
+  "sue-for-peace":         "war",
+  "pact-call":             "war",
+  // Coercion — destructive Standing/Honor moves.
+  "demand-tribute":        "coercion",
+  "denounce":              "coercion",
+  "vassalize":             "coercion",
+  "free-vassal":           "coercion",
+};
+
+const CATEGORY_META = [
+  { key: "diplomacy", label: "Diplomacy",     accent: C.holo,      defaultOpen: true },
+  { key: "trade",     label: "Trade & Borders", accent: C.gold,    defaultOpen: true },
+  { key: "war",       label: "War & Peace",   accent: "#d2453f",   defaultOpen: true },
+  { key: "coercion",  label: "Coercion",      accent: "#d2453f",   defaultOpen: false },
+];
+
+function ActionGroups({ f, onVerb, onOpenPane, onConfirmAndAct }) {
+  // Strip the redundant open-borders verb: when borders are already open
+  // from your side, only show the toggle (which we'll relabel "Close").
+  // When they're closed, only show the "Open" variant. This prevents the
+  // duplicate "Open Borders" + "Toggle Open Borders" button pair.
+  const verbs = (f.verbs || []).filter((v) => {
+    if (v.verb === "set-open-borders" && f.openBordersFromYou) return false;
+    if (v.verb === "toggle-open-borders" && !f.openBordersFromYou) return false;
+    return true;
+  });
+
+  function dispatch(verb, meta) {
+    if (meta.isPane) onOpenPane(meta.isPane);
+    else if (meta.destructive) onConfirmAndAct(verb, { faction: f.id });
+    else if (verb === "set-open-borders") onVerb(verb, { faction: f.id, on: true });
+    else if (verb === "toggle-open-borders") onVerb(verb, { faction: f.id, on: !f.openBordersFromYou });
+    else if (verb === "toggle-allied-vision") onVerb(verb, { faction: f.id, on: true });
+    else onVerb(verb, { faction: f.id });
+  }
+
+  // Override the displayed label/body for context-dependent verbs so the
+  // button text matches what it'll actually do right now.
+  function metaFor(verb) {
+    const base = VERB_META[verb];
+    if (!base) return null;
+    if (verb === "toggle-open-borders") {
+      return { ...base, label: "Close Borders", body: "Close your half of the open-borders agreement." };
+    }
+    return base;
+  }
+
+  return (
+    <Card>
+      <SectionLabel>Actions</SectionLabel>
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        {CATEGORY_META.map((cat) => {
+          const groupVerbs = verbs.filter((v) => VERB_CATEGORY[v.verb] === cat.key);
+          if (groupVerbs.length === 0) return null;
+          return (
+            <ActionGroup key={cat.key} label={cat.label} accent={cat.accent} defaultOpen={cat.defaultOpen}>
+              {groupVerbs.map((v) => {
+                const meta = metaFor(v.verb);
+                if (!meta) return null;
+                return (
+                  <VerbButton
+                    key={v.verb}
+                    verbMeta={meta}
+                    gate={v}
+                    onClick={() => dispatch(v.verb, meta)}
+                  />
+                );
+              })}
+            </ActionGroup>
+          );
+        })}
+      </div>
+    </Card>
+  );
+}
+
+// A collapsible subsection inside the Actions card.
+function ActionGroup({ label, accent, defaultOpen, children }) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="hud-int"
+        style={{
+          width: "100%", textAlign: "left", padding: "5px 8px",
+          background: open ? `${accent}14` : "rgba(86,211,198,0.04)",
+          border: `1px solid ${accent}55`,
+          borderRadius: 4, cursor: "pointer",
+          fontFamily: C.font, fontSize: 10, fontWeight: 700,
+          letterSpacing: 1.8, textTransform: "uppercase",
+          color: accent,
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          marginBottom: open ? 6 : 0,
+          boxShadow: open ? `0 0 6px ${accent}33` : "none",
+          transition: "background .12s ease, box-shadow .12s ease, margin-bottom .12s ease",
+        }}
+      >
+        <span>{label}</span>
+        <span style={{
+          fontSize: 9, color: accent, opacity: 0.7,
+          transition: "transform .15s ease",
+          transform: open ? "rotate(90deg)" : "rotate(0deg)",
+          display: "inline-block",
+        }}>▸</span>
+      </button>
+      {open && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function FactionDetailView({ f, dip, onBack, onClose, onVerb, onOpenPane, onConfirmAndAct }) {
   const tierColor = TIER_COLOR[f.standingTier] || "#f4efe2";
   return (
@@ -579,32 +768,9 @@ function FactionDetailView({ f, dip, onBack, onClose, onVerb, onOpenPane, onConf
         flex: 1, overflowY: "auto", padding: "12px 16px",
         display: "flex", flexDirection: "column", gap: 12,
       }}>
-        {/* Sentiment panel */}
-        <Card>
-          <SectionLabel color={tierColor}>Their stance</SectionLabel>
-          <div className="pc-prose" style={{ fontSize: 12.5, lineHeight: 1.5 }}>{f.sentenceLong}</div>
-        </Card>
-
-        {/* Reputation gate panel — anonymised bars */}
-        <Card>
-          <SectionLabel>Reputation gates</SectionLabel>
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            <RepBar
-              marker={f.menaceMarker}
-              beyond={f.menaceBeyondTolerance}
-              label="Menace · their tolerance"
-              goodSide="low"
-              color="#5fc27a"
-            />
-            <RepBar
-              marker={1 - Math.max(0, Math.min(1, f.honorMarker))}
-              beyond={f.honorBelowFloor}
-              label="Honor · their trust floor"
-              goodSide="high"
-              color="#5fc27a"
-            />
-          </div>
-        </Card>
+        {/* Intel Brief — qualitative read of the relationship. Replaces the
+            old rep-gate bars; the player should never see the numbers. */}
+        <IntelBrief f={f} tierColor={tierColor} />
 
         {/* Relationship & obligations */}
         <Card>
@@ -641,31 +807,14 @@ function FactionDetailView({ f, dip, onBack, onClose, onVerb, onOpenPane, onConf
           </Card>
         )}
 
-        {/* Actions */}
-        <Card>
-          <SectionLabel>Actions</SectionLabel>
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            {(f.verbs || []).map((v) => {
-              const meta = VERB_META[v.verb];
-              if (!meta) return null;
-              return (
-                <VerbButton
-                  key={v.verb}
-                  verbMeta={meta}
-                  gate={v}
-                  onClick={() => {
-                    if (meta.isPane) onOpenPane(meta.isPane);
-                    else if (meta.destructive) onConfirmAndAct(v.verb, { faction: f.id });
-                    else if (v.verb === "set-open-borders") onVerb(v.verb, { faction: f.id, on: true });
-                    else if (v.verb === "toggle-open-borders") onVerb(v.verb, { faction: f.id, on: !f.openBordersFromYou });
-                    else if (v.verb === "toggle-allied-vision") onVerb(v.verb, { faction: f.id, on: true });
-                    else onVerb(v.verb, { faction: f.id });
-                  }}
-                />
-              );
-            })}
-          </div>
-        </Card>
+        {/* Actions — grouped into categories so the player isn't staring at
+            a wall of buttons. Coercion is collapsed by default. */}
+        <ActionGroups
+          f={f}
+          onVerb={onVerb}
+          onOpenPane={onOpenPane}
+          onConfirmAndAct={onConfirmAndAct}
+        />
       </div>
     </div>
   );
