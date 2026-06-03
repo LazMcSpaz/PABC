@@ -1,4 +1,6 @@
+import { useState } from "react";
 import { ContentPicker } from "./ContentPicker.jsx";
+import { DiagnosticsModal } from "./DiagnosticsModal.jsx";
 
 export function Header({
   index,
@@ -15,6 +17,7 @@ export function Header({
   message,
   syncState,
 }) {
+  const [diagOpen, setDiagOpen] = useState(false);
   return (
     <header className="bg-slate-900 border-b border-slate-800 px-3 py-3 flex flex-wrap items-center gap-2 sticky top-0 z-10">
       <div className="flex items-center gap-2 mr-auto sm:mr-0">
@@ -23,7 +26,16 @@ export function Header({
         </span>
         <span className="text-slate-500 hidden sm:inline">·</span>
         <span className="text-slate-300 text-sm hidden sm:inline">Content Editor</span>
+        <button
+          type="button"
+          onClick={() => setDiagOpen(true)}
+          title="Database diagnostics — shows the Supabase host and per-table row counts"
+          className="px-2 py-1 text-xs rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300"
+        >
+          db?
+        </button>
       </div>
+      <DiagnosticsModal open={diagOpen} onClose={() => setDiagOpen(false)} />
 
       <div className="sm:ml-4 w-full sm:w-72 order-3 sm:order-2">
         <ContentPicker index={index} current={current} onSelect={onSelect} />
