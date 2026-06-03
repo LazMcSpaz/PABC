@@ -217,6 +217,9 @@ export default function Hex({ hex, units, selected, reachable, selectedUnitId, d
           </div>
         )}
       </div>
+      {/* §16.2 road — a worn corridor across the hex (movement modifier).
+          Drawn over the fill, under the ZoC tint and tokens. */}
+      {!isUnexplored && hex.road && <RoadBand />}
       {/* §18.3 ZoC overlay — a faint inner tint + glow in the dominating
           faction's color, layered over the fill but under the tokens. */}
       {zocColor && (
@@ -283,6 +286,36 @@ function GhostToken({ ghost, slot = 0 }) {
       }}
     >
       <span style={{ fontFamily: theme.fontDisplay, fontSize: 12, fontWeight: 700, color: "#e8e2d4" }}>?</span>
+    </div>
+  );
+}
+
+// §16.2 — a road corridor: a worn tan band with a dashed centre line crossing
+// the hex. Purely cosmetic; the movement effect lives in board.movementField.
+function RoadBand() {
+  return (
+    <div
+      title="Road — ignores terrain movement cost (a fast, contestable lane)"
+      style={{
+        position: "absolute",
+        top: "50%",
+        left: "8%",
+        right: "8%",
+        height: 12,
+        transform: "translateY(-50%)",
+        borderRadius: 6,
+        background: "linear-gradient(180deg, #b9a47e, #8a7757)",
+        boxShadow: "inset 0 1px 1px rgba(255,255,255,0.25), 0 1px 2px rgba(0,0,0,0.5)",
+        opacity: 0.9,
+        zIndex: 1,
+        pointerEvents: "none",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        overflow: "hidden",
+      }}
+    >
+      <div style={{ width: "100%", height: 2, background: "repeating-linear-gradient(90deg, rgba(40,32,20,0.7) 0 8px, transparent 8px 16px)" }} />
     </div>
   );
 }

@@ -263,6 +263,8 @@ export function adaptState(state) {
       // §19.4 terrain features (known once explored) — drive LoS + UI texture.
       elevation: fog === "unexplored" ? false : !!h.elevation,
       cover: fog === "unexplored" ? false : !!h.cover,
+      // §16.2 road modifier (movement only) — shown once the hex is explored.
+      road: fog === "unexplored" ? false : !!h.road,
       // §18.3 ZoC tint — only where the viewer has live sight (it's live info).
       zocOwner: live ? zoc[h.id] || null : null,
     };

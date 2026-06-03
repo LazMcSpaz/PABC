@@ -108,6 +108,77 @@ export function isElevation(hex) {
 export function isCover(hex) {
   return !!(hex && hex.cover);
 }
+// §16.2 roads — a per-hex MOVEMENT modifier (not its own terrain). A road
+// negates terrain movement cost: a road hex costs 1 to enter and never halts,
+// even through forest or mountain. Roads do NOT affect cover/visibility — a
+// road through a forest still conceals and a mountain still blocks sight.
+export function isRoad(hex) {
+  return !!(hex && hex.road);
+}
+
+// §16.2 terrain movement — the hexes a unit can reach this turn from `start`
+// with `budget` movement points, honouring per-hex entry costs and stoppers:
+//   • forest (cover): costs CONFIG.movement.forestCost (default 2 = "−1 speed")
+//   • mountain (elevation): you may step ONTO one (≥1 point) but it HALTS the
+//     move (arrive with 0) — "speed 1, no matter what"; no passing through.
+//   • road: negates the above — costs 1, never halts (fast lane / chokepoint).
+//   • everything else: 1.
+//   • `blockedThrough` (a Set of hexIds): you may ENTER such a hex but it HALTS
+//     you there (a foreign unit's blockade, or an enemy Location §16.2) — the
+//     caller computes these via diplomacy (see movement.js).
+// Best-first expansion (maximise movement left = minimise cost), tracking a
+// predecessor for each hex so the exact ROUTE can be reconstructed. Returns
+// { best: {hex: remaining}, prev: {hex: cameFrom} } including `start`.
+function expandMovement(state, start, budget, blocked) {
+  const adj = state.board.adjacency;
+  const hexes = state.board.hexes;
+  const halts = CONFIG.movement.mountainHalts;
+  const forestCost = CONFIG.movement.forestCost;
+  const best = { [start]: budget };
+  const prev = { [start]: null };
+  const queue = [start];
+  while (queue.length) {
+    let bi = 0;
+    for (let i = 1; i < queue.length; i++) if (best[queue[i]] > best[queue[bi]]) bi = i;
+    const cur = queue.splice(bi, 1)[0];
+    const rem = best[cur];
+    if (rem <= 0) continue; // out of movement — also how halting hexes (rem 0) stop
+    for (const nb of adj[cur] || []) {
+      const road = isRoad(hexes[nb]);
+      const mountain = halts && isElevation(hexes[nb]) && !road; // road negates the halt
+      const cost = mountain ? 1 : (isCover(hexes[nb]) && !road ? forestCost : 1);
+      if (rem < cost) continue; // not enough movement to enter
+      // A mountain (no road) or a blockaded hex halts you on entry: enter, stop.
+      const terminal = mountain || (blocked && blocked.has(nb));
+      const nrem = terminal ? 0 : rem - cost;
+      if (nrem > (best[nb] ?? -1)) { best[nb] = nrem; prev[nb] = cur; queue.push(nb); }
+    }
+  }
+  return { best, prev };
+}
+
+// Reachable hexes → { hexId: movement points remaining } (start excluded; a
+// halting hex stores 0).
+export function movementField(state, start, budget, { blockedThrough } = {}) {
+  const { best } = expandMovement(state, start, budget, blockedThrough || null);
+  const out = {};
+  for (const hex in best) if (hex !== start) out[hex] = best[hex];
+  return out;
+}
+
+// §16.2 — the exact least-cost ROUTE a unit takes from `start` to `dest` under
+// the same rules as movementField (so the UI arrow and the actual move agree).
+// Returns the ordered hex list [start, …, dest], or null if `dest` isn't
+// reachable within `budget`. Pass a large budget for a budget-agnostic route
+// (e.g. replay display).
+export function movementRoute(state, start, budget, dest, { blockedThrough } = {}) {
+  if (dest === start) return [start];
+  const { best, prev } = expandMovement(state, start, budget, blockedThrough || null);
+  if (best[dest] === undefined) return null;
+  const path = [];
+  for (let c = dest; c != null; c = prev[c]) path.unshift(c);
+  return path;
+}
 
 // §19.4 — stamp deterministic elevation / cover features onto the board.
 // Only terrain ("wasteland") hexes are eligible: Locations stay
@@ -124,6 +195,52 @@ export function assignTerrainFeatures(rng, hexes) {
   let i = 0;
   for (; i < nElev && i < shuffled.length; i++) hexes[shuffled[i]].elevation = true;
   for (let j = 0; j < nCover && i + j < shuffled.length; j++) hexes[shuffled[i + j]].cover = true;
+}
+
+// Shortest hex path from `a` to `b` (inclusive) over `adjacency`, or [] if
+// disconnected. BFS with parent reconstruction; deterministic.
+export function shortestPathHexes(adjacency, a, b) {
+  if (a === b) return [a];
+  const prev = { [a]: null };
+  const q = [a];
+  while (q.length) {
+    const cur = q.shift();
+    if (cur === b) break;
+    for (const nb of adjacency[cur] || []) if (prev[nb] === undefined) { prev[nb] = cur; q.push(nb); }
+  }
+  if (prev[b] === undefined) return [];
+  const path = [];
+  for (let c = b; c != null; c = prev[c]) path.unshift(c);
+  return path;
+}
+
+// §16.2 roads — lay a deterministic road network: a minimum spanning tree
+// (Prim's, by hop distance) over the given `hubHexes` — the faction capitals —
+// with each tree edge's shortest path stamped `road`. The result is a few main
+// corridors between the powers (negating terrain movement cost along them), so
+// the wilderness off-road still matters and the roads become contested lanes.
+// Operates on the live `hexes` map (sets hexes[id].road = true).
+export function assignRoads(adjacency, hexes, hubHexes) {
+  const hubs = [...new Set(hubHexes)].filter((h) => hexes[h]);
+  if (hubs.length < 2) return;
+  const distCache = {};
+  const distFrom = (h) => (distCache[h] ||= bfsDistances(adjacency, h));
+  const inTree = new Set([hubs[0]]);
+  while (inTree.size < hubs.length) {
+    let best = null;
+    for (const a of inTree) {
+      const da = distFrom(a);
+      for (const b of hubs) {
+        if (inTree.has(b)) continue;
+        const d = da[b];
+        if (d === undefined) continue;
+        if (!best || d < best.d || (d === best.d && b < best.b)) best = { a, b, d };
+      }
+    }
+    if (!best) break;
+    inTree.add(best.b);
+    for (const hex of shortestPathHexes(adjacency, best.a, best.b)) hexes[hex].road = true;
+  }
 }
 
 // Constrained-random layout: place the 10 Locations, then fill the rest

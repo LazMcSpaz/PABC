@@ -49,6 +49,14 @@ export const EVENT_NAMES = new Set([
   "coalition_formed", "coalition_dissolved",
   "vassal_established", "vassal_rebelled", "tribute_paid",
   "denounced", "mediated", "recognition_changed",
+  // diplomacy-spec.md §6.4 — verbs, AI eval, war tracking, open borders.
+  "surprise_attack_honor_lost",
+  "trading_pact_formed", "trading_pact_suspended", "trading_pact_resumed", "trading_pact_dissolved",
+  "vassal_freed",
+  "pact_call_requested", "pact_call_honored", "pact_call_declined",
+  "tribute_demanded", "tribute_caved", "tribute_refused",
+  "allied_vision_toggled", "open_borders_toggled", "gift_counter_decayed",
+  "territory_trespassed",
 ]);
 
 // Resolve a chip / card instance uid to its content def. Covers Market
@@ -180,5 +188,19 @@ export function emit(state, name, payload = {}, ctx = {}) {
     applyEffects(state, sub.effects, subCtx);
   }
 
+  // Plain JS event hooks (no content/DSL) — used by systems that need to react
+  // to engine events in code, e.g. diplomacy's war-record bookkeeping
+  // (unit_destroyed / location_captured / contest_won). Registered once via
+  // registerEventHook; fired after content triggers so they see settled state.
+  const hooks = state.eventHooks?.[name];
+  if (hooks) for (const fn of hooks) fn(state, payload, event);
+
   return event;
+}
+
+// Register a code listener for an engine event. Idempotent per (name, fn)
+// pair is the caller's responsibility (e.g. a one-shot install guard).
+export function registerEventHook(state, name, fn) {
+  state.eventHooks = state.eventHooks || {};
+  (state.eventHooks[name] = state.eventHooks[name] || []).push(fn);
 }

@@ -7,7 +7,8 @@ import { performAction } from "./actions.js";
 import { applyEffect } from "./effects.js";
 import { recomputeStats, recomputeResearch, assignTechNode } from "./stats.js";
 import { recomputeInfluence, zocOwner, inZoC } from "./influence.js";
-import { reinforcementRoute, bfsDistances } from "./board.js";
+import { reinforcementRoute, bfsDistances, movementField, movementRoute } from "./board.js";
+import { passesFreely, movementBlockers, unitReach } from "./movement.js";
 import { recomputeVisibility, isUnitVisibleTo, revealRegion, unitVision, isHexVisible } from "./visibility.js";
 import {
   ensureDiplomacy, menaceFromAttack, onAttack,
@@ -15,6 +16,10 @@ import {
   recognitionScore, recognitionMet, wouldAccept, dealValue, performDiplomacy,
   getStanding, atWar, arePacted, vassalLord, mayEngage, areNeighbours,
   tolerance, passesRepGates, factionIds,
+  // diplomacy-spec.md additions
+  findWar, warExhaustion, aiAcceptsPeace, evaluatePactCall,
+  canDemandTribute, caveOnDemand, hasOpenBorders, formTradingPact,
+  findPactAgreement, honorOf, powerOf,
 } from "./diplomacy.js";
 import { setStanding } from "./standing.js";
 import { factionDef, MINOR_FACTIONS } from "./content.js";
@@ -514,9 +519,17 @@ line("\n  [Phase 1] movement budget");
   const u = Object.values(g.units).find((x) => x.owner === me);
   check("base Movement is 2", u.movement === 2 && u.moveRemaining === 2);
   const actionsBefore = g.players[me].actions.remaining;
-  const a = g.board.adjacency[u.node][0];
+  // Two plain (non-forest/mountain) single-cost hops: pick a first hop `a`
+  // adjacent to the unit, then a second hop `b` adjacent to `a` — clearing
+  // any terrain features so this exercises the budget, not terrain cost
+  // (terrain movement has its own block below).
+  const plain = (h) => !g.locations[h] && !g.board.hexes[h].elevation && !g.board.hexes[h].cover;
+  const a = g.board.adjacency[u.node].find(plain) || g.board.adjacency[u.node][0];
+  g.board.hexes[a].elevation = false; g.board.hexes[a].cover = false;
   const m1 = performAction(g, "move", { unit: u.uid, to: a });
-  const b = g.board.adjacency[u.node].find((h) => h !== a);
+  const b = (g.board.adjacency[a] || []).find((h) => h !== u.node && plain)
+    || (g.board.adjacency[a] || []).find((h) => h !== u.node);
+  if (b) { g.board.hexes[b].elevation = false; g.board.hexes[b].cover = false; }
   const m2 = b ? performAction(g, "move", { unit: u.uid, to: b }) : { ok: false };
   check("two moves consume the budget", m1.ok && m2.ok && u.moveRemaining === 0);
   check("moves cost no Actions", g.players[me].actions.remaining === actionsBefore);
@@ -529,6 +542,137 @@ line("\n  [Phase 1] movement budget");
     performAction(g, "contest", { unit: u2.uid });
     check("declaring a contest ends movement", u2.moveRemaining === 0);
   }
+}
+
+// --- §16.2 terrain movement — forest costs +1, mountains halt the move ---
+line("\n  [Terrain] movement costs (forest +1, mountains halt)");
+{
+  // Synthetic line graph A-B-C-D with stamped terrain features. movementField
+  // returns hexId → movement points remaining after arriving.
+  const mk = (B, C) => ({
+    board: {
+      adjacency: { A: ["B"], B: ["A", "C"], C: ["B", "D"], D: ["C"] },
+      hexes: { A: { id: "A" }, B: { id: "B", ...B }, C: { id: "C", ...C }, D: { id: "D" } },
+    },
+  });
+
+  const plain = movementField(mk({}, {}), "A", 2);
+  check("plains: budget 2 reaches 2 hops (B rem1, C rem0), not D",
+    plain.B === 1 && plain.C === 0 && !("D" in plain));
+
+  const forest = movementField(mk({ cover: true }, {}), "A", 2);
+  check("forest costs 2: budget 2 enters the forest (B rem0) but no further",
+    forest.B === 0 && !("C" in forest));
+
+  const forestBlocked = movementField(mk({ cover: true }, {}), "A", 1);
+  check("forest: budget 1 cannot enter a forest hex at all",
+    !("B" in forestBlocked));
+
+  const mtn = movementField(mk({}, { elevation: true }), "A", 3);
+  check("mountain halts: you climb onto it (C rem0) but cannot pass through to D",
+    mtn.B === 2 && mtn.C === 0 && !("D" in mtn));
+
+  const mtnNoMatter = movementField(mk({}, { elevation: true }), "A", 5);
+  check("mountain halts no matter the budget (C rem0, D unreachable even at budget 5)",
+    mtnNoMatter.C === 0 && !("D" in mtnNoMatter));
+
+  // Integration: a real Move onto a forest hex spends the whole budget.
+  const g = createGame({ seed }); startTurn(g);
+  const me = activePlayerId(g);
+  const u = Object.values(g.units).find((x) => x.owner === me);
+  const nb = (g.board.adjacency[u.node] || []).find((h) => !g.locations[h]);
+  if (nb) {
+    g.board.hexes[nb].cover = true; g.board.hexes[nb].elevation = false; g.board.hexes[nb].road = false;
+    u.moveRemaining = 2; recomputeStats(g);
+    const r = performAction(g, "move", { unit: u.uid, to: nb });
+    check("Move onto a forest hex (cost 2) zeroes a budget-2 unit's movement",
+      r.ok && u.node === nb && u.moveRemaining === 0);
+  }
+}
+
+// --- §16.2 roads — a hex modifier that negates terrain MOVEMENT cost ---
+line("\n  [Roads] negate terrain movement cost (forest + mountain)");
+{
+  const mk = (B, C) => ({
+    board: {
+      adjacency: { A: ["B"], B: ["A", "C"], C: ["B", "D"], D: ["C"] },
+      hexes: { A: { id: "A" }, B: { id: "B", ...B }, C: { id: "C", ...C }, D: { id: "D" } },
+    },
+  });
+  const forestRoad = movementField(mk({ cover: true, road: true }, {}), "A", 2);
+  check("a road through forest costs 1 (B rem1, C still reachable)",
+    forestRoad.B === 1 && "C" in forestRoad);
+  const mtnRoad = movementField(mk({}, { elevation: true, road: true }), "A", 3);
+  check("a road through a mountain does NOT halt (C rem1, D reachable)",
+    mtnRoad.C === 1 && "D" in mtnRoad);
+  // Setup lays road corridors between the faction capitals.
+  const g = createGame({ seed });
+  const roads = Object.values(g.board.hexes).filter((h) => h.road).length;
+  check("setup lays a road network between capitals", roads > 0);
+}
+
+// --- §16.2 blockade — foreign units / enemy Locations halt movement ---
+line("\n  [Blockade] non-passing units and enemy Locations stop a move");
+{
+  const mkLine = () => ({
+    board: {
+      adjacency: { A: ["B"], B: ["A", "C"], C: ["B", "D"], D: ["C"] },
+      hexes: { A: { id: "A" }, B: { id: "B" }, C: { id: "C" }, D: { id: "D" } },
+    },
+  });
+  const blocked = movementField(mkLine(), "A", 3, { blockedThrough: new Set(["B"]) });
+  check("a blockaded hex is enterable but terminal (B rem0, C/D unreachable)",
+    blocked.B === 0 && !("C" in blocked) && !("D" in blocked));
+
+  const g = createGame({ seed });
+  const me = g.turnOrder[0];
+  const foe = g.turnOrder.find((p) => p !== me && !g.players[p].isMinor) || g.turnOrder[1];
+  const myU = Object.values(g.units).find((u) => u.owner === me);
+  const foeU = Object.values(g.units).find((u) => u.owner === foe);
+  // Park the enemy on a clean plain neighbour, with the mover holding 3 moves.
+  const nb = (g.board.adjacency[myU.node] || []).find((h) => !g.locations[h]);
+  foeU.node = nb;
+  g.board.hexes[nb].cover = false; g.board.hexes[nb].elevation = false; g.board.hexes[nb].road = false;
+  myU.moveRemaining = 3; recomputeStats(g);
+
+  setStanding(g, me, foe, 0); setStanding(g, foe, me, 0); // neutral both ways
+  check("neutral factions do not pass freely", !passesFreely(g, me, foe));
+  check("an enemy unit's hex is a movement blocker", movementBlockers(g, me).has(nb));
+  check("you may enter a blockaded hex but halt there (remaining 0 despite budget 3)",
+    unitReach(g, myU)[nb] === 0);
+
+  // Friendly+ standing lets units pass through freely (no blockade).
+  const friendly = CONFIG.diplomacy.tiers.friendly;
+  setStanding(g, me, foe, friendly); setStanding(g, foe, me, friendly);
+  check("friendly+ factions pass freely", passesFreely(g, me, foe));
+  check("a friendly faction's unit is NOT a blocker", !movementBlockers(g, me).has(nb));
+}
+
+// --- §16.2 route — the move arrow follows the actual least-cost path ---
+line("\n  [Route] the move path follows real movement rules");
+{
+  // Diamond: A→{B forest, X plains}→D. The cheaper lane is A→X→D.
+  const mk = () => ({
+    board: {
+      adjacency: { A: ["B", "X"], B: ["A", "D"], X: ["A", "D"], D: ["B", "X"] },
+      hexes: { A: { id: "A" }, B: { id: "B", cover: true }, X: { id: "X" }, D: { id: "D" } },
+    },
+  });
+  check("route takes the cheaper lane around a forest (A→X→D, not A→B→D)",
+    JSON.stringify(movementRoute(mk(), "A", 3, "D")) === JSON.stringify(["A", "X", "D"]));
+  check("route is null when the destination is out of budget",
+    movementRoute(mk(), "A", 1, "D") === null);
+
+  // A mountain is a dead-end the route may end on but not pass through.
+  const mk2 = () => ({
+    board: {
+      adjacency: { A: ["M"], M: ["A", "Z"], Z: ["M"] },
+      hexes: { A: { id: "A" }, M: { id: "M", elevation: true }, Z: { id: "Z" } },
+    },
+  });
+  check("route may end on a mountain but cannot pass through it",
+    JSON.stringify(movementRoute(mk2(), "A", 5, "M")) === JSON.stringify(["A", "M"]) &&
+    movementRoute(mk2(), "A", 5, "Z") === null);
 }
 
 // --- Phase 2: two units, cap 3, cheaper recruit ---
@@ -1487,13 +1631,27 @@ line("\n  [Tech Wheel §17.7] Listening Post");
 // =====================================================================
 line("\n  [AI sanity] tech-wheel use + game termination");
 {
-  const g = createGame({ seed: 42 });
-  let safety = 1500;
-  while (!g.winnerId && safety-- > 0) takeAITurn(g);
-  const assigns = g.log.filter((e) => e.name === "tech_node_assigned").length;
-  check("AI assigns tech-wheel nodes during a game (tech_node_assigned fires)", assigns > 0);
+  // (1) The AI spends a free Ability Point when it has one. Seed an AI player
+  // to Tech Level 2 (one point) and run its turn — maybeAssignTech should put
+  // a node on the wheel. Deterministic (independent of how a given seed's
+  // emergent game plays out, which terrain movement legitimately shifts).
+  const g = createGame({ seed: 42, humanFactionId: "versari" });
+  startTurn(g);
+  let guard = 12;
+  while (guard-- > 0 && !g.players[activePlayerId(g)].isAI && !g.winnerId) endTurn(g);
+  const aiPid = activePlayerId(g);
+  g.players[aiPid].permanentResearch = 2;
+  recomputeResearch(g); // → Tech Level 2 → one Ability Point
+  takeAITurn(g);
+  check("AI assigns a tech-wheel node when it has a free Ability Point",
+    g.players[aiPid].techWheel.length > 0);
+
+  // (2) A full AI-vs-AI game still terminates with a winner (no infinite loop).
+  const g2 = createGame({ seed: 42 });
+  let safety = 2000;
+  while (!g2.winnerId && safety-- > 0) takeAITurn(g2);
   check("a full AI-vs-AI game terminates with a winner (no infinite loop)",
-    safety > 0 && !!g.winnerId);
+    safety > 0 && !!g2.winnerId);
 }
 
 // AI-turn replay slice contract (the one engine-touching surface of the
@@ -1713,18 +1871,23 @@ line("\n  [§20 Economy] Output slider, build/upgrade/rush, upkeep dormancy, gat
     check("an economy chip raises Output", g.players[me].resource - before >= out);
   }
 
-  // Rush spends banked scrap to finish a build immediately.
+  // Rush spends banked scrap to finish a build immediately — and now costs an
+  // Action (queuing the build does not).
   {
     const g = createGame({ seed }); startTurn(g);
     const me = g.turnOrder[0];
     const loc = grab(g, me);
     g.players[me].resource += 50;
-    performAction(g, "build", { at: loc.hexId, chipId: "labs" }); // buildCost 3
+    const actsStart = g.players[me].actions.remaining;
+    performAction(g, "build", { at: loc.hexId, chipId: "labs" }); // buildCost 3, free of Actions
+    const actsAfterBuild = g.players[me].actions.remaining;
     const before = g.players[me].resource;
     const r = performAction(g, "rush", { at: loc.hexId });
     check("rush completes the build at once and spends scrap",
       r.ok && loc.chips.some((c) => g.chips[c]?.chipId === "labs") &&
       loc.activeBuild == null && g.players[me].resource === before - 3);
+    check("build is free of Actions; rush costs 1 Action",
+      actsAfterBuild === actsStart && g.players[me].actions.remaining === actsAfterBuild - 1);
   }
 
   // Upgrade in place: labs → advanced-lab, same slot (scarcity preserved).
@@ -2236,6 +2399,321 @@ line("\n§18 DIPLOMACY CAPSTONE");
     check("a pact offer is accepted when Standing + rep gates pass",
       performDiplomacy(g, "versari", "propose-pact", { faction: "plainers" }).accepted === true);
   }
+}
+
+// =====================================================================
+// DIPLOMACY ENGINE (diplomacy-spec.md Parts 1 + 6) — the new verbs, AI
+// evaluation, war tracking, and the open-borders contract.
+// =====================================================================
+line("\nDIPLOMACY ENGINE  (diplomacy-spec Parts 1 + 6)");
+const DH = CONFIG.diplomacy;
+
+// §1.1 — surprise-attack Honor
+line("\n  [§1.1] surprise-attack Honor");
+{
+  const g = createGame({ seed }); ensureDiplomacy(g);
+  const a = "versari", b = "lakers";
+  const h0 = honorOf(g, a);
+  onAttack(g, a, b); // no prior war → treacherous strike
+  check("surprise attack (no prior war) drops attacker Honor by 8",
+    honorOf(g, a) === h0 - DH.honor.surpriseAttackLoss && atWar(g, a, b));
+  const h1 = honorOf(g, a);
+  onAttack(g, a, b); // already at war
+  check("a second attack in the same war doesn't ding Honor again", honorOf(g, a) === h1);
+}
+{
+  const g = createGame({ seed }); ensureDiplomacy(g);
+  const a = "versari", b = "lakers";
+  const h0 = honorOf(g, a);
+  declareWar(g, a, b, "player"); // declare first, no pact
+  onAttack(g, a, b);
+  check("declaring war first (no pact) costs no surprise Honor", honorOf(g, a) === h0);
+}
+{
+  const g = createGame({ seed }); ensureDiplomacy(g);
+  const a = "versari", b = "lakers";
+  formPact(g, a, b, "test");
+  const h0 = honorOf(g, a);
+  declareWar(g, a, b, "player"); // breaks the pact → −breakLoss only
+  check("declaring war on a pacted ally costs only the pact-break (−5)",
+    honorOf(g, a) === h0 - DH.honor.breakLoss);
+}
+
+// §1.2 — gift diminishing returns
+line("\n  [§1.2] gift diminishing returns");
+{
+  const g = createGame({ seed }); ensureDiplomacy(g);
+  const from = "versari", to = "lakers";
+  g.players[from].resource = 200;
+  setStanding(g, to, from, -12); setStanding(g, from, to, -2); // room below cap; no pact
+  const gains = [];
+  for (let i = 0; i < 4; i++) {
+    const before = getStanding(g, to, from);
+    performDiplomacy(g, from, "gift", { faction: to, amount: 8 }); // baseGain 4
+    gains.push(getStanding(g, to, from) - before);
+  }
+  check("gift gains diminish floor(baseGain/(n+1)) → 4,2,1,1",
+    JSON.stringify(gains) === JSON.stringify([4, 2, 1, 1]));
+}
+{
+  const g = createGame({ seed }); ensureDiplomacy(g);
+  const from = "versari", to = "lakers";
+  g.players[from].resource = 200;
+  setStanding(g, to, from, -12); setStanding(g, from, to, -2);
+  performDiplomacy(g, from, "gift", { faction: to, amount: 8 }); // counter → 1
+  runDiplomacyRound(g); // decay → 0
+  const before = getStanding(g, to, from);
+  performDiplomacy(g, from, "gift", { faction: to, amount: 8 });
+  check("an idle round decays the gift counter, refreshing the gain rate (full 4)",
+    getStanding(g, to, from) - before === 4);
+}
+
+// §1.3 — Trading Pact
+line("\n  [§1.3] Trading Pact");
+{
+  const g = createGame({ seed }); ensureDiplomacy(g);
+  const a = "versari", b = "goldgrass";
+  const isCap = (l) => (l.chips || []).some((c) => g.chips[c]?.chipId === "capital");
+  const capA = Object.values(g.locations).find((l) => l.controller === a && isCap(l));
+  const capB = Object.values(g.locations).find((l) => l.controller === b && isCap(l));
+  // Guarantee a clear capital-to-capital route: keep ONLY the two capitals
+  // controlled (every other Location neutral) and clear the stale ZoC so
+  // nothing walls the path between them.
+  for (const loc of Object.values(g.locations)) if (loc !== capA && loc !== capB) loc.controller = null;
+  g.world.zoc = {};
+  setStanding(g, a, b, 0); setStanding(g, b, a, 0);
+  g.players[a].menace = 0; g.players[b].menace = 0; g.players[a].honor = 6; g.players[b].honor = 6;
+  const permA = g.players[a].permanentResearch || 0, permB = g.players[b].permanentResearch || 0;
+  const res = formTradingPact(g, a, b);
+  check("Trading Pact forms with capitals + clear route + Neutral+", res.ok);
+  check("Trading Pact grants +1 permanent Research to each party",
+    (g.players[a].permanentResearch || 0) === permA + 1 && (g.players[b].permanentResearch || 0) === permB + 1);
+  const sa = g.players[a].resource, sb = g.players[b].resource;
+  runDiplomacyRound(g);
+  check("Trading Pact flows +2 scrap/round to each party while clear",
+    g.players[a].resource >= sa + DH.tradingPact.scrapPerUpkeep && g.players[b].resource >= sb + DH.tradingPact.scrapPerUpkeep);
+
+  // Sever the route (a loses all territory → no supply source) → suspend → dissolve.
+  for (const loc of Object.values(g.locations)) if (loc.controller === a) loc.controller = null;
+  runDiplomacyRound(g);
+  const agr = g.diplomacy.agreements.find((x) => x.type === "trading-pact");
+  check("a severed route suspends the Trading Pact", !!agr && agr.suspended === true);
+  runDiplomacyRound(g); runDiplomacyRound(g); // reach the grace limit (3 suspended rounds)
+  check("3 suspended rounds auto-dissolve the Trading Pact + remove the Research floor",
+    !g.diplomacy.agreements.some((x) => x.type === "trading-pact") && (g.players[a].permanentResearch || 0) === permA);
+}
+
+// §1.4 — Demand Tribute
+line("\n  [§1.4] Demand Tribute");
+{
+  const g = createGame({ seed }); ensureDiplomacy(g);
+  const strong = "versari", weak = "lakers";
+  g.players[strong].vp += 30; // overwhelming power lead
+  g.players[weak].resource = 10;
+  check("Demand Tribute is power-gated (strong enough → allowed)", canDemandTribute(g, strong, weak));
+  const r = performDiplomacy(g, strong, "demand-tribute", { faction: weak, amount: 5 });
+  check("a much-stronger demander makes the target cave (tribute transferred)",
+    r.ok && r.caved && g.players[weak].resource === 5 && g.players[strong].resource >= 5);
+}
+{
+  const g = createGame({ seed }); ensureDiplomacy(g);
+  const strong = "versari", target = "lakers";
+  g.players[target].resource = 10;
+  // Tune the power ratio to ~1.7 — passes the 1.5 gate but the target is brave
+  // enough to refuse (ratio < caveBaseRatio 2.0), escalating to war.
+  const base = powerOf(g, target);
+  const cur = powerOf(g, strong);
+  g.players[strong].vp += Math.max(0, Math.ceil((1.7 * base - cur) / DH.coalition.vpWeight));
+  check("Demand Tribute gate passes at a 1.7× power lead", canDemandTribute(g, strong, target));
+  const r = performDiplomacy(g, strong, "demand-tribute", { faction: target, amount: 5 });
+  check("a brave target near parity refuses tribute and the demand escalates to war",
+    r.refused === true && atWar(g, strong, target));
+}
+
+// §1.5 — Sue for peace
+line("\n  [§1.5] Sue for peace (deal-evaluated)");
+{
+  const g = createGame({ seed }); ensureDiplomacy(g);
+  const suer = "versari", ai = "lakers";
+  declareWar(g, suer, ai, "test");
+  const war = findWar(g, suer, ai);
+  war.unitsLost[ai] = 5; war.locationsLost[ai] = 2; // the AI is bleeding
+  g.round = 6; // duration 5
+  check("warExhaustion rises with duration + own losses", warExhaustion(g, ai, suer) >= 8);
+  const r = performDiplomacy(g, suer, "sue-for-peace", { faction: ai });
+  check("sue-for-peace accepted when the AI is exhausted (war ends)",
+    r.accepted === true && !atWar(g, suer, ai));
+}
+{
+  const g = createGame({ seed }); ensureDiplomacy(g);
+  const suer = "versari", ai = "lakers";
+  declareWar(g, suer, ai, "test"); // fresh
+  findWar(g, suer, ai).unitsLost[suer] = 3; // the AI is winning
+  const r = performDiplomacy(g, suer, "sue-for-peace", { faction: ai });
+  check("sue-for-peace refused when the AI is fresh + winning (war intact, no penalty)",
+    r.accepted === false && atWar(g, suer, ai));
+}
+
+// §1.7 — Free vassal
+line("\n  [§1.7] Free vassal");
+{
+  const g = createGame({ seed }); ensureDiplomacy(g);
+  const lord = "versari", vassal = "lakers";
+  vassalize(g, lord, vassal, "test");
+  check("vassalization establishes the tribute flow", g.diplomacy.agreements.some((a) => a.vassalTribute === vassal));
+  const h0 = honorOf(g, lord);
+  const r = performDiplomacy(g, lord, "free-vassal", { faction: vassal });
+  check("free-vassal: +5 lord Honor, vassal freed to Friendly, tribute flow stops",
+    r.ok && vassalLord(g, vassal) === null &&
+    honorOf(g, lord) === Math.min(DH.honor.max, h0 + DH.freeVassal.honorGain) &&
+    getStanding(g, vassal, lord) === DH.freeVassal.standingToFriendly &&
+    !g.diplomacy.agreements.some((a) => a.vassalTribute === vassal));
+}
+
+// §1.8 — Pact call
+line("\n  [§1.8] Player-initiated pact call");
+{
+  const g = createGame({ seed }); ensureDiplomacy(g);
+  const caller = "versari", ally = "lakers", target = "plainers";
+  formPact(g, caller, ally, "test");
+  declareWar(g, caller, target, "test");
+  setStanding(g, ally, target, -8); setStanding(g, ally, caller, 10);
+  check("evaluatePactCall honors when ally hates the target + loves the caller",
+    evaluatePactCall(g, ally, caller, target).honor === true);
+  const r = performDiplomacy(g, caller, "pact-call", { ally, target });
+  check("pact-call honored → ally joins the war", r.honored === true && atWar(g, ally, target));
+}
+{
+  const g = createGame({ seed }); ensureDiplomacy(g);
+  const caller = "versari", ally = "lakers", target = "plainers";
+  formPact(g, caller, ally, "test");
+  declareWar(g, caller, target, "test");
+  setStanding(g, ally, target, 5); setStanding(g, ally, caller, -2);
+  g.players[target].vp += 40; // a strong target the ally won't risk
+  const sBefore = getStanding(g, caller, ally);
+  check("evaluatePactCall declines when ally is friendly to a strong target",
+    evaluatePactCall(g, ally, caller, target).honor === false);
+  const r = performDiplomacy(g, caller, "pact-call", { ally, target });
+  check("pact-call declined → caller Standing toward ally drops",
+    r.honored === false && getStanding(g, caller, ally) === sBefore - DH.pactCall.declineStandingHit);
+}
+
+// §1.9 — Allied vision
+line("\n  [§1.9] Allied vision auto-share + toggle");
+{
+  const g = createGame({ seed }); ensureDiplomacy(g);
+  const a = "versari", b = "lakers";
+  const hexes = Object.keys(g.board.hexes);
+  g.visibility[a].visible = new Set([hexes[0]]);
+  g.visibility[b].visible = new Set([hexes[1]]);
+  formPact(g, a, b, "test"); // applySharedVision unions on formation
+  check("pact auto-shares vision (both factions see the union)",
+    g.visibility[a].visible.has(hexes[1]) && g.visibility[b].visible.has(hexes[0]));
+  const s0 = getStanding(g, a, b);
+  const r = performDiplomacy(g, a, "toggle-allied-vision", { faction: b, on: false });
+  const agr = findPactAgreement(g, a, b);
+  check("toggle-allied-vision off flips visionShare + costs 1 Standing",
+    r.ok && agr.visionShare === false && getStanding(g, a, b) === s0 - DH.pact.toggleVisionStandingHit);
+}
+
+// §1.6 / §1.10 — Open borders
+line("\n  [§1.6/§1.10] Open borders contract");
+{
+  const g = createGame({ seed }); ensureDiplomacy(g);
+  const a = "versari", b = "lakers";
+  check("hasOpenBorders is false with no agreement", !hasOpenBorders(g, a, b));
+  formPact(g, a, b, "test");
+  check("pacted parties have open borders by default (§1.10)",
+    hasOpenBorders(g, a, b) && hasOpenBorders(g, b, a));
+  performDiplomacy(g, a, "toggle-open-borders", { faction: b, on: false });
+  check("toggle-open-borders off removes the pact passage", !hasOpenBorders(g, a, b));
+}
+{
+  const g = createGame({ seed }); ensureDiplomacy(g);
+  const a = "versari", b = "lakers";
+  g.players[a].menace = 0; g.players[b].menace = 0; g.players[a].honor = 6; g.players[b].honor = 6;
+  setStanding(g, a, b, 0); setStanding(g, b, a, 0);
+  check("set-open-borders refused below Friendly",
+    !performDiplomacy(g, a, "set-open-borders", { faction: b, on: true }).ok);
+  setStanding(g, a, b, 6); setStanding(g, b, a, 6);
+  check("set-open-borders grants standalone passage at Friendly+",
+    performDiplomacy(g, a, "set-open-borders", { faction: b, on: true }).ok && hasOpenBorders(g, a, b));
+  check("set-open-borders off removes standalone passage",
+    performDiplomacy(g, a, "set-open-borders", { faction: b, on: false }).ok && !hasOpenBorders(g, a, b));
+}
+
+// Open borders is a permit, not a wall — moving through territory without it
+// is trespassing (relations hit); with it, free passage.
+line("\n  [Open borders] territory trespass penalty");
+{
+  // Move a unit into another faction's ZoC with no open borders → relations hit.
+  const g = createGame({ seed }); startTurn(g); ensureDiplomacy(g);
+  const mover = g.turnOrder[0], owner = g.turnOrder[1];
+  setStanding(g, owner, mover, 0);
+  const u = Object.values(g.units).find((x) => x.owner === mover);
+  const dest = (g.board.adjacency[u.node] || []).find((h) => !g.locations[h]);
+  g.world.zoc = g.world.zoc || {}; g.world.zoc[dest] = owner; // owner's territory
+  u.moveRemaining = 2; recomputeStats(g);
+  const s0 = getStanding(g, owner, mover);
+  const m0 = g.players[mover].menace || 0;
+  performAction(g, "move", { unit: u.uid, to: dest });
+  check("moving into a faction's territory without open borders hits relationship + reputation",
+    getStanding(g, owner, mover) === s0 - CONFIG.diplomacy.trespass.standingPenalty &&
+    (g.players[mover].menace || 0) === m0 + CONFIG.diplomacy.trespass.reputationPenalty &&
+    CONFIG.diplomacy.trespass.standingPenalty > CONFIG.diplomacy.trespass.reputationPenalty);
+}
+{
+  // Same move, but with an open-borders agreement → no penalty (free passage).
+  const g = createGame({ seed }); startTurn(g); ensureDiplomacy(g);
+  const mover = g.turnOrder[0], owner = g.turnOrder[1];
+  setStanding(g, owner, mover, 0);
+  g.diplomacy.agreements.push({ id: "ob-test", type: "open-borders", a: mover, b: owner, since: 0 });
+  const u = Object.values(g.units).find((x) => x.owner === mover);
+  const dest = (g.board.adjacency[u.node] || []).find((h) => !g.locations[h]);
+  g.world.zoc = g.world.zoc || {}; g.world.zoc[dest] = owner;
+  u.moveRemaining = 2; recomputeStats(g);
+  const s0 = getStanding(g, owner, mover);
+  const m0 = g.players[mover].menace || 0;
+  performAction(g, "move", { unit: u.uid, to: dest });
+  check("an open-borders agreement waives the trespass penalty (no Standing or Menace hit)",
+    getStanding(g, owner, mover) === s0 && (g.players[mover].menace || 0) === m0);
+}
+{
+  // On Friendly+ terms the hit is softened.
+  const g = createGame({ seed }); startTurn(g); ensureDiplomacy(g);
+  const mover = g.turnOrder[0], owner = g.turnOrder[1];
+  setStanding(g, owner, mover, CONFIG.diplomacy.tiers.friendly); // good terms
+  const u = Object.values(g.units).find((x) => x.owner === mover);
+  const dest = (g.board.adjacency[u.node] || []).find((h) => !g.locations[h]);
+  g.world.zoc = g.world.zoc || {}; g.world.zoc[dest] = owner;
+  u.moveRemaining = 2; recomputeStats(g);
+  const s0 = getStanding(g, owner, mover);
+  const m0 = g.players[mover].menace || 0;
+  performAction(g, "move", { unit: u.uid, to: dest });
+  const tr = CONFIG.diplomacy.trespass;
+  check("the trespass hit is softened on good terms (relationship −1, reputation waived)",
+    getStanding(g, owner, mover) === s0 - Math.max(1, tr.standingPenalty - tr.goodTermsReduction) &&
+    (g.players[mover].menace || 0) === m0 + Math.max(0, tr.reputationPenalty - tr.goodTermsReduction));
+}
+
+// §6.2 — war-record listeners (combat feeds the war record)
+line("\n  [§6.2] war-record listeners");
+{
+  const g = createGame({ seed }); startTurn(g); ensureDiplomacy(g);
+  const me = g.turnOrder[0], foe = g.turnOrder[1];
+  declareWar(g, me, foe, "test");
+  const terrain = Object.values(g.board.hexes).find((h) => h.type === "terrain" && !g.locations[h.id]).id;
+  const atk = Object.values(g.units).find((u) => u.owner === me);
+  const vic = Object.values(g.units).find((u) => u.owner === foe);
+  atk.node = terrain; atk.moveRemaining = atk.movement; atk.baseStrength = 12;
+  vic.node = terrain; vic.baseStrength = 1;
+  recomputeStats(g); g.players[me].actions.remaining = 5; g.rng.roll = () => 6;
+  performAction(g, "contest", { unit: atk.uid, target: vic.uid });
+  const war = findWar(g, me, foe);
+  check("unit_destroyed in a war increments war.unitsLost for the victim's owner",
+    !!war && (war.unitsLost[foe] || 0) >= 1);
+  check("contest_won credits war.contestsWon for the winner",
+    !!war && (war.contestsWon[me] || 0) >= 1);
 }
 
 line(`\n  v0.2 verification: ${v2pass} passed, ${v2fail} failed`);

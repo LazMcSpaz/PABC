@@ -32,6 +32,15 @@ export const CONFIG = {
 
   contestDieSides: 6, // 1d6 per side, defender wins ties
 
+  // §16.2 terrain movement — per-hex entry costs over the base 1/hex.
+  // Forest (cover) costs extra; mountains (elevation) HALT a move (you may
+  // climb onto one but advance no further that turn — "speed 1 in mountains").
+  // (Roads, when added, will reduce these.)
+  movement: {
+    forestCost: 2,     // entering a cover/forest hex costs this (vs 1) — "−1 speed"
+    mountainHalts: true, // entering an elevation/mountain hex ends the move
+  },
+
   // v0.2 §16.4 attrition
   attrition: { routMargin: 4 }, // margin >= this spills a casualty to a 2nd stacked unit
   // v0.2 §16.5 healing / reinforcement
@@ -144,6 +153,7 @@ export const CONFIG = {
       keepGain: 1, // honoring a pact/deal to term
       breakLoss: 5, // breaking a pact call / treaty / promise (sharp)
       mediateGain: 2, // §18.7 peacemaker reputation
+      surpriseAttackLoss: 8, // §1.1 — attacking before declaring war (treachery)
       decayToward: 0, decayPerRound: 0, // no passive decay by default
     },
     // §18.5 Tolerance = base + standing·perStanding, ± by the faction's
@@ -179,6 +189,53 @@ export const CONFIG = {
       giftStandingPerScrap: 0.5, // Standing bought per scrap gifted
       warGrudgeThreshold: -5, // AI declares war when Standing falls to/below this (+ aggression)
       vassalPowerRatio: 0.4, // offer/accept vassalage when weak side power < ratio·strong side
+    },
+
+    // --- diplomacy-spec.md §6.3 — the verb/AI/agreement layer on top of §18.
+    // Playtest starting numbers (all TBD-tunable).
+    gift: { windowRounds: 3 }, // §1.2 — gift diminishing-returns window
+    tradingPact: { // §1.3
+      scrapPerUpkeep: 2,
+      permanentResearchOnFormation: 1, // Research FLOOR granted each party; removed on dissolve
+      suspendGraceRounds: 3, // consecutive suspended rounds → auto-dissolve
+    },
+    demandTribute: { // §1.4
+      minPowerRatio: 1.5, // power needed over target to even offer the demand
+      caveBaseRatio: 2.0,
+      braveryScale: 1.5,
+      escalateOnRefusal: "war", // "war" | "standing-drop"
+      refuseStandingDropTiers: 2,
+    },
+    suePeace: { acceptThreshold: 8, standingBoost: 3 }, // §1.5
+    war: { unitLossWeight: 2, locationLossWeight: 4 }, // §1.5 war-exhaustion weights
+    freeVassal: { // §1.7
+      honorGain: 5,
+      standingToFriendly: 5, // Standing value the freed vassal takes toward you
+      rivalCoolingTiers: 1, // tiers the freed party's rivals cool toward you
+    },
+    pactCall: { // §1.8
+      hostilityWeight: 0.3,
+      loyaltyWeight: 0.3,
+      targetPowerWeight: 2.0,
+      acceptScoreThreshold: 1,
+      aggressionScoreBias: 1, // ±1 to score from the ally's aggression dial
+      honorGainOnHonor: 2, // ally→caller Standing gain on honoring
+      declineStandingHit: 4, // caller→ally Standing hit on declining
+    },
+    vision: { sharedPactDefault: true }, // §1.9 — pacts auto-share vision by default
+    borders: { pactDefault: true }, // §1.10 — pacts auto-open borders by default
+    // Open-borders ENFORCEMENT — open borders is a permit, not a wall: a unit
+    // may always move into another faction's territory (conquest needs that),
+    // but moving through their ZoC WITHOUT an open-borders agreement is
+    // trespassing and costs relations (softened when already on good terms).
+    trespass: {
+      standingPenalty: 2, // relationship hit (owner → mover) per incursion — the larger hit
+      reputationPenalty: 1, // global Menace bump on the mover — the smaller hit
+      goodTermsReduction: 1, // both softened by this when on Friendly+ terms (floored)
+    },
+    pact: { // §1.9, §1.10 — toggle costs
+      toggleVisionStandingHit: 1,
+      toggleBordersStandingHit: 1,
     },
   },
 };
