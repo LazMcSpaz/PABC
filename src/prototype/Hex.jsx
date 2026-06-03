@@ -127,6 +127,7 @@ export default function Hex({ hex, units, selected, reachable, selectedUnitId, d
     <div
       className="pc-hex-cell"
       data-hex={hex.id}
+      data-loc={isLocation ? hex.locationId : undefined}
       onClick={onClick}
       style={{ width: HEX_W, height: HEX_H, position: "relative", filter, cursor }}
     >

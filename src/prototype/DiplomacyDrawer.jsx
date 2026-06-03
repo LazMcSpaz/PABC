@@ -19,9 +19,60 @@
 // `onHighlightFaction(factionId)` so the host can colour-glow that
 // faction's locations.
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { C, CornerBrackets, useEscClose } from "./HudChrome.jsx";
+import { FACTIONS as UI_FACTIONS } from "./data.js";
+
+// Draw a dotted capital-to-capital line between two location ids by
+// querying the DOM for hex cells tagged data-loc=<id>. Re-measures on
+// resize/scroll so the line tracks pan/zoom.
+function TradingPactRouteLayer({ fromLocId, toLocId, status }) {
+  const [pts, setPts] = useState(null);
+  useLayoutEffect(() => {
+    function measure() {
+      if (typeof document === "undefined") return null;
+      const a = document.querySelector(`[data-loc="${CSS.escape(fromLocId)}"]`);
+      const b = document.querySelector(`[data-loc="${CSS.escape(toLocId)}"]`);
+      if (!a || !b) return null;
+      const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect();
+      return {
+        x1: ra.left + ra.width / 2, y1: ra.top + ra.height / 2,
+        x2: rb.left + rb.width / 2, y2: rb.top + rb.height / 2,
+      };
+    }
+    setPts(measure());
+    const update = () => setPts(measure());
+    window.addEventListener("resize", update);
+    window.addEventListener("scroll", update, true);
+    return () => {
+      window.removeEventListener("resize", update);
+      window.removeEventListener("scroll", update, true);
+    };
+  }, [fromLocId, toLocId]);
+  if (!pts) return null;
+  const color = status === "suspended" ? "#d2913c" : "#5fc27a";
+  return (
+    <svg style={{
+      position: "fixed", inset: 0, width: "100%", height: "100%",
+      pointerEvents: "none", zIndex: 6, overflow: "visible",
+    }}>
+      <motion.line
+        x1={pts.x1} y1={pts.y1} x2={pts.x2} y2={pts.y2}
+        stroke={color} strokeWidth="2.2"
+        strokeDasharray="7 6" strokeLinecap="round"
+        initial={{ strokeDashoffset: 0 }}
+        animate={{ strokeDashoffset: -26 }}
+        transition={{ duration: 1.2, ease: "linear", repeat: Infinity }}
+        style={{ filter: `drop-shadow(0 0 5px ${color})`, opacity: 0.78 }}
+      />
+      <circle cx={pts.x1} cy={pts.y1} r="5" fill="none" stroke={color} strokeWidth="1.6"
+        style={{ filter: `drop-shadow(0 0 5px ${color})`, opacity: 0.8 }} />
+      <circle cx={pts.x2} cy={pts.y2} r="5" fill="none" stroke={color} strokeWidth="1.6"
+        style={{ filter: `drop-shadow(0 0 5px ${color})`, opacity: 0.8 }} />
+    </svg>
+  );
+}
 
 const TIER_LABEL = {
   allied: "Allied",
@@ -41,35 +92,51 @@ const TIER_COLOR = {
 // Verbs the drawer renders. Order = how they appear in the actions
 // menu. Each carries label / description / destructive flag.
 const VERB_META = {
-  "gift":          { label: "Gift", body: "Send scrap. Raises their Standing toward you." },
-  "propose-deal":  { label: "Custom Deal", body: "Build a give/get offer. Opens the deal builder.", isPane: "deal" },
-  "demand-tribute":{ label: "Demand Tribute", body: "Take, don't ask. Stains Honor if refused.", isPane: "tribute", destructive: true },
-  "sue-for-peace": { label: "Sue for Peace", body: "Offer terms alongside the peace promise.", isPane: "peace" },
-  "propose-pact":  { label: "Propose Pact", body: "Mutual defence + Standing bonus on both sides." },
-  "make-peace":    { label: "Make Peace", body: "End the war, no terms attached." },
-  "mediate":       { label: "Mediate", body: "Broker peace between two warring factions.", isPane: "mediate" },
-  "pact-call":     { label: "Call to Pact", body: "Call your ally into one of your wars.", isPane: "pact-call" },
-  "vassalize":     { label: "Vassalize", body: "Bind them under your banner.", destructive: true },
-  "free-vassal":   { label: "Free Vassal", body: "Release them. Honor rises; tribute stops.", destructive: true },
-  "denounce":      { label: "Denounce", body: "Public condemnation. Standing falls on both sides.", destructive: true },
-  "declare-war":   { label: "Declare War", body: "Open hostilities. Menace rises immediately.", destructive: true },
+  "gift":                  { label: "Gift", body: "Send scrap. Raises their Standing toward you." },
+  "propose-deal":          { label: "Custom Deal", body: "Build a give/get offer. Opens the deal builder.", isPane: "deal" },
+  "demand-tribute":        { label: "Demand Tribute", body: "Take, don't ask. Stains Honor if refused.", isPane: "tribute", destructive: true },
+  "sue-for-peace":         { label: "Sue for Peace", body: "Offer terms alongside the peace promise.", isPane: "peace" },
+  "propose-pact":          { label: "Propose Pact", body: "Mutual defence + Standing bonus on both sides." },
+  "make-peace":            { label: "Make Peace", body: "End the war, no terms attached." },
+  "mediate":               { label: "Mediate", body: "Broker peace between two warring factions.", isPane: "mediate" },
+  "pact-call":             { label: "Call to Pact", body: "Call your ally into one of your wars.", isPane: "pact-call" },
+  "vassalize":             { label: "Vassalize", body: "Bind them under your banner.", destructive: true },
+  "free-vassal":           { label: "Free Vassal", body: "Release them. Honor rises; tribute stops.", destructive: true },
+  "denounce":              { label: "Denounce", body: "Public condemnation. Standing falls on both sides.", destructive: true },
+  "declare-war":           { label: "Declare War", body: "Open hostilities. Menace rises immediately.", destructive: true },
+  // §6 trade + passive toggles
+  "trading-pact":          { label: "Open Trading Pact", body: "Route between capitals — per-round scrap each side + permanent Research floor." },
+  "dissolve-trading-pact": { label: "Close Trading Pact", body: "Closes the trade route. Keeps the Research floor.", destructive: true },
+  "set-open-borders":      { label: "Open Borders", body: "Let them transit your territory; they may grant the reverse." },
+  "toggle-open-borders":   { label: "Toggle Open Borders", body: "Flip your half of the open-borders agreement on or off." },
+  "toggle-allied-vision":  { label: "Toggle Allied Vision", body: "Share line-of-sight with the ally on or off." },
 };
 
 const DESTRUCTIVE_PROMPT = {
-  "declare-war":  "Declare war? You'll lose Standing and gain Menace immediately. Their allies may join in.",
-  "denounce":     "Denounce publicly? Standing falls on both sides and your Honor takes a hit.",
-  "vassalize":    "Force vassalage? They'll resist unless they have no choice.",
-  "free-vassal":  "Release this vassal? Your Honor rises, their tribute stops.",
-  "demand-tribute": "Demand tribute? Refusal will damage your Honor and could trigger war.",
+  "declare-war":            "Declare war? You'll lose Standing and gain Menace immediately. Their allies may join in.",
+  "denounce":               "Denounce publicly? Standing falls on both sides and your Honor takes a hit.",
+  "vassalize":              "Force vassalage? They'll resist unless they have no choice.",
+  "free-vassal":            "Release this vassal? Your Honor rises, their tribute stops.",
+  "demand-tribute":         "Demand tribute? Refusal will damage your Honor and could trigger war.",
+  "dissolve-trading-pact":  "Close the trading pact? The per-round scrap flow stops; the permanent Research floor stays.",
 };
 
-// Loose match — used to skip a verb's `outcome` tooltip when it just
-// repeats the static body. We strip punctuation, lowercase, and compare
-// the first 24 chars; that's enough to catch near-duplicates without
-// false-positives between genuinely different sentences.
+// Loose match — used to skip a verb's `outcome` tooltip when it's a
+// near-paraphrase of the static body. Jaccard on long-enough word tokens;
+// ≥0.55 overlap is the empirical threshold that catches "Opens a route
+// between your capitals — …" vs. "Route between capitals — …" without
+// collapsing genuinely-different sentences like "Costs 5 scrap" vs.
+// "Will likely accept".
 function sameish(a, b) {
-  const norm = (s) => (s || "").toLowerCase().replace(/[^a-z ]+/g, " ").trim().slice(0, 24);
-  return norm(a) === norm(b);
+  const tokenize = (s) => new Set(
+    (s || "").toLowerCase().replace(/[^a-z ]+/g, " ").trim().split(/\s+/).filter((w) => w.length > 2)
+  );
+  const A = tokenize(a), B = tokenize(b);
+  if (A.size === 0 || B.size === 0) return false;
+  let intersect = 0;
+  for (const w of A) if (B.has(w)) intersect++;
+  const union = A.size + B.size - intersect;
+  return intersect / union >= 0.55;
 }
 
 // --- small holo primitives ----------------------------------------------
@@ -546,6 +613,9 @@ function FactionDetailView({ f, dip, onBack, onClose, onVerb, onOpenPane, onConf
                   onClick={() => {
                     if (meta.isPane) onOpenPane(meta.isPane);
                     else if (meta.destructive) onConfirmAndAct(v.verb, { faction: f.id });
+                    else if (v.verb === "set-open-borders") onVerb(v.verb, { faction: f.id, on: true });
+                    else if (v.verb === "toggle-open-borders") onVerb(v.verb, { faction: f.id, on: !f.openBordersFromYou });
+                    else if (v.verb === "toggle-allied-vision") onVerb(v.verb, { faction: f.id, on: true });
                     else onVerb(v.verb, { faction: f.id });
                   }}
                 />
@@ -625,6 +695,14 @@ function ObligationsList({ f, dip }) {
   if (f.pacted) items.push("You have a mutual-defence pact.");
   if (f.atWar) items.push("You are at war.");
   if (f.inCoalition) items.push("They have joined a coalition against you.");
+  if (f.tradingPact) {
+    items.push(f.tradingPact.suspended
+      ? `Trading pact — suspended (round ${f.tradingPact.suspendedRounds} of grace).`
+      : "Trading pact — open route between capitals.");
+  }
+  if (f.openBordersFromYou && f.openBordersFromThem) items.push("Open borders both ways.");
+  else if (f.openBordersFromYou) items.push("You allow their units through your territory.");
+  else if (f.openBordersFromThem) items.push("They allow your units through their territory.");
   if (items.length === 0) items.push("No formal agreements with this faction.");
 
   return (
@@ -1057,8 +1135,24 @@ export default function DiplomacyDrawer({
     setPane(null);
   }
 
+  // §5.3 — when the faction-detail view is showing a faction with an
+  // active trading pact, paint the capital-to-capital dotted route line
+  // on the map (green if clear, amber if suspended). Endpoints come from
+  // FACTIONS.{capital} — the viewer's own capital is read from data.js.
+  const tradeFor = selectedFaction?.tradingPact || null;
+  const myCapital = UI_FACTIONS[dip.youId]?.capital || null;
+  const theirCapital = selectedFaction?.capital || null;
+  const showRoute = tradeFor && myCapital && theirCapital && view === "detail";
+
   return (
     <>
+      {showRoute && (
+        <TradingPactRouteLayer
+          fromLocId={myCapital}
+          toLocId={theirCapital}
+          status={tradeFor.suspended ? "suspended" : "clear"}
+        />
+      )}
       <motion.div
         initial={{ x: 440, opacity: 0 }}
         animate={{ x: 0, opacity: 1 }}

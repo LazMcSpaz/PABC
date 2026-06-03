@@ -21,6 +21,7 @@ import {
   recognitionScore, threatScore, tolerance, trustFloor, standingTier, getStanding,
   arePacted, atWar, vassalLord, coalitionAgainst, factionIds,
   aiAcceptsPact, aiAcceptsVassalage, wouldAccept, passesRepGates,
+  evaluatePactCall, canDemandTribute, hasOpenBorders,
 } from "../game/diplomacy.js";
 import { hasTechNode } from "../game/tech.js";
 import {
@@ -523,6 +524,14 @@ function adaptDiplomacy(state, viewer) {
       verbs: availableVerbsAgainst(state, viewer, f),
       // Inbox + capital (for map binding).
       capital: def.capital || null,
+      // §5.3 trading-pact route status — read straight off the agreement
+      // shape on `state.diplomacy.agreements` so the map can draw the
+      // capital-to-capital line green (clear) or amber (suspended).
+      tradingPact: findTradingPact(state, viewer, f),
+      // §1.4 passive agreements (open-borders, allied-vision) — exposed
+      // so the relationship panel can summarise active toggles.
+      openBordersFromYou: hasOpenBorders(state, f, viewer), // they may transit your land
+      openBordersFromThem: hasOpenBorders(state, viewer, f), // you may transit theirs
     };
   });
   return {
@@ -619,6 +628,28 @@ function pickWarringPairs(state, viewer) {
   return pairs;
 }
 
+// §5.3 trading-pact route status — pluck the agreement off
+// state.diplomacy.agreements and surface { active, suspended,
+// suspendedRounds } so the map can draw the dotted line green or amber.
+// Returns null when no trading-pact agreement exists between the two.
+function findTradingPact(state, a, b) {
+  const agrs = state.diplomacy?.agreements || [];
+  for (const agr of agrs) {
+    if (agr.type !== "trading-pact") continue;
+    const ab = (agr.partyA === a && agr.partyB === b) || (agr.partyA === b && agr.partyB === a)
+            || (agr.a === a && agr.b === b) || (agr.a === b && agr.b === a);
+    if (!ab) continue;
+    return {
+      id: agr.id,
+      active: !agr.suspended,
+      suspended: !!agr.suspended,
+      suspendedRounds: agr.suspendedRounds || 0,
+      since: agr.since,
+    };
+  }
+  return null;
+}
+
 // §4 — Hidden / Visible-disabled / Visible-enabled per (verb, target).
 // Each verb returns { state, reason?, outcome? }. Hidden verbs are
 // omitted from the list (the UI doesn't render them at all).
@@ -694,9 +725,14 @@ function availableVerbsAgainst(state, viewer, fid) {
     out.push({ verb: "propose-deal", state: "enabled", outcome: "They accept deals where your offer outweighs your ask." });
   }
 
-  // 7) Demand Tribute — available when they're weaker or scared.
+  // 7) Demand Tribute — engine gates on a power ratio; refusal stains
+  // your Honor and may auto-declare war.
   if (!myLord && !myVassal && !pacted) {
-    out.push({ verb: "demand-tribute", state: "enabled", outcome: "They cave if intimidated; refusal stains your Honor and may declare war." });
+    if (canDemandTribute(state, viewer, fid)) {
+      out.push({ verb: "demand-tribute", state: "enabled", outcome: "Strong enough to coerce — they likely cave; refusal stains your Honor." });
+    } else {
+      out.push({ verb: "demand-tribute", state: "disabled", reason: "Not strong enough to coerce them." });
+    }
   }
 
   // 8) Vassalize (engine handles eligibility; UI shows disabled with reason).
@@ -724,12 +760,69 @@ function availableVerbsAgainst(state, viewer, fid) {
   // 12) Pact Call (outgoing) — only meaningful when you're at war with someone AND have a pact with them.
   if (pacted) {
     // Need at least one war the ally could join.
-    const haveWar = factionIds(state).some((t) => t !== viewer && t !== fid && atWar(state, viewer, t));
-    if (haveWar) {
-      out.push({ verb: "pact-call", state: "enabled", outcome: "Call the ally into one of your active wars." });
+    const myWars = factionIds(state).filter((t) => t !== viewer && t !== fid && atWar(state, viewer, t));
+    if (myWars.length > 0) {
+      // Use evaluatePactCall against each candidate target to give the
+      // best-case outcome hint without committing to a target yet.
+      const wouldHonor = myWars.some((t) => evaluatePactCall(state, fid, viewer, t).honor);
+      out.push({
+        verb: "pact-call",
+        state: "enabled",
+        outcome: wouldHonor
+          ? "Will likely honor against at least one of your wars."
+          : "May refuse — their loyalty or fear of the target is low.",
+      });
     } else {
       out.push({ verb: "pact-call", state: "disabled", reason: "You have no active wars to call them into." });
     }
+  }
+
+  // 13) Trading Pact (§6) — needs Neutral+ both ways, rep gates, and a
+  // capital-to-capital route. Engine returns specific reasons; we only
+  // surface the common ones here.
+  const tradingActive = findTradingPact(state, viewer, fid);
+  if (!myLord && !myVassal && !war) {
+    if (tradingActive) {
+      out.push({
+        verb: "dissolve-trading-pact",
+        state: "enabled",
+        outcome: "Closes the trade route. You and they lose the per-round scrap and the permanent Research floor is kept.",
+      });
+    } else {
+      const standOK = getStanding(state, viewer, fid) >= (D.tiers?.neutral ?? 0)
+                   && getStanding(state, fid, viewer) >= (D.tiers?.neutral ?? 0);
+      if (!standOK) {
+        out.push({ verb: "trading-pact", state: "disabled", reason: "Standing needs Neutral+ on both sides." });
+      } else if (!passesRepGates(state, fid, viewer)) {
+        const why = myMenace > tol ? "Your Menace is past their Tolerance."
+                  : myHonor < floor ? "Your Honor is below their floor."
+                  : "Reputation gates closed.";
+        out.push({ verb: "trading-pact", state: "disabled", reason: why });
+      } else {
+        out.push({ verb: "trading-pact", state: "enabled", outcome: "Opens a route between your capitals — per-round scrap each side + a permanent Research floor." });
+      }
+    }
+  }
+
+  // 14) Open Borders + Allied Vision passive toggles.
+  if (!myLord && !myVassal && !war) {
+    out.push({
+      verb: "set-open-borders",
+      state: "enabled",
+      outcome: "Lets them transit your territory; they may grant you the same.",
+    });
+    out.push({
+      verb: "toggle-open-borders",
+      state: "enabled",
+      outcome: "Toggle the current open-borders agreement on or off from your side.",
+    });
+  }
+  if (pacted) {
+    out.push({
+      verb: "toggle-allied-vision",
+      state: "enabled",
+      outcome: "Toggle sharing line-of-sight with the ally on or off.",
+    });
   }
 
   return out;

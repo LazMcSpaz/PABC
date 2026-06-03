@@ -30,7 +30,7 @@ import { evalCond } from "../game/dsl.js";
 import { adaptState, reinforcePreview, engineChipIdToUi, previewLocationContest, previewAttackerStrength } from "./engineAdapter.js";
 import { resolveSalvage } from "../game/contest.js";
 import { assignTechNode } from "../game/stats.js";
-import { performDiplomacy, releaseVassal } from "../game/diplomacy.js";
+import { performDiplomacy } from "../game/diplomacy.js";
 import DiplomacyDrawer from "./DiplomacyDrawer.jsx";
 import EncounterModal from "./EncounterModal.jsx";
 import MoveConfirmOverlay from "./MoveConfirmOverlay.jsx";
@@ -635,36 +635,21 @@ export default function Prototype({ config, onNewGame }) {
     setMenuPanel(key);
   }
 
-  // §18.7 — issue a diplomatic verb (free of the Action budget). Surfaces a
-  // short accept/decline result, then refreshes the screen.
-  //
-  // A few verbs from the spec aren't yet exposed through performDiplomacy —
-  // we map them here so the UI can stay forward-compatible:
-  //   sue-for-peace  → make-peace (side terms dropped pending engine support)
-  //   demand-tribute → propose-deal with give = []
-  //   free-vassal    → releaseVassal direct
-  //   pact-call      → not wired yet; a friendly toast.
+  // §18.7 — issue a diplomatic verb (free of the Action budget). All 18
+  // verbs dispatch through performDiplomacy now; the prototype layer just
+  // routes params + surfaces the accept/decline result.
   function onDiplomacy(action, params) {
     const game = gameRef.current;
     const youId = state.youId;
-    let r;
-    if (action === "sue-for-peace") {
-      r = performDiplomacy(game, youId, "make-peace", { faction: params.faction });
-    } else if (action === "demand-tribute") {
-      r = performDiplomacy(game, youId, "propose-deal", { faction: params.faction, give: [], get: params.get || [] });
-    } else if (action === "free-vassal") {
-      releaseVassal(game, params.faction, "player-release");
-      r = { ok: true };
-    } else if (action === "pact-call") {
-      r = { ok: false, reason: "Pact-call routing not yet wired in the engine — coming soon." };
-    } else {
-      r = performDiplomacy(game, youId, action, params || {});
-    }
-    const name = state.players[params?.faction] ? (UI_FACTIONS[params.faction]?.name || params.faction) : params?.faction;
+    const r = performDiplomacy(game, youId, action, params || {});
+    const targetId = params?.faction || params?.ally || params?.b;
+    const name = state.players[targetId] ? (UI_FACTIONS[targetId]?.name || targetId) : targetId;
     let msg = "";
     if (!r.ok) msg = r.reason || "no effect";
     else if (r.accepted === false) msg = `${name} declines — ${r.reason || ""}`;
     else if (r.accepted === true) msg = `${name} agrees.`;
+    else if (r.honored === true) msg = `${name} answers the call.`;
+    else if (r.honored === false) msg = `${name} refuses the call.`;
     else msg = `Done${name ? ` — ${name}` : ""}.`;
     setDiploResult({ ...r, msg });
     bumpTick();
