@@ -10,9 +10,8 @@ import {
   Field,
   TextInput,
   TextArea,
-  Select,
   SectionCard,
-  IconButton,
+  SectionIntro,
   HelpTip,
 } from "./Field.jsx";
 
@@ -35,43 +34,70 @@ export function WikiEntryEditor({ value, onChange }) {
   return (
     <div className="flex flex-col gap-4">
       <SectionCard title="Wiki entry">
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <Field
-            label="id"
-            tip="wiki.id"
-            hint="stable identifier — referenced by [[term]] markup as-is or via aliases"
-          >
-            <TextInput value={value.id} onChange={(v) => set("id", v)} />
-          </Field>
-          <Field label="term (display)" tip="wiki.term">
-            <TextInput
-              value={value.term}
-              onChange={(v) => set("term", v)}
-              placeholder="e.g. Menace"
-            />
-          </Field>
-          <Field
-            label="aliases (comma-separated)"
-            tip="wiki.aliases"
-            className="col-span-2"
-            hint='e.g. "ZoC, zone of control, control zone"'
-          >
-            <TextInput value={aliasesText} onChange={onAliases} />
-          </Field>
-          <Field label="category" tip="wiki.category">
-            <CategoryPicker
-              value={value.category}
-              onChange={(v) => set("category", v)}
-            />
-          </Field>
-        </div>
+        <SectionIntro>
+          Wiki entries are clickable terms players can look up mid-game. When
+          you write encounter text, wrap any term in <code className="text-amber-400">[[double brackets]]</code> and
+          it becomes a tap-to-open link to its entry here. Entries can
+          cross-link to each other, so think of this as a small in-game
+          encyclopedia that grows with your content.
+        </SectionIntro>
+
+        <Field
+          label="id"
+          tip="wiki.id"
+          hint="Unique identifier. Use lower-case with dashes (e.g. `menace`, `zone-of-control`). Don't change after saving — other entries may link to it."
+        >
+          <TextInput value={value.id} onChange={(v) => set("id", v)} />
+        </Field>
+
+        <Field
+          label="term (display)"
+          tip="wiki.term"
+          hint="The word the player sees when they tap the link, and what shows at the top of the wiki page."
+        >
+          <TextInput
+            value={value.term}
+            onChange={(v) => set("term", v)}
+            placeholder="e.g. Menace"
+          />
+        </Field>
+
+        <Field
+          label="aliases (comma-separated)"
+          tip="wiki.aliases"
+          hint='Other spellings the renderer should also match — so [[ZoC]] and [[zone of control]] both find this entry. Leave blank if there are none.'
+        >
+          <TextInput value={aliasesText} onChange={onAliases} />
+        </Field>
+
+        <Field
+          label="category"
+          tip="wiki.category"
+          hint="Groups the entry into a section of the in-game wiki sidebar. Pick from the suggestions or type your own."
+        >
+          <CategoryPicker
+            value={value.category}
+            onChange={(v) => set("category", v)}
+          />
+        </Field>
       </SectionCard>
 
-      <SectionCard
-        title="Body"
-        actions={<HelpTip k="wiki.body" />}
-      >
-        <Field label="body (supports [[other-term]] cross-links)">
+      <SectionCard title="Body">
+        <SectionIntro>
+          Plain text the player reads when they open the entry. Wrap any term
+          in <code className="text-amber-400">[[brackets]]</code> to make it a
+          clickable link to another wiki entry —
+          {" "}<code className="text-amber-400">[[Honor]]</code> looks up an
+          entry whose <em>term</em>, id, or aliases match "Honor". Use
+          {" "}<code className="text-amber-400">[[id|display]]</code> when you
+          want different visible text than the entry's term.
+        </SectionIntro>
+
+        <Field
+          label="body"
+          tip="wiki.body"
+          hint="Newlines are preserved. Keep it short and concrete — definitions, not lore essays."
+        >
           <TextArea
             value={value.body}
             onChange={(v) => set("body", v)}
@@ -95,7 +121,7 @@ function CategoryPicker({ value, onChange }) {
           key={c}
           type="button"
           onClick={() => onChange(c)}
-          className={`px-2 py-1 text-xs rounded border ${
+          className={`px-2 py-1.5 text-xs rounded border ${
             value === c
               ? "bg-amber-500 text-slate-950 border-amber-400 font-semibold"
               : "bg-slate-800 text-slate-200 border-slate-700 hover:bg-slate-700"
