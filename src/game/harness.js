@@ -2496,9 +2496,12 @@ line("\n  [Open borders] territory trespass penalty");
   g.world.zoc = g.world.zoc || {}; g.world.zoc[dest] = owner; // owner's territory
   u.moveRemaining = 2; recomputeStats(g);
   const s0 = getStanding(g, owner, mover);
+  const m0 = g.players[mover].menace || 0;
   performAction(g, "move", { unit: u.uid, to: dest });
-  check("moving into a faction's territory without open borders costs Standing",
-    getStanding(g, owner, mover) === s0 - CONFIG.diplomacy.trespass.standingPenalty);
+  check("moving into a faction's territory without open borders hits relationship + reputation",
+    getStanding(g, owner, mover) === s0 - CONFIG.diplomacy.trespass.standingPenalty &&
+    (g.players[mover].menace || 0) === m0 + CONFIG.diplomacy.trespass.reputationPenalty &&
+    CONFIG.diplomacy.trespass.standingPenalty > CONFIG.diplomacy.trespass.reputationPenalty);
 }
 {
   // Same move, but with an open-borders agreement → no penalty (free passage).
@@ -2511,8 +2514,10 @@ line("\n  [Open borders] territory trespass penalty");
   g.world.zoc = g.world.zoc || {}; g.world.zoc[dest] = owner;
   u.moveRemaining = 2; recomputeStats(g);
   const s0 = getStanding(g, owner, mover);
+  const m0 = g.players[mover].menace || 0;
   performAction(g, "move", { unit: u.uid, to: dest });
-  check("an open-borders agreement waives the trespass penalty", getStanding(g, owner, mover) === s0);
+  check("an open-borders agreement waives the trespass penalty (no Standing or Menace hit)",
+    getStanding(g, owner, mover) === s0 && (g.players[mover].menace || 0) === m0);
 }
 {
   // On Friendly+ terms the hit is softened.
@@ -2524,10 +2529,12 @@ line("\n  [Open borders] territory trespass penalty");
   g.world.zoc = g.world.zoc || {}; g.world.zoc[dest] = owner;
   u.moveRemaining = 2; recomputeStats(g);
   const s0 = getStanding(g, owner, mover);
+  const m0 = g.players[mover].menace || 0;
   performAction(g, "move", { unit: u.uid, to: dest });
-  const expected = CONFIG.diplomacy.trespass.standingPenalty - CONFIG.diplomacy.trespass.goodTermsReduction;
-  check("the trespass hit is softened when already on good terms",
-    getStanding(g, owner, mover) === s0 - expected);
+  const tr = CONFIG.diplomacy.trespass;
+  check("the trespass hit is softened on good terms (relationship −1, reputation waived)",
+    getStanding(g, owner, mover) === s0 - Math.max(1, tr.standingPenalty - tr.goodTermsReduction) &&
+    (g.players[mover].menace || 0) === m0 + Math.max(0, tr.reputationPenalty - tr.goodTermsReduction));
 }
 
 // §6.2 — war-record listeners (combat feeds the war record)

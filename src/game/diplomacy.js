@@ -86,10 +86,14 @@ function onTrespass(state, payload) {
   if (atWar(state, mover, owner)) return;          // already at war — penalty is moot
   if (hasOpenBorders(state, mover, owner)) return; // permission granted — free passage
   const tr = D().trespass;
-  const onGoodTerms = getStanding(state, owner, mover) >= D().tiers.friendly;
-  const penalty = Math.max(1, tr.standingPenalty - (onGoodTerms ? tr.goodTermsReduction : 0));
-  adjustStanding(state, owner, mover, -penalty, "trespass");
-  emit(state, "territory_trespassed", { mover, owner, hex: payload.to, penalty });
+  const soft = getStanding(state, owner, mover) >= D().tiers.friendly ? tr.goodTermsReduction : 0;
+  // The relationship hit is the larger; the global-reputation (Menace) bump is
+  // the smaller. Both soften on good terms (Menace can soften to nothing).
+  const standingHit = Math.max(1, tr.standingPenalty - soft);
+  const repHit = Math.max(0, tr.reputationPenalty - soft);
+  adjustStanding(state, owner, mover, -standingHit, "trespass");
+  if (repHit) adjustMenace(state, mover, repHit, "trespass");
+  emit(state, "territory_trespassed", { mover, owner, hex: payload.to, standingHit, repHit });
 }
 
 // §6.2 — the active war record between two factions, or null.

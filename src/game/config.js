@@ -220,8 +220,9 @@ export const CONFIG = {
     // but moving through their ZoC WITHOUT an open-borders agreement is
     // trespassing and costs relations (softened when already on good terms).
     trespass: {
-      standingPenalty: 2, // base relations hit (owner → mover) per incursion
-      goodTermsReduction: 1, // softened by this when on Friendly+ terms
+      standingPenalty: 2, // relationship hit (owner → mover) per incursion — the larger hit
+      reputationPenalty: 1, // global Menace bump on the mover — the smaller hit
+      goodTermsReduction: 1, // both softened by this when on Friendly+ terms (floored)
     },
     pact: { // §1.9, §1.10 — toggle costs
       toggleVisionStandingHit: 1,
