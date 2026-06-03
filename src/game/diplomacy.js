@@ -10,30 +10,97 @@
 // contest RNG stream.
 import { CONFIG } from "./config.js";
 import { FACTIONS, MINOR_FACTIONS, factionDef, LOCATIONS } from "./content.js";
-import { emit } from "./events.js";
+import { emit, registerEventHook } from "./events.js";
 import { getStanding, adjustStanding, setStanding, standingTier } from "./standing.js";
-import { bfsDistances } from "./board.js";
-import { revealRegion } from "./visibility.js";
+import { bfsDistances, reinforcementRoute } from "./board.js";
+import { revealRegion, applySharedVision, recomputeVisibilityFor } from "./visibility.js";
+import { recomputeResearch } from "./stats.js";
 
 // --- state ----------------------------------------------------------
 export function ensureDiplomacy(state) {
   if (!state.diplomacy) {
     state.diplomacy = {
-      agreements: [], // live deals (flows + promises): { id, a, b, give, get, promises:[] }
+      agreements: [], // live deals + typed agreements (see §6.2 for the type tag)
       pacts: [], // { a, b } unordered alliances
-      wars: [], // { a, b } active war-states
+      wars: [], // { a, b, since, unitsLost, locationsLost, contestsWon } war-states
       coalitions: [], // { target, members:[] } against a player
       vassals: {}, // vassalFid -> lordId
       resentment: {}, // vassalFid -> number
       threatScores: {}, // pid -> number
       recognition: {}, // pid -> number (cached)
+      giftCounter: {}, // §1.2 — { fromPid: { toPid: gifts-in-window } }
     };
   }
+  if (!state.diplomacy.giftCounter) state.diplomacy.giftCounter = {};
   for (const p of Object.values(state.players)) {
     if (p.menace == null) p.menace = 0;
     if (p.honor == null) p.honor = CONFIG.diplomacy.honor.start;
   }
+  installDiplomacyListeners(state);
   return state.diplomacy;
+}
+
+// §6.2 state-maintenance listeners — keep the war records honest by reacting
+// to combat events on the bus. Registered ONCE (a guard on the diplomacy
+// object), so repeated ensureDiplomacy calls don't stack handlers.
+function installDiplomacyListeners(state) {
+  if (state.diplomacy._listenersInstalled) return;
+  state.diplomacy._listenersInstalled = true;
+
+  // A destroyed unit counts as a loss for its owner in the war it was fighting.
+  registerEventHook(state, "unit_destroyed", (st, p) => {
+    const victim = p.owner;
+    const killerOwner = p.killer ? st.units[p.killer]?.owner : null;
+    let war = killerOwner ? findWar(st, victim, killerOwner) : null;
+    if (!war) war = (st.diplomacy.wars || []).find((w) => w.a === victim || w.b === victim);
+    if (war) war.unitsLost[victim] = (war.unitsLost[victim] || 0) + 1;
+  });
+  // A captured Location counts as a loss for its prior controller.
+  registerEventHook(state, "location_captured", (st, p) => {
+    const war = findWar(st, p.from, p.controller);
+    if (war && p.from) war.locationsLost[p.from] = (war.locationsLost[p.from] || 0) + 1;
+  });
+  // A won contest credits the winner in the relevant war.
+  registerEventHook(state, "contest_won", (st, p) => {
+    const winner = p.player;
+    const war = (st.diplomacy.wars || []).find((w) => w.a === winner || w.b === winner);
+    if (war) war.contestsWon[winner] = (war.contestsWon[winner] || 0) + 1;
+  });
+  // Open-borders enforcement — a unit ending its move inside another faction's
+  // territory pays the trespass penalty (unless open borders / war / own land).
+  registerEventHook(state, "unit_moved", (st, p) => onTrespass(st, p));
+}
+
+// Open borders is a PERMIT, not a wall: you may always move into a faction's
+// territory (so conquest is possible), but moving through its ZoC WITHOUT an
+// open-borders agreement is trespassing — the owner's relations toward you
+// take a hit, softened when you're already on good terms. Open borders (a
+// pact default or a standalone agreement) waives it; an active war makes it
+// moot (you're already enemies).
+function onTrespass(state, payload) {
+  const unit = state.units[payload.unit];
+  if (!unit) return;
+  const mover = unit.owner;
+  const owner = state.world?.zoc?.[payload.to];
+  if (!owner || owner === mover) return;          // neutral ground or your own land
+  if (atWar(state, mover, owner)) return;          // already at war — penalty is moot
+  if (hasOpenBorders(state, mover, owner)) return; // permission granted — free passage
+  const tr = D().trespass;
+  const soft = getStanding(state, owner, mover) >= D().tiers.friendly ? tr.goodTermsReduction : 0;
+  // The relationship hit is the larger; the global-reputation (Menace) bump is
+  // the smaller. Both soften on good terms (Menace can soften to nothing).
+  const standingHit = Math.max(1, tr.standingPenalty - soft);
+  const repHit = Math.max(0, tr.reputationPenalty - soft);
+  adjustStanding(state, owner, mover, -standingHit, "trespass");
+  if (repHit) adjustMenace(state, mover, repHit, "trespass");
+  emit(state, "territory_trespassed", { mover, owner, hex: payload.to, standingHit, repHit });
+}
+
+// §6.2 — the active war record between two factions, or null.
+export function findWar(state, a, b) {
+  return state.diplomacy?.wars.find(
+    (w) => (w.a === a && w.b === b) || (w.a === b && w.b === a),
+  ) || null;
 }
 
 // All faction ids in play (majors + seeded minors are all `players`).
@@ -239,19 +306,42 @@ export function applyDeal(state, deal, cause = "deal") {
   // transfer each side's items
   transferItems(state, deal.proposer, deal.recipient, deal.give);
   transferItems(state, deal.recipient, deal.proposer, deal.get);
-  // register live agreement if it carries flows/promises
+  // register live agreement if it carries flows/promises (§6.2 type tag).
   const promises = [...(deal.give || []), ...(deal.get || [])].filter((it) => it.flow || it.promise);
   if (promises.length) {
     state.diplomacy.agreements.push({
       id: `agr${state.diplomacy.agreements.length + 1}`,
+      type: "deal-promise",
       proposer: deal.proposer, recipient: deal.recipient,
       give: deal.give || [], get: deal.get || [], round: state.round,
     });
   }
-  // a deal warms Standing both ways
-  adjustStanding(state, deal.proposer, deal.recipient, 2, cause);
-  adjustStanding(state, deal.recipient, deal.proposer, 2, cause);
+  // §1.2 — a gift warms Standing with diminishing returns; any other deal
+  // warms both ways at the flat rate.
+  if (cause === "gift") {
+    applyGiftStanding(state, deal);
+  } else {
+    adjustStanding(state, deal.proposer, deal.recipient, 2, cause);
+    adjustStanding(state, deal.recipient, deal.proposer, 2, cause);
+  }
   emit(state, "deal_struck", { proposer: deal.proposer, recipient: deal.recipient, cause });
+}
+
+// §1.2/§6.9 — gift Standing with sliding-window diminishing returns. The n-th
+// gift from→to in the window grants floor(baseGain / (n + 1)); the counter
+// increments here and decays −1 each round-end (runDiplomacyRound). A 3-round
+// quiet spell fully refreshes the rate.
+function applyGiftStanding(state, deal) {
+  const fromPid = deal.proposer, toPid = deal.recipient;
+  const scrapAmount = (deal.give || []).reduce(
+    (s, it) => s + (it.resource?.resource === "scrap" ? (it.resource.amount || 0) : 0), 0,
+  );
+  const n = state.diplomacy.giftCounter[fromPid]?.[toPid] || 0;
+  const baseGain = scrapAmount * D().ai.giftStandingPerScrap;
+  const actualGain = Math.floor(baseGain / (n + 1));
+  if (actualGain) adjustStanding(state, toPid, fromPid, actualGain, "gift");
+  state.diplomacy.giftCounter[fromPid] = state.diplomacy.giftCounter[fromPid] || {};
+  state.diplomacy.giftCounter[fromPid][toPid] = n + 1;
 }
 
 function transferItems(state, from, to, items) {
@@ -278,7 +368,8 @@ export function declareWar(state, a, b, cause = "declared") {
   if (atWar(state, a, b)) return;
   // declaring war on a pacted faction breaks the pact (Honor ding).
   if (arePacted(state, a, b)) breakPact(state, a, b, "war-on-ally");
-  state.diplomacy.wars.push({ a, b, since: state.round });
+  // §6.2 — war record tracks losses for the §1.5 exhaustion model.
+  state.diplomacy.wars.push({ a, b, since: state.round, unitsLost: {}, locationsLost: {}, contestsWon: {} });
   setStanding(state, a, b, D().tiers.hostile, cause);
   setStanding(state, b, a, D().tiers.hostile, cause);
   emit(state, "war_declared", { a, b, cause });
@@ -296,13 +387,31 @@ export function makePeace(state, a, b, cause = "peace") {
   }
 }
 
+// The typed §6.2 pact agreement (carries visionShare / openBorders), or null.
+export function findPactAgreement(state, a, b) {
+  return state.diplomacy.agreements.find(
+    (agr) => agr.type === "pact" && ((agr.a === a && agr.b === b) || (agr.a === b && agr.b === a)),
+  ) || null;
+}
+
 export function formPact(state, a, b, cause = "pact") {
   if (arePacted(state, a, b)) return false;
   makePeace(state, a, b, "pact-peace");
   state.diplomacy.pacts.push({ a, b, since: state.round });
+  // §1.9/§1.10 — a pact carries a typed agreement with the auto-share defaults
+  // (allied vision + open borders), toggled later without dissolving the pact.
+  if (!findPactAgreement(state, a, b)) {
+    state.diplomacy.agreements.push({
+      id: `pact-${a}-${b}-${state.round}`,
+      type: "pact", a, b, since: state.round,
+      visionShare: D().vision.sharedPactDefault,
+      openBorders: D().borders.pactDefault,
+    });
+  }
   setStanding(state, a, b, Math.max(getStanding(state, a, b), D().tiers.allied), cause);
   setStanding(state, b, a, Math.max(getStanding(state, b, a), D().tiers.allied), cause);
   emit(state, "pact_formed", { a, b, cause });
+  applySharedVision(state); // §1.9 — pool visible sets immediately on formation
   return true;
 }
 
@@ -312,6 +421,10 @@ export function breakPact(state, a, b, cause = "broken") {
     (p) => !((p.a === a && p.b === b) || (p.a === b && p.b === a)),
   );
   if (state.diplomacy.pacts.length !== before) {
+    // tear down the typed pact agreement (vision/borders) along with the pact.
+    state.diplomacy.agreements = state.diplomacy.agreements.filter(
+      (agr) => !(agr.type === "pact" && ((agr.a === a && agr.b === b) || (agr.a === b && agr.b === a))),
+    );
     // breaking your word is the canonical Honor-dinging event (global).
     if (state.players[a]) adjustHonor(state, a, -D().honor.breakLoss, "pact-broken");
     adjustStanding(state, b, a, -6, cause);
@@ -319,10 +432,219 @@ export function breakPact(state, a, b, cause = "broken") {
   }
 }
 
+// --- §6.7 open-borders contract -------------------------------------
+// Does `transitingFid` have passage through `ownerFid`'s territory? True for a
+// standalone open-borders agreement, or a pact with openBorders on. THE
+// MOVEMENT-BLOCKADE SYSTEM IMPORTS THIS to short-circuit its blockade rule;
+// the contract is: any active agreement granting transitingFid passage → true.
+export function hasOpenBorders(state, transitingFid, ownerFid) {
+  for (const agr of state.diplomacy?.agreements || []) {
+    const matches =
+      (agr.a === transitingFid && agr.b === ownerFid) ||
+      (agr.a === ownerFid && agr.b === transitingFid);
+    if (!matches) continue;
+    if (agr.type === "open-borders") return true;
+    if (agr.type === "pact" && agr.openBorders) return true;
+  }
+  return false;
+}
+
+// Standalone open-borders agreement between a and b (not the pact flag), or null.
+function standaloneOpenBorders(state, a, b) {
+  return state.diplomacy.agreements.find(
+    (agr) => agr.type === "open-borders" && ((agr.a === a && agr.b === b) || (agr.a === b && agr.b === a)),
+  ) || null;
+}
+
+// --- §1.8 pact-call evaluation --------------------------------------
+// Would `ally` honor `caller`'s call into war with `target`? Hard refuses
+// first, then a soft score modulated by the ally's aggression dial.
+export function evaluatePactCall(state, ally, caller, target) {
+  if (arePacted(state, ally, target)) return { honor: false, reason: "pacted with target" };
+  if (vassalLord(state, target) === ally) return { honor: false, reason: "target is my vassal" };
+  if (!mayEngage(state, ally, target)) return { honor: false, reason: "out of scope" };
+  const pc = D().pactCall;
+  const hostilityToTarget = -getStanding(state, ally, target); // higher = more hostile
+  const loyaltyToCaller = getStanding(state, ally, caller); // higher = more loyal
+  const targetPowerRatio = powerOf(state, target) / Math.max(1, powerOf(state, ally));
+  let score = hostilityToTarget * pc.hostilityWeight
+            + loyaltyToCaller * pc.loyaltyWeight
+            - targetPowerRatio * pc.targetPowerWeight;
+  // aggression bias is applied AFTER the score sum (§1.8).
+  const agg = factionDef(ally)?.aggression ?? 0.5;
+  if (agg >= 0.6) score += pc.aggressionScoreBias;
+  else if (agg <= 0.4) score -= pc.aggressionScoreBias;
+  return { honor: score >= pc.acceptScoreThreshold, score };
+}
+
+// --- §1.5 war exhaustion + peace acceptance --------------------------
+// Higher score = more eager for peace (I'm losing, and it's dragging on).
+export function warExhaustion(state, fid, opponent) {
+  const war = findWar(state, fid, opponent);
+  if (!war) return 0;
+  const w = D().war;
+  const duration = state.round - war.since;
+  return duration
+    + (war.unitsLost[fid] || 0) * w.unitLossWeight
+    + (war.locationsLost[fid] || 0) * w.locationLossWeight
+    - (war.unitsLost[opponent] || 0) * 0.5
+    - (war.locationsLost[opponent] || 0) * 1.0;
+}
+
+// Would `ai` accept `suer`'s peace proposal (war exhaustion + side terms +
+// a warmth bonus)? `sideTerms` is a deal object (suer = proposer).
+export function aiAcceptsPeace(state, ai, suer, sideTerms) {
+  const exhaustion = warExhaustion(state, ai, suer);
+  const sideValue = sideTerms ? dealValue(state, ai, sideTerms) : 0;
+  const standing = getStanding(state, ai, suer);
+  const standingBoost = standing >= D().tiers.neutral ? D().suePeace.standingBoost : 0;
+  return (exhaustion + sideValue + standingBoost) >= D().suePeace.acceptThreshold;
+}
+
+// --- §1.4 demand tribute --------------------------------------------
+// Gate: the demander must outweigh the target by `minPowerRatio`.
+export function canDemandTribute(state, demander, target) {
+  return powerOf(state, demander) >= powerOf(state, target) * D().demandTribute.minPowerRatio;
+}
+
+// Does `target` cave to `demander`'s tribute demand? Power gap vs. the target's
+// bravery (aggression), then an affordability check on the demanded items.
+export function caveOnDemand(state, target, demander, terms) {
+  const dt = D().demandTribute;
+  const caveScore = powerOf(state, demander) / Math.max(1, powerOf(state, target))
+    - dt.caveBaseRatio
+    - (factionDef(target)?.aggression ?? 0.5) * dt.braveryScale;
+  if (caveScore < 0) return false;
+  const tp = state.players[target];
+  for (const it of terms || []) {
+    if (it.resource?.resource === "scrap" && (tp?.resource || 0) < (it.resource.amount || 0)) return false;
+  }
+  return true;
+}
+
+// Lower a→b Standing by `n` whole tiers (used by tribute refusal escalation).
+function dropStandingTiers(state, a, b, n) {
+  const order = ["hostile", "wary", "neutral", "friendly", "allied"];
+  const idx = Math.max(0, order.indexOf(standingTier(getStanding(state, a, b))) - n);
+  setStanding(state, a, b, Math.min(getStanding(state, a, b), D().tiers[order[idx]]), "tribute-refused");
+}
+
+// --- §1.3 trading pact ----------------------------------------------
+// The Capital hex a faction controls (carries the `capital` chip), or null.
+function capitalHexOf(state, fid) {
+  for (const loc of Object.values(state.locations)) {
+    if (loc.controller === fid && (loc.chips || []).some((c) => state.chips[c]?.chipId === "capital")) return loc.hexId;
+  }
+  return null;
+}
+function tradingPactBetween(state, a, b) {
+  return state.diplomacy.agreements.find(
+    (agr) => agr.type === "trading-pact" && ((agr.a === a && agr.b === b) || (agr.a === b && agr.b === a)),
+  ) || null;
+}
+function grantResearchFloor(state, fid, amount) {
+  const p = state.players[fid];
+  if (p) p.permanentResearch = Math.max(0, (p.permanentResearch || 0) + amount);
+}
+
+// Form a Trading Pact between a and b: both need a Capital with a clear
+// capital-to-capital route (reusing `reinforcementRoute`), Neutral+ both ways,
+// not at war, rep gates clear. Grants +1 permanent Research FLOOR to each.
+export function formTradingPact(state, a, b) {
+  if (a === b) return { ok: false, reason: "can't trade with yourself" };
+  if (atWar(state, a, b)) return { ok: false, reason: "at war with them" };
+  if (tradingPactBetween(state, a, b)) return { ok: false, reason: "trading pact already exists" };
+  if (getStanding(state, a, b) < D().tiers.neutral || getStanding(state, b, a) < D().tiers.neutral)
+    return { ok: false, reason: "standing too low (need Neutral+)" };
+  if (!passesRepGates(state, a, b) || !passesRepGates(state, b, a))
+    return { ok: false, reason: "reputation gates fail" };
+  const capA = capitalHexOf(state, a), capB = capitalHexOf(state, b);
+  if (!capA || !capB) return { ok: false, reason: "both parties need a Capital" };
+  if (!reinforcementRoute(state, a, capB)) return { ok: false, reason: "no clear route between capitals" };
+  state.diplomacy.agreements.push({
+    id: `trade-${a}-${b}-${state.round}`,
+    type: "trading-pact", a, b, partyA: a, partyB: b,
+    suspended: false, suspendedRounds: 0, since: state.round,
+  });
+  const floor = D().tradingPact.permanentResearchOnFormation;
+  grantResearchFloor(state, a, floor);
+  grantResearchFloor(state, b, floor);
+  recomputeResearch(state); // re-band Tech Level off the new Research floor
+  adjustStanding(state, a, b, 2, "trading-pact");
+  adjustStanding(state, b, a, 2, "trading-pact");
+  emit(state, "trading_pact_formed", { partyA: a, partyB: b });
+  return { ok: true, partyA: a, partyB: b };
+}
+
+// §6.5 step 2 — re-validate every trading pact's route at round-end, drive the
+// suspend/resume/dissolve cycle, and pay the per-round scrap while it runs.
+function tradingPactRoundCheck(state) {
+  const grace = D().tradingPact.suspendGraceRounds;
+  const sp = D().tradingPact.scrapPerUpkeep;
+  const survivors = [];
+  for (const agr of state.diplomacy.agreements) {
+    if (agr.type !== "trading-pact") { survivors.push(agr); continue; }
+    const capB = capitalHexOf(state, agr.b);
+    const clear = !!(capB && reinforcementRoute(state, agr.a, capB));
+    if (!clear) {
+      if (!agr.suspended) { agr.suspended = true; emit(state, "trading_pact_suspended", { agreement: agr.id, reason: "route-severed" }); }
+      agr.suspendedRounds = (agr.suspendedRounds || 0) + 1;
+      if (agr.suspendedRounds >= grace) {
+        // Force of circumstance — no Honor penalty. Remove the Research floor.
+        const floor = D().tradingPact.permanentResearchOnFormation;
+        grantResearchFloor(state, agr.a, -floor);
+        grantResearchFloor(state, agr.b, -floor);
+        recomputeResearch(state);
+        emit(state, "trading_pact_dissolved", { agreement: agr.id, reason: "route-severed" });
+        continue; // dropped (not a survivor)
+      }
+    } else {
+      if (agr.suspended) { agr.suspended = false; agr.suspendedRounds = 0; emit(state, "trading_pact_resumed", { agreement: agr.id }); }
+      // The economic bump: +scrap to each party (engine-paid, not a transfer).
+      if (state.players[agr.a]) state.players[agr.a].resource = (state.players[agr.a].resource || 0) + sp;
+      if (state.players[agr.b]) state.players[agr.b].resource = (state.players[agr.b].resource || 0) + sp;
+    }
+    survivors.push(agr);
+  }
+  state.diplomacy.agreements = survivors;
+}
+
+// Voluntarily dissolve a trading pact (UI). After ≥1 full round: no Honor hit,
+// Research floor removed both sides. Same round as formation: prevented.
+export function dissolveTradingPact(state, a, b, cause = "voluntary") {
+  const agr = tradingPactBetween(state, a, b);
+  if (!agr) return { ok: false, reason: "no trading pact" };
+  if (agr.since === state.round) return { ok: false, reason: "can't cancel the round it formed" };
+  const floor = D().tradingPact.permanentResearchOnFormation;
+  grantResearchFloor(state, agr.a, -floor);
+  grantResearchFloor(state, agr.b, -floor);
+  recomputeResearch(state);
+  state.diplomacy.agreements = state.diplomacy.agreements.filter((x) => x !== agr);
+  emit(state, "trading_pact_dissolved", { agreement: agr.id, reason: cause });
+  return { ok: true };
+}
+
+// §6.5 step 1 — decay each gift counter by 1 per round-end; emit only on the
+// transition to 0 (so a quiet spell refreshes the gain rate without spam).
+function giftCounterDecay(state) {
+  const gc = state.diplomacy.giftCounter || {};
+  for (const from of Object.keys(gc)) {
+    for (const to of Object.keys(gc[from])) {
+      const v = (gc[from][to] || 0) - 1;
+      if (v <= 0) { delete gc[from][to]; emit(state, "gift_counter_decayed", { fromPid: from, toPid: to, value: 0 }); }
+      else gc[from][to] = v;
+    }
+    if (!Object.keys(gc[from]).length) delete gc[from];
+  }
+}
+
 // §18.7 pact call — `caller` asks `ally` into its war with `target`.
 // Honoring commits ally to war + builds the alliance; declining costs
 // Standing with caller + a global Honor ding. Returns true if honored.
+// (Used by the content-effect path; the AI decision now flows through
+// evaluatePactCall when `honored` is left undefined.)
 export function resolvePactCall(state, caller, ally, target, honored) {
+  if (honored == null) honored = evaluatePactCall(state, ally, caller, target).honor;
   emit(state, "pact_called", { caller, ally, target, honored });
   if (honored) {
     declareWar(state, ally, target, "pact-call");
@@ -373,7 +695,7 @@ export function vassalize(state, lord, vassal, cause = "vassalized") {
   setStanding(state, lord, vassal, Math.max(getStanding(state, lord, vassal), D().tiers.friendly), cause);
   // register the tribute flow
   state.diplomacy.agreements.push({
-    id: `vassal-${vassal}`, proposer: vassal, recipient: lord, vassalTribute: vassal,
+    id: `vassal-${vassal}`, type: "tribute-flow", proposer: vassal, recipient: lord, vassalTribute: vassal,
     give: [{ flow: { resource: "scrap", amountPerTurn: D().vassal.tributeScrap } }], get: [], round: state.round,
   });
   emit(state, "vassal_established", { lord, vassal, cause });
@@ -415,6 +737,19 @@ function breakPromiseIfAny(state, a, b, kinds) {
 export function onAttack(state, attackerPid, targetFid) {
   if (!targetFid || attackerPid === targetFid) return;
   ensureDiplomacy(state);
+  // §1.1/§6.8 — a "treacherous strike": attacking before any war exists costs
+  // a steep Honor toll, ONCE per war-initiation (this check must run before
+  // declareWar below establishes the war record). Stacks with any pact-break.
+  const wasAtWar = atWar(state, attackerPid, targetFid);
+  if (!wasAtWar && state.players[attackerPid]) {
+    state.players[attackerPid].honor = Math.max(
+      D().honor.min,
+      honorOf(state, attackerPid) - D().honor.surpriseAttackLoss,
+    );
+    emit(state, "surprise_attack_honor_lost", {
+      attacker: attackerPid, target: targetFid, amount: D().honor.surpriseAttackLoss,
+    });
+  }
   if (arePacted(state, attackerPid, targetFid)) breakPact(state, attackerPid, targetFid, "attacked-ally");
   breakPromiseIfAny(state, attackerPid, targetFid, ["nonAggression", "peace"]);
   if (!atWar(state, attackerPid, targetFid)) declareWar(state, attackerPid, targetFid, "attack");
@@ -606,6 +941,10 @@ export function runDiplomacyRound(state) {
   }
   driftStanding(state);
   runFlows(state);
+  // diplomacy-spec.md §6.5 — gift-counter decay + trading-pact route check run
+  // BEFORE the AI-to-AI politics step.
+  giftCounterDecay(state);
+  tradingPactRoundCheck(state);
   runAIPolitics(state);
   vassalTick(state);
   recomputeCoalitions(state);
@@ -682,6 +1021,128 @@ export function performDiplomacy(state, pid, action, params = {}) {
       vassalize(state, pid, f, "player-vassalize");
       return r({ accepted: true });
     }
+
+    // §1.5 — sue for peace (deal-evaluated). Side terms are an optional give/get.
+    case "sue-for-peace": {
+      if (!atWar(state, pid, f)) return { ok: false, reason: "not at war with them" };
+      const side = { proposer: pid, recipient: f, give: params.give || [], get: params.get || [] };
+      if (!aiAcceptsPeace(state, f, pid, side)) return { ok: true, accepted: false, reason: "they fight on" };
+      if ((side.give.length || side.get.length)) applyDeal(state, side, "sue-for-peace");
+      makePeace(state, pid, f, "sue-for-peace");
+      return r({ accepted: true });
+    }
+
+    // §1.4 — demand tribute. Power-gated; caves or escalates to war.
+    case "demand-tribute": {
+      if (!canDemandTribute(state, pid, f)) return { ok: false, reason: "not strong enough to coerce them" };
+      const terms = params.terms || [{ resource: { resource: "scrap", amount: params.amount || 0 } }];
+      adjustMenace(state, pid, D().menace.base, "demand-tribute"); // the threat is hostile
+      emit(state, "tribute_demanded", { demander: pid, target: f, terms });
+      if (caveOnDemand(state, f, pid, terms)) {
+        transferItems(state, f, pid, terms); // coerced — no Standing warmth
+        emit(state, "tribute_caved", { demander: pid, target: f, terms });
+        return r({ accepted: true, caved: true });
+      }
+      const esc = D().demandTribute.escalateOnRefusal;
+      if (esc === "war") declareWar(state, pid, f, "tribute-refused");
+      else dropStandingTiers(state, f, pid, D().demandTribute.refuseStandingDropTiers);
+      emit(state, "tribute_refused", { demander: pid, target: f, escalation: esc });
+      return r({ accepted: false, refused: true });
+    }
+
+    // §1.3 — form a Trading Pact (capital-to-capital route + Neutral+).
+    case "trading-pact": {
+      const res = formTradingPact(state, pid, f);
+      return res.ok ? r(res) : res;
+    }
+    case "dissolve-trading-pact": {
+      const res = dissolveTradingPact(state, pid, f, "player");
+      return res.ok ? r(res) : res;
+    }
+
+    // §1.6 — start/stop a standalone open-borders agreement.
+    case "set-open-borders": {
+      const on = params.on !== false;
+      if (on) {
+        if (atWar(state, pid, f)) return { ok: false, reason: "at war with them" };
+        if (getStanding(state, pid, f) < D().tiers.friendly || getStanding(state, f, pid) < D().tiers.friendly)
+          return { ok: false, reason: "need Friendly+ standing" };
+        if (!passesRepGates(state, pid, f) || !passesRepGates(state, f, pid))
+          return { ok: false, reason: "reputation gates fail" };
+        if (!standaloneOpenBorders(state, pid, f)) {
+          state.diplomacy.agreements.push({ id: `ob-${pid}-${f}-${state.round}`, type: "open-borders", a: pid, b: f, since: state.round });
+        }
+        emit(state, "open_borders_toggled", { agreement: `ob-${pid}-${f}`, on: true });
+        return r({ on: true });
+      }
+      state.diplomacy.agreements = state.diplomacy.agreements.filter(
+        (agr) => !(agr.type === "open-borders" && ((agr.a === pid && agr.b === f) || (agr.a === f && agr.b === pid))),
+      );
+      emit(state, "open_borders_toggled", { agreement: `ob-${pid}-${f}`, on: false });
+      return r({ on: false });
+    }
+
+    // §1.9 — toggle a pact's allied-vision auto-share (Standing cost on off).
+    case "toggle-allied-vision": {
+      const agr = findPactAgreement(state, pid, f);
+      if (!agr) return { ok: false, reason: "no pact with them" };
+      const on = params.on !== false;
+      agr.visionShare = on;
+      adjustStanding(state, pid, f, on ? D().pact.toggleVisionStandingHit : -D().pact.toggleVisionStandingHit, "toggle-vision");
+      if (state.visibility) recomputeVisibilityFor(state, [pid, f], { emitEvents: false });
+      emit(state, "allied_vision_toggled", { agreement: agr.id, on });
+      return r({ on });
+    }
+
+    // §1.10 — toggle a pact's open-borders auto-share (Standing cost on off).
+    case "toggle-open-borders": {
+      const agr = findPactAgreement(state, pid, f);
+      if (!agr) return { ok: false, reason: "no pact with them" };
+      const on = params.on !== false;
+      agr.openBorders = on;
+      adjustStanding(state, pid, f, on ? D().pact.toggleBordersStandingHit : -D().pact.toggleBordersStandingHit, "toggle-borders");
+      emit(state, "open_borders_toggled", { agreement: agr.id, on });
+      return r({ on });
+    }
+
+    // §1.8 — player-initiated pact call (ally evaluated via evaluatePactCall).
+    case "pact-call": {
+      const ally = params.ally, target = params.target;
+      if (!arePacted(state, pid, ally)) return { ok: false, reason: "not pacted with that ally" };
+      if (!atWar(state, pid, target)) return { ok: false, reason: "you're not at war with the target" };
+      emit(state, "pact_call_requested", { caller: pid, ally, target });
+      const { honor } = evaluatePactCall(state, ally, pid, target);
+      if (honor) {
+        declareWar(state, ally, target, "pact-call");
+        adjustStanding(state, ally, pid, D().pactCall.honorGainOnHonor, "pact-honored");
+        emit(state, "pact_call_honored", { caller: pid, ally, target });
+        return r({ honored: true });
+      }
+      adjustStanding(state, pid, ally, -D().pactCall.declineStandingHit, "pact-declined");
+      if (state.players[ally]) adjustHonor(state, ally, -D().honor.breakLoss, "pact-declined");
+      emit(state, "pact_call_declined", { caller: pid, ally, target });
+      return r({ honored: false });
+    }
+
+    // §1.7/§6.10 — voluntarily release a vassal (clemency).
+    case "free-vassal": {
+      const vassal = f;
+      if (vassalLord(state, vassal) !== pid) return { ok: false, reason: "not your vassal" };
+      state.diplomacy.agreements = state.diplomacy.agreements.filter((agr) => agr.vassalTribute !== vassal);
+      delete state.diplomacy.vassals[vassal];
+      delete state.diplomacy.resentment[vassal];
+      state.players[pid].honor = Math.min(D().honor.max, honorOf(state, pid) + D().freeVassal.honorGain);
+      setStanding(state, vassal, pid, D().freeVassal.standingToFriendly, "freed");
+      for (const fid of factionIds(state)) {
+        if (fid === pid || fid === vassal) continue;
+        if (getStanding(state, fid, vassal) <= D().tiers.wary) {
+          adjustStanding(state, fid, pid, -D().freeVassal.rivalCoolingTiers * 3, "freed-clemency");
+        }
+      }
+      emit(state, "vassal_freed", { lord: pid, vassal });
+      return r();
+    }
+
     default:
       return { ok: false, reason: `unknown diplomacy action "${action}"` };
   }

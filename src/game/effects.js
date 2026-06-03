@@ -325,7 +325,9 @@ const EFFECTS = {
   },
   CALL_PACT(state, e, ctx) {
     const caller = resolveTargets(state, e.actor || "active", ctx)[0];
-    diplo.resolvePactCall(state, caller, e.ally, e.target, e.honored !== false);
+    // §1.8 — when the content doesn't force an outcome, the ally evaluates the
+    // call (evaluatePactCall) instead of always honoring.
+    diplo.resolvePactCall(state, caller, e.ally, e.target, e.honored);
   },
   DENOUNCE(state, e, ctx) {
     const a = resolveTargets(state, e.actor || "active", ctx)[0];

@@ -299,6 +299,27 @@ export function recomputeVisibility(state, fid, { emitEvents = true } = {}) {
 // Recompute several factions at once (capture, shared-vision grants).
 export function recomputeVisibilityFor(state, fids, opts) {
   for (const fid of new Set(fids)) if (fid) recomputeVisibility(state, fid, opts);
+  applySharedVision(state);
+}
+
+// diplomacy-spec.md §1.9/§6.6 — allied vision auto-share. After each faction's
+// own fog is computed, pacted parties with `visionShare` on their pact
+// agreement pool their `visible` sets (mutual). Concealment is NOT shared: the
+// union is over visible HEXES only — a concealed-but-undetected unit on a
+// shared hex stays invisible to the borrowing faction (canSee handles that per
+// faction). `explored` is monotonic, so extend both with the union too.
+export function applySharedVision(state) {
+  if (!state.diplomacy?.agreements) return;
+  for (const agr of state.diplomacy.agreements) {
+    if (agr.type !== "pact" || !agr.visionShare) continue;
+    const va = state.visibility?.[agr.a];
+    const vb = state.visibility?.[agr.b];
+    if (!va || !vb) continue;
+    const union = new Set([...va.visible, ...vb.visible]);
+    va.visible = new Set(union);
+    vb.visible = new Set(union);
+    for (const h of union) { va.explored.add(h); vb.explored.add(h); }
+  }
 }
 
 // --- concealment / detection (§19.5) ---------------------------------
