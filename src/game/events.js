@@ -56,6 +56,7 @@ export const EVENT_NAMES = new Set([
   "pact_call_requested", "pact_call_honored", "pact_call_declined",
   "tribute_demanded", "tribute_caved", "tribute_refused",
   "allied_vision_toggled", "open_borders_toggled", "gift_counter_decayed",
+  "territory_trespassed",
 ]);
 
 // Resolve a chip / card instance uid to its content def. Covers Market

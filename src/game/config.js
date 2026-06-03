@@ -215,6 +215,14 @@ export const CONFIG = {
     },
     vision: { sharedPactDefault: true }, // §1.9 — pacts auto-share vision by default
     borders: { pactDefault: true }, // §1.10 — pacts auto-open borders by default
+    // Open-borders ENFORCEMENT — open borders is a permit, not a wall: a unit
+    // may always move into another faction's territory (conquest needs that),
+    // but moving through their ZoC WITHOUT an open-borders agreement is
+    // trespassing and costs relations (softened when already on good terms).
+    trespass: {
+      standingPenalty: 2, // base relations hit (owner → mover) per incursion
+      goodTermsReduction: 1, // softened by this when on Friendly+ terms
+    },
     pact: { // §1.9, §1.10 — toggle costs
       toggleVisionStandingHit: 1,
       toggleBordersStandingHit: 1,

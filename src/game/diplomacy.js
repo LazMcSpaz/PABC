@@ -66,6 +66,30 @@ function installDiplomacyListeners(state) {
     const war = (st.diplomacy.wars || []).find((w) => w.a === winner || w.b === winner);
     if (war) war.contestsWon[winner] = (war.contestsWon[winner] || 0) + 1;
   });
+  // Open-borders enforcement — a unit ending its move inside another faction's
+  // territory pays the trespass penalty (unless open borders / war / own land).
+  registerEventHook(state, "unit_moved", (st, p) => onTrespass(st, p));
+}
+
+// Open borders is a PERMIT, not a wall: you may always move into a faction's
+// territory (so conquest is possible), but moving through its ZoC WITHOUT an
+// open-borders agreement is trespassing — the owner's relations toward you
+// take a hit, softened when you're already on good terms. Open borders (a
+// pact default or a standalone agreement) waives it; an active war makes it
+// moot (you're already enemies).
+function onTrespass(state, payload) {
+  const unit = state.units[payload.unit];
+  if (!unit) return;
+  const mover = unit.owner;
+  const owner = state.world?.zoc?.[payload.to];
+  if (!owner || owner === mover) return;          // neutral ground or your own land
+  if (atWar(state, mover, owner)) return;          // already at war — penalty is moot
+  if (hasOpenBorders(state, mover, owner)) return; // permission granted — free passage
+  const tr = D().trespass;
+  const onGoodTerms = getStanding(state, owner, mover) >= D().tiers.friendly;
+  const penalty = Math.max(1, tr.standingPenalty - (onGoodTerms ? tr.goodTermsReduction : 0));
+  adjustStanding(state, owner, mover, -penalty, "trespass");
+  emit(state, "territory_trespassed", { mover, owner, hex: payload.to, penalty });
 }
 
 // §6.2 — the active war record between two factions, or null.

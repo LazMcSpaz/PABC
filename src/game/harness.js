@@ -2483,6 +2483,53 @@ line("\n  [§1.6/§1.10] Open borders contract");
     performDiplomacy(g, a, "set-open-borders", { faction: b, on: false }).ok && !hasOpenBorders(g, a, b));
 }
 
+// Open borders is a permit, not a wall — moving through territory without it
+// is trespassing (relations hit); with it, free passage.
+line("\n  [Open borders] territory trespass penalty");
+{
+  // Move a unit into another faction's ZoC with no open borders → relations hit.
+  const g = createGame({ seed }); startTurn(g); ensureDiplomacy(g);
+  const mover = g.turnOrder[0], owner = g.turnOrder[1];
+  setStanding(g, owner, mover, 0);
+  const u = Object.values(g.units).find((x) => x.owner === mover);
+  const dest = (g.board.adjacency[u.node] || []).find((h) => !g.locations[h]);
+  g.world.zoc = g.world.zoc || {}; g.world.zoc[dest] = owner; // owner's territory
+  u.moveRemaining = 2; recomputeStats(g);
+  const s0 = getStanding(g, owner, mover);
+  performAction(g, "move", { unit: u.uid, to: dest });
+  check("moving into a faction's territory without open borders costs Standing",
+    getStanding(g, owner, mover) === s0 - CONFIG.diplomacy.trespass.standingPenalty);
+}
+{
+  // Same move, but with an open-borders agreement → no penalty (free passage).
+  const g = createGame({ seed }); startTurn(g); ensureDiplomacy(g);
+  const mover = g.turnOrder[0], owner = g.turnOrder[1];
+  setStanding(g, owner, mover, 0);
+  g.diplomacy.agreements.push({ id: "ob-test", type: "open-borders", a: mover, b: owner, since: 0 });
+  const u = Object.values(g.units).find((x) => x.owner === mover);
+  const dest = (g.board.adjacency[u.node] || []).find((h) => !g.locations[h]);
+  g.world.zoc = g.world.zoc || {}; g.world.zoc[dest] = owner;
+  u.moveRemaining = 2; recomputeStats(g);
+  const s0 = getStanding(g, owner, mover);
+  performAction(g, "move", { unit: u.uid, to: dest });
+  check("an open-borders agreement waives the trespass penalty", getStanding(g, owner, mover) === s0);
+}
+{
+  // On Friendly+ terms the hit is softened.
+  const g = createGame({ seed }); startTurn(g); ensureDiplomacy(g);
+  const mover = g.turnOrder[0], owner = g.turnOrder[1];
+  setStanding(g, owner, mover, CONFIG.diplomacy.tiers.friendly); // good terms
+  const u = Object.values(g.units).find((x) => x.owner === mover);
+  const dest = (g.board.adjacency[u.node] || []).find((h) => !g.locations[h]);
+  g.world.zoc = g.world.zoc || {}; g.world.zoc[dest] = owner;
+  u.moveRemaining = 2; recomputeStats(g);
+  const s0 = getStanding(g, owner, mover);
+  performAction(g, "move", { unit: u.uid, to: dest });
+  const expected = CONFIG.diplomacy.trespass.standingPenalty - CONFIG.diplomacy.trespass.goodTermsReduction;
+  check("the trespass hit is softened when already on good terms",
+    getStanding(g, owner, mover) === s0 - expected);
+}
+
 // §6.2 — war-record listeners (combat feeds the war record)
 line("\n  [§6.2] war-record listeners");
 {
