@@ -24,6 +24,14 @@ import { AnimatePresence, motion } from "framer-motion";
 import { C, CornerBrackets, useEscClose } from "./HudChrome.jsx";
 import { FACTIONS as UI_FACTIONS } from "./data.js";
 
+const A = import.meta.env.BASE_URL;
+const LEADER_PORTRAIT = {
+  versari:   `${A}assets/portraits/factions/versari/versari_leader_1.webp`,
+  lakers:    `${A}assets/portraits/factions/lakers/laker_leader_1.webp`,
+  goldgrass: `${A}assets/portraits/factions/goldgrass/goldgrass_leader_1.webp`,
+  plainers:  `${A}assets/portraits/factions/plainers/plainer_leader_1.webp`,
+};
+
 // Draw a dotted capital-to-capital line between two location ids by
 // querying the DOM for hex cells tagged data-loc=<id>. Re-measures on
 // resize/scroll so the line tracks pan/zoom.
@@ -569,6 +577,442 @@ function FactionRow({ f, onClick }) {
 // Faction Detail view — §3.3
 // =======================================================================
 
+// Leader-transmission viewscreen — a landscape "video feed" with bezel,
+// corner brackets, scanlines, and broadcast-HUD strips. Replays the
+// encounter modal's image-frame chrome so the diplomacy detail view
+// reads as a recorded transmission rather than a flat info panel. Falls
+// back to a NO-SIGNAL pattern when there is no portrait for the faction
+// (minor factions etc).
+function LeaderTransmission({ f, tierColor }) {
+  const portrait = LEADER_PORTRAIT[f.id];
+  return (
+    <div style={{
+      position: "relative",
+      width: "100%",
+      padding: 6,
+      borderRadius: 7,
+      background: "linear-gradient(160deg, rgba(28,46,48,0.86) 0%, rgba(10,20,22,0.92) 100%)",
+      border: `1px solid ${C.holo}cc`,
+      boxShadow: `
+        0 0 18px rgba(86,211,198,0.22),
+        inset 0 1px 0 rgba(143,246,234,0.18),
+        inset 0 -1px 0 rgba(0,0,0,0.55),
+        inset 0 0 14px rgba(86,211,198,0.06)
+      `,
+    }}>
+      <CornerBrackets color={C.holoHi} len={11} inset={3} w={1.4} />
+      <div style={{
+        position: "relative",
+        width: "100%",
+        height: 168,
+        background: "linear-gradient(170deg, rgba(8,16,17,0.97), rgba(3,7,8,0.99))",
+        border: `1px solid rgba(86,211,198,0.55)`,
+        borderRadius: 3,
+        boxShadow: `
+          inset 0 0 22px rgba(0,0,0,0.85),
+          inset 0 2px 4px rgba(0,0,0,0.7),
+          inset 0 0 8px rgba(86,211,198,0.16)
+        `,
+        overflow: "hidden",
+      }}>
+        {portrait ? (
+          <img src={portrait} alt={f.name} style={{
+            position: "absolute", inset: 0, width: "100%", height: "100%",
+            objectFit: "cover", objectPosition: "center 22%",
+            filter: "brightness(0.92) saturate(0.95)",
+          }} />
+        ) : (
+          <>
+            <div style={{
+              position: "absolute", inset: 0,
+              backgroundImage: `linear-gradient(rgba(86,211,198,0.06) 1px, transparent 1px), linear-gradient(90deg, rgba(86,211,198,0.06) 1px, transparent 1px)`,
+              backgroundSize: "20px 20px", pointerEvents: "none",
+            }} />
+            <div style={{
+              position: "absolute", inset: 0, display: "flex", flexDirection: "column",
+              alignItems: "center", justifyContent: "center", gap: 8, pointerEvents: "none",
+            }}>
+              <motion.svg
+                width="40" height="40" viewBox="0 0 24 24" fill="none"
+                stroke={C.holoHi} strokeWidth="1"
+                animate={{ opacity: [0.4, 0.7, 0.4] }}
+                transition={{ duration: 2.4, repeat: Infinity, ease: "easeInOut" }}
+              >
+                <circle cx="12" cy="12" r="10" />
+                <circle cx="12" cy="12" r="4.5" />
+                <path d="M2 12h4M18 12h4M12 2v4M12 18v4" strokeLinecap="round" />
+              </motion.svg>
+              <span style={{
+                fontFamily: C.font, fontSize: 9, letterSpacing: 2.8,
+                textTransform: "uppercase", color: "rgba(143,246,234,0.42)",
+              }}>No Visual</span>
+            </div>
+          </>
+        )}
+        <div className="hud-scanlines" style={{ position: "absolute", inset: 0 }} />
+
+        {/* Top broadcast strip */}
+        <div style={{
+          position: "absolute", top: 0, left: 0, right: 0, height: 17,
+          background: "linear-gradient(180deg, rgba(86,211,198,0.16), transparent)",
+          borderBottom: "1px solid rgba(86,211,198,0.22)",
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          padding: "0 8px",
+          fontFamily: C.font, fontSize: 8, letterSpacing: 1.6,
+          textTransform: "uppercase", color: "rgba(143,246,234,0.78)",
+          pointerEvents: "none",
+        }}>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+            <span style={{ color: f.color, fontWeight: 700, textShadow: `0 0 5px ${f.color}` }}>◆</span>
+            Transmission · {f.short || f.name}
+          </span>
+          <span style={{ color: "rgba(143,246,234,0.55)" }}>Ch. {String(((f.id || "").length * 7) % 64).padStart(2, "0")}</span>
+        </div>
+
+        {/* Bottom broadcast strip */}
+        <div style={{
+          position: "absolute", bottom: 0, left: 0, right: 0, height: 18,
+          background: "linear-gradient(0deg, rgba(0,0,0,0.55), transparent)",
+          borderTop: "1px solid rgba(86,211,198,0.22)",
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          padding: "0 8px",
+          fontFamily: C.font, fontSize: 8, letterSpacing: 1.6,
+          textTransform: "uppercase", color: "rgba(143,246,234,0.78)",
+          pointerEvents: "none",
+        }}>
+          <span style={{ color: tierColor, fontWeight: 700, textShadow: `0 0 5px ${tierColor}aa` }}>
+            ◢ {TIER_LABEL[f.standingTier] || f.standingTier}
+          </span>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+            <motion.span
+              animate={{ opacity: [0.4, 1, 0.4] }}
+              transition={{ duration: 1.6, repeat: Infinity, ease: "easeInOut" }}
+              style={{
+                display: "inline-block", width: 5, height: 5, borderRadius: "50%",
+                background: "#e0654a", boxShadow: "0 0 5px #e0654a",
+              }}
+            />
+            Live
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Small holo pill — used as a tag row below the leader transmission to
+// surface relationship state at a glance (Pacted, At War, Vassal, etc).
+function StatusPill({ color, children }) {
+  return (
+    <span style={{
+      display: "inline-flex", alignItems: "center", gap: 4,
+      padding: "2px 8px", borderRadius: 99,
+      border: `1px solid ${color}99`,
+      background: `${color}18`,
+      boxShadow: `0 0 6px ${color}33`,
+      fontFamily: C.font, fontSize: 8.5, fontWeight: 700,
+      letterSpacing: 1.4, textTransform: "uppercase",
+      color, whiteSpace: "nowrap",
+    }}>{children}</span>
+  );
+}
+
+function StatusRow({ f, tierColor }) {
+  const pills = [];
+  pills.push({ color: tierColor, label: TIER_LABEL[f.standingTier] || f.standingTier });
+  if (f.temperament) pills.push({ color: C.holo, label: f.temperament });
+  if (f.atWar)        pills.push({ color: "#d2453f", label: "◤ At War" });
+  if (f.pacted)       pills.push({ color: "#5fc27a", label: "◆ Pacted" });
+  if (f.vassalOfYou)  pills.push({ color: C.gold,    label: "◇ Your Vassal" });
+  if (f.lordOfYou)    pills.push({ color: C.gold,    label: "◆ Sworn To" });
+  if (f.inCoalition)  pills.push({ color: "#d2453f", label: "⚠ Coalition" });
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
+      {pills.map((p, i) => <StatusPill key={i} color={p.color}>{p.label}</StatusPill>)}
+    </div>
+  );
+}
+
+// A thin gradient rule with an inline numeric marker — used to separate
+// sections in the scrolling detail body without piling Cards on Cards.
+function SectionRule({ index, label, color = C.holo }) {
+  return (
+    <div style={{
+      display: "flex", alignItems: "center", gap: 8,
+      margin: "2px 0 -2px",
+    }}>
+      <span style={{
+        fontFamily: C.font, fontSize: 8.5, fontWeight: 700,
+        letterSpacing: 2, color, opacity: 0.85,
+        textShadow: `0 0 6px ${color}66`,
+      }}>{String(index).padStart(2, "0")}</span>
+      <span style={{
+        fontFamily: C.font, fontSize: 9, fontWeight: 700,
+        letterSpacing: 2.4, textTransform: "uppercase", color,
+        opacity: 0.9,
+      }}>▸ {label}</span>
+      <span style={{
+        flex: 1, height: 1,
+        background: `linear-gradient(90deg, ${color}99, ${color}10 80%, transparent)`,
+        opacity: 0.75,
+      }} />
+    </div>
+  );
+}
+
+// Intel Brief — qualitative read of the relationship dressed up as an
+// intelligence dispatch. The player never sees raw Menace/Honor numbers
+// or the words "tolerance" / "floor"; the underlying engine truth is
+// folded into the prose from `sentenceLong` plus a couple of extra
+// "field reads" we synthesize from the gate flags.
+function IntelBrief({ f, tierColor }) {
+  const extras = [];
+  if (f.menaceBeyondTolerance) {
+    extras.push("Your war record has crossed what they can stomach — overtures will fall on closed ears until you ease off.");
+  } else if (f.menaceMarker > 0.7) {
+    extras.push("Their watchers flag your campaigns; another move and they may pull back from the table.");
+  }
+  if (f.honorBelowFloor) {
+    extras.push("Their councils name you oath-breaker; no pact or deal of weight will hold your name on it.");
+  } else if (f.honorMarker < 0.4) {
+    extras.push("There are murmurings about whether your word is worth the breath it takes.");
+  }
+  return (
+    <div style={{
+      position: "relative",
+      padding: 7,
+      borderRadius: 7,
+      background: "linear-gradient(160deg, rgba(28,46,48,0.8), rgba(10,20,22,0.88))",
+      border: `1px solid ${C.holo}aa`,
+      borderLeft: `3px solid ${tierColor}`,
+      boxShadow: `
+        inset 0 1px 0 rgba(143,246,234,0.15),
+        inset 0 -1px 0 rgba(0,0,0,0.5),
+        inset 0 0 12px rgba(86,211,198,0.05),
+        0 0 12px rgba(86,211,198,0.15)
+      `,
+    }}>
+      <CornerBrackets color={C.holoHi} len={8} inset={3} w={1.2} />
+      {/* recessed inner panel — the "screen" where the text lives */}
+      <div style={{
+        position: "relative",
+        padding: "11px 12px 12px",
+        borderRadius: 3,
+        background: "linear-gradient(172deg, rgba(8,16,17,0.96), rgba(3,7,8,0.99))",
+        border: `1px solid rgba(86,211,198,0.45)`,
+        boxShadow: `
+          inset 0 0 20px rgba(0,0,0,0.75),
+          inset 0 0 8px rgba(86,211,198,0.10)
+        `,
+        overflow: "hidden",
+      }}>
+        {/* faint grid */}
+        <div style={{
+          position: "absolute", inset: 0,
+          backgroundImage: `linear-gradient(rgba(86,211,198,0.04) 1px, transparent 1px), linear-gradient(90deg, rgba(86,211,198,0.04) 1px, transparent 1px)`,
+          backgroundSize: "18px 18px", pointerEvents: "none",
+        }} />
+        <div className="hud-scanlines" style={{ position: "absolute", inset: 0 }} />
+
+        <div style={{
+          position: "relative",
+          display: "flex", alignItems: "baseline", justifyContent: "space-between",
+          marginBottom: 8,
+          paddingBottom: 6,
+          borderBottom: "1px dashed rgba(86,211,198,0.22)",
+        }}>
+          <span style={{
+            fontFamily: C.font, fontSize: 9, fontWeight: 700,
+            letterSpacing: 2.4, textTransform: "uppercase",
+            color: C.holoHi, textShadow: `0 0 6px ${C.holo}66`,
+          }}>▸ Intel Brief</span>
+          <span style={{
+            display: "inline-flex", alignItems: "center", gap: 5,
+            fontFamily: C.font, fontSize: 8, fontWeight: 600,
+            letterSpacing: 1.8, textTransform: "uppercase",
+            color: "rgba(143,246,234,0.55)",
+          }}>
+            <span style={{
+              width: 4, height: 4, borderRadius: "50%",
+              background: tierColor, boxShadow: `0 0 5px ${tierColor}`,
+            }} />
+            Field Report
+          </span>
+        </div>
+        <div className="pc-prose" style={{
+          position: "relative",
+          fontSize: 12.5, lineHeight: 1.55, color: "#dbe8e3",
+          fontStyle: "italic",
+          textShadow: "0 0 8px rgba(86,211,198,0.18)",
+        }}>
+          {f.sentenceLong}
+          {extras.length > 0 && (
+            <>
+              {" "}{extras.join(" ")}
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Verb → category lookup. Keeps the actions panel from being a flat
+// wall of buttons.
+const VERB_CATEGORY = {
+  // Diplomacy — overtures, custom deals, mediation.
+  "gift":                  "diplomacy",
+  "propose-deal":          "diplomacy",
+  "propose-pact":          "diplomacy",
+  "mediate":               "diplomacy",
+  // Trade & borders — passive economic / movement agreements.
+  "trading-pact":          "trade",
+  "dissolve-trading-pact": "trade",
+  "set-open-borders":      "trade",
+  "toggle-open-borders":   "trade",
+  "toggle-allied-vision":  "trade",
+  // War & peace — opening, ending, calling allies into wars.
+  "declare-war":           "war",
+  "make-peace":            "war",
+  "sue-for-peace":         "war",
+  "pact-call":             "war",
+  // Coercion — destructive Standing/Honor moves.
+  "demand-tribute":        "coercion",
+  "denounce":              "coercion",
+  "vassalize":             "coercion",
+  "free-vassal":           "coercion",
+};
+
+const CATEGORY_META = [
+  { key: "diplomacy", label: "Diplomacy",     accent: C.holo,      defaultOpen: true },
+  { key: "trade",     label: "Trade & Borders", accent: C.gold,    defaultOpen: true },
+  { key: "war",       label: "War & Peace",   accent: "#d2453f",   defaultOpen: true },
+  { key: "coercion",  label: "Coercion",      accent: "#d2453f",   defaultOpen: false },
+];
+
+function ActionGroups({ f, onVerb, onOpenPane, onConfirmAndAct }) {
+  // Strip the redundant open-borders verb: when borders are already open
+  // from your side, only show the toggle (which we'll relabel "Close").
+  // When they're closed, only show the "Open" variant. This prevents the
+  // duplicate "Open Borders" + "Toggle Open Borders" button pair.
+  const verbs = (f.verbs || []).filter((v) => {
+    if (v.verb === "set-open-borders" && f.openBordersFromYou) return false;
+    if (v.verb === "toggle-open-borders" && !f.openBordersFromYou) return false;
+    return true;
+  });
+
+  function dispatch(verb, meta) {
+    if (meta.isPane) onOpenPane(meta.isPane);
+    else if (meta.destructive) onConfirmAndAct(verb, { faction: f.id });
+    else if (verb === "set-open-borders") onVerb(verb, { faction: f.id, on: true });
+    else if (verb === "toggle-open-borders") onVerb(verb, { faction: f.id, on: !f.openBordersFromYou });
+    else if (verb === "toggle-allied-vision") onVerb(verb, { faction: f.id, on: true });
+    else onVerb(verb, { faction: f.id });
+  }
+
+  // Override the displayed label/body for context-dependent verbs so the
+  // button text matches what it'll actually do right now.
+  function metaFor(verb) {
+    const base = VERB_META[verb];
+    if (!base) return null;
+    if (verb === "toggle-open-borders") {
+      return { ...base, label: "Close Borders", body: "Close your half of the open-borders agreement." };
+    }
+    return base;
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
+      {CATEGORY_META.map((cat) => {
+        const groupVerbs = verbs.filter((v) => VERB_CATEGORY[v.verb] === cat.key);
+        if (groupVerbs.length === 0) return null;
+        return (
+          <ActionGroup key={cat.key} label={cat.label} accent={cat.accent} defaultOpen={cat.defaultOpen}>
+            {groupVerbs.map((v) => {
+              const meta = metaFor(v.verb);
+              if (!meta) return null;
+              return (
+                <VerbButton
+                  key={v.verb}
+                  verbMeta={meta}
+                  gate={v}
+                  onClick={() => dispatch(v.verb, meta)}
+                />
+              );
+            })}
+          </ActionGroup>
+        );
+      })}
+    </div>
+  );
+}
+
+// A collapsible subsection inside the Actions block. The header is
+// styled as a holo tab — clipped left edge in the accent colour, a
+// trailing gradient rule, and a small chevron that rotates when open.
+function ActionGroup({ label, accent, defaultOpen, count, children }) {
+  const [open, setOpen] = useState(defaultOpen);
+  const childCount = Array.isArray(children) ? children.length : (children ? 1 : 0);
+  return (
+    <div>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="hud-int"
+        style={{
+          position: "relative",
+          width: "100%", textAlign: "left", padding: "6px 9px 6px 12px",
+          background: open
+            ? `linear-gradient(90deg, ${accent}22, ${accent}05 65%, transparent)`
+            : "rgba(86,211,198,0.03)",
+          border: `1px solid ${accent}55`,
+          borderLeft: `3px solid ${accent}`,
+          borderRadius: "0 4px 4px 0",
+          cursor: "pointer",
+          fontFamily: C.font, fontSize: 10, fontWeight: 700,
+          letterSpacing: 1.8, textTransform: "uppercase",
+          color: accent,
+          display: "flex", alignItems: "center", gap: 6,
+          marginBottom: open ? 6 : 0,
+          boxShadow: open ? `0 0 8px ${accent}33, inset 0 0 6px ${accent}10` : "none",
+          transition: "background .12s ease, box-shadow .12s ease, margin-bottom .12s ease",
+        }}
+      >
+        <span style={{
+          display: "inline-block", width: 6, height: 6,
+          background: accent,
+          clipPath: "polygon(0 0, 100% 50%, 0 100%)",
+          boxShadow: `0 0 5px ${accent}`,
+          transition: "transform .15s ease",
+          transform: open ? "rotate(90deg)" : "rotate(0deg)",
+          flexShrink: 0,
+        }} />
+        <span style={{ flex: 1, textShadow: `0 0 6px ${accent}55` }}>{label}</span>
+        <span style={{
+          fontSize: 8.5, color: accent, opacity: 0.6, fontWeight: 600,
+          letterSpacing: 1.4,
+        }}>
+          {childCount}
+        </span>
+        <span style={{
+          height: 1, width: 18,
+          background: `linear-gradient(90deg, ${accent}99, transparent)`,
+          opacity: 0.55,
+        }} />
+      </button>
+      {open && (
+        <motion.div
+          initial={{ opacity: 0, y: -3 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.16, ease: "easeOut" }}
+          style={{ display: "flex", flexDirection: "column", gap: 5 }}
+        >
+          {children}
+        </motion.div>
+      )}
+    </div>
+  );
+}
+
 function FactionDetailView({ f, dip, onBack, onClose, onVerb, onOpenPane, onConfirmAndAct }) {
   const tierColor = TIER_COLOR[f.standingTier] || "#f4efe2";
   return (
@@ -576,45 +1020,24 @@ function FactionDetailView({ f, dip, onBack, onClose, onVerb, onOpenPane, onConf
       <DetailHeader f={f} tierColor={tierColor} onBack={onBack} onClose={onClose} />
 
       <div className="pc-scroll" style={{
-        flex: 1, overflowY: "auto", padding: "12px 16px",
-        display: "flex", flexDirection: "column", gap: 12,
+        flex: 1, overflowY: "auto", padding: "12px 14px 14px",
+        display: "flex", flexDirection: "column", gap: 11,
       }}>
-        {/* Sentiment panel */}
-        <Card>
-          <SectionLabel color={tierColor}>Their stance</SectionLabel>
-          <div className="pc-prose" style={{ fontSize: 12.5, lineHeight: 1.5 }}>{f.sentenceLong}</div>
-        </Card>
+        {/* Recorded transmission — leader portrait in a viewscreen with
+            broadcast HUD strips. Top of the detail view; scrolls away. */}
+        <LeaderTransmission f={f} tierColor={tierColor} />
+        <StatusRow f={f} tierColor={tierColor} />
 
-        {/* Reputation gate panel — anonymised bars */}
-        <Card>
-          <SectionLabel>Reputation gates</SectionLabel>
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            <RepBar
-              marker={f.menaceMarker}
-              beyond={f.menaceBeyondTolerance}
-              label="Menace · their tolerance"
-              goodSide="low"
-              color="#5fc27a"
-            />
-            <RepBar
-              marker={1 - Math.max(0, Math.min(1, f.honorMarker))}
-              beyond={f.honorBelowFloor}
-              label="Honor · their trust floor"
-              goodSide="high"
-              color="#5fc27a"
-            />
-          </div>
-        </Card>
+        <SectionRule index={1} label="Intel Brief" color={tierColor} />
+        <IntelBrief f={f} tierColor={tierColor} />
 
-        {/* Relationship & obligations */}
+        <SectionRule index={2} label="Relationship" color={C.holo} />
         <Card>
-          <SectionLabel>Relationship</SectionLabel>
           <ObligationsList f={f} dip={dip} />
         </Card>
 
-        {/* What they want */}
+        <SectionRule index={3} label="What They Want" color={C.holo} />
         <Card>
-          <SectionLabel>What they want</SectionLabel>
           <div className="pc-prose" style={{ fontSize: 12, lineHeight: 1.5 }}>
             <div style={{ marginBottom: 4 }}>
               <strong style={{ color: C.holoHi, textTransform: "uppercase", letterSpacing: 1 }}>
@@ -625,47 +1048,31 @@ function FactionDetailView({ f, dip, onBack, onClose, onVerb, onOpenPane, onConf
           </div>
         </Card>
 
-        {/* Tech wheel (B1 gated) */}
+        <SectionRule index={4} label="Tech Wheel" color={C.holo} />
         {dip.spyRing ? (
           <Card>
-            <SectionLabel>Tech wheel</SectionLabel>
             <TechReadout nodes={f.theirTechWheel || []} />
           </Card>
         ) : (
           <Card accent="rgba(86,211,198,0.2)">
-            <SectionLabel>Tech wheel</SectionLabel>
             <div style={{
               fontFamily: C.font, fontSize: 11, letterSpacing: 1, textTransform: "uppercase",
               color: "rgba(143,246,234,0.5)",
-            }}>— Espionage required (Intelligence B1 Spy Ring)</div>
+              display: "flex", alignItems: "center", gap: 6,
+            }}>
+              <span style={{ color: C.holoHi, opacity: 0.5 }}>◇</span>
+              Espionage required · Intelligence B1 Spy Ring
+            </div>
           </Card>
         )}
 
-        {/* Actions */}
-        <Card>
-          <SectionLabel>Actions</SectionLabel>
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            {(f.verbs || []).map((v) => {
-              const meta = VERB_META[v.verb];
-              if (!meta) return null;
-              return (
-                <VerbButton
-                  key={v.verb}
-                  verbMeta={meta}
-                  gate={v}
-                  onClick={() => {
-                    if (meta.isPane) onOpenPane(meta.isPane);
-                    else if (meta.destructive) onConfirmAndAct(v.verb, { faction: f.id });
-                    else if (v.verb === "set-open-borders") onVerb(v.verb, { faction: f.id, on: true });
-                    else if (v.verb === "toggle-open-borders") onVerb(v.verb, { faction: f.id, on: !f.openBordersFromYou });
-                    else if (v.verb === "toggle-allied-vision") onVerb(v.verb, { faction: f.id, on: true });
-                    else onVerb(v.verb, { faction: f.id });
-                  }}
-                />
-              );
-            })}
-          </div>
-        </Card>
+        <SectionRule index={5} label="Actions" color={C.holoHi} />
+        <ActionGroups
+          f={f}
+          onVerb={onVerb}
+          onOpenPane={onOpenPane}
+          onConfirmAndAct={onConfirmAndAct}
+        />
       </div>
     </div>
   );
