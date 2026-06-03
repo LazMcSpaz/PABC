@@ -167,7 +167,7 @@ function BeatEditor({
           </IconButton>
         }
       >
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Field label="id">
             <TextInput value={beat.id} onChange={(v) => set("id", v)} />
           </Field>
@@ -214,7 +214,7 @@ function BeatEditor({
       </SectionCard>
 
       <SectionCard title="Delivery">
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Field label="deliver">
             <Select
               value={beat.deliver}

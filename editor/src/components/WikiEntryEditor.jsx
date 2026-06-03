@@ -35,7 +35,7 @@ export function WikiEntryEditor({ value, onChange }) {
   return (
     <div className="flex flex-col gap-4">
       <SectionCard title="Wiki entry">
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Field
             label="id"
             tip="wiki.id"
