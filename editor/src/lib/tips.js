@@ -82,6 +82,18 @@ export const TIPS = {
   "beat.art":
     "Free-text art direction notes — for your reference, not shown in-game.",
 
+  // --- wiki ---
+  "wiki.id":
+    "Stable identifier the [[term]] markup falls back to if the displayed term doesn't match. Lower-case, dash-separated.",
+  "wiki.term":
+    "What the entry is called. The renderer looks up `[[term]]` first by exact match on this field, then by id, then by alias.",
+  "wiki.aliases":
+    "Alternate spellings the [[markup]] resolver treats as pointing to this same entry. Comma-separated.",
+  "wiki.category":
+    "Grouping shown in the in-game wiki's left sidebar. Free-text; pick from the starter buttons or type your own.",
+  "wiki.body":
+    "Body text. Use [[term]] to cross-link to another entry, or [[term|display]] to show different visible text. Plain newlines are preserved.",
+
   // --- weight tiers (per-row) ---
   "weight.common":
     "2.0× multiplier. Fires aggressively — wins ties at the cutoff.",

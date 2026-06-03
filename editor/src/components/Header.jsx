@@ -55,6 +55,14 @@ export function Header({
             </option>
           ))}
         </optgroup>
+
+        <optgroup label="Wiki">
+          {(index?.wikiEntries ?? []).map((w) => (
+            <option key={`wiki:${w.id}`} value={`wiki:${w.id}`}>
+              {w.term} {w.category ? `· ${w.category}` : ""}
+            </option>
+          ))}
+        </optgroup>
       </select>
 
       <div className="ml-2 flex items-center gap-1">
@@ -78,6 +86,13 @@ export function Header({
           onClick={() => onNew("field")}
         >
           + field
+        </button>
+        <button
+          type="button"
+          className="px-2 py-1 text-xs rounded bg-slate-800 hover:bg-slate-700 border border-slate-700"
+          onClick={() => onNew("wiki")}
+        >
+          + wiki
         </button>
         <button
           type="button"

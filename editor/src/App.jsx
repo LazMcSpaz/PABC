@@ -3,8 +3,13 @@ import { Header } from "./components/Header.jsx";
 import { WorldEncounterEditor } from "./components/WorldEncounterEditor.jsx";
 import { FieldEncounterEditor } from "./components/FieldEncounterEditor.jsx";
 import { QuestEditor } from "./components/QuestEditor.jsx";
+import { WikiEntryEditor } from "./components/WikiEntryEditor.jsx";
 import { ImportModal } from "./components/ImportModal.jsx";
-import { listAll, loadQuest, saveQuest, deleteQuest } from "./lib/api.js";
+import {
+  listAll,
+  loadQuest, saveQuest, deleteQuest,
+  loadWikiEntry, saveWikiEntry, deleteWikiEntry,
+} from "./lib/api.js";
 import {
   loadStory,
   saveStory,
@@ -15,6 +20,7 @@ import {
   validateWorldEncounter,
   validateFieldEncounter,
   validateQuest,
+  validateWikiEntry,
 } from "./lib/validation.js";
 import { newId } from "./lib/id.js";
 import {
@@ -265,6 +271,8 @@ function EditorForKind({ kind, draft, onChange, context }) {
       return <FieldEncounterEditor value={draft} onChange={onChange} context={context} />;
     case "quest":
       return <QuestEditor value={draft} onChange={onChange} context={context} />;
+    case "wiki":
+      return <WikiEntryEditor value={draft} onChange={onChange} />;
     default:
       return null;
   }
@@ -274,6 +282,7 @@ function canonicalKind(kind) {
   if (kind === "world" || kind === "world_encounter") return "world";
   if (kind === "field" || kind === "field_encounter") return "field";
   if (kind === "quest") return "quest";
+  if (kind === "wiki" || kind === "wiki_entry") return "wiki";
   return kind;
 }
 
@@ -284,18 +293,21 @@ function kindKey(kind) {
 async function loadForKind(kind, id) {
   if (kind === "world" || kind === "field") return loadStory(kind, id);
   if (kind === "quest") return loadQuest(id);
+  if (kind === "wiki") return loadWikiEntry(id);
   throw new Error(`unknown kind ${kind}`);
 }
 
 async function saveForKind(kind, draft) {
   if (kind === "world" || kind === "field") return saveStory(draft);
   if (kind === "quest") return saveQuest(draft);
+  if (kind === "wiki") return saveWikiEntry(draft);
   throw new Error(`unknown kind ${kind}`);
 }
 
 async function deleteForKind(kind, id) {
   if (kind === "world" || kind === "field") return deleteStory(kind, id);
   if (kind === "quest") return deleteQuest(id);
+  if (kind === "wiki") return deleteWikiEntry(id);
   throw new Error(`unknown kind ${kind}`);
 }
 
@@ -312,6 +324,7 @@ function validate(kind, draft, ctx) {
   if (kind === "world") return validateWorldEncounter(draft, ctx);
   if (kind === "field") return validateFieldEncounter(draft, ctx);
   if (kind === "quest") return validateQuest(draft, ctx);
+  if (kind === "wiki") return validateWikiEntry(draft, ctx);
   return [];
 }
 
@@ -350,6 +363,17 @@ function blankForKind(kind, id) {
       prereqs: [],
       claimRewards: [],
       sharedRewards: [],
+    };
+  }
+  if (kind === "wiki") {
+    return {
+      kind: "wiki",
+      id,
+      term: "",
+      aliases: [],
+      category: "Mechanics",
+      body: "",
+      imagePath: null,
     };
   }
   return null;

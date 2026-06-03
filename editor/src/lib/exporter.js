@@ -36,13 +36,21 @@ export function renderFiles(snapshot, { generatedAt = new Date() } = {}) {
         `export const QUESTS = ${stableStringify(byId(snapshot.quests))};\n`,
     },
     {
+      path: "src/game/content/wiki.js",
+      content:
+        HEADER +
+        stampLine +
+        `export const WIKI_ENTRIES = ${stableStringify(byId(snapshot.wikiEntries ?? []))};\n`,
+    },
+    {
       path: "src/game/content/index.js",
       content:
         HEADER +
         stampLine +
         `export { WORLD_ENCOUNTERS } from "./world-encounters.js";\n` +
         `export { FIELD_ENCOUNTERS } from "./field-encounters.js";\n` +
-        `export { QUESTS } from "./quests.js";\n`,
+        `export { QUESTS } from "./quests.js";\n` +
+        `export { WIKI_ENTRIES } from "./wiki.js";\n`,
     },
   ];
 }

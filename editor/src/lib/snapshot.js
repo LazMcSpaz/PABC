@@ -22,7 +22,7 @@ export async function loadSnapshot() {
   const sb = requireSupabase();
 
   const [
-    we, fe, q, qb, qbp, ch, ef,
+    we, fe, q, qb, qbp, ch, ef, wk,
   ] = await Promise.all([
     sb.from("world_encounters").select("*").order("id"),
     sb.from("field_encounters").select("*").order("id"),
@@ -31,11 +31,15 @@ export async function loadSnapshot() {
     sb.from("quest_beat_prereqs").select("*"),
     sb.from("choices").select("*").order("ordinal"),
     sb.from("effects").select("*").order("ordinal"),
+    sb.from("wiki_entries").select("*").order("id"),
   ]);
 
   for (const r of [we, fe, q, qb, qbp, ch, ef]) {
     if (r.error) throw r.error;
   }
+  // wiki_entries is optional — pre-0007 databases won't have the table;
+  // tolerate that gracefully instead of failing the whole snapshot.
+  const wikiRows = wk.error ? [] : wk.data ?? [];
 
   // Index effects by parent.
   const effectsByParent = new Map();
@@ -135,7 +139,16 @@ export async function loadSnapshot() {
     },
   }));
 
-  return { worldEncounters, fieldEncounters, quests };
+  const wikiEntries = wikiRows.map((row) => ({
+    id: row.id,
+    term: row.term,
+    aliases: decodeJson(row.aliases) ?? [],
+    category: row.category ?? null,
+    body: row.body,
+    imagePath: row.imagePath ?? null,
+  }));
+
+  return { worldEncounters, fieldEncounters, quests, wikiEntries };
 }
 
 // Strip the "__b<n>" sub-beat suffix to find the head id.

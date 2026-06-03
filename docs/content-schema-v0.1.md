@@ -34,6 +34,7 @@ a build step exports the DB to engine-consumable JS.
 | `triggerCondition` | TEXT | DSL JSON (§5) |
 | `triggerStrength` | TEXT | DSL JSON returning 1–5 |
 | `triggerCooldown` | INT | rounds before re-fireable |
+| `triggerWeight` | NUMERIC | rarity multiplier on strength; default 1.0; tier picker exposes Common 2.0 / Normal 1.0 / Uncommon 0.6 / Rare 0.3 / Mythic 0.1. End-of-round trigger pipeline scores `strength × weight`. |
 | `placementFilter` | TEXT | HexFilter JSON (§4); nullable; `placement` mode only |
 
 The engine derives its trigger registry from this table — one trigger
@@ -112,6 +113,22 @@ owner; no recipient/mode columns needed.
   `parentKind = 'quest_claim_reward'` (claimant only) or
   `'quest_shared_reward'` (every player), and `parentId = quests.id`.
 
+### `wiki_entries`
+| Column | Type | Notes |
+|---|---|---|
+| `id` | TEXT PK | stable identifier; `[[term]]` markup falls back to this |
+| `term` | TEXT | display label |
+| `aliases` | TEXT | JSON array of alt spellings the renderer also matches |
+| `category` | TEXT | grouping for the wiki sidebar (free-text; starter set: `'Mechanics'`, `'Geography & Story'`, `'Factions'`) |
+| `body` | TEXT | entry text; supports recursive `[[other-term]]` cross-links |
+| `imagePath` | TEXT | nullable; optional illustration |
+
+In-game flavor text in encounter beats, choice labels, choice outcomes,
+and any other player-facing string is rendered through a `[[term]]`
+parser. A match (alias → term → id, case-insensitive) becomes a
+clickable span that opens the wiki modal. Unresolved markers render as
+plain text with a faded hint so authors can spot typos.
+
 ---
 
 ## 2. Effect type names — **locked, 23 total**
@@ -150,7 +167,7 @@ new row here).
 | `ADVANCE_QUEST` | `{ questId: string, beatId: string }` |
 | `COMPLETE_QUEST` | `{ questId: string }` |
 | `PLACE_ENCOUNTER` | `{ encounterId: string, hex?: <hexId>, hexFilter?: <HexFilter>, expiresIn?: int }` |
-| `DELIVER_ENCOUNTER` | `{ encounterId: string, mode?: 'private'\|'public', recipient?: <token> }` |
+| `DELIVER_ENCOUNTER` | `{ encounterId: string, mode?: 'private'\|'public', recipient?: <token>, condition?: Cond }` (optional `condition` — false skips delivery silently; other effects on the same choice still run, enabling success / fallback chains) |
 
 ### From spec §16 (v0.2 — implemented)
 
@@ -205,6 +222,8 @@ revision.
 | `factionAffiliation` | no | fid \| `'unaffiliated'` \| `'any'` |
 | `strategicValue` | no | `'low'` \| `'medium'` \| `'high'` \| `'veryHigh'` |
 | `hasAbility` | no | abilityId \| `'any'` \| `'none'` |
+| `terrain` | no | terrain sub-type id (`'mountain'`, `'forest'`, `'rubble'`, `'wetland'`, …) \| `'any'` |
+| `hasRoad` | no | `true` (only road hexes) \| `false` (only off-road hexes) |
 
 Example — "an encounter hex within 2 of versari's capital, not
 controlled by anyone":
@@ -236,6 +255,9 @@ trigger `condition`, trigger `strength`, choice `condition`, beat
 | `{ quest_completed: { player: Tok, questId: string } }` | bool | |
 | `{ controls_count: { player: Tok, strategicValue?: string } }` | int | usable as a `Val` |
 | `{ control_duration: { player: Tok, hex: <hexId> } }` | int | usable as a `Val` |
+| `{ has_chip: { holder, chipId, player?, hex? } }` | bool | `holder` ∈ `'active-player-units'`, `'active-player-locations'`, `'any-unit-on-hex'`, `'any-location-on-hex'` |
+| `{ unit_count: { player: Tok, unitType?: string } }` | int | usable as a `Val` |
+| `{ score: { kind, player? \| faction? \| fromFaction?+toFaction? \| observer?+toward? } }` | int | usable as a `Val`. `kind` ∈ `'menace'`, `'honor'`, `'recognition'`, `'standing'`, `'tolerance'`, `'trust_floor'`. |
 | `true` \| `false` | bool | literal |
 
 **`Op`** is one of: `'eq'`, `'ne'`, `'gt'`, `'gte'`, `'lt'`, `'lte'`.
