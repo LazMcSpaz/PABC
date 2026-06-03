@@ -92,6 +92,12 @@ export default function App() {
       setDirty(false);
       return;
     }
+    // A freshly-created draft (handleNew) is already mounted via setDraft;
+    // skip the load — fetching its id from Supabase would error with
+    // "Cannot coerce the result to a single JSON object" since it
+    // doesn't exist on the server yet, and that error would wipe the
+    // blank draft we just set.
+    if (current.isNew) return;
     let cancelled = false;
     (async () => {
       try {
@@ -139,7 +145,9 @@ export default function App() {
       return;
     }
     const blank = blankForKind(kind, id);
-    setCurrent({ kind, id, key: `${kindKey(kind)}:${id}` });
+    // `isNew` keeps the load effect from fetching this id (it doesn't
+    // exist server-side yet); it's cleared on the first successful save.
+    setCurrent({ kind, id, key: `${kindKey(kind)}:${id}`, isNew: true });
     setDraft(blank);
     setDirty(true);
     setMessage({ tone: "ok", text: `new ${kind} draft — save to persist` });
@@ -162,6 +170,9 @@ export default function App() {
     try {
       await saveForKind(current.kind, draft);
       setDirty(false);
+      // First save persists the row — drop the isNew flag so any future
+      // selection reloads from the canonical Supabase state.
+      if (current.isNew) setCurrent((c) => (c ? { ...c, isNew: false } : c));
       setMessage({ tone: "ok", text: "saved" });
       await refreshIndex();
       if (githubConfigured()) {
