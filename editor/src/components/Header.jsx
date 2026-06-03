@@ -1,3 +1,5 @@
+import { ContentPicker } from "./ContentPicker.jsx";
+
 export function Header({
   index,
   current,
@@ -23,50 +25,9 @@ export function Header({
         <span className="text-slate-300 text-sm hidden sm:inline">Content Editor</span>
       </div>
 
-      <select
-        className="sm:ml-4 w-full sm:w-72 text-sm order-3 sm:order-2"
-        value={current?.key ?? ""}
-        onChange={(e) => {
-          if (!e.target.value) return;
-          const [kind, id] = e.target.value.split(":", 2);
-          onSelect({ kind, id });
-        }}
-        style={{ fontSize: 16 }}
-      >
-        <option value="">— select content —</option>
-
-        <optgroup label="Quests">
-          {(index?.quests ?? []).map((q) => (
-            <option key={`quest:${q.id}`} value={`quest:${q.id}`}>
-              {q.title ? `${q.title} (${q.id})` : q.id}
-            </option>
-          ))}
-        </optgroup>
-
-        <optgroup label="World Encounters">
-          {(index?.worldEncounters ?? []).map((e) => (
-            <option key={`world:${e.id}`} value={`world:${e.id}`}>
-              {e.title ? `${e.title} (${e.id})` : e.id} · {e.mode}
-            </option>
-          ))}
-        </optgroup>
-
-        <optgroup label="Field Encounters">
-          {(index?.fieldEncounters ?? []).map((e) => (
-            <option key={`field:${e.id}`} value={`field:${e.id}`}>
-              {e.title ? `${e.title} (${e.id})` : e.id}
-            </option>
-          ))}
-        </optgroup>
-
-        <optgroup label="Wiki">
-          {(index?.wikiEntries ?? []).map((w) => (
-            <option key={`wiki:${w.id}`} value={`wiki:${w.id}`}>
-              {w.term} {w.category ? `· ${w.category}` : ""}
-            </option>
-          ))}
-        </optgroup>
-      </select>
+      <div className="sm:ml-4 w-full sm:w-72 order-3 sm:order-2">
+        <ContentPicker index={index} current={current} onSelect={onSelect} />
+      </div>
 
       <div className="order-4 sm:order-3 ml-0 sm:ml-2 flex items-center gap-1 flex-wrap">
         <button
