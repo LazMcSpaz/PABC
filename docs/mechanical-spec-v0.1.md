@@ -2121,9 +2121,15 @@ stale intel about anything you are not currently watching.
 each recompute is the **LoS-limited union** of the radius around every
 source it owns:
 
-- **Units** — radius around each unit.
+- **Units** — radius around each unit. **Base radius 1** (a unit sees its own
+  hex and the ring around it); **+1 on high ground**, **+ Vision chips /
+  upgrades** (`unit.visionBonus` / a chip's `vision`), and **+ the Watch
+  Network** faction-wide bonus. A line trooper is short-sighted by default, so
+  scouting — high ground, scout loadouts, the Intelligence path — is a real
+  investment, not a freebie.
 - **Controlled Locations** — radius scaling with tier / Loyalty (a loyal
-  core sees farther than a fresh capture).
+  core sees farther than a fresh capture): **base 1 + ⌊Loyalty × 0.25⌋**, so a
+  full-Loyalty Capital sees **radius 3** (it is the eye of your territory).
 - **ZoC projects vision** (§18.3) — the influence field contributes sight,
   so presence and visibility share a shape.
 
@@ -2272,8 +2278,11 @@ reaction window for the surprised side.
 
 ### 19.12 Open questions / tables to fill
 
-- **Vision radii** (unit base, by Location tier/Loyalty, ZoC contribution)
-  and **Detection** ranges.
+- **Vision radii** — *decided* (see §19.3): **unit base 1** (+1 high ground,
+  + chips/upgrades, + Watch Network), **Location 1 + ⌊Loyalty × 0.25⌋** (3 at a
+  full-Loyalty Capital), **ZoC** contributes the owned hex itself. Tuned for a
+  larger map — on the 30-hex demo board a radius of 2–3 covers most of the
+  field, which is expected. **Detection** ranges still TBD.
 - **Elevation / cover LoS** rules — how much each blocks or extends.
 - **Ambush magnitude** — does it remove the defensive die, or only add a
   roll penalty alongside dropping the reaction window?
