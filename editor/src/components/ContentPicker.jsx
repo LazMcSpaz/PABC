@@ -140,6 +140,7 @@ export function ContentPicker({ index, current, onSelect }) {
                             const isCurrent =
                               current?.id === item.id &&
                               currentKindToCatKey(current.kind) === cat.key;
+                            const isSub = !!item._isSubBeat;
                             return (
                               <button
                                 key={`${cat.key}:${item.id}`}
@@ -152,10 +153,16 @@ export function ContentPicker({ index, current, onSelect }) {
                                   isCurrent
                                     ? "border-amber-400 bg-amber-500/10 text-amber-200"
                                     : "border-transparent text-slate-200 hover:bg-slate-800/60"
-                                }`}
+                                } ${isSub ? "opacity-60" : ""}`}
                                 style={{ minHeight: 44 }}
+                                title={isSub ? "sub-beat — reached via DELIVER_ENCOUNTER from a parent" : undefined}
                               >
-                                {cat.render(item)}
+                                <span>{cat.render(item)}</span>
+                                {isSub && (
+                                  <span className="ml-2 text-[10px] uppercase tracking-wider text-slate-500">
+                                    sub-beat
+                                  </span>
+                                )}
                               </button>
                             );
                           })

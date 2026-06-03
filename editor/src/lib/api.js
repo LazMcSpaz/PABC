@@ -34,15 +34,18 @@ export async function listAll() {
   if (quests.error) throw quests.error;
   // wiki_entries may not exist yet (pre-0007 schema) — tolerate.
 
-  // Hide sub-beats: their sentinels are copies=0 (field) or
-  // triggerCondition===false (world). They're only reachable via
-  // DELIVER_ENCOUNTER, never standalone, so they don't belong in the
-  // navigator. (See lib/story.js.)
-  const worldEncounters = (worlds.data ?? []).filter((r) => {
-    const cond = decodeJsonSafe(r.triggerCondition);
-    return cond !== false;
-  });
-  const fieldEncounters = (fields.data ?? []).filter((r) => r.copies !== 0);
+  // Sub-beats are not hidden any more — the navigator tags them so
+  // authors can still see their DB has rows. (Previously silently
+  // filtering by copies=0 / triggerCondition=false made data invisible
+  // when something went wrong.) See lib/story.js for sentinel encoding.
+  const worldEncounters = (worlds.data ?? []).map((r) => ({
+    ...r,
+    _isSubBeat: decodeJsonSafe(r.triggerCondition) === false,
+  }));
+  const fieldEncounters = (fields.data ?? []).map((r) => ({
+    ...r,
+    _isSubBeat: r.copies === 0,
+  }));
 
   return {
     worldEncounters,
