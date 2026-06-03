@@ -4,8 +4,10 @@
 // a holo Reinforce action. Bottom-left anchored, ~2:1 wide-and-short so
 // it stays out of the way of the inspector and the event feed.
 import { motion } from "framer-motion";
-import { FACTIONS as UI_FACTIONS } from "./data.js";
+import { FACTIONS as UI_FACTIONS, UNIT_UPGRADES, CHIP_COLOR } from "./data.js";
 import { C, CornerBrackets } from "./HudChrome.jsx";
+
+const BAY_SLOTS = 2;
 
 const A = import.meta.env.BASE_URL;
 const ICON_STRENGTH = `${A}assets/ui/icons/stats/unit_strength_icon.png`;
@@ -104,6 +106,65 @@ function Tag({ color, children }) {
   );
 }
 
+// Compact chip-bay row — one pill per slot, faded dashed pill for empty slots.
+function ChipBay({ chips }) {
+  const accent = CHIP_COLOR.unit;
+  const installed = chips.length;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+      <div style={{
+        display: "flex", justifyContent: "space-between", alignItems: "baseline",
+        fontFamily: C.font, fontSize: 8.5, letterSpacing: 1.4,
+        textTransform: "uppercase",
+      }}>
+        <span style={{ color: "rgba(143,246,234,0.55)" }}>Chip Bay</span>
+        <span style={{ color: installed >= BAY_SLOTS ? C.gold : "rgba(143,246,234,0.55)" }}>
+          {installed}/{BAY_SLOTS}
+        </span>
+      </div>
+      <div style={{ display: "flex", gap: 4 }}>
+        {Array.from({ length: BAY_SLOTS }).map((_, i) => {
+          const chip = UNIT_UPGRADES[chips[i]];
+          if (!chip) {
+            return (
+              <div key={i} style={{
+                flex: 1, height: 30, borderRadius: 3,
+                border: `1px dashed rgba(86,211,198,0.25)`,
+                background: "rgba(8,12,14,0.4)",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                fontFamily: C.font, fontSize: 8.5, letterSpacing: 1.2,
+                textTransform: "uppercase",
+                color: "rgba(143,246,234,0.35)",
+              }}>Empty</div>
+            );
+          }
+          return (
+            <div key={i} title={`${chip.name} — ${chip.effect}`} style={{
+              flex: 1, height: 30, borderRadius: 3, padding: "3px 5px",
+              border: `1px solid ${accent}cc`,
+              background: `linear-gradient(180deg, ${accent}26, ${accent}10)`,
+              boxShadow: `0 0 6px ${accent}33, inset 0 0 4px ${accent}1a`,
+              display: "flex", flexDirection: "column", justifyContent: "center", gap: 1,
+              minWidth: 0,
+            }}>
+              <span style={{
+                fontFamily: C.font, fontSize: 9, fontWeight: 700,
+                letterSpacing: 0.5, color: "#f4efe2", lineHeight: 1,
+                whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+              }}>{chip.name}</span>
+              <span style={{
+                fontFamily: C.font, fontSize: 8, fontWeight: 600,
+                letterSpacing: 0.6, color: accent, lineHeight: 1,
+                whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+              }}>{chip.effect}</span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export default function UnitPanel({ unit, hex, canAct, reinforce, scrap, raidTargets = [], onReinforce, onContest, onClose }) {
   if (!unit) return null;
   const faction = UI_FACTIONS[unit.owner];
@@ -130,7 +191,7 @@ export default function UnitPanel({ unit, hex, canAct, reinforce, scrap, raidTar
         left: 14,
         bottom: 58,
         width: 440,
-        height: 220,
+        minHeight: 220,
         zIndex: 45,
         background: "linear-gradient(158deg, rgba(18,31,32,0.93), rgba(9,17,18,0.95) 60%, rgba(6,11,12,0.97))",
         border: `1px solid ${C.holo}`,
@@ -260,6 +321,9 @@ export default function UnitPanel({ unit, hex, canAct, reinforce, scrap, raidTar
               </span>
             </div>
           )}
+
+          {/* Chip bay — installed upgrades + remaining slots. */}
+          <ChipBay chips={unit.chips || []} />
 
           {canReinforce && (
             <button

@@ -398,10 +398,20 @@ export default function Prototype({ config, onNewGame }) {
   }
 
   // Terrain (wasteland) hexes carry no info worth a dialogue, so they
-  // never open the Inspector — landing on or clicking one just leaves
-  // the inspector closed.
+  // never open the Inspector. Encounter hexes still in their refresh
+  // cooldown (already drawn this run) are skipped too — the player
+  // doesn't need a popup telling them the timer.
+  function isInspectableHex(hexId) {
+    const hex = state.hexes[hexId];
+    if (!hex || hex.type === "terrain") return false;
+    if (hex.type === "encounter") {
+      const cd = gameRef.current.world?.encounterHexCooldowns?.[hex.id] || 0;
+      if (gameRef.current.round < cd) return false;
+    }
+    return true;
+  }
   function inspectHex(hexId) {
-    if (state.hexes[hexId]?.type === "terrain") {
+    if (!isInspectableHex(hexId)) {
       setSelectedHexId(null);
       return;
     }
@@ -462,10 +472,9 @@ export default function Prototype({ config, onNewGame }) {
       return;
     }
 
-    // Otherwise toggle the inspector (terrain never opens it). Hex
-    // selection no longer touches unit selection — those are
-    // independent now (unit tokens have their own click handler).
-    if (state.hexes[hexId]?.type === "terrain") {
+    // Otherwise toggle the inspector. Skip hexes that don't carry
+    // anything worth a dialogue (terrain; encounter sites in cooldown).
+    if (!isInspectableHex(hexId)) {
       setSelectedHexId(null);
       return;
     }
