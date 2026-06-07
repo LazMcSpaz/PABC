@@ -324,8 +324,14 @@ export default function TechWheel({ player, onAssign, onClose, levelInfo }) {
           ))}
         </div>
 
-        {/* Info strip */}
-        <div style={{ minHeight: 54, maxWidth: 520, textAlign: "center", padding: "4px 16px", pointerEvents: "none" }}>
+        {/* Info strip — absolutely positioned beneath the wheel so a one-line
+            vs. multi-line description never changes the flex block's height,
+            which would otherwise re-center (and visibly jump) the wheel. */}
+        <div style={{
+          position: "absolute", top: "100%", left: 0, right: 0,
+          margin: "10px auto 0", minHeight: 54, maxWidth: 520,
+          textAlign: "center", padding: "4px 16px", pointerEvents: "none",
+        }}>
           {hovered ? (
             <>
               <div style={{

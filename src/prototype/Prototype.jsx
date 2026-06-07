@@ -322,12 +322,21 @@ export default function Prototype({ config, onNewGame }) {
     return () => clearTimeout(t);
   }, [toast]);
 
-  // Drop selection when a turn changes — selected unit may no longer be
-  // yours / be ready.
+  // Auto-dismiss the diplomacy action banner so it stops covering the
+  // drawer's text. The timer resets whenever a new result arrives.
+  useEffect(() => {
+    if (!diploResult) return undefined;
+    const t = setTimeout(() => setDiploResult(null), 4500);
+    return () => clearTimeout(t);
+  }, [diploResult]);
+
+  // Drop selection only when the selected unit no longer exists (killed /
+  // pulled off-board). Enemy units stay selectable so the player can inspect
+  // their stats and owner read-only — control actions (move, contest,
+  // reinforce) are gated on ownership everywhere they're offered.
   useEffect(() => {
     if (!selectedUnitId) return;
-    const unit = state.units[selectedUnitId];
-    if (!unit || unit.owner !== state.youId) setSelectedUnitId(null);
+    if (!state.units[selectedUnitId]) setSelectedUnitId(null);
   }, [state, selectedUnitId]);
 
   // Compute the set of hexes the selected unit can reach this turn.
@@ -758,6 +767,7 @@ export default function Prototype({ config, onNewGame }) {
           <UnitPanel
             unit={state.units[selectedUnitId]}
             hex={state.hexes[state.units[selectedUnitId].node]}
+            owned={state.units[selectedUnitId].owner === state.youId}
             canAct={isYourTurn && state.units[selectedUnitId].owner === state.youId}
             reinforce={reinforcePreview(gameRef.current, selectedUnitId)}
             scrap={you.scrap}
@@ -1031,6 +1041,7 @@ export default function Prototype({ config, onNewGame }) {
             key="diplo-drawer"
             dip={state.diplomacy}
             lastResult={diploResult}
+            onDismissResult={() => setDiploResult(null)}
             onAction={onDiplomacy}
             onClose={() => { setShowDiplomacy(false); setDiploResult(null); setHighlightedFactionId(null); }}
             onHighlightFaction={setHighlightedFactionId}

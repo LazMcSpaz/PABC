@@ -1535,7 +1535,7 @@ function Toggle({ label, value, onChange }) {
 // =======================================================================
 
 export default function DiplomacyDrawer({
-  dip, lastResult, onAction, onClose,
+  dip, lastResult, onAction, onClose, onDismissResult,
   onHighlightFaction, // (factionId | null) — host glows that faction's locations on the map
 }) {
   useEscClose(() => {
@@ -1629,20 +1629,39 @@ export default function DiplomacyDrawer({
         }} />
         <CornerBrackets color={C.holo} len={12} inset={5} w={1.4} />
 
-        {/* Last-action toast */}
-        {lastResult?.msg && (
-          <div style={{
-            position: "absolute", left: 16, right: 16, top: 56,
-            zIndex: 5,
-            padding: "6px 10px",
-            background: "rgba(8,16,17,0.92)",
-            border: `1px solid ${lastResult.ok && lastResult.accepted !== false ? "#5fc27a" : "#d2913c"}88`,
-            borderRadius: 4,
-            color: lastResult.ok && lastResult.accepted !== false ? "#5fc27a" : "#d2913c",
-            fontFamily: C.font, fontSize: 10.5, letterSpacing: 0.6,
-            boxShadow: "0 4px 10px rgba(0,0,0,0.4)",
-          }}>{lastResult.msg}</div>
-        )}
+        {/* Last-action toast — auto-clears (host timer); also click to
+            dismiss so it never sits on top of text you're trying to read. */}
+        <AnimatePresence>
+          {lastResult?.msg && (
+            <motion.div
+              key={lastResult.msg}
+              initial={{ opacity: 0, y: -6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -6 }}
+              transition={{ duration: 0.18 }}
+              onClick={onDismissResult}
+              title="Dismiss"
+              style={{
+                position: "absolute", left: 16, right: 16, top: 56,
+                zIndex: 5,
+                display: "flex", alignItems: "center", gap: 8,
+                padding: "6px 10px",
+                background: "rgba(8,16,17,0.92)",
+                border: `1px solid ${lastResult.ok && lastResult.accepted !== false ? "#5fc27a" : "#d2913c"}88`,
+                borderRadius: 4,
+                color: lastResult.ok && lastResult.accepted !== false ? "#5fc27a" : "#d2913c",
+                fontFamily: C.font, fontSize: 10.5, letterSpacing: 0.6,
+                boxShadow: "0 4px 10px rgba(0,0,0,0.4)",
+                cursor: onDismissResult ? "pointer" : "default",
+              }}
+            >
+              <span style={{ flex: 1 }}>{lastResult.msg}</span>
+              {onDismissResult && (
+                <span style={{ opacity: 0.7, fontWeight: 700, flexShrink: 0 }}>×</span>
+              )}
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* View switching */}
         <AnimatePresence mode="wait">

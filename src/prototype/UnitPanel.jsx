@@ -165,7 +165,7 @@ function ChipBay({ chips }) {
   );
 }
 
-export default function UnitPanel({ unit, hex, canAct, reinforce, scrap, raidTargets = [], onReinforce, onContest, onClose }) {
+export default function UnitPanel({ unit, hex, owned = true, canAct, reinforce, scrap, raidTargets = [], onReinforce, onContest, onClose }) {
   if (!unit) return null;
   const faction = UI_FACTIONS[unit.owner];
   const factionColor = faction?.color || C.holo;
@@ -239,7 +239,7 @@ export default function UnitPanel({ unit, hex, canAct, reinforce, scrap, raidTar
             fontFamily: C.font, fontSize: 8.5, letterSpacing: 1.6, textTransform: "uppercase",
             color: factionColor, fontWeight: 600, marginTop: 2,
           }}>
-            {faction?.short || unit.owner} · Selected
+            {faction?.short || unit.owner} · {owned ? "Selected" : "Enemy · View Only"}
           </span>
         </div>
         <button
@@ -378,11 +378,17 @@ export default function UnitPanel({ unit, hex, canAct, reinforce, scrap, raidTar
             color: "rgba(143,246,234,0.45)",
             marginTop: "auto",
           }}>
-            <span style={{ color: READY, fontWeight: 700 }}>Green</span> hex to move ·
-            {canRaid ? (
-              <> <span style={{ color: STOPPED }}>Attack</span> the enemy sharing this hex</>
+            {!owned ? (
+              <>Spotted <span style={{ color: factionColor, fontWeight: 700 }}>{faction?.short || unit.owner}</span> unit — read-only intel. You can't command another faction's forces.</>
             ) : (
-              <> location to <span style={{ color: C.holoHi }}>Contest / Activate / Recruit</span></>
+              <>
+                <span style={{ color: READY, fontWeight: 700 }}>Green</span> hex to move ·
+                {canRaid ? (
+                  <> <span style={{ color: STOPPED }}>Attack</span> the enemy sharing this hex</>
+                ) : (
+                  <> location to <span style={{ color: C.holoHi }}>Contest / Activate / Recruit</span></>
+                )}
+              </>
             )}
           </div>
         </div>
