@@ -31,6 +31,7 @@ import { adaptState, reinforcePreview, engineChipIdToUi, previewLocationContest,
 import { resolveSalvage } from "../game/contest.js";
 import { assignTechNode } from "../game/stats.js";
 import { performDiplomacy } from "../game/diplomacy.js";
+import { isUnitVisibleTo } from "../game/visibility.js";
 import DiplomacyDrawer from "./DiplomacyDrawer.jsx";
 import EncounterModal from "./EncounterModal.jsx";
 import MoveConfirmOverlay from "./MoveConfirmOverlay.jsx";
@@ -330,13 +331,21 @@ export default function Prototype({ config, onNewGame }) {
     return () => clearTimeout(t);
   }, [diploResult]);
 
-  // Drop selection only when the selected unit no longer exists (killed /
-  // pulled off-board). Enemy units stay selectable so the player can inspect
-  // their stats and owner read-only — control actions (move, contest,
-  // reinforce) are gated on ownership everywhere they're offered.
+  // Manage the selection's lifetime. Enemy units stay selectable so the
+  // player can inspect their stats and owner read-only — control actions
+  // (move, contest, reinforce) are gated on ownership everywhere they're
+  // offered. We drop the selection when:
+  //   • the unit no longer exists (killed / pulled off-board), or
+  //   • §19 fog — it's an enemy unit that has left the viewer's sight.
+  // Your own units are always visible, so they're never dropped for fog.
   useEffect(() => {
     if (!selectedUnitId) return;
-    if (!state.units[selectedUnitId]) setSelectedUnitId(null);
+    const game = gameRef.current;
+    const eu = game?.units?.[selectedUnitId];
+    if (!eu) { setSelectedUnitId(null); return; }
+    if (eu.owner !== state.youId && !isUnitVisibleTo(game, state.youId, eu)) {
+      setSelectedUnitId(null);
+    }
   }, [state, selectedUnitId]);
 
   // Compute the set of hexes the selected unit can reach this turn.
