@@ -195,7 +195,10 @@ export function adaptState(state) {
   // the human faction; `vis` is its per-faction visibility (or null in any
   // pre-fog/headless path, in which case everything is shown — back-compat).
   const viewer = state.humanFactionId;
-  const vis = viewer ? state.visibility?.[viewer] : null;
+  // §19 — fog can be switched off at setup; when disabled the viewer reads no
+  // fog at all (whole board + every unit visible). The engine still computes
+  // visibility for AI/ambush mechanics; this only governs what the UI reveals.
+  const vis = (viewer && state.fogEnabled !== false) ? state.visibility?.[viewer] : null;
   const fogOf = (id) =>
     !vis ? "visible" : vis.visible.has(id) ? "visible" : vis.explored.has(id) ? "explored" : "unexplored";
   // A unit is shown only if the viewer can actually see it (live sight +

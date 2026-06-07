@@ -828,7 +828,7 @@ export function checkRecognitionVictory(state) {
       state.diplomacy.recognition[pid] = sc.total;
       emit(state, "recognition_changed", { player: pid, value: sc.total, contributors: sc.contributors });
     }
-    if (sc.total >= D().recognition.threshold) { state.winnerId = pid; return; }
+    if (state.victory?.recognition !== false && sc.total >= D().recognition.threshold) { state.winnerId = pid; return; }
   }
 }
 

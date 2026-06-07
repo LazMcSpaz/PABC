@@ -73,6 +73,18 @@ export const CONFIG = {
   testMap: [3, 4, 5, 6, 5, 4, 3], // 30 hexes
   hexSplit: { location: 10, encounter: 13, terrain: 7 },
 
+  // Selectable map sizes (SetupScreen). `small` is the v0.1 test board, kept
+  // byte-identical so headless/default games are unchanged. Larger sizes add
+  // wasteland + scaled encounter hexes around the same 10 named Locations.
+  // `rows` are hex-grid row widths (diamond); the engine builds the grid from
+  // these and scales the encounter split proportionally (see setup.js).
+  mapSizes: {
+    small:  { label: "Small",  rows: [3, 4, 5, 6, 5, 4, 3] },                              // 30
+    medium: { label: "Medium", rows: [4, 5, 6, 7, 8, 7, 6, 5, 4] },                        // 52
+    large:  { label: "Large",  rows: [6, 7, 8, 9, 10, 11, 10, 9, 8, 7, 6] },               // 91
+    huge:   { label: "Huge",   rows: [8, 9, 10, 11, 12, 13, 14, 13, 12, 11, 10, 9, 8] },   // 140
+  },
+
   // Capital chip bonuses (content/config.csv).
   capital: { garrisonBonus: 2, productionBonus: 2 },
 

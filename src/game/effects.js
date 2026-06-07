@@ -60,7 +60,7 @@ const EFFECTS = {
       emit(state, e.amount >= 0 ? "resource_gained" : "resource_spent", {
         player: pid, resource: e.resource, amount: e.amount,
       });
-      if (e.resource === "VP" && p.vp >= CONFIG.vpThreshold && !state.winnerId) {
+      if (state.victory?.conquest !== false && e.resource === "VP" && p.vp >= CONFIG.vpThreshold && !state.winnerId) {
         state.winnerId = pid;
       }
     }

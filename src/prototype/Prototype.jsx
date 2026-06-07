@@ -24,7 +24,7 @@ import { unitReach, unitMovePath } from "../game/movement.js";
 import { CHIPS as ENGINE_CHIPS, LOCATIONS as ENGINE_LOCATIONS } from "../game/content.js";
 import { CONFIG } from "../game/config.js";
 import { NEUTRAL } from "./data.js";
-import { getEncounter } from "../game/encounters.js";
+import { getEncounter, fieldEncountersEnabled } from "../game/encounters.js";
 import { hasTechNode } from "../game/tech.js";
 import { evalCond } from "../game/dsl.js";
 import { adaptState, reinforcePreview, engineChipIdToUi, previewLocationContest, previewAttackerStrength } from "./engineAdapter.js";
@@ -215,9 +215,31 @@ function buildLocView(state, hex, isYourTurn) {
 // §18.4.1 — field a VARIABLE subset of minors per game so no two casts (and
 // therefore no two political webs) recur. Two distinct minors chosen by seed.
 const MINOR_POOL = ["tempest", "croppers", "steeltraders", "dambarans"];
-function bootGame(seed, humanFactionId) {
-  const minors = [MINOR_POOL[seed % 4], MINOR_POOL[(seed + 2) % 4]];
-  const game = createGame({ seed, humanFactionId, minors });
+// The four playable majors, in fixed order — used to pick the `factionCount`
+// subset (the human is always seated first).
+const MAJOR_POOL = ["versari", "lakers", "goldgrass", "plainers"];
+
+// Translate the SetupScreen config into engine createGame() options.
+function bootGame(config) {
+  const seed = config?.seed ?? 42;
+  const humanFactionId = config?.humanFactionId ?? "versari";
+  const count = Math.max(2, Math.min(4, config?.factionCount ?? 4));
+  // Human first, then the remaining majors in fixed order, capped at `count`.
+  const factionIds = [humanFactionId, ...MAJOR_POOL.filter((f) => f !== humanFactionId)].slice(0, count);
+  const minors = config?.minorFactions === false
+    ? []
+    : [MINOR_POOL[seed % 4], MINOR_POOL[(seed + 2) % 4]];
+  const mapRows = CONFIG.mapSizes?.[config?.mapSize]?.rows ?? CONFIG.testMap;
+  const game = createGame({
+    seed,
+    humanFactionId,
+    factionIds,
+    minors,
+    mapRows,
+    victory: config?.victory,
+    fogOfWar: config?.fogOfWar,
+    encounters: config?.encounters,
+  });
   startTurn(game);
   driveAIsThroughHumanTurn(game);
   return game;
@@ -248,7 +270,7 @@ export default function Prototype({ config, onNewGame }) {
   // and bump a tick to trigger a re-adapt + re-render after each mutation.
   const gameRef = useRef(null);
   if (!gameRef.current) {
-    gameRef.current = bootGame(config?.seed ?? 42, config?.humanFactionId ?? "versari");
+    gameRef.current = bootGame(config);
   }
   const [tick, setTick] = useState(0);
   const bumpTick = useCallback(() => setTick((t) => t + 1), []);
@@ -343,7 +365,7 @@ export default function Prototype({ config, onNewGame }) {
     const game = gameRef.current;
     const eu = game?.units?.[selectedUnitId];
     if (!eu) { setSelectedUnitId(null); return; }
-    if (eu.owner !== state.youId && !isUnitVisibleTo(game, state.youId, eu)) {
+    if (game.fogEnabled !== false && eu.owner !== state.youId && !isUnitVisibleTo(game, state.youId, eu)) {
       setSelectedUnitId(null);
     }
   }, [state, selectedUnitId]);
@@ -395,6 +417,7 @@ export default function Prototype({ config, onNewGame }) {
   }
 
   function peekFieldEncounter(game, destHex) {
+    if (!fieldEncountersEnabled(game)) return null;
     if (game.board.hexes[destHex]?.type !== "encounter") return null;
     const cooldownUntil = game.world?.encounterHexCooldowns?.[destHex] || 0;
     if (game.round < cooldownUntil) return null;

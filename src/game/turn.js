@@ -212,6 +212,22 @@ function runRoundEnd(state) {
   // drift, flows, AI-to-AI politics, vassal tick, coalitions, then the
   // Recognition win check (sets winnerId if a peaceful victory has landed).
   runDiplomacyRound(state);
+  // Last-faction-standing win (SetupScreen "Elimination"). Off unless the
+  // option enabled it, so headless games gain no new win path.
+  checkElimination(state);
+}
+
+// Elimination victory — the sole surviving MAJOR faction (holds a Location
+// or still fields a unit) wins. Minors never count as the last survivor.
+function checkElimination(state) {
+  if (state.winnerId || !state.victory?.elimination) return;
+  const alive = state.turnOrder.filter((fid) => {
+    if (state.players[fid]?.isMinor) return false;
+    const hasLoc = Object.values(state.locations).some((l) => l.controller === fid);
+    const hasUnit = Object.values(state.units).some((u) => u.owner === fid);
+    return hasLoc || hasUnit;
+  });
+  if (alive.length === 1) state.winnerId = alive[0];
 }
 
 // v0.2 §16.5 — advance in-transit field reinforcements. Each round the

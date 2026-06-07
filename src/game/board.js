@@ -246,7 +246,7 @@ export function assignRoads(adjacency, hexes, hubHexes) {
 // Constrained-random layout: place the 10 Locations, then fill the rest
 // with encounter / terrain tiles. Each faction's two affiliated Locations
 // land within 2 hexes of each other; the four start areas are spread.
-export function generateLayout(rng, grid, factions, locations) {
+export function generateLayout(rng, grid, factions, locations, opts = {}) {
   const hexIds = Object.keys(grid.hexes);
   const distFrom = {};
   for (const id of hexIds) distFrom[id] = bfsDistances(grid.adjacency, id);
@@ -305,11 +305,14 @@ export function generateLayout(rng, grid, factions, locations) {
     used.add(chosen);
   }
 
-  // everything else splits into encounter / terrain
+  // everything else splits into encounter / terrain. `encounterCount`
+  // defaults to the v0.1 split so the test board is byte-identical; larger
+  // maps pass a scaled count (setup.js) to keep encounter density steady.
   const type = {};
   for (const id of hexIds) if (placement[id]) type[id] = "location";
+  const encounterCount = opts.encounterCount ?? CONFIG.hexSplit.encounter;
   rng.shuffle(hexIds.filter((id) => !used.has(id))).forEach((id, i) => {
-    type[id] = i < CONFIG.hexSplit.encounter ? "encounter" : "terrain";
+    type[id] = i < encounterCount ? "encounter" : "terrain";
   });
 
   return { type, placement, factionStart, anchors };

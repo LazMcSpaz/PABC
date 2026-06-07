@@ -131,6 +131,23 @@ function applyChoiceEffects(state, choice, pid, ctx) {
 // the unit's owner.
 const FIELD_HEX_COOLDOWN = 3;
 
+// §15 field-encounter frequency (SetupScreen). The dial maps to how fast an
+// encounter hex refreshes after a draw: more frequent ⇒ shorter cooldown.
+// Absent dial (headless / pre-config state) ⇒ the v0.1 cooldown of 3.
+export function fieldEncounterCooldown(state) {
+  const f = state.encounterFreq?.field;
+  if (f == null) return FIELD_HEX_COOLDOWN;
+  if (f <= 0.35) return 6;             // Low
+  if (f <= 0.69) return FIELD_HEX_COOLDOWN; // Normal (3)
+  return 1;                            // High
+}
+
+// "None" on the frequency dial switches field encounters off entirely (the
+// hex never fires a draw). Default (no dial) keeps them enabled.
+export function fieldEncountersEnabled(state) {
+  return (state.encounterFreq?.field ?? 1) > 0.05;
+}
+
 // Recon Team chips on `pid`'s fully-held Locations — each grants one
 // encounter discard (stacks with the §17.5 Intelligence entry node).
 function reconTeamCount(state, pid) {
@@ -172,7 +189,7 @@ export function drawFieldEncounter(state, unit, ctx = {}) {
 
   const encounterId = state.encounterDeck.shift();
   state.discards.encounter.push(encounterId);
-  state.world.encounterHexCooldowns[unit.node] = state.round + FIELD_HEX_COOLDOWN;
+  state.world.encounterHexCooldowns[unit.node] = state.round + fieldEncounterCooldown(state);
   return deliverEncounter(
     state, encounterId,
     { mode: "private", recipient: unit.owner },

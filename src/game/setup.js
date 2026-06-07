@@ -38,6 +38,11 @@ export function createGame({
   factionIds,
   humanFactionId = null,
   minors = [], // §18.4.1 — a VARIABLE subset of minor faction ids to seed
+  // --- SetupScreen options (all optional; defaults preserve the v0.1 game) ---
+  mapRows = CONFIG.testMap, // hex-grid row widths (CONFIG.mapSizes[size].rows)
+  victory, // { conquest, recognition, elimination } win-condition toggles
+  fogOfWar = true, // §19 — when false the UI reveals the whole board
+  encounters, // { field, world } 0..1 frequency dials
 } = {}) {
   const rng = makeRng(seed);
   const uid = createIdGen();
@@ -47,8 +52,17 @@ export function createGame({
   const seededMinors = (minors || []).filter((m) => MINOR_FACTIONS[m]);
   const playing = [...majors, ...seededMinors];
 
-  const grid = buildHexGrid(CONFIG.testMap);
-  const layout = generateLayout(rng, grid, FACTIONS, LOCATIONS);
+  const grid = buildHexGrid(mapRows);
+  // Scale the encounter split with the board so density stays ~constant; the
+  // test board (mapRows === CONFIG.testMap, 30 hexes) yields exactly the v0.1
+  // count (13), keeping headless games byte-identical.
+  const totalHexes = Object.keys(grid.hexes).length;
+  const testTotal = CONFIG.testMap.reduce((a, b) => a + b, 0);
+  const encounterCount =
+    mapRows === CONFIG.testMap
+      ? undefined // → generateLayout uses CONFIG.hexSplit.encounter
+      : Math.round((totalHexes * CONFIG.hexSplit.encounter) / testTotal);
+  const layout = generateLayout(rng, grid, FACTIONS, LOCATIONS, { encounterCount });
 
   // chip-instance registry — every chip in play has a uid
   const chips = {};
@@ -260,6 +274,23 @@ export function createGame({
     rng, // live seeded generator — contest dice draw from it
     nextId: uid, // shared instance id generator — used by runtime Recruit
     humanFactionId,
+    // --- SetupScreen win conditions (§14.1 / §18.10). conquest + recognition
+    // default ON (the engine's always-available paths, unchanged headless);
+    // elimination defaults OFF unless explicitly enabled so headless games
+    // never gain a new win path. The UI passes all three explicitly.
+    victory: {
+      conquest: victory?.conquest ?? true,
+      recognition: victory?.recognition ?? true,
+      elimination: victory?.elimination ?? false,
+    },
+    // §19 — fog toggle (read by the UI adapter; engine vision still computes).
+    fogEnabled: fogOfWar !== false,
+    // §15 — encounter frequency dials (field gates the deck draw cadence;
+    // world is stored for when the world-encounter content/eval lands).
+    encounterFreq: {
+      field: encounters?.field ?? 0.5,
+      world: encounters?.world ?? 0.5,
+    },
     round: 1,
     phase: "Upkeep",
     turnOrder: [...playing],

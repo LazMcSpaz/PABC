@@ -26,6 +26,7 @@ import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { FACTIONS as UI_FACTIONS } from "./data.js";
 import { C, CornerBrackets } from "./HudChrome.jsx";
+import { CONFIG } from "../game/config.js";
 import "./prototype.css";
 
 // ─── constants ──────────────────────────────────────────────────────────────
@@ -47,13 +48,13 @@ const TAGLINE = {
   plainers:  "Wasteland raiders · opportunistic",
 };
 
-// Placeholder hex counts — ascending, placeholder values for UI display only.
-const MAP_SIZES = [
-  { id: "small",  label: "Small",  hexes: 30  },
-  { id: "medium", label: "Medium", hexes: 54  },
-  { id: "large",  label: "Large",  hexes: 85  },
-  { id: "huge",   label: "Huge",   hexes: 128 },
-];
+// Map sizes mirror the engine's CONFIG.mapSizes (single source of truth); hex
+// counts are the real board totals the engine will build.
+const MAP_SIZES = Object.entries(CONFIG.mapSizes).map(([id, m]) => ({
+  id,
+  label: m.label,
+  hexes: m.rows.reduce((a, b) => a + b, 0),
+}));
 
 const VICTORY_CONDITIONS = [
   {
@@ -136,39 +137,48 @@ function FactionCard({ fid, picked, onPick }) {
         <img src={PORTRAITS[fid]} alt={f.name} style={{
           position: "absolute", top: "50%", left: "50%",
           transform: "translate(-50%, -50%)",
-          height: "100%",
-          objectFit: "cover",
+          width: "100%", height: "100%",
+          objectFit: "cover", objectPosition: "center top",
           filter: on
             ? `saturate(1.05) drop-shadow(0 0 12px ${f.color}55)`
             : "saturate(0.7) brightness(0.78)",
           transition: "filter .22s ease",
         }} />
         <div className="hud-scanlines" style={{ position: "absolute", inset: 0 }} />
+        {/* Selected badge overlays the portrait (with its own backing) so it
+            never collides with the variable-length tagline below. */}
+        {on && (
+          <div style={{
+            position: "absolute", top: 8, right: 8,
+            fontFamily: C.font, fontSize: 8, fontWeight: 700,
+            letterSpacing: 1.6, textTransform: "uppercase",
+            color: "#f4efe2",
+            padding: "3px 7px", borderRadius: 3,
+            background: "rgba(4,10,11,0.78)",
+            border: `1px solid ${f.color}`,
+            boxShadow: `0 0 8px ${f.color}88`,
+            textShadow: `0 0 6px ${f.color}aa`,
+            pointerEvents: "none",
+          }}>◆ Selected</div>
+        )}
       </div>
       <div style={{ padding: "9px 11px 11px" }}>
+        {/* Reserved two-line height so longer names (e.g. "Goldgrass
+            Coalition") that wrap stay aligned with single-line cards. */}
         <div style={{
           fontFamily: C.font, fontSize: 13, fontWeight: 700,
           letterSpacing: 1.4, textTransform: "uppercase",
           color: f.color,
           textShadow: on ? `0 0 8px ${f.color}aa` : undefined,
-          lineHeight: 1,
+          lineHeight: 1.12, minHeight: 30,
         }}>{f.name}</div>
         <div style={{
           fontFamily: C.font, fontSize: 9, letterSpacing: 1.1,
           textTransform: "uppercase",
           color: on ? "rgba(244,239,226,0.78)" : "rgba(143,246,234,0.45)",
-          marginTop: 5, lineHeight: 1.35,
+          marginTop: 5, lineHeight: 1.35, minHeight: 25,
         }}>{TAGLINE[fid]}</div>
       </div>
-      {on && (
-        <div style={{
-          position: "absolute", bottom: 8, right: 10,
-          fontFamily: C.font, fontSize: 8.5,
-          letterSpacing: 2, textTransform: "uppercase",
-          color: f.color, fontWeight: 700,
-          textShadow: `0 0 6px ${f.color}aa`,
-        }}>◆ Selected</div>
-      )}
     </button>
   );
 }

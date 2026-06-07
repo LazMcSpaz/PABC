@@ -211,7 +211,7 @@ function captureLocation(state, loc, victor) {
       emit(state, "resource_gained", {
         player: victor, resource: "VP", amount: reward, source: "capture",
       });
-      if (p.vp >= CONFIG.vpThreshold && !state.winnerId) {
+      if (state.victory?.conquest !== false && p.vp >= CONFIG.vpThreshold && !state.winnerId) {
         state.winnerId = victor;
       }
     }
@@ -459,6 +459,7 @@ function offerRetreat(state, unit, ctx, preferred) {
 // crosses 12 ends the game at once.
 function checkVictory(state) {
   if (state.winnerId) return;
+  if (state.victory?.conquest === false) return; // conquest path disabled
   for (const p of Object.values(state.players)) {
     if (p.vp >= CONFIG.vpThreshold) {
       state.winnerId = p.id;

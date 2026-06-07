@@ -83,9 +83,11 @@ export default function LoreScreen({ onBack }) {
   }
 
   return (
-    // Full-screen wrapper — same radial bg as SetupScreen / TitleScreen
+    // Full-screen wrapper — same radial bg as SetupScreen / TitleScreen.
+    // NOTE: hud-screen-scan must be a SEPARATE pointer-events:none overlay
+    // child — applying it to the root would disable clicks on the whole
+    // screen (it sets pointer-events: none).
     <div
-      className="hud-screen-scan"
       style={{
         position: "relative",
         width: "100vw",
@@ -103,6 +105,9 @@ export default function LoreScreen({ onBack }) {
         boxSizing: "border-box",
       }}
     >
+      {/* whole-screen subtle CRT scan — separate overlay so it never blocks clicks */}
+      <div className="hud-screen-scan" style={{ zIndex: 0, opacity: 0.55, position: "fixed" }} />
+
       {/* ── page header ─────────────────────────────────────────────────── */}
       <motion.div
         initial={{ opacity: 0, y: -12 }}

@@ -13,7 +13,7 @@ import { recomputeStats } from "./stats.js";
 import { recomputeInfluence } from "./influence.js";
 import { recomputeVisibility } from "./visibility.js";
 import { applyEffects } from "./effects.js";
-import { drawFieldEncounter, resolveMarkerOnHex } from "./encounters.js";
+import { drawFieldEncounter, resolveMarkerOnHex, fieldEncountersEnabled } from "./encounters.js";
 import { makeUnit } from "./setup.js";
 import { hasTechNode } from "./tech.js";
 import { postAt, buildPost, revealPost } from "./posts.js";
@@ -81,7 +81,7 @@ function runMove(state, { params, ctx }) {
   const markerResult = resolveMarkerOnHex(state, params.to, unit, ctx);
   // §15.8 field-encounter hexes draw from the deck unless the hex is
   // still in its refresh cooldown.
-  if (!markerResult && state.board.hexes[params.to].type === "encounter") {
+  if (!markerResult && fieldEncountersEnabled(state) && state.board.hexes[params.to].type === "encounter") {
     const cooldownUntil = state.world?.encounterHexCooldowns?.[params.to] || 0;
     if (state.round >= cooldownUntil) {
       drawFieldEncounter(state, unit, ctx);
