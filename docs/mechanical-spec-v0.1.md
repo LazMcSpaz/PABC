@@ -759,6 +759,12 @@ per-player state, plus a faction-by-player **standing matrix**.
   entries appended on every Location capture / loss. Lets a trigger
   ask "how long has player X held Y?" or "has this hex changed hands
   twice recently?"
+- `unitDwell` — `uid -> { hex, since }`, reconciled in the round-end
+  pipeline (`updateUnitDwell`). Tracks how long each unit has continuously
+  sat on its current hex; a move resets `since` at the next boundary.
+  Backs the `unit_on_hex_duration` condition — the "leave a unit on this
+  tile for N rounds before the next beat fires" gate. Round-granular: a
+  unit that leaves and returns within one round counts as having stayed.
 - `raidCounts` and `ignoreCounts` — per-faction rolling counters
   (raids carried out against the faction; engagements that were
   passed up). Decayed slightly each round so they reflect recency.
@@ -1013,6 +1019,7 @@ player.encounterCooldowns = {};                 // per-player cooldowns (reserve
 // state-level additions
 state.world = {
   controlHistory:        [],
+  unitDwell:             { /* uid: { hex, since } */ },
   raidCounts:            { /* fid: n */ },
   ignoreCounts:          { /* fid: n */ },
   eventTimeline:         [],

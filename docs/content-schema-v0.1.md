@@ -276,6 +276,8 @@ trigger `condition`, trigger `strength`, choice `condition`, beat
 | `{ quest_completed: { player: Tok, questId: string } }` | bool | |
 | `{ controls_count: { player: Tok, strategicValue?: string } }` | int | usable as a `Val` |
 | `{ control_duration: { player: Tok, hex: <hexId> } }` | int | usable as a `Val` |
+| `{ unit_on_hex_duration: { unit: <uid>, hex?: <hexId\|path> } }` | int | usable as a `Val`. Rounds the unit has continuously sat on the hex (0 the round it arrives). `hex` omitted → its current hex; otherwise gates on that hex. |
+| `{ unit_on_hex_duration: { player: Tok, hex: <hexId\|path> } }` | int | usable as a `Val`. Longest dwell among that player's units currently on `hex` (0 if none). `hex` defaults to the encounter hex (`ctx.sourceHex`). The "park a unit here for N rounds" gate. |
 | `{ has_chip: { holder, chipId, player?, hex? } }` | bool | `holder` ∈ `'active-player-units'`, `'active-player-locations'`, `'any-unit-on-hex'`, `'any-location-on-hex'` |
 | `{ unit_count: { player: Tok, unitType?: string } }` | int | usable as a `Val` |
 | `{ score: { kind, player? \| faction? \| fromFaction?+toFaction? \| observer?+toward? } }` | int | usable as a `Val`. `kind` ∈ `'menace'`, `'honor'`, `'recognition'`, `'standing'`, `'tolerance'`, `'trust_floor'`. |

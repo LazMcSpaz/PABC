@@ -61,6 +61,10 @@ export const TIPS = {
     "Reputation / diplomacy scalar. menace and honor are global per-player; standing is from-faction × to-faction; tolerance is observer's patience with subject's menace.",
   "dsl.controls_count":
     "Integer count of locations the player controls (optionally filtered by strategicValue).",
+  "dsl.control_duration":
+    "Integer rounds the player has continuously controlled a specific hex (a Location). 0 if they don't control it. Gate on 'held the relay for 3 rounds'.",
+  "dsl.unit_on_hex_duration":
+    "Integer rounds a unit has sat on a hex — 0 the round it arrives. Player form returns the longest dwell among that player's units on the hex (blank hex = the encounter hex). Use with op() to gate the next beat on 'park a unit here for N rounds'.",
 
   // --- choices / effects ---
   "choice.label":

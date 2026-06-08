@@ -299,6 +299,10 @@ export function createGame({
       zoc: {},
       // §17.7 Listening Posts — hexId -> { owner, hex, strength, paid, revealedTo }.
       listeningPosts: {},
+      // §5 dwell tracking — uid -> { hex, since }. How long a unit has sat
+      // on its current hex, reconciled at each round end (turn.js). Read by
+      // the `unit_on_hex_duration` condition. Seeded for starting units below.
+      unitDwell: {},
     },
     factionStanding: Object.fromEntries(
       playing.map((fid) => [fid, Object.fromEntries(playing.map((pid) => [pid, 0]))]),
@@ -307,6 +311,12 @@ export function createGame({
     deferred: [],
     activeQuests: {},
   };
+
+  // §5 — seed per-unit hex dwell so `unit_on_hex_duration` reads correctly
+  // for starting units from round 1 (mirrors the controlHistory seeding).
+  state.world.unitDwell = Object.fromEntries(
+    Object.values(state.units).map((u) => [u.uid, { hex: u.node, since: state.round }]),
+  );
 
   // §18.3 — establish the starting Influence field + ZoC owner map so the
   // HUD and routing have them before the first turn.

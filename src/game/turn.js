@@ -202,6 +202,7 @@ export function endTurn(state) {
 // The §15.12 round-end pipeline. Deferred resolution comes first so a
 // queued consequence can update the state that triggers then read.
 function runRoundEnd(state) {
+  updateUnitDwell(state);
   sweepDeferred(state);
   sweepReinforcements(state);
   evaluateTriggers(state);
@@ -249,6 +250,30 @@ function expirePlacementMarkers(state) {
   if (!markers) return;
   for (const [hex, m] of Object.entries(markers)) {
     if (m.expiresAt != null && m.expiresAt < state.round) delete markers[hex];
+  }
+}
+
+// §5 — reconcile per-unit hex dwell at the round boundary so dwell-gated
+// conditions (`unit_on_hex_duration`) see fresh values when conditional
+// beats and triggers evaluate. Self-healing: it compares each unit's
+// current node to its last recorded hex regardless of HOW the unit got
+// there (Move action, post-contest retreat, spawn, direct placement),
+// resetting `since` to the current round on any change. Round-granular by
+// design — it matches the round-end cadence of the consumers, so a unit
+// that leaves and returns within one round is treated as having stayed.
+// Runs first in the pipeline so everything downstream reads current dwell.
+function updateUnitDwell(state) {
+  const w = state.world;
+  if (!w) return;
+  const dwell = (w.unitDwell = w.unitDwell || {});
+  for (const u of Object.values(state.units)) {
+    const cur = dwell[u.uid];
+    if (!cur || cur.hex !== u.node) dwell[u.uid] = { hex: u.node, since: state.round };
+  }
+  // Drop records for units that no longer exist so the map can't leak or
+  // report a stale dwell against a recycled uid.
+  for (const uid of Object.keys(dwell)) {
+    if (!state.units[uid]) delete dwell[uid];
   }
 }
 

@@ -25,6 +25,8 @@ export function emptyCond(form = "op") {
       return { controls_count: { player: "active" } };
     case "control_duration":
       return { control_duration: { player: "active", hex: "" } };
+    case "unit_on_hex_duration":
+      return { unit_on_hex_duration: { player: "active", hex: "" } };
     case "has_chip":
       return { has_chip: { holder: "active-player-units", chipId: "", player: "active" } };
     case "unit_count":
@@ -50,6 +52,7 @@ export function condForm(c) {
     if ("quest_completed" in c) return "quest_completed";
     if ("controls_count" in c) return "controls_count";
     if ("control_duration" in c) return "control_duration";
+    if ("unit_on_hex_duration" in c) return "unit_on_hex_duration";
     if ("has_chip" in c) return "has_chip";
     if ("unit_count" in c) return "unit_count";
     if ("score" in c) return "score";
@@ -96,6 +99,12 @@ export function validateCond(c, errors = [], path = "") {
     case "control_duration":
       if (!c.control_duration?.player) errors.push(`${path}.control_duration.player required`);
       if (!c.control_duration?.hex) errors.push(`${path}.control_duration.hex required`);
+      return errors;
+    case "unit_on_hex_duration":
+      if (!c.unit_on_hex_duration?.unit && !c.unit_on_hex_duration?.player)
+        errors.push(`${path}.unit_on_hex_duration: unit or player required`);
+      if (c.unit_on_hex_duration?.player && !c.unit_on_hex_duration?.hex)
+        errors.push(`${path}.unit_on_hex_duration.hex required (player form)`);
       return errors;
     case "has_chip":
       if (!c.has_chip?.holder) errors.push(`${path}.has_chip.holder required`);

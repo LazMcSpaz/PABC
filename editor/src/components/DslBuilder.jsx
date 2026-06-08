@@ -20,6 +20,7 @@ const FORM_LABELS = {
   quest_completed: "quest_completed",
   controls_count: "controls_count (int)",
   control_duration: "control_duration (int)",
+  unit_on_hex_duration: "unit_on_hex_duration (int)",
   has_chip: "has_chip",
   unit_count: "unit_count (int)",
   score: "score (int)",
@@ -33,6 +34,8 @@ const FORM_TIP_KEYS = {
   unit_count: "dsl.unit_count",
   score: "dsl.score",
   controls_count: "dsl.controls_count",
+  control_duration: "dsl.control_duration",
+  unit_on_hex_duration: "dsl.unit_on_hex_duration",
 };
 
 export function DslBuilder({ value, onChange, allowNull = false, label }) {
@@ -221,6 +224,32 @@ function FormBody({ form, value, onChange }) {
                 })
               }
               className="w-32"
+            />
+          </Row>
+        </div>
+      );
+    case "unit_on_hex_duration":
+      return (
+        <div className="flex flex-col gap-2 pl-4 border-l border-slate-800">
+          <Row label="player">
+            <RecipientPicker
+              value={value.unit_on_hex_duration?.player ?? "active"}
+              onChange={(v) =>
+                onChange({ unit_on_hex_duration: { ...value.unit_on_hex_duration, player: v } })
+              }
+            />
+          </Row>
+          <Row label="hex">
+            <input
+              type="text"
+              value={value.unit_on_hex_duration?.hex ?? ""}
+              placeholder="hex id or state path (blank = encounter hex)"
+              onChange={(e) =>
+                onChange({
+                  unit_on_hex_duration: { ...value.unit_on_hex_duration, hex: e.target.value },
+                })
+              }
+              className="w-48"
             />
           </Row>
         </div>

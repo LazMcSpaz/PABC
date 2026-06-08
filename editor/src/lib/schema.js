@@ -83,6 +83,7 @@ export const DSL_FORMS = [
   "quest_completed",
   "controls_count",
   "control_duration",
+  "unit_on_hex_duration",
   "has_chip",
   "unit_count",
   "score",

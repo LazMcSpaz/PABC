@@ -2947,5 +2947,64 @@ line("\n  [Phase 11] text-token resolver");
     both.includes(activeName) && !both.includes("{"));
 }
 
+// =====================================================================
+// Phase 12 — unit_on_hex_duration. A unit parked on a hex accrues dwell
+// at each round boundary (0 the round it arrives); a move zeroes it and it
+// restarts on the new hex. This is the "leave a unit here for N rounds"
+// gate for staged encounters / quest beats. Dwell is reconciled in the
+// round-end pipeline (turn.js updateUnitDwell) and read via the DSL.
+// =====================================================================
+line("\n  [Phase 12] unit_on_hex_duration");
+{
+  const g = createGame({ seed });
+  startTurn(g);
+  const me = activePlayerId(g);
+  const u = Object.values(g.units).find((x) => x.owner === me);
+  const hex = u.node; // a starting hex — in supply, so attrition won't skew it
+  const advanceRound = () => { const n = g.turnOrder.length; for (let i = 0; i < n; i++) endTurn(g); };
+
+  // Seeded at setup (since round 1); before any round boundary, dwell is 0.
+  check("dwell is 0 the round a unit is first observed",
+    evalCond(g, { unit_on_hex_duration: { unit: u.uid, hex } }) === 0);
+
+  advanceRound();
+  check("dwell = 1 after the unit stays through one full round",
+    evalCond(g, { unit_on_hex_duration: { unit: u.uid, hex } }) === 1);
+
+  advanceRound(); advanceRound();
+  check("dwell accrues each round the unit stays put (now 3)",
+    evalCond(g, { unit_on_hex_duration: { unit: u.uid, hex } }) === 3);
+
+  // player-form aggregates: at least the parked unit's dwell on the hex.
+  check("player-form unit_on_hex_duration reflects the parked unit",
+    evalCond(g, { unit_on_hex_duration: { player: me, hex } }) >= 3);
+
+  // op() gate — the headline 'park a unit here for >= 3 rounds' use.
+  check("unit_on_hex_duration nests as a Val in an op() gate",
+    evalCond(g, { op: "gte",
+      left: { unit_on_hex_duration: { unit: u.uid, hex } }, right: 3 }) === true);
+
+  // Leaving the hex zeroes dwell there at once (durOf checks the live node),
+  // then it restarts from 0 on the new hex at the next boundary.
+  const dest = (g.board.adjacency[hex] || []).find((h) => h !== hex);
+  u.node = dest;
+  check("dwell on the vacated hex is 0 as soon as the unit leaves",
+    evalCond(g, { unit_on_hex_duration: { unit: u.uid, hex } }) === 0);
+  advanceRound();
+  check("dwell restarts at 0 the round the unit arrives on the new hex",
+    evalCond(g, { unit_on_hex_duration: { unit: u.uid, hex: dest } }) === 0);
+  advanceRound();
+  check("dwell accrues to 1 after a round parked on the new hex",
+    evalCond(g, { unit_on_hex_duration: { unit: u.uid, hex: dest } }) === 1);
+
+  // A destroyed unit is pruned from the dwell map at the next boundary.
+  const goneUid = u.uid;
+  delete g.units[goneUid];
+  advanceRound();
+  check("dwell record is pruned when the unit no longer exists",
+    g.world.unitDwell[goneUid] === undefined &&
+    evalCond(g, { unit_on_hex_duration: { unit: goneUid, hex: dest } }) === 0);
+}
+
 line(`\n  v0.2 verification: ${v2pass} passed, ${v2fail} failed`);
 line("");

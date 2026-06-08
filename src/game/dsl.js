@@ -136,6 +136,44 @@ export function evalCond(state, cond, ctx = {}) {
     return 0;
   }
 
+  // `unit_on_hex_duration` — how many full rounds a unit has continuously
+  // sat on a hex (0 the round it arrives), from state.world.unitDwell which
+  // turn.js reconciles each round end. Two forms:
+  //   { unit: "<uid>", hex?: "<hexId|path>" }
+  //     that unit's dwell; `hex` (or ctx.sourceHex) gates on a specific hex,
+  //     else it reports dwell wherever the unit currently stands.
+  //   { player: "<token>", hex: "<hexId|path>" }
+  //     the longest dwell among that player's units currently on `hex`
+  //     (0 if none) — the "did the recipient park a unit here long enough"
+  //     check. `hex` defaults to ctx.sourceHex (the encounter hex).
+  // Returns an int, so it composes inside an `op` predicate like the other
+  // integer helpers.
+  if (cond.unit_on_hex_duration) {
+    const q = cond.unit_on_hex_duration;
+    const dwell = state.world?.unitDwell || {};
+    let hex = q.hex ?? ctx.sourceHex ?? null;
+    if (typeof hex === "string" && hex.includes(".")) hex = resolvePath(state, hex);
+    const durOf = (uid) => {
+      const u = state.units[uid];
+      const d = dwell[uid];
+      if (!u || !d || d.hex !== u.node) return 0; // gone, untracked, or moved this round
+      if (hex != null && u.node !== hex) return 0; // not on the hex we asked about
+      return Math.max(0, state.round - d.since);
+    };
+    if (q.unit) return durOf(q.unit);
+    if (q.player) {
+      const pid = resolvePlayer(state, q.player, ctx);
+      if (!pid || hex == null) return 0;
+      let best = 0;
+      for (const u of Object.values(state.units)) {
+        if (u.owner !== pid || u.node !== hex) continue;
+        best = Math.max(best, durOf(u.uid));
+      }
+      return best;
+    }
+    return 0;
+  }
+
   // `has_chip` — true if a chip with `chipId` is installed in the scope
   // requested by `holder`. Holders:
   //   - "active-player-units"     : any unit owned by the resolved player
