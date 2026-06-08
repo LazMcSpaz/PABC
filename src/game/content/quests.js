@@ -2,6 +2,6 @@
 // Do not edit by hand — any changes here will be overwritten on the next
 // editor save. Source of truth lives in the Supabase content tables.
 // Schema: docs/content-schema-v0.1.md.
-// Generated at 2026-06-03T20:17:04.526Z.
+// Generated at 2026-06-08T11:20:07.365Z.
 
 export const QUESTS = {};
