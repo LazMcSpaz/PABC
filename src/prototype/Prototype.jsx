@@ -25,6 +25,7 @@ import { CHIPS as ENGINE_CHIPS, LOCATIONS as ENGINE_LOCATIONS } from "../game/co
 import { CONFIG } from "../game/config.js";
 import { NEUTRAL } from "./data.js";
 import { getEncounter } from "../game/encounters.js";
+import { anchorsCancelledByMove } from "../game/deferred.js";
 import { hasTechNode } from "../game/tech.js";
 import { evalCond } from "../game/dsl.js";
 import { adaptState, reinforcePreview, engineChipIdToUi, previewLocationContest, previewAttackerStrength } from "./engineAdapter.js";
@@ -499,6 +500,18 @@ export default function Prototype({ config, onNewGame }) {
     if (r.ok) { inspectHex(destHex); maybeOpenLoot(); }
   }
 
+  // Build the warning shown when a move would cancel a unit's anchored
+  // "stay on this hex" deferred timer(s). Names the soonest payout so the
+  // player knows what they'd forfeit.
+  function moveCancelWarning(cancels) {
+    const soonest = Math.min(...cancels.map((p) => p.dueRound));
+    const rounds = Math.max(0, soonest - gameRef.current.round);
+    const what = cancels.length > 1 ? `${cancels.length} pending encounters` : "the pending encounter";
+    return rounds > 0
+      ? `Leaving cancels ${what} you're waiting on — it resolves in ${rounds} round${rounds === 1 ? "" : "s"}.`
+      : `Leaving cancels ${what} you're waiting on.`;
+  }
+
   function onHexClick(hexId) {
     // Reachable hex with selected unit → Move. Don't open inspector.
     if (
@@ -508,10 +521,17 @@ export default function Prototype({ config, onNewGame }) {
       state.units[selectedUnitId]?.node !== hexId
     ) {
       const origin = state.units[selectedUnitId]?.node;
-      if (skipMoveConfirm) {
+      // §5 — moving off the hex cancels any "stay here and wait" deferred
+      // timer anchored to this unit. Warn, and force the confirm overlay
+      // even when "don't ask again" is on (this is the destructive path).
+      const cancels = anchorsCancelledByMove(gameRef.current, selectedUnitId, hexId);
+      if (skipMoveConfirm && !cancels.length) {
         executeMove(selectedUnitId, hexId);
       } else {
-        setPendingMove({ unitUid: selectedUnitId, origin, dest: hexId });
+        setPendingMove({
+          unitUid: selectedUnitId, origin, dest: hexId,
+          warning: cancels.length ? moveCancelWarning(cancels) : null,
+        });
       }
       return;
     }
@@ -974,6 +994,7 @@ export default function Prototype({ config, onNewGame }) {
             destHexId={pendingMove.dest}
             pathHexIds={unitMovePath(gameRef.current, gameRef.current.units[pendingMove.unitUid], pendingMove.dest)}
             ownerColor={UI_FACTIONS[state.units[pendingMove.unitUid]?.owner]?.color}
+            warning={pendingMove.warning}
             onConfirm={() => {
               const m = pendingMove;
               setPendingMove(null);

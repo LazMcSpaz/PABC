@@ -49,7 +49,7 @@ function PreviewToken({ unit, color, x, y, size = 32 }) {
   );
 }
 
-export default function MoveConfirmOverlay({ unit, originHexId, destHexId, pathHexIds, ownerColor, onConfirm, onCancel, onSkipFuture }) {
+export default function MoveConfirmOverlay({ unit, originHexId, destHexId, pathHexIds, ownerColor, warning, onConfirm, onCancel, onSkipFuture }) {
   useEscClose(onCancel);
   const [skip, setSkip] = useState(false);
   const [pts, setPts] = useState(null); // screen-space centres along the route
@@ -109,9 +109,10 @@ export default function MoveConfirmOverlay({ unit, originHexId, destHexId, pathH
   const pulseOpacity = poly.map((_, i) => (i === 0 ? 0 : 1));
 
   // Prompt: small, anchored to the right of the ghost (origin), flips
-  // left only if it would clip the viewport right edge.
-  const promptW = 138;
-  const promptH = 56;
+  // left only if it would clip the viewport right edge. A cancellation
+  // warning widens/heightens the box so the message has room.
+  const promptW = warning ? 210 : 138;
+  const promptH = warning ? 118 : 56;
   const gap = 30;
   const vw = (typeof window !== "undefined" ? window.innerWidth : 1440);
   const vh = (typeof window !== "undefined" ? window.innerHeight : 900);
@@ -277,20 +278,40 @@ export default function MoveConfirmOverlay({ unit, originHexId, destHexId, pathH
           className="hud-int"
         >×</button>
 
-        {/* Confirm button — shorter (auto-width, centred) */}
+        {/* Cancellation warning — amber, sits above the confirm button. The
+            unit is mid-wait on this hex; leaving forfeits that encounter. */}
+        {warning && (
+          <div style={{
+            margin: "1px 0 7px",
+            fontFamily: C.font, fontSize: 9, lineHeight: 1.35,
+            letterSpacing: 0.2,
+            color: "#f4c77a",
+            display: "flex", gap: 5, alignItems: "flex-start",
+          }}>
+            <span style={{ fontSize: 11, lineHeight: 1.1, flexShrink: 0 }}>⚠</span>
+            <span>{warning}</span>
+          </div>
+        )}
+
+        {/* Confirm button — shorter (auto-width, centred). When leaving would
+            cancel an encounter, it reads as the deliberate destructive choice. */}
         <button onClick={confirm} className="hud-int" style={{
           display: "block",
-          margin: "0 auto 6px",
+          margin: warning ? "0 auto 2px" : "0 auto 6px",
           fontFamily: C.font, fontSize: 10, fontWeight: 700,
           letterSpacing: 1.4, textTransform: "uppercase",
           color: "#08100f", padding: "4px 16px", borderRadius: 3,
-          border: `1px solid ${C.holo}`,
-          background: `linear-gradient(180deg, ${C.holoHi}, ${C.holo})`,
-          boxShadow: `0 0 8px ${C.holo}55`,
+          border: `1px solid ${warning ? "#e8a13a" : C.holo}`,
+          background: warning
+            ? "linear-gradient(180deg, #f4c77a, #e8a13a)"
+            : `linear-gradient(180deg, ${C.holoHi}, ${C.holo})`,
+          boxShadow: `0 0 8px ${warning ? "#e8a13a55" : `${C.holo}55`}`,
           cursor: "pointer",
-        }}>Move</button>
+        }}>{warning ? "Leave anyway" : "Move"}</button>
 
-        {/* Don't ask again — custom teal checkbox (not OS-white) */}
+        {/* Don't ask again — custom teal checkbox (not OS-white). Suppressed
+            on the warning path: a destructive move always re-confirms. */}
+        {!warning && (
         <label
           onClick={() => setSkip((v) => !v)}
           style={{
@@ -314,6 +335,7 @@ export default function MoveConfirmOverlay({ unit, originHexId, destHexId, pathH
           </span>
           Don't ask again
         </label>
+        )}
       </motion.div>
     </div>
   );

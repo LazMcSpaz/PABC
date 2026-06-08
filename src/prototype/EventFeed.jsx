@@ -173,6 +173,13 @@ function formatEvent(ev, engineState) {
       return { color: theme.accent, text: ev.name.replace("_", " ") };
     case "deferred_resolved":
       return { color: theme.textDim, text: "Deferred packet fired" };
+    case "deferred_cancelled":
+      return {
+        color: theme.textDim,
+        text: p?.reason === "unit_left_hex"
+          ? "Encounter cancelled — unit left the hex"
+          : "Deferred packet cancelled (anchor lost)",
+      };
     case "round_ended":
       return { color: theme.textFaint, text: `— round ${p.round} ended —` };
     case "turn_ended":

@@ -183,12 +183,24 @@ new row here).
 | `ADJUST_TRACK` | `{ track: 'trust'\|'reputation'\|'alignment', amount: int, target: <token> }` |
 | `ADJUST_STANDING` | `{ faction: <fid>, player: <token>, amount: int }` |
 | `SET_PLAYER_FLAG` | `{ flag: string, value: any, target: <token>, duration?: string }` |
-| `QUEUE_DEFERRED` | `{ effects: [Effect], delayRounds: int, target: <token> }` |
+| `QUEUE_DEFERRED` | `{ effects: [Effect], delayRounds: int, target: <token>, anchor?: "encounter", anchorUnit?: <token>, anchorHex?: <token> }` |
 | `START_QUEST` | `{ questId: string, claimant: <token> }` |
 | `ADVANCE_QUEST` | `{ questId: string, beatId: string }` |
 | `COMPLETE_QUEST` | `{ questId: string }` |
 | `PLACE_ENCOUNTER` | `{ encounterId: string, hex?: <hexId>, hexFilter?: <HexFilter>, expiresIn?: int }` |
 | `DELIVER_ENCOUNTER` | `{ encounterId: string, mode?: 'private'\|'public', recipient?: <token>, condition?: Cond }` (optional `condition` — false skips delivery silently; other effects on the same choice still run, enabling success / fallback chains) |
+
+**`QUEUE_DEFERRED` anchoring (§5).** By default a deferred packet is a blind
+timer — it fires after `delayRounds` no matter what. Setting `anchor:
+"encounter"` binds it to the unit that triggered the encounter, standing on
+the encounter hex: the timer pays out only if that unit is still on that hex
+when it comes due. Moving the unit off the hex **cancels** the packet
+immediately (the in-game Move confirm warns the player first, and won't be
+suppressed by "don't ask again"); if the anchor breaks any other way (the
+unit is destroyed or force-retreated) the round-end sweep discards the packet
+instead of firing it. `anchorUnit` / `anchorHex` override the bound unit/hex
+explicitly — tokens `"encounter-unit"` / `"encounter-hex"` (the defaults), or
+a literal uid / hex id. The cancellation emits a `deferred_cancelled` event.
 
 ### From spec §16 (v0.2 — implemented)
 

@@ -251,13 +251,25 @@ const EFFECTS = {
     const active = state.turnOrder[state.activeIndex];
     const effects = (e.effects || []).map((eff) => snapshotActiveToken(eff, active));
     state.deferred = state.deferred || [];
-    state.deferred.push({
+    const packet = {
       dueRound: state.round + (e.delayRounds || 0),
       effects,
       source: ctx.source || null,
       originalActive: active,
       queuedAt: state.round,
-    });
+    };
+    // §5 anchoring — an authored `anchor: "encounter"` (or explicit
+    // anchorUnit / anchorHex tokens) binds the packet to a unit standing on
+    // a hex. We snapshot to concrete ids now; the timer is cancelled the
+    // moment that unit leaves the hex (actions.js runMove), and the
+    // round-end sweep refuses to resolve a packet whose anchor has broken.
+    const anchorUnit = resolveAnchorUnit(state, e, ctx);
+    const anchorHex = resolveAnchorHex(state, e, ctx, anchorUnit);
+    if (anchorUnit && anchorHex) {
+      packet.anchorUnit = anchorUnit;
+      packet.anchorHex = anchorHex;
+    }
+    state.deferred.push(packet);
   },
 
   // --- §19 Fog of War (additive handlers) ---
@@ -389,6 +401,29 @@ const EFFECTS = {
     if (ctx.pending) ctx.pending.cancelled = true;
   },
 };
+
+// §5 — resolve the anchor *unit* for a QUEUE_DEFERRED packet to a concrete
+// uid. `anchor: "encounter"` (or `true`), or anchorUnit "encounter-unit" /
+// "source-unit", bind to the unit that drew the encounter (ctx.sourceUnit);
+// an explicit uid passes through if it exists. Returns null when nothing
+// resolves — the packet then behaves as a plain (un-anchored) timer.
+function resolveAnchorUnit(state, e, ctx) {
+  const tok = e.anchorUnit ?? (e.anchor === "encounter" || e.anchor === true ? "encounter-unit" : null);
+  if (!tok) return null;
+  if (tok === "encounter-unit" || tok === "source-unit") return ctx.sourceUnit || null;
+  return state.units[tok] ? tok : null;
+}
+
+// §5 — resolve the anchor *hex*. Defaults to the encounter hex
+// (ctx.sourceHex); accepts "encounter-hex" / "source-hex", a literal hex id,
+// or — when anchoring to a unit with no explicit hex — that unit's current
+// node (the natural "stay where you are" reading).
+function resolveAnchorHex(state, e, ctx, anchorUnit) {
+  const tok = e.anchorHex ?? (e.anchor === "encounter" || e.anchor === true ? "encounter-hex" : null);
+  if (tok == null) return anchorUnit ? state.units[anchorUnit]?.node ?? null : null;
+  if (tok === "encounter-hex" || tok === "source-hex") return ctx.sourceHex ?? null;
+  return tok;
+}
 
 // Walk an effect tree and replace any `active` / `active_player` token
 // in player-bearing fields with a concrete pid. Used by QUEUE_DEFERRED

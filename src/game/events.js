@@ -32,7 +32,7 @@ export const EVENT_NAMES = new Set([
   // Layer 5 — encounter & quest system (spec §15.13)
   "encounter_delivered", "encounter_delivery_skipped", "trigger_fired",
   "quest_started", "quest_advanced", "quest_completed",
-  "standing_changed", "track_changed", "deferred_resolved",
+  "standing_changed", "track_changed", "deferred_resolved", "deferred_cancelled",
   // §20 Economy & City Development (APPEND-ONLY — distinct keys so a parallel
   // Influence branch never collides). The Market is retired, so `market_churned`
   // is dropped with it.

@@ -33,6 +33,7 @@ import { pickHexByFilter } from "./encounters.js";
 import { resolveTokens } from "./textTokens.js";
 import { evalCond, evalStrength } from "./dsl.js";
 import { registerQuest } from "./quests.js";
+import { anchorsCancelledByMove } from "./deferred.js";
 import { CONFIG } from "./config.js";
 import { takeAITurn } from "./ai.js";
 import { enforceLoyaltySlotCap, chargeChipUpkeep, slotCapacity, effectiveBuildCost } from "./economy.js";
@@ -3004,6 +3005,68 @@ line("\n  [Phase 12] unit_on_hex_duration");
   check("dwell record is pruned when the unit no longer exists",
     g.world.unitDwell[goneUid] === undefined &&
     evalCond(g, { unit_on_hex_duration: { unit: goneUid, hex: dest } }) === 0);
+}
+
+// =====================================================================
+// Phase 13 — anchored QUEUE_DEFERRED. A "stay on this hex and wait" timer
+// pays out only if the anchored unit holds the hex; leaving cancels it at
+// once (the Move action), and the round-end sweep refuses to fire a packet
+// whose anchor broke by any other route (e.g. the unit was destroyed).
+// =====================================================================
+line("\n  [Phase 13] anchored QUEUE_DEFERRED (stay-on-hex timer)");
+{
+  const g = createGame({ seed });
+  startTurn(g);
+  const me = activePlayerId(g);
+  const u = Object.values(g.units).find((x) => x.owner === me);
+  const hex = u.node;
+  const advanceRound = () => { const n = g.turnOrder.length; for (let i = 0; i < n; i++) endTurn(g); };
+  // Pay out a player flag (immune to round-end economy) so resolution is
+  // unambiguous to assert.
+  const paid = (flag) => !!g.players[me].flags?.[flag]?.value;
+  const queueAnchored = (delay, flag) => applyEffect(g, {
+    type: "QUEUE_DEFERRED", delayRounds: delay, anchor: "encounter",
+    effects: [{ type: "SET_PLAYER_FLAG", flag, value: true, target: "active_player" }],
+  }, { sourceUnit: u.uid, sourceHex: u.node });
+
+  // anchor: "encounter" snapshots the source unit + hex onto the packet.
+  queueAnchored(2, "stay-paid");
+  const pkt = g.deferred[g.deferred.length - 1];
+  check("anchored packet records anchorUnit + anchorHex",
+    pkt.anchorUnit === u.uid && pkt.anchorHex === hex);
+
+  // Query the UI uses to warn: leaving cancels, staying does not.
+  const elsewhere = (g.board.adjacency[hex] || []).find((h) => h !== hex);
+  check("anchorsCancelledByMove flags a move that leaves the hex",
+    anchorsCancelledByMove(g, u.uid, elsewhere).length === 1);
+  check("anchorsCancelledByMove ignores a move that stays on the hex",
+    anchorsCancelledByMove(g, u.uid, hex).length === 0);
+
+  // Stay put → the timer pays out on schedule.
+  advanceRound(); advanceRound();
+  check("anchored timer resolves when the unit stays on the hex",
+    paid("stay-paid") && g.deferred.length === 0);
+
+  // Leave the hex → cancelled at once, never pays out.
+  queueAnchored(2, "leave-paid");
+  // A plain, empty, reachable neighbour (avoid encounter/loot/terrain noise).
+  const dest = (g.board.adjacency[hex] || []).find(
+    (h) => !g.locations[h] && g.board.hexes[h].type === "terrain");
+  g.board.hexes[dest].elevation = false; g.board.hexes[dest].cover = false;
+  u.moveRemaining = 9; recomputeStats(g);
+  const mv = performAction(g, "move", { unit: u.uid, to: dest });
+  check("moving off the hex cancels the anchored timer at once",
+    mv.ok && g.deferred.length === 0);
+  advanceRound(); advanceRound();
+  check("a cancelled anchored timer never pays out", !paid("leave-paid"));
+
+  // Anchor broken by other means (unit destroyed) → the due-round sweep
+  // discards the packet instead of firing it.
+  queueAnchored(1, "ghost-paid");
+  delete g.units[u.uid];
+  advanceRound();
+  check("round-end sweep discards a due packet whose anchor unit is gone",
+    !paid("ghost-paid") && g.deferred.length === 0);
 }
 
 line(`\n  v0.2 verification: ${v2pass} passed, ${v2fail} failed`);

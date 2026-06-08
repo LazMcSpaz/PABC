@@ -527,6 +527,20 @@ function EffectParams({ type, params, onChange, context }) {
           <ParamRow label="target">
             <RecipientPicker value={params.target} onChange={(v) => set("target", v)} />
           </ParamRow>
+          <ParamRow label="anchor to hex">
+            <PickList
+              value={params.anchor === "encounter" || params.anchor === true ? "true" : "false"}
+              options={["true", "false"]}
+              onChange={(v) => set("anchor", v === "true" ? "encounter" : false)}
+            />
+          </ParamRow>
+          {(params.anchor === "encounter" || params.anchor === true) && (
+            <div className="text-[11px] text-slate-500 pl-[110px] -mt-1">
+              The unit that triggered this encounter must stay on its hex. Moving
+              it off cancels the timer (the player is warned first) and these
+              effects never fire.
+            </div>
+          )}
           <div className="flex flex-col gap-2">
             <span className="text-xs text-slate-400">effects (deferred)</span>
             <div className="pl-4 border-l border-slate-800">

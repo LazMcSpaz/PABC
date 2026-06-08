@@ -14,6 +14,7 @@ import { recomputeInfluence } from "./influence.js";
 import { recomputeVisibility } from "./visibility.js";
 import { applyEffects } from "./effects.js";
 import { drawFieldEncounter, resolveMarkerOnHex } from "./encounters.js";
+import { cancelAnchorsOnLeave } from "./deferred.js";
 import { makeUnit } from "./setup.js";
 import { hasTechNode } from "./tech.js";
 import { postAt, buildPost, revealPost } from "./posts.js";
@@ -63,6 +64,10 @@ function runMove(state, { params, ctx }) {
   unit.moveRemaining = Math.max(0, field[params.to] ?? 0);
   unit.movedSinceUpkeep = true; // §16.6 fortify — moving voids "dug in"
   emit(state, "unit_moved", { unit: unit.uid, from, to: params.to });
+
+  // §5 — leaving the hex breaks any "stay here and wait" deferred timer
+  // anchored to this unit; cancel it now (the UI warns before reaching here).
+  cancelAnchorsOnLeave(state, unit.uid, params.to);
 
   // §19.11 — INCREMENTAL recompute (the scale guard): a move only changes
   // the MOVER's own sight footprint, so we refresh that one faction's

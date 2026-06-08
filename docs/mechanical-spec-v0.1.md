@@ -994,7 +994,7 @@ follows §11.
 - **`ADJUST_TRACK`** — `{ track: "trust"|"reputation"|"alignment", amount, target }`. Mirrors `ADJUST_RESOURCE` for player tracks.
 - **`ADJUST_STANDING`** — `{ faction, player, amount }`. Modifies the matrix.
 - **`SET_PLAYER_FLAG`** — `{ flag, value, target, duration? }`. Player-scoped flag store. (§12.5's `SET_FLAG` is entity-scoped — units / locations / chips — and remains as-is.)
-- **`QUEUE_DEFERRED`** — `{ effects, delayRounds, target }`. Schedule effects for a future round.
+- **`QUEUE_DEFERRED`** — `{ effects, delayRounds, target, anchor?, anchorUnit?, anchorHex? }`. Schedule effects for a future round. With `anchor: "encounter"` the packet is bound to the triggering unit + hex (§5): it only fires if that unit holds the hex when due; the unit leaving cancels it at once (the Move confirm warns first) and a broken anchor is discarded by the round-end sweep. Cancellation emits `deferred_cancelled`.
 - **`START_QUEST`** — `{ questId, claimant }`.
 - **`ADVANCE_QUEST`** — `{ questId, beatId }`.
 - **`COMPLETE_QUEST`** — `{ questId }`. Rarely authored — usually emitted by the engine when the final beat resolves.
@@ -1042,7 +1042,8 @@ next player's `startTurn`:
 ```
 emit round_ended
   ↓
-resolve deferred queue (entries with dueRound <= round)
+resolve deferred queue (entries with dueRound <= round; anchored entries
+  whose unit has left/lost the hex are discarded, not fired)
   ↓
 trigger evaluation: filter, score, fire top 2 → encounter delivery
   ↓
