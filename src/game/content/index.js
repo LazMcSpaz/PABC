@@ -2,7 +2,7 @@
 // Do not edit by hand — any changes here will be overwritten on the next
 // editor save. Source of truth lives in the Supabase content tables.
 // Schema: docs/content-schema-v0.1.md.
-// Generated at 2026-06-08T11:20:07.365Z.
+// Generated at 2026-06-09T12:50:34.869Z.
 
 export { WORLD_ENCOUNTERS } from "./world-encounters.js";
 export { FIELD_ENCOUNTERS } from "./field-encounters.js";
