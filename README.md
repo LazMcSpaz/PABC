@@ -13,10 +13,8 @@ catastrophe. Rival factions fight for control of a contested wasteland map.
 > [`src/game/`](src/game/) and playable through
 > [`src/prototype/`](src/prototype/), including AI-vs-AI. What's left is
 > mostly content (quests and world encounters are still empty; other
-> tables are thin), AI decision-making quality, and cleanup — see
-> [`docs/v0.3-roadmap.md`](docs/v0.3-roadmap.md) for the live roadmap. The
-> earlier settlement-only version's code is retained but inactive (see
-> *Legacy* below).
+> tables are thin) and AI decision-making quality — see
+> [`docs/v0.3-roadmap.md`](docs/v0.3-roadmap.md) for the live roadmap.
 
 ## The game
 
@@ -103,7 +101,6 @@ src/
   game/content/             auto-generated from the editor — do not hand-edit
   prototype/                the live UI, wired to src/game/ via engineAdapter.js
   App.jsx                   renders the prototype
-  engine/ components/ hooks/  legacy settlement-game code (dead, unremoved)
 editor/                     content-authoring tool (Supabase-backed)
 content/                    legacy CSV content source (thin, superseded by editor)
 public/assets/              art assets — drop new art here
@@ -137,11 +134,13 @@ public/assets/              art assets — drop new art here
 - [ ] Content — quests and world encounters are still empty; locations,
       chips, factions and tuning constants are thin (see
       [`docs/v0.3-roadmap.md`](docs/v0.3-roadmap.md))
-- [ ] AI decision-making quality — contests are EV-blind, a couple of
-      build/tech scoring heuristics are hardcoded (see
-      [`docs/ai-overhaul-plan.md`](docs/ai-overhaul-plan.md))
+- [x] AI contest judgment — contests are now EV-gated by win probability
+      (was fully blind); recruit-cap chip check generalized off id
+- [ ] AI build/tech scoring — still a hardcoded heuristic, not the full
+      effect→value table (see [`docs/ai-overhaul-plan.md`](docs/ai-overhaul-plan.md))
 - [ ] Art assets — faction emblems, terrain tiles, icons
-- [ ] Retire the legacy settlement-game code (confirmed dead, not yet deleted)
+- [x] Retire the legacy settlement-game code — removed (`src/engine`,
+      `src/components`, `src/hooks`; 38 files, confirmed dead/unreferenced)
 
 See [`docs/v0.3-roadmap.md`](docs/v0.3-roadmap.md) for the current live
 roadmap and how these fronts can run in parallel.
@@ -149,10 +148,9 @@ roadmap and how these fronts can run in parallel.
 ## Legacy
 
 The original version was a settlement-builder — grow a settlement, raid
-opponents, progress through three "Ages." That code remains under
-`src/engine`, `src/components` and `src/hooks` but is no longer
-referenced; `App.jsx` renders the prototype instead. The new engine has
-now landed (see Status above), so this code is confirmed dead weight —
-removing it is an open, unblocked cleanup item (see
-[`docs/v0.3-roadmap.md`](docs/v0.3-roadmap.md)). The detailed rules
-summary this README used to carry is superseded by the mechanical spec.
+opponents, progress through three "Ages." That code lived under
+`src/engine`, `src/components` and `src/hooks`, superseded by the
+spatial-board redesign (`src/prototype/` + `src/game/`) and confirmed
+unreferenced from `App.jsx` or anywhere reachable, so it has been removed.
+The detailed rules summary this README used to carry is superseded by the
+mechanical spec.
