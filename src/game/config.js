@@ -55,6 +55,17 @@ export const CONFIG = {
   },
   veteran: { winsToPromote: 3, survivedToPromote: 5 },
 
+  // AI combat judgment (docs/ai-overhaul-plan.md item 4 — "contests are
+  // blind"). The AI only commits to a contest when its estimated win
+  // probability clears a threshold; the threshold drops as the faction's
+  // `aggression` dial rises, so a warlord fights worse odds than a
+  // cautious minor. `floor` never goes below `min` even at aggression 1.
+  ai: {
+    contestWinProbBase: 0.55, // required win% at aggression 0
+    contestWinProbAggressionScale: 0.35, // subtracted at aggression 1
+    contestWinProbMin: 0.15, // never accept worse odds than this, however aggressive
+  },
+
   // §17 Tech Wheel. Research fills a bar; Tech Level is a derived band
   // (1–5); each new level grants one Ability Point to spend on the wheel.
   tech: {

@@ -64,6 +64,78 @@ function concentration(state, owner, hex, excludeUid) {
   return Math.min(n, CONFIG.combat.concentrationCap) * CONFIG.combat.concentrationPerUnit;
 }
 
+// Attacker-side preview: the combined Strength of `ownerId`'s stack on
+// `hexId` plus its Concentration bonus — what the attacker brings before
+// the d6. Used both by the UI (pre-contest odds) and by the AI (EV-gating
+// whether to pick a fight at all) — no dice, no mutation.
+export function previewAttackerStrength(state, hexId, ownerId) {
+  const strength = stackStrength(state, ownerId, hexId);
+  const n = Object.values(state.units).filter(
+    (u) => u.owner === ownerId && u.node === hexId,
+  ).length;
+  const conc = Math.min(n - 1, CONFIG.combat.concentrationCap) * CONFIG.combat.concentrationPerUnit;
+  return { strength, concentration: conc, units: n, total: strength + conc };
+}
+
+// Preview a Location contest's defender side exactly as runContest would
+// resolve it, so callers (UI odds, AI EV-gating) see the true number the
+// attacker must beat — not just the bare garrison. Mirrors defenderValue()
+// + the garrison-only no-die house rule. No dice, no mutation.
+export function previewLocationContest(state, hexId) {
+  const loc = state.locations[hexId];
+  if (!loc) return null;
+  const hasNeutral = loc.sections.includes("neutral");
+  let locChipGarrison = 0;
+  for (const c of loc.chips) {
+    locChipGarrison += CHIPS[state.chips[c]?.chipId]?.garrison || 0;
+  }
+  let value = loc.garrison + locChipGarrison;
+
+  // A defending unit only counts when the Location is fully held by its
+  // controller (no neutral sections) and that controller has a unit on
+  // the hex — same gate as defendingUnit(). Stacked defenders fight
+  // together: sum the controller's units on the hex (the strongest is the
+  // "lead" for display / attrition).
+  let defender = null;
+  let defenderStack = 0;
+  if (!hasNeutral && loc.controller) {
+    for (const u of Object.values(state.units)) {
+      if (u.owner !== loc.controller || u.node !== loc.hexId) continue;
+      defenderStack += u.strength;
+      if (!defender || u.strength > defender.strength) defender = u;
+    }
+    value += defenderStack;
+  }
+
+  // §16.6 combat levers on the defender side.
+  const mountain =
+    state.board.hexes[hexId]?.terrain === "mountain" ? CONFIG.combat.mountainDefenseBonus : 0;
+  let conc = 0, fortify = 0, veteran = 0;
+  if (defender) {
+    conc = concentration(state, loc.controller, hexId, defender.uid);
+    if (defender.fortified) fortify = CONFIG.combat.fortifyBonus;
+    if (defender.veteran) veteran = CONFIG.combat.veteranBonus;
+  }
+  value += mountain + conc + fortify + veteran;
+
+  // House rule: a garrison-only defence (no defending unit) does NOT
+  // roll a d6 — its total is the static value.
+  const defenderRollsDie = !!defender;
+  return {
+    value,
+    garrison: loc.garrison + locChipGarrison,
+    defendingUnit: defender
+      ? { uid: defender.uid, owner: defender.owner, strength: defender.strength }
+      : null,
+    modifiers: {
+      mountain, concentration: conc, fortify, veteran,
+      allies: defender ? defenderStack - defender.strength : 0,
+    },
+    hasNeutral,
+    defenderRollsDie,
+  };
+}
+
 // §16.6 Veterancy — after a contest, every surviving participant banks a
 // "survived"; the winner's unit banks a "win". A unit promotes to Veteran
 // (permanent +1 to its rolls) at 3 wins or 5 survivals, whichever first.

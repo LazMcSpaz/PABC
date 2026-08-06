@@ -700,6 +700,35 @@ line("\n  [Phase 2] two-unit start, cap 3, cheaper recruit");
   check("recruit blocked past cap", !r5.ok && r5.reason === "unit cap reached");
 }
 
+// --- recruit-cap gating is schema-driven, not a "training-grounds" id
+// special case (docs/ai-overhaul-plan.md item 2) — any chip carrying
+// `unitCapBonus` unlocks recruiting and raises the cap the same way. ---
+line("\n  [Recruit] unitCapBonus is generic, not id-hardcoded");
+{
+  CHIPS["__test-recruit-hut"] = { id: "__test-recruit-hut", kind: "location", unitCapBonus: 1 };
+  try {
+    const g = createGame({ seed });
+    const me = g.turnOrder[0];
+    startTurn(g);
+    const home = Object.values(g.locations).find((l) => l.controller === me);
+    const before = performAction(g, "recruit", { at: home.hexId });
+    check("recruiting is blocked with no recruit-enabling chip present",
+      !before.ok && before.reason === "requires a chip that unlocks recruiting");
+    const c = g.nextId("chip");
+    g.chips[c] = { uid: c, chipId: "__test-recruit-hut" };
+    home.chips.push(c);
+    g.players[me].resource += 100;
+    const r1 = performAction(g, "recruit", { at: home.hexId });
+    const r2 = performAction(g, "recruit", { at: home.hexId });
+    const r3b = performAction(g, "recruit", { at: home.hexId });
+    check("a non-'training-grounds' chip with unitCapBonus unlocks recruiting", r1.ok);
+    check("cap = baseUnitCap + unitCapBonus (1: 2 starting + 2 recruits = 4), 3rd blocked",
+      r2.ok && !r3b.ok && r3b.reason === "unit cap reached");
+  } finally {
+    delete CHIPS["__test-recruit-hut"];
+  }
+}
+
 // --- Phase 3: attrition, death, salvage ---
 line("\n  [Phase 3] attrition, death, salvage");
 {

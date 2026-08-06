@@ -122,14 +122,15 @@ function tryPickupLoot(state, unit, hex, ctx) {
 }
 
 // --- Recruit ---------------------------------------------------------
-// Spawn a unit at a controlled location. A Training Grounds chip there
-// is the prerequisite, and each one also raises the unit cap by one
-// (cap = the one starting unit + one per Training Grounds).
-function trainingGroundsCount(state, pid) {
+// Spawn a unit at a controlled location. Any chip carrying `unitCapBonus`
+// (Training Grounds today; content may add alternatives later) is the
+// prerequisite, and each one also raises the unit cap by its bonus
+// (cap = baseUnitCap + the sum of unitCapBonus across owned chips).
+export function recruitCapBonus(state, pid) {
   let n = 0;
   for (const loc of Object.values(state.locations)) {
     if (loc.controller !== pid) continue;
-    for (const c of loc.chips) if (state.chips[c]?.chipId === "training-grounds") n++;
+    for (const c of loc.chips) n += CHIPS[state.chips[c]?.chipId]?.unitCapBonus || 0;
   }
   return n;
 }
@@ -142,10 +143,10 @@ function validateRecruit(state, { pid, player, params }) {
   const loc = state.locations[params.at];
   if (!loc) return fail("no such location");
   if (loc.controller !== pid) return fail("you do not control that location");
-  const tg = trainingGroundsCount(state, pid);
-  if (tg < 1) return fail("requires a Training Grounds");
+  const capBonus = recruitCapBonus(state, pid);
+  if (capBonus < 1) return fail("requires a chip that unlocks recruiting");
   if (player.resource < CONFIG.unitRecruitCost) return fail("not enough scrap");
-  if (ownedUnitCount(state, pid) >= CONFIG.baseUnitCap + tg) return fail("unit cap reached");
+  if (ownedUnitCount(state, pid) >= CONFIG.baseUnitCap + capBonus) return fail("unit cap reached");
   return { ok: true };
 }
 

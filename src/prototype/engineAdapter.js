@@ -15,6 +15,7 @@ import {
 import {
   buildableChips, upgradeOption, slotCapacity, slotsUsed, locationOutput,
 } from "../game/economy.js";
+import { recruitCapBonus } from "../game/actions.js";
 import { isUnitVisibleTo } from "../game/visibility.js";
 import { factionDef } from "../game/content.js";
 import {
@@ -346,7 +347,7 @@ export function adaptState(state) {
       techWheel: [...(p.techWheel || [])],
       abilityPointsAvailable: (p.techLevel || 1) - 1 - (p.techWheel?.length || 0),
       actions: { ...p.actions },
-      unitCap: CONFIG.baseUnitCap + countTrainingGrounds(state, pid),
+      unitCap: CONFIG.baseUnitCap + recruitCapBonus(state, pid),
       isAI: !!p.isAI,
       isMinor: !!p.isMinor,
       hand: [...p.hand],
@@ -879,92 +880,8 @@ export function reinforcePreview(state, unitUid) {
   };
 }
 
-function countTrainingGrounds(state, pid) {
-  let n = 0;
-  for (const loc of Object.values(state.locations)) {
-    if (loc.controller !== pid) continue;
-    for (const c of loc.chips) {
-      if (state.chips[c]?.chipId === "training-grounds") n++;
-    }
-  }
-  return n;
-}
-
-// Attacker-side preview: the combined Strength of `ownerId`'s stack on
-// `hexId` plus its Concentration bonus — what the attacker brings before
-// the d6. Mirrors contest.js (stackStrength + concentration).
-export function previewAttackerStrength(state, hexId, ownerId) {
-  let strength = 0;
-  let n = 0;
-  for (const u of Object.values(state.units)) {
-    if (u.owner !== ownerId || u.node !== hexId) continue;
-    strength += u.strength;
-    n += 1;
-  }
-  const concentration =
-    Math.min(n - 1, CONFIG.combat.concentrationCap) * CONFIG.combat.concentrationPerUnit;
-  return { strength, concentration, units: n, total: strength + concentration };
-}
-
-// Preview a Location contest's defender side exactly as contest.js would
-// resolve it, so the UI shows the true number the attacker must beat —
-// not just the bare garrison. Mirrors defenderValue() + the
-// garrison-only no-die house rule.
-export function previewLocationContest(state, hexId) {
-  const loc = state.locations[hexId];
-  if (!loc) return null;
-  const hasNeutral = loc.sections.includes("neutral");
-  let chipGarrison = 0;
-  for (const c of loc.chips) {
-    chipGarrison += ENGINE_CHIPS[state.chips[c]?.chipId]?.garrison || 0;
-  }
-  let value = loc.garrison + chipGarrison;
-
-  // A defending unit only counts when the Location is fully held by its
-  // controller (no neutral sections) and that controller has a unit on
-  // the hex — same gate as contest.js defendingUnit().
-  // Stacked defenders fight together: sum the controller's units on the
-  // hex (the strongest is the "lead" for display / attrition).
-  let defendingUnit = null;
-  let defenderStack = 0;
-  if (!hasNeutral && loc.controller) {
-    for (const u of Object.values(state.units)) {
-      if (u.owner !== loc.controller || u.node !== loc.hexId) continue;
-      defenderStack += u.strength;
-      if (!defendingUnit || u.strength > defendingUnit.strength) defendingUnit = u;
-    }
-    value += defenderStack;
-  }
-
-  // §16.6 combat levers on the defender side.
-  const mountain =
-    state.board.hexes[hexId]?.terrain === "mountain" ? CONFIG.combat.mountainDefenseBonus : 0;
-  let concentration = 0, fortify = 0, veteran = 0;
-  if (defendingUnit) {
-    let n = 0;
-    for (const u of Object.values(state.units)) {
-      if (u.owner === loc.controller && u.node === hexId && u.uid !== defendingUnit.uid) n++;
-    }
-    concentration = Math.min(n, CONFIG.combat.concentrationCap) * CONFIG.combat.concentrationPerUnit;
-    if (defendingUnit.fortified) fortify = CONFIG.combat.fortifyBonus;
-    if (defendingUnit.veteran) veteran = CONFIG.combat.veteranBonus;
-  }
-  value += mountain + concentration + fortify + veteran;
-
-  // House rule: a garrison-only defence (no defending unit) does NOT
-  // roll a d6 — its total is the static value.
-  const defenderRollsDie = !!defendingUnit;
-  return {
-    value,
-    garrison: loc.garrison + chipGarrison,
-    defendingUnit: defendingUnit
-      ? { uid: defendingUnit.uid, owner: defendingUnit.owner, strength: defendingUnit.strength }
-      : null,
-    modifiers: {
-      mountain, concentration, fortify, veteran,
-      allies: defendingUnit ? defenderStack - defendingUnit.strength : 0,
-    },
-    hasNeutral,
-    defenderRollsDie,
-  };
-}
+// previewAttackerStrength / previewLocationContest now live in
+// contest.js (the engine owns the math they mirror; the AI needs them
+// too, not just this UI adapter) — re-exported here so Inspector.jsx /
+// Prototype.jsx don't need to change their import path.
+export { previewAttackerStrength, previewLocationContest } from "../game/contest.js";

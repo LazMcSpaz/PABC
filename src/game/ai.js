@@ -4,7 +4,7 @@
 // already supplies headless defaults for sub-choices (encounter pick,
 // reactive play, retreat hex), so the AI never has to touch ctx.interact.
 
-import { performAction } from "./actions.js";
+import { performAction, recruitCapBonus } from "./actions.js";
 import { endTurn } from "./turn.js";
 import { activePlayerId } from "./targeting.js";
 import { bfsDistances } from "./board.js";
@@ -13,6 +13,7 @@ import { LOCATIONS } from "./content.js";
 import { CONFIG } from "./config.js";
 import { buildableChips, slotCapacity, slotsUsed, stationedUnitWithBay } from "./economy.js";
 import { isUnitVisibleTo } from "./visibility.js";
+import { previewAttackerStrength, previewLocationContest } from "./contest.js";
 import { assignTechNode } from "./stats.js";
 import { hasTechNode } from "./tech.js";
 import { postAt } from "./posts.js";
@@ -49,17 +50,55 @@ export function takeAITurn(state) {
   if (!state.winnerId) endTurn(state);
 }
 
+// Exact win probability over both d6 rolls (defender wins ties, and skips
+// its die entirely for a garrison-only Location defence — the §16 house
+// rule `previewLocationContest` already flags via `defenderRollsDie`).
+function winProbability(atkTotal, defTotal, defenderRollsDie = true) {
+  let wins = 0, outcomes = 0;
+  for (let a = 1; a <= 6; a++) {
+    if (!defenderRollsDie) {
+      outcomes++;
+      if (atkTotal + a > defTotal) wins++;
+      continue;
+    }
+    for (let d = 1; d <= 6; d++) {
+      outcomes++;
+      if (atkTotal + a > defTotal + d) wins++;
+    }
+  }
+  return wins / outcomes;
+}
+
+// docs/ai-overhaul-plan.md item 4 — "contests are blind": don't pick a
+// fight the dice say you'll probably lose. The bar drops as the faction's
+// aggression dial rises (a warlord accepts worse odds than a cautious
+// minor), floored at `contestWinProbMin` so even max aggression won't
+// throw a unit away on a near-certain loss.
+function acceptableOdds(state, pid, atkTotal, defTotal, defenderRollsDie) {
+  const aggression = factionDef(pid)?.aggression ?? 0.5;
+  const ai = CONFIG.ai;
+  const threshold = Math.max(
+    ai.contestWinProbMin,
+    ai.contestWinProbBase - aggression * ai.contestWinProbAggressionScale,
+  );
+  return winProbability(atkTotal, defTotal, defenderRollsDie) >= threshold;
+}
+
 // Returns true if the AI spent at least one Action (whether the action
 // succeeded or not — failed actions don't decrement remaining, so the
 // loop must give up if no priority matches a runnable action).
 function tryOneAction(state, pid) {
-  // 1. Contest where standing
+  // 1. Contest where standing — but only when the odds are acceptable.
   for (const unit of ownUnits(state, pid)) {
     if (isImmobilized(state, unit)) continue;
     const loc = state.locations[unit.node];
     if (loc && !loc.sections.every((s) => s === pid)) {
-      const r = performAction(state, "contest", { unit: unit.uid });
-      if (r.ok) return true;
+      const atk = previewAttackerStrength(state, unit.node, pid).total;
+      const def = previewLocationContest(state, unit.node);
+      if (def && acceptableOdds(state, pid, atk, def.value, def.defenderRollsDie)) {
+        const r = performAction(state, "contest", { unit: unit.uid });
+        if (r.ok) return true;
+      }
     }
     // §19.10 — only raid an enemy the AI can actually SEE. A concealed
     // enemy on this hex isn't targeted explicitly; if the AI contests the
@@ -69,10 +108,14 @@ function tryOneAction(state, pid) {
       (u) => u.node === unit.node && u.owner !== pid && isUnitVisibleTo(state, pid, u),
     );
     if (enemyHere && (!loc || !loc.sections.includes("neutral"))) {
-      const r = performAction(state, "contest", {
-        unit: unit.uid, target: enemyHere.uid,
-      });
-      if (r.ok) return true;
+      const atk = previewAttackerStrength(state, unit.node, pid).total;
+      const def = previewAttackerStrength(state, unit.node, enemyHere.owner).total;
+      if (acceptableOdds(state, pid, atk, def, true)) {
+        const r = performAction(state, "contest", {
+          unit: unit.uid, target: enemyHere.uid,
+        });
+        if (r.ok) return true;
+      }
     }
   }
 
@@ -345,15 +388,15 @@ function manageEconomy(state, pid) {
 
 // Choose what a city should build next: the highest-value buildable
 // (Tech-allowed, Loyalty-unlocked, slot-fitting) chip. Prefers economy /
-// research / a first Training Grounds; falls back to arming a stationed unit.
+// research / a first recruit-unlocking chip (Training Grounds today, or
+// whatever content adds later — scored via `unitCapBonus`, not by id);
+// falls back to arming a stationed unit.
 function pickBuild(state, pid, loc) {
   const options = buildableChips(state, loc).filter((o) => !o.locked);
-  const haveTG = Object.values(state.locations).some(
-    (l) => l.controller === pid && l.chips.some((c) => state.chips[c]?.chipId === "training-grounds"),
-  );
+  const haveRecruiting = recruitCapBonus(state, pid) > 0;
   const score = (def) => {
     let s = (def.output || 0) * 3 + (def.research || 0) * 3 + (def.garrison || 0) + (def.strength || 0);
-    if (def.id === "training-grounds" && !haveTG) s += 5;
+    if ((def.unitCapBonus || 0) > 0 && !haveRecruiting) s += 5;
     return s - (def.upkeep || 0); // mild aversion to upkeep when poor
   };
 
@@ -378,10 +421,12 @@ function pickBuild(state, pid, loc) {
 function tryRecruit(state, pid) {
   const player = state.players[pid];
   if (player.resource < CONFIG.unitRecruitCost) return false;
+  // The recruit-unlocking chip just needs to exist ANYWHERE the player
+  // controls (validateRecruit checks it player-wide, not per-location) —
+  // so try every controlled location, not just the one holding the chip.
+  if (recruitCapBonus(state, pid) < 1) return false;
   for (const loc of Object.values(state.locations)) {
     if (loc.controller !== pid) continue;
-    const hasTG = loc.chips.some((c) => state.chips[c]?.chipId === "training-grounds");
-    if (!hasTG) continue;
     const r = performAction(state, "recruit", { at: loc.hexId });
     if (r.ok) return true;
   }

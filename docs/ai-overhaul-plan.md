@@ -1,14 +1,25 @@
 # AI Overhaul — toward a content-agnostic opponent
 
-> **STATUS (2026-08-06):** partially implemented. The "unused tech wheel"
-> gap (item 3 below) is **closed** — `ai.js` now calls `assignTechNode` via
-> a `maybeAssignTech` helper. Items 1, 2, and 4 (fixed-field build scorer,
-> hardcoded `training-grounds`, blind/no-EV contests) are **still open** —
-> verified by reading current `ai.js`. The full shared-eval-core rewrite
-> described below has not been done; what exists is a heuristic patch, not
-> the effect→value table. See `docs/v0.3-roadmap.md` §1 for the current
-> recommended scope (EV-gating contests + delisting the hardcoded chip id
-> are worth doing now; the full table rewrite is a larger, separable lift).
+> **STATUS (2026-08-06):** partially implemented, updated further today.
+> Items 2, 3, and 4 below are now **closed**: the tech wheel is used
+> (`maybeAssignTech`), `training-grounds` is no longer hardcoded (chips now
+> carry a generic `unitCapBonus` field — see `content.js`, `actions.js`
+> `recruitCapBonus`), and contests are no longer blind — `ai.js` now
+> EV-gates every contest through `previewAttackerStrength`/
+> `previewLocationContest` (moved into `contest.js` so both the engine-side
+> AI and the UI's odds preview share one implementation) and a
+> `winProbability`/`acceptableOdds` check tuned by the faction's aggression
+> dial (`config.js` `CONFIG.ai`). Measured effect on the seed-42 harness
+> AI-vs-AI smoke test: contest win rate went from 51/245 (~21%) to
+> 230/264 (~87%), captures roughly doubled (15 → 29), and the game no
+> longer produces one faction's army being wiped out to near-zero units.
+>
+> **Still open:** item 1, the fixed-field build/tech scorer. The
+> `unitCapBonus` fix generalizes recruiting specifically; a chip with a
+> genuinely new effect type (influence, vision, detection, loyalty-rate)
+> still scores 0 in `pickBuild`'s heuristic and in `maybeAssignTech`'s path
+> picker. The full effect→value table described below is the fix for that
+> — a larger, separable lift. See `docs/v0.3-roadmap.md` §1.
 
 Status: **plan, not yet implemented.** The demo is 1 human vs 3 AI, so the
 AI is what makes the v0.2+ systems (combat, tech, loyalty, influence, fog,
@@ -39,17 +50,26 @@ A **hybrid** — generic in places, brittle in others.
    new effect** scores **0** and is ignored. *This is the core
    content-robustness hole:* records using known fields are fine; anything
    else is invisible.
-2. **`training-grounds` is hard-coded** in three places (`pickBuild` +5,
-   `tryRecruit`, the `haveTG` check) — rename it or add an alternative and
-   the AI misses it.
+2. ~~**`training-grounds` is hard-coded**~~ — **CLOSED (2026-08-06).**
+   The chip now carries a generic `unitCapBonus` field; `actions.js`
+   exports `recruitCapBonus(state, pid)` summing it across owned chips
+   (also fixed a latent bug: recruiting is a player-wide check, not
+   per-location, so the AI was skipping eligible locations). `pickBuild`
+   and `tryRecruit` in `ai.js` now read that instead of the id. A new
+   content chip with the same field, any id, works with zero AI changes.
 3. ~~**The tech wheel is entirely unused**~~ — **CLOSED (2026-08-06).**
    `ai.js` now has `maybeAssignTech`, which calls `assignTechNode` when a
    point is free. It's a simple heuristic pick, not the goal-weighted
    effect→value model described below — that upgrade is still open — but
    the wheel is no longer ignored.
-4. **Contests are blind** — it attacks whenever a unit stands on a
-   contestable hex, with no win-probability / attrition check and no use of
-   the §16 levers (concentration, fortify, terrain).
+4. ~~**Contests are blind**~~ — **CLOSED (2026-08-06).** `ai.js` now
+   estimates win probability (via `previewAttackerStrength(state, hex,
+   pid)` and `previewLocationContest(state, hex)` from `contest.js`, which
+   already fold in concentration/fortify/mountain/veteran) before
+   committing to a fight, and declines contests below a threshold set by
+   the faction's aggression dial. It's an exact-odds check on the *current*
+   totals, not a deeper minimax/attrition projection — still a reasonable
+   next step if AI quality needs another pass.
 
 ## The plan
 
