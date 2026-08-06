@@ -25,7 +25,7 @@ import { CHIPS as ENGINE_CHIPS, LOCATIONS as ENGINE_LOCATIONS } from "../game/co
 import { CONFIG } from "../game/config.js";
 import { NEUTRAL } from "./data.js";
 import { getEncounter } from "../game/encounters.js";
-import { hasTechNode } from "../game/tech.js";
+import { encounterRedrawBudget } from "../game/encounters.js";
 import { evalCond } from "../game/dsl.js";
 import { adaptState, reinforcePreview, engineChipIdToUi, previewLocationContest, previewAttackerStrength } from "./engineAdapter.js";
 import { resolveSalvage } from "../game/contest.js";
@@ -410,16 +410,11 @@ export default function Prototype({ config, onNewGame }) {
       .map((c) => c.id);
   }
 
-  // §17.5 Intelligence (Recon) + Recon Team chips each grant one
-  // encounter discard for the drawing player.
-  function redrawBudget(game, pid) {
-    let recon = 0;
-    for (const loc of Object.values(game.locations)) {
-      if (loc.controller !== pid) continue;
-      for (const c of loc.chips) if (game.chips[c]?.chipId === "recon-team") recon += 1;
-    }
-    return (hasTechNode(game, pid, "int-entry") ? 1 : 0) + recon;
-  }
+  // §17.5 Intelligence (Recon) + any chip carrying `encounterRedraws` each
+  // grant one encounter discard for the drawing player. Mirrors
+  // encounters.js exactly (imported from there) so the UI's redraw button
+  // and the engine's own headless default never drift apart.
+  const redrawBudget = encounterRedrawBudget;
 
   // Build the encounter pre-flight prompt for the card at deck index `idx`
   // (the engine discards to the bottom, so after `idx` discards it draws

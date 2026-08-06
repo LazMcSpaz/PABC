@@ -29,7 +29,7 @@ import { resolveSalvage } from "./contest.js";
 import { readRivalIntel } from "./intel.js";
 import { postAt, isPostVisibleTo, chargePostUpkeep } from "./posts.js";
 import { loadFieldEncounters, findUnsupportedTypes, choiceIsRunnable, WORLD_ENCOUNTERS } from "./content-loader.js";
-import { pickHexByFilter } from "./encounters.js";
+import { pickHexByFilter, encounterRedrawBudget } from "./encounters.js";
 import { resolveTokens } from "./textTokens.js";
 import { evalCond, evalStrength } from "./dsl.js";
 import { registerQuest } from "./quests.js";
@@ -726,6 +726,27 @@ line("\n  [Recruit] unitCapBonus is generic, not id-hardcoded");
       r2.ok && !r3b.ok && r3b.reason === "unit cap reached");
   } finally {
     delete CHIPS["__test-recruit-hut"];
+  }
+}
+
+// --- encounterRedraws is likewise schema-driven, not a "recon-team" id
+// special case. ---
+line("\n  [Encounters] encounterRedraws is generic, not id-hardcoded");
+{
+  CHIPS["__test-scout-hut"] = { id: "__test-scout-hut", kind: "location", encounterRedraws: 1 };
+  try {
+    const g = createGame({ seed });
+    const me = g.turnOrder[0];
+    const home = Object.values(g.locations).find((l) => l.controller === me);
+    check("no redraw budget with no recon-granting chip / tech", encounterRedrawBudget(g, me) === 0);
+    const c = g.nextId("chip");
+    g.chips[c] = { uid: c, chipId: "__test-scout-hut" };
+    home.chips.push(c);
+    check("a non-'recon-team' chip with encounterRedraws grants a redraw", encounterRedrawBudget(g, me) === 1);
+    g.players[me].techWheel = ["int-entry"];
+    check("stacks with the Intelligence entry node (1 + 1 = 2)", encounterRedrawBudget(g, me) === 2);
+  } finally {
+    delete CHIPS["__test-scout-hut"];
   }
 }
 

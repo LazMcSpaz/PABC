@@ -124,7 +124,7 @@ export const CHIPS = {
   // --- location chips ---
   recyclers: { id: "recyclers", name: "Recyclers", kind: "location", slots: 1, techLevel: 1, cost: 3, copies: 3, output: 1, buildCost: 3, loyaltyReq: 0, upgradesTo: "factory", desc: "+1 scrap Output" },
   "town-hall": { id: "town-hall", name: "Town Hall", kind: "location", slots: 1, techLevel: 1, cost: 3, copies: 3, buildCost: 3, loyaltyReq: 0, desc: "+1 to this location's foothold cap" },
-  "recon-team": { id: "recon-team", name: "Recon Team", kind: "location", slots: 1, techLevel: 1, cost: 3, copies: 2, buildCost: 3, loyaltyReq: 0, desc: "Discard a drawn encounter and draw again" },
+  "recon-team": { id: "recon-team", name: "Recon Team", kind: "location", slots: 1, techLevel: 1, cost: 3, copies: 2, buildCost: 3, loyaltyReq: 0, encounterRedraws: 1, desc: "Discard a drawn encounter and draw again" },
   "training-grounds": { id: "training-grounds", name: "Training Grounds", kind: "location", slots: 1, techLevel: 1, cost: 4, copies: 3, buildCost: 4, loyaltyReq: 0, unitCapBonus: 1, desc: "Enables recruiting units; +1 unit cap" },
   labs: { id: "labs", name: "Labs", kind: "location", slots: 1, techLevel: 1, cost: 3, copies: 3, research: 1, buildCost: 3, loyaltyReq: 0, upgradesTo: "advanced-lab", desc: "+1 Research while controlled" },
   "advanced-lab": { id: "advanced-lab", name: "Advanced Lab", kind: "location", slots: 1, techLevel: 2, cost: 5, copies: 2, research: 2, buildCost: 5, loyaltyReq: 3, upkeep: 1, desc: "+2 Research while controlled (upkeep 1)" },
