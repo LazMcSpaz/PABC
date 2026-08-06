@@ -6,12 +6,17 @@ A post-apocalyptic strategy game for 2–4 players, set in the Ashlands — a
 retro-futuristic world wrecked by a simultaneous plague and solar
 catastrophe. Rival factions fight for control of a contested wasteland map.
 
-> **Status — mid-redesign.** The game is being rebuilt around a spatial
-> hex board. The engine architecture is specified in
-> [`docs/mechanical-spec-v0.1.md`](docs/mechanical-spec-v0.1.md); a
-> desktop UI prototype — a visual look-pass, not yet wired to an engine —
-> lives in [`src/prototype/`](src/prototype/). The earlier settlement-only
-> version's code is retained but inactive (see *Legacy* below).
+> **Status — playable, content phase.** The spatial hex-board redesign's
+> engine is built and wired to the UI: every system in the mechanical spec
+> (§15 encounters/quests, §16 combat, §17 tech, §18 loyalty/influence/
+> diplomacy, §19 fog of war, §20 economy) is implemented in
+> [`src/game/`](src/game/) and playable through
+> [`src/prototype/`](src/prototype/), including AI-vs-AI. What's left is
+> mostly content (quests and world encounters are still empty; other
+> tables are thin), AI decision-making quality, and cleanup — see
+> [`docs/v0.3-roadmap.md`](docs/v0.3-roadmap.md) for the live roadmap. The
+> earlier settlement-only version's code is retained but inactive (see
+> *Legacy* below).
 
 ## The game
 
@@ -27,33 +32,48 @@ Core ideas:
   parallel **world-encounter** system reads the state of the game and
   fires ambient encounters and quest beats — see §15 of the mechanical
   spec.
-- **Units** — each faction starts with one unit: a token on the map plus a
-  stat card carrying `Strength` and `Movement`. Units move and fight; more
-  can be recruited once the prerequisite is built.
+- **Units** — each faction starts with two units: a token on the map plus a
+  stat card carrying `Strength` and `Movement`, with its own movement
+  budget, attrition, salvage and veterancy (§16). More can be recruited up
+  to a cap.
 - **Locations & the control meter** — every location has a 3-section
   control meter. Winning a contest flips a section; hold all three for
   **full control**, which grants the location's passives, scrap and VP.
-- **Foothold & decay** — a held location's foothold score rises while your
-  unit garrisons it and falls when the unit leaves; left long enough,
-  sections decay back to neutral. A **Capital** is immune to decay.
+- **Loyalty** — an 8-slice pie that rises while a location is held/
+  integrated and decays when neglected; control only flips on a lost
+  contest or Loyalty hitting 0 (§18.2, replaces the old foothold/decay).
+  A **Capital** is immune.
 - **Contests** — a unit's `Strength` + 1d6 versus the defender value +
-  1d6; the defender wins ties.
-- **Chips** — small upgrades acquired from the Market Row and installed on
-  units (2 slots) or location cards: more Strength, Movement, scrap
-  production, garrison, and so on.
-- **Scrap** is the spendable currency; **Victory Points** are the win track.
+  1d6, modified by concentration, terrain, fortify and veterancy (§16.6);
+  the defender wins ties.
+- **Tech Wheel** — Research banked from held Labs sets a Tech Level, which
+  grants Ability Points to spend on a 4-path wheel (military, logistics,
+  economy, intelligence) (§17).
+- **Economy** — locations produce Output split between banked scrap and
+  building chips into slots (the old Market is retired) (§20).
+- **Influence & Fog of War** — a per-faction Zone of Control field (§18.3)
+  and per-faction vision/fog/ghost tracking (§19) — the board looks
+  different depending who's viewing it.
+- **Diplomacy** — factions have Standing, Menace and Honor; deals, pacts,
+  war, vassalage and a reputation-gated Recognition victory are all in
+  play (§18.4–§18.13).
+- **Chips** — upgrades built into units (2 bay slots) or location slots:
+  more Strength, Movement, scrap production, garrison, and so on.
+- **Scrap** is the spendable currency; **Victory Points** and Recognition
+  are the win conditions.
 
 The authoritative, theme-free rules live in the mechanical spec — this
 section is just orientation.
 
 ## The prototype
 
-[`src/prototype/`](src/prototype/) is a desktop-first **UI look-pass**: it
-renders the redesigned game against a hand-authored mock state so the
-visual design can be reviewed. It is **not** wired to a rules engine — you
-cannot play a game yet. It demonstrates the hex board, location cards
-(face-down / held), unit cards, the control meter, upgrade-chip tooltips,
-the faction bar, the inspector, and a contest dice roll.
+[`src/prototype/`](src/prototype/) is the live, playable UI: a desktop-first
+hex board wired to the real rules engine in [`src/game/`](src/game/) via
+[`src/prototype/engineAdapter.js`](src/prototype/engineAdapter.js) — you can
+play a full game, including against AI opponents. It renders the hex board,
+location cards (face-down / held), unit cards, the control meter and
+Loyalty pie, upgrade-chip tooltips, the tech wheel, the diplomacy drawer,
+the faction bar, the inspector, fog of war, and contest dice rolls.
 
 ## Getting started
 
@@ -72,13 +92,20 @@ ignores it, so the local root URL works as-is.
 
 ```
 docs/
-  mechanical-spec-v0.1.md   authoritative, theme-free engine spec
+  mechanical-spec-v0.1.md   authoritative, theme-free engine spec (§1-§20)
+  v0.3-roadmap.md           live roadmap — what's actually left
   design-doc-v0.1.md        world / faction / lore outline
+  content-schema-v0.1.md    engine↔editor content contract
   playtesting-log.md        notes
 src/
-  prototype/                current UI prototype (look-pass)
+  game/                     the rules engine (turn loop, contests, tech,
+                             loyalty, influence, fog, economy, diplomacy)
+  game/content/             auto-generated from the editor — do not hand-edit
+  prototype/                the live UI, wired to src/game/ via engineAdapter.js
   App.jsx                   renders the prototype
-  engine/ components/ hooks/  legacy settlement-game code (inactive)
+  engine/ components/ hooks/  legacy settlement-game code (dead, unremoved)
+editor/                     content-authoring tool (Supabase-backed)
+content/                    legacy CSV content source (thin, superseded by editor)
 public/assets/              art assets — drop new art here
 ```
 
@@ -87,24 +114,45 @@ public/assets/              art assets — drop new art here
 - **[`docs/mechanical-spec-v0.1.md`](docs/mechanical-spec-v0.1.md)** — the
   engine spec: zones, turn loop, the contest model, units, chips, the
   effect library, data schemas. The source of truth for mechanics.
+- **[`docs/v0.3-roadmap.md`](docs/v0.3-roadmap.md)** — the live roadmap:
+  ground-truth status of every system and what's actually left to do.
 - **[`docs/design-doc-v0.1.md`](docs/design-doc-v0.1.md)** — world,
   factions and lore (outline, in progress).
+- **[`docs/content-schema-v0.1.md`](docs/content-schema-v0.1.md)** — the
+  contract between the engine and the `editor/` content tool.
+- **[`docs/ai-overhaul-plan.md`](docs/ai-overhaul-plan.md)** — known AI
+  decision-making gaps and the plan to close them.
+- Older phase-by-phase implementation docs (`v0.2-implementation-roadmap.md`,
+  `tech-wheel-plan.md`, `demo-gameplay-v0.2-plan.md`,
+  `parallel-agent-briefs.md`) are historical records of already-shipped
+  work — each now carries a status banner pointing here.
 
 ## Status & next steps
 
-- [x] Mechanical spec for the spatial-board redesign (v0.1 draft)
+- [x] Mechanical spec for the spatial-board redesign (v0.1 draft, §1–§20)
 - [x] Desktop UI prototype — look pass
+- [x] Rules engine implementing the spec (`src/game/`) — combat, tech,
+      loyalty, influence, fog of war, economy, diplomacy all implemented
+- [x] Wire the prototype UI to the engine (`src/prototype/engineAdapter.js`)
+- [ ] Content — quests and world encounters are still empty; locations,
+      chips, factions and tuning constants are thin (see
+      [`docs/v0.3-roadmap.md`](docs/v0.3-roadmap.md))
+- [ ] AI decision-making quality — contests are EV-blind, a couple of
+      build/tech scoring heuristics are hardcoded (see
+      [`docs/ai-overhaul-plan.md`](docs/ai-overhaul-plan.md))
 - [ ] Art assets — faction emblems, terrain tiles, icons
-- [ ] Rules engine implementing the spec
-- [ ] Wire the prototype UI to the engine
-- [ ] Content — faction, location and chip definitions; balancing
-- [ ] Retire the legacy settlement-game code
+- [ ] Retire the legacy settlement-game code (confirmed dead, not yet deleted)
+
+See [`docs/v0.3-roadmap.md`](docs/v0.3-roadmap.md) for the current live
+roadmap and how these fronts can run in parallel.
 
 ## Legacy
 
 The original version was a settlement-builder — grow a settlement, raid
 opponents, progress through three "Ages." That code remains under
 `src/engine`, `src/components` and `src/hooks` but is no longer
-referenced; `App.jsx` renders the prototype instead. It will be removed
-once the new engine lands. The detailed rules summary this README used to
-carry is superseded by the mechanical spec.
+referenced; `App.jsx` renders the prototype instead. The new engine has
+now landed (see Status above), so this code is confirmed dead weight —
+removing it is an open, unblocked cleanup item (see
+[`docs/v0.3-roadmap.md`](docs/v0.3-roadmap.md)). The detailed rules
+summary this README used to carry is superseded by the mechanical spec.

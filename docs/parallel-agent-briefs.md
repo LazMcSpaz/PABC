@@ -1,4 +1,18 @@
-# Parallel Agent Briefs (off `main`)
+# Parallel Agent Briefs (off `main`) — v0.2 round, archived
+
+> **STATUS (2026-08-06): all three briefs below are done** — Loyalty,
+> Economy, and (partially — see caveat) the design-tables pass all landed
+> or were superseded. §18–§20 are fully implemented (verified against
+> `src/game/*.js` and a clean harness run); kept here as a historical
+> record of how the work was split, not as active instructions. **For
+> current parallel work fronts (AI quality / content authoring / cleanup),
+> see `docs/v0.3-roadmap.md`.**
+>
+> Caveat: **Agent 3's deliverable was never produced** —
+> `docs/tuning-tables-proposals.md` doesn't exist. The Loyalty/Economy/
+> Influence/Diplomacy constants that shipped are engineering defaults, not
+> a deliberate design pass. That gap is carried forward into the v0.3
+> content bucket rather than re-briefed here.
 
 How to split the next slice of work across 2–3 agents. Supersedes the
 earlier round-1 briefs (which were mis-baselined on a stale branch and

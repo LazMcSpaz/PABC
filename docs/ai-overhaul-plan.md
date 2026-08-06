@@ -1,5 +1,15 @@
 # AI Overhaul — toward a content-agnostic opponent
 
+> **STATUS (2026-08-06):** partially implemented. The "unused tech wheel"
+> gap (item 3 below) is **closed** — `ai.js` now calls `assignTechNode` via
+> a `maybeAssignTech` helper. Items 1, 2, and 4 (fixed-field build scorer,
+> hardcoded `training-grounds`, blind/no-EV contests) are **still open** —
+> verified by reading current `ai.js`. The full shared-eval-core rewrite
+> described below has not been done; what exists is a heuristic patch, not
+> the effect→value table. See `docs/v0.3-roadmap.md` §1 for the current
+> recommended scope (EV-gating contests + delisting the hardcoded chip id
+> are worth doing now; the full table rewrite is a larger, separable lift).
+
 Status: **plan, not yet implemented.** The demo is 1 human vs 3 AI, so the
 AI is what makes the v0.2+ systems (combat, tech, loyalty, influence, fog,
 economy, diplomacy) actually *function as a game*. This documents the
@@ -32,9 +42,11 @@ A **hybrid** — generic in places, brittle in others.
 2. **`training-grounds` is hard-coded** in three places (`pickBuild` +5,
    `tryRecruit`, the `haveTG` check) — rename it or add an alternative and
    the AI misses it.
-3. **The tech wheel is entirely unused** — there is no `assignTechNode`
-   call anywhere; the AI never spends Ability Points. A whole system
-   ignored.
+3. ~~**The tech wheel is entirely unused**~~ — **CLOSED (2026-08-06).**
+   `ai.js` now has `maybeAssignTech`, which calls `assignTechNode` when a
+   point is free. It's a simple heuristic pick, not the goal-weighted
+   effect→value model described below — that upgrade is still open — but
+   the wheel is no longer ignored.
 4. **Contests are blind** — it attacks whenever a unit stands on a
    contestable hex, with no win-probability / attrition check and no use of
    the §16 levers (concentration, fortify, terrain).

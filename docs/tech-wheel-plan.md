@@ -1,5 +1,11 @@
 # Implementation Instructions — Tech Wheel
 
+> **STATUS (2026-08-06): shipped**, exactly as scoped — the 4 entry nodes
+> are implemented and wired into the AI and UI; the 16 branch nodes remain
+> the intentional `noop` stubs described in "Out of scope" below. Designing
+> and implementing those branch effects is open work — see
+> `docs/v0.3-roadmap.md` §2.
+
 Quick build guide. **Read `docs/mechanical-spec-v0.1.md` §17 first** — it's the
 design of record; this is the how/where. Build on
 `claude/ashland-conquest-demo-BViiz`.
