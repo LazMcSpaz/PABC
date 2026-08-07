@@ -297,7 +297,7 @@ function ConfirmDialog({ title, body, accent = "#d2453f", onConfirm, onCancel })
         transition={{ type: "spring", stiffness: 280, damping: 24 }}
         style={{
           position: "relative",
-          width: 340, padding: 18,
+          width: 340, maxWidth: "92vw", padding: 18,
           background: "linear-gradient(158deg, rgba(18,31,32,0.97), rgba(9,17,18,0.98))",
           border: `1px solid ${accent}aa`, borderRadius: 7,
           boxShadow: `0 0 22px ${accent}33, 0 12px 28px rgba(0,0,0,0.6)`,
@@ -1612,7 +1612,7 @@ export default function DiplomacyDrawer({
         style={{
           position: "fixed",
           top: 0, right: 0, bottom: 44, // sit above the bottom tab dock
-          width: 420,
+          width: 420, maxWidth: "100vw",
           zIndex: 70,
           display: "flex", flexDirection: "column",
           background: "linear-gradient(168deg, rgba(18,31,32,0.96), rgba(8,15,16,0.97))",

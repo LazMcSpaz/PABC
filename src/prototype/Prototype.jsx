@@ -12,8 +12,9 @@ import Inspector from "./Inspector.jsx";
 import UnitCard from "./UnitCard.jsx";
 import ControlMeter from "./ControlMeter.jsx";
 import {
-  TopBar, MenuOrb, RadialMenu, LocationWindow, TitledWindow, ICON, C as HUD,
+  TopBar, MenuOrb, RadialMenu, LocationWindow, TitledWindow, ICON, C as HUD, COMPACT_HUD_H,
 } from "./HudChrome.jsx";
+import { useIsPhone } from "./useViewport.js";
 import { createGame } from "../game/setup.js";
 import { startTurn, endTurn } from "../game/turn.js";
 import { performAction } from "../game/actions.js";
@@ -253,6 +254,8 @@ export default function Prototype({ config, onNewGame }) {
   }
   const [tick, setTick] = useState(0);
   const bumpTick = useCallback(() => setTick((t) => t + 1), []);
+  const isPhone = useIsPhone();
+  const hudOffset = isPhone ? COMPACT_HUD_H : 60;
 
   const state = useMemo(() => adaptState(gameRef.current), [tick]);
 
@@ -739,7 +742,7 @@ export default function Prototype({ config, onNewGame }) {
           HUD chrome (resource wheel, faction readout, menu orb) floats
           over it as absolute overlays — see below. */}
       <div style={{ position: "relative", flex: 1, display: "flex", minHeight: 0 }}>
-        <BoardViewport cameraTarget={replay.cameraTarget} cameraPanMs={replay.cameraPanMs}>
+        <BoardViewport cameraTarget={replay.cameraTarget} cameraPanMs={replay.cameraPanMs} controlsTop={hudOffset + 10}>
           <div style={{ position: "relative", padding: 30 }}>
             <Bracket corner="tl" />
             <Bracket corner="tr" />
@@ -782,7 +785,7 @@ export default function Prototype({ config, onNewGame }) {
             onClose={() => setSelectedUnitId(null)}
           />
         )}
-        <EventFeed engineState={gameRef.current} tick={tick} />
+        <EventFeed engineState={gameRef.current} tick={tick} topOffset={hudOffset + 10} />
       </div>
 
       {/* HEX DETAIL — locations open the single-window Location view;

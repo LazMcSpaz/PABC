@@ -6,6 +6,7 @@
 import { motion } from "framer-motion";
 import { FACTIONS as UI_FACTIONS, UNIT_UPGRADES, CHIP_COLOR } from "./data.js";
 import { C, CornerBrackets } from "./HudChrome.jsx";
+import { useIsPhone } from "./useViewport.js";
 
 const BAY_SLOTS = 2;
 
@@ -166,6 +167,7 @@ function ChipBay({ chips }) {
 }
 
 export default function UnitPanel({ unit, hex, owned = true, canAct, reinforce, scrap, raidTargets = [], onReinforce, onContest, onClose }) {
+  const isPhone = useIsPhone();
   if (!unit) return null;
   const faction = UI_FACTIONS[unit.owner];
   const factionColor = faction?.color || C.holo;
@@ -189,8 +191,9 @@ export default function UnitPanel({ unit, hex, owned = true, canAct, reinforce, 
       style={{
         position: "absolute",
         left: 14,
-        bottom: 58,
-        width: 440,
+        right: isPhone ? 14 : "auto",
+        bottom: isPhone ? 106 : 58, // clear the bottom-right MenuOrb once full-width
+        width: isPhone ? "auto" : 440,
         minHeight: 220,
         zIndex: 45,
         background: "linear-gradient(158deg, rgba(18,31,32,0.93), rgba(9,17,18,0.95) 60%, rgba(6,11,12,0.97))",
@@ -259,8 +262,9 @@ export default function UnitPanel({ unit, hex, owned = true, canAct, reinforce, 
         >×</button>
       </div>
 
-      {/* Body — 2 columns: stats on the left, status/action on the right */}
-      <div style={{ display: "flex", padding: "15px 16px 16px", gap: 16, alignItems: "stretch", flex: 1, minHeight: 0 }}>
+      {/* Body — 2 columns on desktop/iPad (stats left, status/action right);
+          stacked on phone, where there isn't width for both side by side. */}
+      <div style={{ display: "flex", flexDirection: isPhone ? "column" : "row", padding: "15px 16px 16px", gap: isPhone ? 10 : 16, alignItems: isPhone ? "stretch" : "stretch", flex: 1, minHeight: 0 }}>
         {/* Left: stats row */}
         <div style={{ flex: 1, display: "flex", gap: 6, alignItems: "center", justifyContent: "center" }}>
           <StatCell
@@ -287,12 +291,12 @@ export default function UnitPanel({ unit, hex, owned = true, canAct, reinforce, 
           />
         </div>
 
-        {/* Divider */}
-        <div style={{ width: 1, background: "rgba(86,211,198,0.18)" }} />
+        {/* Divider — vertical between side-by-side columns, horizontal once stacked */}
+        <div style={isPhone ? { height: 1, background: "rgba(86,211,198,0.18)" } : { width: 1, background: "rgba(86,211,198,0.18)" }} />
 
         {/* Right: tags + location + (reinforce when needed) + helper */}
         <div style={{
-          width: 158, display: "flex", flexDirection: "column", gap: 7, minWidth: 0,
+          width: isPhone ? "auto" : 158, display: "flex", flexDirection: "column", gap: 7, minWidth: 0,
         }}>
           {(unit.veteran || unit.fortified) && (
             <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>

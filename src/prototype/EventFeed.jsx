@@ -4,6 +4,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { FACTIONS as UI_FACTIONS, theme } from "./data.js";
 import { engineLocationIdToUi } from "./engineAdapter.js";
+import { useIsPhone } from "./useViewport.js";
 
 const MAX_ROWS = 14;
 
@@ -190,7 +191,8 @@ function formatEvent(ev, engineState) {
   }
 }
 
-export default function EventFeed({ engineState, tick }) {
+export default function EventFeed({ engineState, tick, topOffset = 14 }) {
+  const isPhone = useIsPhone();
   // Pull every event from the engine log; format the visible ones; keep
   // only the tail. The component re-runs on every tick bump so AI turns
   // surface immediately.
@@ -217,10 +219,10 @@ export default function EventFeed({ engineState, tick }) {
     <div
       style={{
         position: "absolute",
-        top: 14,
-        right: 14,
-        width: 270,
-        maxHeight: 260,
+        top: topOffset,
+        right: isPhone ? 8 : 14,
+        width: isPhone ? 170 : 270,
+        maxHeight: isPhone ? 190 : 260,
         background: "rgba(20, 17, 13, 0.92)",
         border: `1px solid ${theme.border}`,
         borderRadius: 7,

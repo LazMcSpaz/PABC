@@ -13,7 +13,7 @@ const clamp = (n, lo, hi) => Math.min(hi, Math.max(lo, n));
 // `cameraTarget` is a content-space point {x,y} (a hex centre) the AI replay
 // wants centred; `cameraPanMs` is the eased pan duration (0 = snap). User
 // drag / wheel still work and simply override the last programmatic pan.
-export default function BoardViewport({ children, cameraTarget = null, cameraPanMs = 350 }) {
+export default function BoardViewport({ children, cameraTarget = null, cameraPanMs = 350, controlsTop = 14 }) {
   const vpRef = useRef(null);
   const contentRef = useRef(null);
   const drag = useRef(null);
@@ -241,7 +241,7 @@ export default function BoardViewport({ children, cameraTarget = null, cameraPan
         onPointerDown={(e) => e.stopPropagation()}
         style={{
           position: "absolute",
-          top: 14,
+          top: controlsTop,
           left: 14,
           display: "flex",
           flexDirection: "column",
