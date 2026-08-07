@@ -15,7 +15,7 @@ import { buildableChips, slotCapacity, slotsUsed, stationedUnitWithBay } from ".
 import { isUnitVisibleTo } from "./visibility.js";
 import { previewAttackerStrength, previewLocationContest } from "./contest.js";
 import { assignTechNode } from "./stats.js";
-import { hasTechNode } from "./tech.js";
+import { hasTechNode, TECH_NODES, prereqMet } from "./tech.js";
 import { postAt } from "./posts.js";
 import { standingTier } from "./standing.js";
 import { factionDef } from "./content.js";
@@ -144,29 +144,126 @@ function tryOneAction(state, pid) {
   return false;
 }
 
-// AI overhaul plan replaces this — a hard-coded heuristic so the demo AI at
-// least USES the tech wheel (the full effect→value table is the
-// docs/ai-overhaul-plan.md overhaul, deliberately out of scope here).
-function maybeAssignTech(state, pid) {
+// --- Tech Wheel allocation ---------------------------------------------
+// Every node's mechanical effect is real — wired at its consumer site via
+// hasTechNode(state, pid, "<node-id>") in contest.js/stats.js/board.js/
+// turn.js/actions.js/economy.js/visibility.js/intel.js — TECH_NODES'
+// `effect: {kind:"noop"}` on branch nodes is just unused leftover shape,
+// not a gap (see docs/v0.3-roadmap.md). What WAS missing is a sensible
+// allocation policy: this table scores which currently-assignable node is
+// worth taking right now. It's small and hand-written rather than a
+// generic effect→value table (docs/ai-overhaul-plan.md item 1, still open
+// for chips/build-scoring) because the wheel is a fixed, engine-owned set
+// of exactly 20 nodes that content authors never extend — enumerating
+// them by id is the appropriately-sized solution here, not a smell.
+
+// How many owned units are below Strength cap — feeds the Sustainment
+// (heal) nodes.
+function ownUnitsBelowCap(state, pid) {
+  return ownUnits(state, pid).filter((u) => u.baseStrength < CONFIG.unit.baseStrengthCap).length;
+}
+
+// Fraction of the map this faction has explored — feeds the Vision nodes
+// (an unexplored map makes more Vision/Detection worth more).
+function exploredFraction(state, pid) {
+  const vis = state.visibility?.[pid];
+  const total = Object.keys(state.board.hexes).length || 1;
+  return vis ? vis.explored.size / total : 1;
+}
+
+// Is a hostile/warring enemy unit standing on a Location this faction
+// controls right now — feeds the Bastion (defense) nodes.
+function underThreatAtHome(state, pid) {
+  return Object.values(state.units).some((u) => {
+    if (u.owner === pid) return false;
+    const loc = state.locations[u.node];
+    if (!loc || loc.controller !== pid) return false;
+    return atWar(state, pid, u.owner) || standingTier(getStanding(state, pid, u.owner)) === "hostile";
+  });
+}
+
+// Is this faction's banked scrap thin relative to what it has queued to
+// build — feeds the Construction (cost) nodes.
+function scrapScarce(state, pid) {
+  const queued = Object.values(state.locations).filter((l) => l.controller === pid && l.activeBuild).length;
+  return queued > 0 && (state.players[pid]?.resource || 0) < queued * 5;
+}
+
+// The highest Loyalty among Locations held by a hostile/warring rival —
+// feeds Saboteurs (bigger target, more worth undermining).
+function bestHostileLoyalty(state, pid) {
+  let best = 0;
+  for (const loc of Object.values(state.locations)) {
+    const c = loc.controller;
+    if (!c || c === pid) continue;
+    const hostile = atWar(state, pid, c) || standingTier(getStanding(state, pid, c)) === "hostile";
+    if (hostile) best = Math.max(best, loc.loyalty ?? 0);
+  }
+  return best;
+}
+
+// One situational-value function per node id. Flat ~1 is "generically
+// useful, no special-cased reason to prefer or defer it right now."
+const TECH_NODE_SCORE = {
+  "mil-entry": () => 1.5, // any-contest-roll bonus is always live
+  "mil-a1": (s, pid) => ((factionDef(pid)?.aggression ?? 0.5) > 0.5 ? 2 : 0.5),
+  "mil-a2": (s, pid) => ((factionDef(pid)?.aggression ?? 0.5) > 0.5 ? 2 : 0.5),
+  "mil-b1": (s, pid) => (underThreatAtHome(s, pid) ? 3 : 1),
+  "mil-b2": (s, pid) => (underThreatAtHome(s, pid) ? 2.5 : 1),
+  "log-entry": () => 1.2,
+  "log-a1": (s, pid) => ((factionDef(pid)?.aggression ?? 0.5) > 0.5 ? 1.5 : 1),
+  "log-a2": (s, pid) => (factionIds(s).some((f) => atWar(s, pid, f)) ? 2 : 0.5),
+  "log-b1": (s, pid) => (ownUnitsBelowCap(s, pid) > 0 ? 1 + ownUnitsBelowCap(s, pid) * 0.4 : 0.5),
+  "log-b2": (s, pid) => (ownUnitsBelowCap(s, pid) > 0 || scrapScarce(s, pid) ? 1.5 : 0.8),
+  "eco-entry": () => 1.5,
+  "eco-a1": (s, pid) => 1 + (scrapScarce(s, pid) ? 1 : 0),
+  "eco-a2": () => 1,
+  "eco-b1": (s, pid) => 1 + (scrapScarce(s, pid) ? 1.5 : 0),
+  "eco-b2": () => 1,
+  "int-entry": () => 1,
+  "int-a1": (s, pid) => 1 + (1 - exploredFraction(s, pid)) * 2,
+  "int-a2": (s, pid) => 1 + (1 - exploredFraction(s, pid)) * 1.5,
+  "int-b1": (s, pid) => (factionIds(s).length > 2 ? 1.5 : 1),
+  "int-b2": (s, pid) => 0.3 + bestHostileLoyalty(s, pid) * 0.3,
+};
+
+// Additive identity fit (was an exclusive path/branch SELECTOR before —
+// that's the bug: it locked a faction into one path for the whole game
+// and never once picked Logistics). Now every path/branch gets a fair
+// comparison; the dial just tilts the scale.
+function techIdentityWeight(path, branch, dial) {
+  let w = 0;
+  if (path === "military" && (dial.victoryLean === "conquest" || (dial.aggression ?? 0.5) > 0.6)) w += 2;
+  if (path === "intelligence" && (dial.victoryLean === "diplomacy" || dial.victoryLean === "diplomatic")) w += 2;
+  if (branch === "a" && (dial.aggression ?? 0.5) > 0.6) w += 1;
+  if (branch === "b" && (dial.aggression ?? 0.5) <= 0.6) w += 1;
+  return w;
+}
+
+function techBranchOf(nodeId) {
+  if (nodeId.endsWith("-a1") || nodeId.endsWith("-a2")) return "a";
+  if (nodeId.endsWith("-b1") || nodeId.endsWith("-b2")) return "b";
+  return null;
+}
+
+export function maybeAssignTech(state, pid) {
   const p = state.players[pid];
   if (((p.techLevel || 1) - 1) - (p.techWheel?.length || 0) <= 0) return; // no free point
-  const me = factionDef(pid) || {};
-  // Path by faction dial: conquest → Military, diplomacy → Intelligence,
-  // otherwise Economy; aggressive factions still favour Military.
-  let path = "economy";
-  if (me.victoryLean === "conquest") path = "military";
-  else if (me.victoryLean === "diplomacy" || me.victoryLean === "diplomatic") path = "intelligence";
-  else if ((me.aggression ?? 0) > 0.6) path = "military";
-  // Branch: A (Aggression / Vision / Maneuver / Industry) when aggressive,
-  // else B (Bastion / Espionage / Sustainment / Construction).
-  const branch = (me.aggression ?? 0) > 0.6 ? "a" : "b";
-  const prefix = { military: "mil", logistics: "log", economy: "eco", intelligence: "int" }[path];
-  // Fill the chosen branch shallow-to-deep; the first assignable node wins.
-  for (const node of [`${prefix}-entry`, `${prefix}-${branch}1`, `${prefix}-${branch}2`]) {
-    if (p.techWheel.includes(node)) continue;
-    if (assignTechNode(state, pid, node).ok) return;
-    break; // a deeper node's prereq isn't met yet — wait for the next point
+  const dial = factionDef(pid) || {};
+  let best = null, bestScore = -Infinity;
+  for (const nodeId of Object.keys(TECH_NODES)) {
+    if (p.techWheel.includes(nodeId)) continue;
+    if (!prereqMet(state, pid, nodeId)) continue;
+    const node = TECH_NODES[nodeId];
+    const branch = techBranchOf(nodeId);
+    let score = techIdentityWeight(node.path, branch, dial) + (TECH_NODE_SCORE[nodeId]?.(state, pid) ?? 1);
+    // Mild nudge to finish a branch already started over cold-opening a
+    // new path at an exact tie — favours coherent builds without hard-
+    // gating diversification the way the old single-path lock-in did.
+    if (node.prereq && p.techWheel.includes(node.prereq)) score += 0.5;
+    if (score > bestScore) { bestScore = score; best = nodeId; }
   }
+  if (best) assignTechNode(state, pid, best);
 }
 
 // §17.7 — low-probability Listening Post placement: drop a concealed Vision

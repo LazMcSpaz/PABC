@@ -14,12 +14,26 @@
 > 230/264 (~87%), captures roughly doubled (15 → 29), and the game no
 > longer produces one faction's army being wiped out to near-zero units.
 >
-> **Still open:** item 1, the fixed-field build/tech scorer. The
+> **Update (2026-08-07):** `maybeAssignTech`'s allocation policy is fixed
+> too (see item 3, updated below) — it now scores every currently-legal
+> node instead of locking a faction into one path for the whole game. This
+> also corrects a separate, unrelated mistake this doc and `v0.3-roadmap.md`
+> both made: the 16 tech-wheel **branch** nodes were never actually
+> `noop`/undesigned — their real effects are implemented at each consumer
+> site (`contest.js`, `stats.js`, `board.js`, `turn.js`, `actions.js`,
+> `economy.js`, `visibility.js`, `intel.js`) and pass the harness's
+> `[Tech Wheel §17.5]` tests. The `noop` in `TECH_NODES` is just an unused
+> leftover field. §"Robustness guarantee" below repeats that mistake too —
+> corrected there.
+>
+> **Still open:** item 1, the fixed-field **chip/build** scorer only (the
+> tech-node side of item 1 is now closed too — see item 3). The
 > `unitCapBonus` fix generalizes recruiting specifically; a chip with a
 > genuinely new effect type (influence, vision, detection, loyalty-rate)
-> still scores 0 in `pickBuild`'s heuristic and in `maybeAssignTech`'s path
-> picker. The full effect→value table described below is the fix for that
-> — a larger, separable lift. See `docs/v0.3-roadmap.md` §1.
+> still scores 0 in `pickBuild`'s heuristic. The full effect→value table
+> described below is the fix for that — a larger, separable lift, and now
+> scoped specifically to chips since tech nodes have their own bounded
+> fix. See `docs/v0.3-roadmap.md` §1.
 
 Status: **plan, not yet implemented.** The demo is 1 human vs 3 AI, so the
 AI is what makes the v0.2+ systems (combat, tech, loyalty, influence, fog,
@@ -57,11 +71,27 @@ A **hybrid** — generic in places, brittle in others.
    per-location, so the AI was skipping eligible locations). `pickBuild`
    and `tryRecruit` in `ai.js` now read that instead of the id. A new
    content chip with the same field, any id, works with zero AI changes.
-3. ~~**The tech wheel is entirely unused**~~ — **CLOSED (2026-08-06).**
-   `ai.js` now has `maybeAssignTech`, which calls `assignTechNode` when a
-   point is free. It's a simple heuristic pick, not the goal-weighted
-   effect→value model described below — that upgrade is still open — but
-   the wheel is no longer ignored.
+3. ~~**The tech wheel is entirely unused**~~ — **CLOSED (2026-08-06, then
+   properly fixed 2026-08-07).** `ai.js` has `maybeAssignTech`, which spends
+   a free Ability Point every turn. The 2026-08-06 version was a bare
+   heuristic with two real bugs: it picked a path via a hardcoded if/else
+   that could **never** produce `"logistics"` (dead code — present in the
+   lookup map, unreachable through the conditional), and once its chosen
+   path's 3 nodes were assigned, every later call found them all already
+   taken and did nothing — Ability Points earned past that point (a
+   faction can reach 4) were silently wasted forever. Replaced with
+   `TECH_NODE_SCORE`, a table of 20 small situational scoring functions
+   (one per node id, reading things like "are owned units below Strength
+   cap," "is a hostile unit standing on my territory," "what fraction of
+   the map is still unexplored") plus an additive `techIdentityWeight` that
+   tilts scores by the faction dial instead of hard-excluding 3 of 4 paths.
+   This is hand-written per-id rather than the generic effect→value model
+   below **on purpose** — the tech wheel is a fixed, engine-owned set of
+   exactly 20 nodes that content authors never extend, so there's no
+   open-ended-content risk to generalize against; a bespoke table is the
+   right size for a closed set. Confirmed in a real AI-vs-AI game (seed
+   777): a faction maxed one path's second branch, then correctly spent its
+   4th point on a different path's entry instead of losing it.
 4. ~~**Contests are blind**~~ — **CLOSED (2026-08-06).** `ai.js` now
    estimates win probability (via `previewAttackerStrength(state, hex,
    pid)` and `previewLocationContest(state, hex)` from `contest.js`, which
@@ -99,11 +129,18 @@ the **effect vocabulary** rather than record ids:
 4. **Route every decision through the core, and close the gaps:**
    - Build/upgrade: score all buildable chips *and upgrades* via `valueOf`
      (the `training-grounds` special-case dissolves — value it via a generic
-     "enables-recruiting / unit-capacity" effect tag, not its id).
-   - **Tech wheel (new):** each turn, if an Ability Point is free, assign the
-     prereq-legal node whose effects best serve current goal weights.
-   - Contest/move: EV-gated attacks; mass units for concentration when it
-     tips a fight; fog-aware caution against likely ambush.
+     "enables-recruiting / unit-capacity" effect tag, not its id — done,
+     via the `unitCapBonus` schema field).
+   - ~~**Tech wheel (new):** each turn, if an Ability Point is free, assign
+     the prereq-legal node whose effects best serve current goal
+     weights.~~ **Done, in bounded form** — `maybeAssignTech`'s
+     `TECH_NODE_SCORE` table (item 3 above) is this same idea, hand-written
+     per node instead of routed through the generic `valueOf`, since the
+     wheel's 20 nodes are a closed set that doesn't need the general
+     machinery.
+   - Contest/move: EV-gated attacks — done (win-probability check, item 4
+     above); mass units for concentration when it tips a fight; fog-aware
+     caution against likely ambush — still open.
    - Diplomacy: extend to the full action vocabulary (deals / trade /
      denounce / mediate / ultimatum) via the existing deal valuation, with
      coalition-threat awareness, pursuing a coherent victory path.
@@ -113,13 +150,17 @@ the **effect vocabulary** rather than record ids:
 Because the scorer is keyed to the **effect vocabulary**, not record ids:
 - **New records that compose existing effects** (chips, factions, locations,
   abilities) → scored automatically, **zero AI changes**.
-- **A genuinely new effect *type*** (some of the 16 stubbed tech branch
-  nodes will introduce these) → **one new entry in the effect→value table**,
-  added **when you design that mechanic**, co-located with its
-  implementation.
+- **A genuinely new effect *type*** (a chip design introducing one — this
+  no longer applies to tech branch nodes, which are a closed, already-fully-
+  designed set handled by their own bounded fix, item 3 above) → **one new
+  entry in the effect→value table**, added **when you design that
+  mechanic**, co-located with its implementation.
 
 So: new content is free; new *mechanics* are a bounded one-entry-each cost.
-That is the §2 promise realized in the AI.
+That is the §2 promise realized in the AI. This section now applies to
+**chip/build scoring only** — the tech-wheel side of the AI is done via
+its own hand-written per-node table (item 3), which is the correct-sized
+solution for a fixed 20-node set rather than a mismatch to fix later.
 
 ## Scope & how to build it
 
@@ -134,8 +175,10 @@ That is the §2 promise realized in the AI.
   `config.js`.
 - Verify with the harness (`node src/game/harness.js`) — add AI-quality
   checks (e.g. a full AI-vs-AI game completes and reaches a victory; the AI
-  values a movement/influence/vision chip; the AI assigns tech nodes; it
-  declines a losing contest) — and watch a full AI-vs-AI game.
+  values a movement/influence/vision chip; it declines a losing contest —
+  done, item 4) — and watch a full AI-vs-AI game. (The AI assigning tech
+  nodes, and doing so without stranding points or excluding a path, is
+  now covered by the `[Tech Wheel AI]` harness block.)
 
 ## References
 

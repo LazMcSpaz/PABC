@@ -34,7 +34,7 @@ import { resolveTokens } from "./textTokens.js";
 import { evalCond, evalStrength } from "./dsl.js";
 import { registerQuest } from "./quests.js";
 import { CONFIG } from "./config.js";
-import { takeAITurn } from "./ai.js";
+import { takeAITurn, maybeAssignTech } from "./ai.js";
 import { enforceLoyaltySlotCap, chargeChipUpkeep, slotCapacity, effectiveBuildCost } from "./economy.js";
 
 const seed = Number(process.argv[2]) || 42;
@@ -1729,6 +1729,50 @@ line("\n  [AI sanity] tech-wheel use + game termination");
   while (!g2.winnerId && safety-- > 0) takeAITurn(g2);
   check("a full AI-vs-AI game terminates with a winner (no infinite loop)",
     safety > 0 && !!g2.winnerId);
+}
+
+// The old maybeAssignTech picked ONE path by faction dial — military,
+// economy, or intelligence only, via a hardcoded if/else that could never
+// produce "logistics" — and filled exactly 3 nodes (entry + one branch)
+// before every further call found all 3 already assigned and did nothing,
+// silently stranding any later Ability Point forever. Verify both are
+// fixed with unambiguous fixtures (every other candidate deliberately
+// exhausted or unavailable) rather than predicting exact score arithmetic
+// across many live candidates, which is exactly the kind of fragile,
+// hard-to-eyeball setup the harness-determinism pass just finished purging.
+line("\n  [Tech Wheel AI] scored allocation reaches every path, never strands a point");
+{
+  // (1) Logistics is reachable at all: assign every OTHER node (Military,
+  // Economy, Intelligence — all 5 each) so Logistics's own entry is the
+  // ONLY assignable candidate left, then confirm a free Ability Point
+  // lands on it. Under the old code this could never happen no matter the
+  // faction or the game state — "logistics" was not a reachable branch of
+  // the if/else at all.
+  const g = createGame({ seed: 42 });
+  const pid = g.turnOrder[0];
+  const p = g.players[pid];
+  p.techWheel = [
+    "mil-entry", "mil-a1", "mil-a2", "mil-b1", "mil-b2",
+    "eco-entry", "eco-a1", "eco-a2", "eco-b1", "eco-b2",
+    "int-entry", "int-a1", "int-a2", "int-b1", "int-b2",
+  ];
+  p.techLevel = 100; // fixture-only: budget = techLevel-1, well past techWheel.length
+  maybeAssignTech(g, pid);
+  check("Logistics is reachable when it's the only path left assignable",
+    p.techWheel.includes("log-entry"));
+
+  // (2) Points don't strand once a path is FULLY maxed (all 5 nodes, not
+  // just the old code's single 3-node branch): grant a further free point
+  // and confirm the allocator picks up a node from a different path
+  // instead of leaving the point unspent.
+  const g2 = createGame({ seed: 42 });
+  const pid2 = g2.turnOrder[0];
+  const p2 = g2.players[pid2];
+  p2.techWheel = ["mil-entry", "mil-a1", "mil-a2", "mil-b1", "mil-b2"]; // Military fully maxed
+  p2.techLevel = 7; // one free point past the 5 Military nodes
+  maybeAssignTech(g2, pid2);
+  check("a fully-maxed path doesn't strand a later Ability Point",
+    p2.techWheel.length === 6 && !p2.techWheel[5].startsWith("mil-"));
 }
 
 // AI-turn replay slice contract (the one engine-touching surface of the
