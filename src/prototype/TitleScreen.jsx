@@ -38,6 +38,7 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
 import { C, CornerBrackets } from "./HudChrome.jsx";
+import { useIsPhone } from "./useViewport.js";
 import "./prototype.css";
 
 // ---------------------------------------------------------------------------
@@ -161,6 +162,7 @@ export default function TitleScreen({
   version = "v0.2 demo",
 }) {
   const handlers = { onNewGame, onContinue, onLoadGame, onLore, onSettings };
+  const isPhone = useIsPhone();
 
   return (
     <div
@@ -199,11 +201,13 @@ export default function TitleScreen({
           position:       "relative",
           zIndex:         1,
           display:        "flex",
-          flexDirection:  "row",
+          flexDirection:  isPhone ? "column" : "row",
           alignItems:     "center",
-          gap:            56,
+          gap:            isPhone ? 22 : 56,
           maxWidth:       "96vw",
-          width:          1100,
+          maxHeight:      isPhone ? "94vh" : undefined,
+          overflowY:      isPhone ? "auto" : undefined,
+          width:          isPhone ? "92vw" : 1100,
         }}
       >
         {/* ══════════════════════════════════════════════════════════════════
@@ -213,9 +217,19 @@ export default function TitleScreen({
           style={{
             display:        "flex",
             flexDirection:  "column",
-            alignItems:     "flex-start",
-            gap:            28,
+            alignItems:     isPhone ? "center" : "flex-start",
+            gap:            isPhone ? 16 : 28,
             flex:           "0 0 auto",
+            width:          isPhone ? "100%" : "auto",
+            // Caps the title at "Ashland" / "Conquest" wrapping to two
+            // lines instead of one very wide line — without this, the
+            // one-line title's intrinsic width (~820px at this font
+            // size) plus the menu column's 320px minWidth exceeds the
+            // 1100px container at any viewport ≥1100px wide, and the
+            // menu gets silently clipped off the right edge by the
+            // page's overflow:hidden (pre-existing bug, not phone-only).
+            maxWidth:       isPhone ? "100%" : 460,
+            textAlign:      isPhone ? "center" : "left",
           }}
         >
           {/* — eyebrow label — */}
@@ -225,8 +239,8 @@ export default function TitleScreen({
             transition={{ duration: 0.5, ease: "easeOut", delay: 0.1 }}
             style={{
               fontFamily:    C.font,
-              fontSize:      10,
-              letterSpacing: 4.4,
+              fontSize:      isPhone ? 8 : 10,
+              letterSpacing: isPhone ? 2 : 4.4,
               textTransform: "uppercase",
               color:         C.holoHi,
               opacity:       0.58,
@@ -244,10 +258,10 @@ export default function TitleScreen({
             style={{
               fontFamily:    C.font,
               fontWeight:    800,
-              fontSize:      62,
-              letterSpacing: 5.5,
+              fontSize:      isPhone ? 40 : 62,
+              letterSpacing: isPhone ? 2 : 5.5,
               textTransform: "uppercase",
-              lineHeight:    0.95,
+              lineHeight:    isPhone ? 1.05 : 0.95,
               color:         "#f4efe2",
               textShadow:    `0 0 18px ${C.holo}55, 0 0 38px ${C.holo}30`,
             }}
@@ -270,8 +284,8 @@ export default function TitleScreen({
             transition={{ duration: 0.5, ease: "easeOut", delay: 0.35 }}
             style={{
               fontFamily:    C.font,
-              fontSize:      11.5,
-              letterSpacing: 2.4,
+              fontSize:      isPhone ? 9.5 : 11.5,
+              letterSpacing: isPhone ? 1.2 : 2.4,
               textTransform: "uppercase",
               color:         `rgba(143,246,234,0.50)`,
             }}
@@ -294,8 +308,9 @@ export default function TitleScreen({
             transition={{ duration: 0.55, ease: "easeOut", delay: 0.3 }}
             style={{
               position:     "relative",
-              width:        380,
-              height:       220,
+              width:        isPhone ? "100%" : 380,
+              maxWidth:     380,
+              height:       isPhone ? 170 : 220,
               borderRadius: 7,
               border:       `1px dashed rgba(86,211,198,0.40)`,
               background:   "linear-gradient(158deg, rgba(16,28,29,0.75), rgba(8,15,16,0.88))",
@@ -342,7 +357,7 @@ export default function TitleScreen({
                   fontFamily:    C.font,
                 }}
               >
-                380 × 220
+                {isPhone ? "responsive" : "380 × 220"}
               </span>
             </div>
 
@@ -374,8 +389,9 @@ export default function TitleScreen({
           transition={{ type: "spring", stiffness: 220, damping: 24, delay: 0.22 }}
           style={{
             position:     "relative",
-            flex:         1,
-            minWidth:     320,
+            flex:         isPhone ? "0 0 auto" : 1,
+            minWidth:     isPhone ? 0 : 320,
+            width:        isPhone ? "100%" : "auto",
             maxWidth:     400,
             background:   "linear-gradient(158deg, rgba(16,28,29,0.88), rgba(8,15,16,0.92) 60%, rgba(6,11,12,0.95))",
             border:       `1px solid ${C.holo}`,
@@ -457,13 +473,13 @@ export default function TitleScreen({
         transition={{ duration: 0.6, ease: "easeOut", delay: 0.9 }}
         style={{
           position:      "absolute",
-          bottom:        18,
+          bottom:        isPhone ? 8 : 18,
           left:          0,
           right:         0,
           textAlign:     "center",
           fontFamily:    C.font,
-          fontSize:      9,
-          letterSpacing: 2.4,
+          fontSize:      isPhone ? 7.5 : 9,
+          letterSpacing: isPhone ? 1.2 : 2.4,
           textTransform: "uppercase",
           color:         "rgba(143,246,234,0.28)",
           zIndex:        1,
