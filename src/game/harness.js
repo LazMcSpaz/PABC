@@ -1279,6 +1279,33 @@ line("\n  [Tech Wheel] entry-node effects");
     check("Logistics (Supply Lines): +1 Movement", u.movement === before + 1);
   }
 
+  // Bugfix: the +1 Movement must extend THIS TURN's usable budget too, not
+  // just the cap — previously recomputeStats only touched unit.movement;
+  // unit.moveRemaining (what movement.js actually spends) only re-synced
+  // at the next Upkeep, so assigning the tech mid-turn silently did
+  // nothing until next turn. Covers both directions: a still-full budget
+  // extends by the full delta, and a partially-spent one keeps its spent
+  // amount (extends by the delta, not reset to the new cap).
+  {
+    const g = createGame({ seed }); startTurn(g);
+    const me = g.turnOrder[0];
+    const u = Object.values(g.units).find((x) => x.owner === me);
+    g.players[me].techLevel = 2;
+    const r = assignTechNode(g, me, "log-entry");
+    check("assigning +1 Movement mid-turn extends an untouched budget by 1",
+      r.ok && u.moveRemaining === u.movement && u.moveRemaining === 3);
+  }
+  {
+    const g2 = createGame({ seed }); startTurn(g2);
+    const me2 = g2.turnOrder[0];
+    const u2 = Object.values(g2.units).find((x) => x.owner === me2);
+    u2.moveRemaining = 1; // already spent 1 of 2 this turn
+    g2.players[me2].techLevel = 2;
+    assignTechNode(g2, me2, "log-entry");
+    check("a partially-spent budget extends by the delta, not reset to the new cap",
+      u2.movement === 3 && u2.moveRemaining === 2);
+  }
+
   // Economy: +1 scrap per fully-held Location at Upkeep.
   {
     const g = createGame({ seed }); startTurn(g);

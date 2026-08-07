@@ -7,6 +7,7 @@ import { TECH_NODES, hasTechNode, prereqMet } from "./tech.js";
 
 export function recomputeStats(state) {
   for (const unit of Object.values(state.units)) {
+    const prevMovement = unit.movement;
     let strength = unit.baseStrength;
     let movement = unit.baseMovement;
 
@@ -34,7 +35,19 @@ export function recomputeStats(state) {
     if (hasTechNode(state, unit.owner, "log-a1")) movement += 1;
 
     unit.strength = Math.max(0, strength);
-    unit.movement = Math.max(0, movement);
+    movement = Math.max(0, movement);
+    // A movement change mid-turn (tech assigned, chip picked up/lost,
+    // dormant toggle) previously only touched the CAP (unit.movement) —
+    // this turn's actual usable budget (unit.moveRemaining) only ever got
+    // re-synced at the next Upkeep (turn.js refreshMoveBudget), so e.g.
+    // assigning +1 Movement tech didn't extend how far you could move
+    // THIS turn at all — the reported bug. Carry the delta into
+    // moveRemaining too, preserving how much was already spent (a gain
+    // extends what's left; a loss trims it), clamped to the new cap.
+    if (prevMovement != null && unit.moveRemaining != null && movement !== prevMovement) {
+      unit.moveRemaining = Math.max(0, Math.min(movement, unit.moveRemaining + (movement - prevMovement)));
+    }
+    unit.movement = movement;
   }
 }
 
