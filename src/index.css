@@ -8,6 +8,19 @@
   box-sizing: border-box;
 }
 
+/* Without this, mobile browsers (confirmed on Android Chrome/Brave) apply
+ * native platform button theming that can silently override an explicit
+ * CSS width/height with the OS's own minimum touch-target size — every
+ * circular button in the HUD (close ×, settings gear) rendered as a
+ * tall oval on a real phone because of exactly this, invisible in
+ * desktop-Chromium testing since desktop doesn't apply the same native
+ * sizing. `appearance: none` opts every button out of native theming so
+ * our own CSS dimensions are the only ones that apply. */
+button {
+  appearance: none;
+  -webkit-appearance: none;
+}
+
 html,
 body,
 #root {

@@ -139,11 +139,22 @@ function FactionCard({ fid, picked, onPick }) {
           alt={f.name}
           className={on ? "portrait-slow-zoom" : undefined}
           style={{
-            position: "absolute", top: "50%", left: "50%",
-            transform: "translate(-50%, -50%)",
+            // `inset: 0` instead of the old top/left 50% + translate(-50%,-50%)
+            // centering trick — that combined three independent percentage
+            // calculations (top, left, and the transform's own -50%-of-
+            // itself) that could each round to a different sub-pixel value
+            // and leave a hairline gap on one edge. Since width/height are
+            // already 100% of the box, inset:0 ties all four edges to the
+            // container directly with a single unambiguous computation.
+            position: "absolute", inset: 0,
             width: "100%",
             height: "100%",
             objectFit: "cover",
+            // Portraits are headshots with little headroom in the source
+            // art; a centred (50%) crop shaves the same amount off the
+            // top as the bottom, which cuts into hair/hats. Biasing
+            // toward the top crops mostly from the body/shoulders instead.
+            objectPosition: "50% 18%",
             filter: on
               ? `saturate(1.05) drop-shadow(0 0 12px ${f.color}55)`
               : "saturate(0.7) brightness(0.78)",
