@@ -26,6 +26,7 @@ import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { FACTIONS as UI_FACTIONS } from "./data.js";
 import { C, CornerBrackets } from "./HudChrome.jsx";
+import { useIsPhone } from "./useViewport.js";
 import "./prototype.css";
 
 // ─── constants ──────────────────────────────────────────────────────────────
@@ -393,6 +394,8 @@ function Divider() {
 // ─── main component ─────────────────────────────────────────────────────────
 
 export default function SetupScreen({ onStart, onBack }) {
+  const isPhone = useIsPhone();
+
   // faction picker
   const [picked, setPicked] = useState("versari");
 
@@ -524,7 +527,7 @@ export default function SetupScreen({ onStart, onBack }) {
           position: "relative",
           width: 980,
           maxWidth: "94vw",
-          padding: "26px 26px 28px",
+          padding: isPhone ? "18px 14px 20px" : "26px 26px 28px",
           background: "linear-gradient(158deg, rgba(16,28,29,0.85), rgba(8,15,16,0.88) 60%, rgba(6,11,12,0.92))",
           border: `1px solid ${C.holo}`,
           borderRadius: 10,
@@ -543,11 +546,13 @@ export default function SetupScreen({ onStart, onBack }) {
           position: "absolute", inset: 0, borderRadius: 10,
         }} />
 
-        {/* two-column layout: left = faction, right = settings */}
+        {/* Two-column layout on desktop/tablet (left = faction, right =
+            settings); a single stacked column on phone — there's no width
+            to split, and scrolling to see the rest is fine there. */}
         <div style={{
           display: "grid",
-          gridTemplateColumns: "1fr 340px",
-          gap: 24,
+          gridTemplateColumns: isPhone ? "1fr" : "1fr 340px",
+          gap: isPhone ? 22 : 24,
           position: "relative",
           alignItems: "start",
         }}>
@@ -559,7 +564,7 @@ export default function SetupScreen({ onStart, onBack }) {
             </div>
             <div style={{
               display: "grid",
-              gridTemplateColumns: "repeat(4, 1fr)",
+              gridTemplateColumns: isPhone ? "repeat(2, 1fr)" : "repeat(4, 1fr)",
               gap: 10,
             }}>
               {PLAYABLE.map((fid) => (
@@ -755,14 +760,16 @@ export default function SetupScreen({ onStart, onBack }) {
         <div style={{
           marginTop: 22,
           display: "flex",
+          flexDirection: isPhone ? "column" : "row",
           justifyContent: "flex-end",
-          alignItems: "center",
+          alignItems: isPhone ? "stretch" : "center",
           gap: 14,
           position: "relative",
         }}>
           <div style={{
             fontFamily: C.font, fontSize: 9.5, letterSpacing: 1.6,
             textTransform: "uppercase",
+            textAlign: isPhone ? "center" : "left",
             color: "rgba(143,246,234,0.38)",
           }}>
             {`${UI_FACTIONS[picked]?.name} · ${MAP_SIZES.find((m) => m.id === mapSize)?.label} Map · ${factionCount} Factions`}

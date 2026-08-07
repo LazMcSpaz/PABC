@@ -95,6 +95,30 @@ function StatCell({ color, icon, label, value, delta }) {
   );
 }
 
+// Phone-only stat chip — icon, value and label all inline in one row
+// instead of StatCell's stacked icon/value/label column. Three of these
+// side by side take roughly a third the vertical space of three
+// StatCells, which is the point: the panel eats into board space on a
+// phone screen, so "smaller" means flattening this, not just shrinking
+// the same layout's fonts.
+function PhoneStatChip({ color, icon, label, value }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 4, minWidth: 0 }}>
+      <IconBubble color={color} size={18}>{icon}</IconBubble>
+      <div style={{ display: "flex", flexDirection: "column", lineHeight: 1.05, minWidth: 0 }}>
+        <span style={{
+          fontFamily: C.font, fontSize: 11, fontWeight: 700,
+          color: "#f4efe2", whiteSpace: "nowrap",
+        }}>{value}</span>
+        <span style={{
+          fontFamily: C.font, fontSize: 6, letterSpacing: 1, textTransform: "uppercase",
+          color, fontWeight: 600, whiteSpace: "nowrap",
+        }}>{label}</span>
+      </div>
+    </div>
+  );
+}
+
 function Tag({ color, children }) {
   return (
     <span style={{
@@ -108,14 +132,15 @@ function Tag({ color, children }) {
 }
 
 // Compact chip-bay row — one pill per slot, faded dashed pill for empty slots.
-function ChipBay({ chips }) {
+function ChipBay({ chips, compact }) {
   const accent = CHIP_COLOR.unit;
   const installed = chips.length;
+  const slotH = compact ? 17 : 30;
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: compact ? 3 : 4 }}>
       <div style={{
         display: "flex", justifyContent: "space-between", alignItems: "baseline",
-        fontFamily: C.font, fontSize: 8.5, letterSpacing: 1.4,
+        fontFamily: C.font, fontSize: compact ? 7.5 : 8.5, letterSpacing: 1.4,
         textTransform: "uppercase",
       }}>
         <span style={{ color: "rgba(143,246,234,0.55)" }}>Chip Bay</span>
@@ -129,11 +154,11 @@ function ChipBay({ chips }) {
           if (!chip) {
             return (
               <div key={i} style={{
-                flex: 1, height: 30, borderRadius: 3,
+                flex: 1, height: slotH, borderRadius: 3,
                 border: `1px dashed rgba(86,211,198,0.25)`,
                 background: "rgba(8,12,14,0.4)",
                 display: "flex", alignItems: "center", justifyContent: "center",
-                fontFamily: C.font, fontSize: 8.5, letterSpacing: 1.2,
+                fontFamily: C.font, fontSize: compact ? 7.5 : 8.5, letterSpacing: 1.2,
                 textTransform: "uppercase",
                 color: "rgba(143,246,234,0.35)",
               }}>Empty</div>
@@ -141,7 +166,7 @@ function ChipBay({ chips }) {
           }
           return (
             <div key={i} title={`${chip.name} — ${chip.effect}`} style={{
-              flex: 1, height: 30, borderRadius: 3, padding: "3px 5px",
+              flex: 1, height: slotH, borderRadius: 3, padding: compact ? "2px 4px" : "3px 5px",
               border: `1px solid ${accent}cc`,
               background: `linear-gradient(180deg, ${accent}26, ${accent}10)`,
               boxShadow: `0 0 6px ${accent}33, inset 0 0 4px ${accent}1a`,
@@ -149,15 +174,17 @@ function ChipBay({ chips }) {
               minWidth: 0,
             }}>
               <span style={{
-                fontFamily: C.font, fontSize: 9, fontWeight: 700,
+                fontFamily: C.font, fontSize: compact ? 8 : 9, fontWeight: 700,
                 letterSpacing: 0.5, color: "#f4efe2", lineHeight: 1,
                 whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
               }}>{chip.name}</span>
-              <span style={{
-                fontFamily: C.font, fontSize: 8, fontWeight: 600,
-                letterSpacing: 0.6, color: accent, lineHeight: 1,
-                whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-              }}>{chip.effect}</span>
+              {!compact && (
+                <span style={{
+                  fontFamily: C.font, fontSize: 8, fontWeight: 600,
+                  letterSpacing: 0.6, color: accent, lineHeight: 1,
+                  whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                }}>{chip.effect}</span>
+              )}
             </div>
           );
         })}
@@ -194,7 +221,7 @@ export default function UnitPanel({ unit, hex, owned = true, canAct, reinforce, 
         right: isPhone ? 14 : "auto",
         bottom: isPhone ? 106 : 58, // clear the bottom-right MenuOrb once full-width
         width: isPhone ? "auto" : 440,
-        minHeight: 220,
+        minHeight: isPhone ? 0 : 220,
         zIndex: 45,
         background: "linear-gradient(158deg, rgba(18,31,32,0.93), rgba(9,17,18,0.95) 60%, rgba(6,11,12,0.97))",
         border: `1px solid ${C.holo}`,
@@ -216,12 +243,12 @@ export default function UnitPanel({ unit, hex, owned = true, canAct, reinforce, 
 
       {/* Header — full width */}
       <div style={{
-        display: "flex", alignItems: "center", gap: 10,
-        padding: "9px 13px 9px",
+        display: "flex", alignItems: "center", gap: isPhone ? 8 : 10,
+        padding: isPhone ? "7px 11px 7px" : "9px 13px 9px",
         borderBottom: "1px solid rgba(86,211,198,0.22)",
       }}>
         <span style={{
-          width: 28, height: 28, borderRadius: "50%",
+          width: isPhone ? 22 : 28, height: isPhone ? 22 : 28, borderRadius: "50%",
           background: `radial-gradient(circle at 36% 30%, ${factionColor}, #14110c 145%)`,
           border: "1.5px solid #100d09",
           boxShadow: `0 0 10px ${factionColor}aa, inset 0 1px 2px rgba(255,255,255,0.3)`,
@@ -264,39 +291,67 @@ export default function UnitPanel({ unit, hex, owned = true, canAct, reinforce, 
 
       {/* Body — 2 columns on desktop/iPad (stats left, status/action right);
           stacked on phone, where there isn't width for both side by side. */}
-      <div style={{ display: "flex", flexDirection: isPhone ? "column" : "row", padding: "15px 16px 16px", gap: isPhone ? 10 : 16, alignItems: isPhone ? "stretch" : "stretch", flex: 1, minHeight: 0 }}>
-        {/* Left: stats row */}
-        <div style={{ flex: 1, display: "flex", gap: 6, alignItems: "center", justifyContent: "center" }}>
-          <StatCell
-            color={STR_COLOR}
-            icon={<img src={ICON_STRENGTH} alt="" style={{
-              width: 22, height: 22, objectFit: "contain", display: "block",
-              filter: `brightness(1.1) drop-shadow(0 0 4px ${STR_COLOR}aa)`,
-            }} />}
-            label="Strength"
-            value={eff.strength}
-            delta={typeof eff.strength === "number" && typeof unit.strength === "number" ? eff.strength - unit.strength : 0}
-          />
-          <StatCell
-            color={MOV_COLOR}
-            icon={<MovementGlyph color={MOV_COLOR} size={22} />}
-            label="Moves"
-            value={`${unit.moveRemaining ?? eff.movement}/${eff.movement}`}
-          />
-          <StatCell
-            color={unit.immobilized ? STOPPED : READY}
-            icon={<StatusGlyph color={unit.immobilized ? STOPPED : READY} blocked={unit.immobilized} size={22} />}
-            label="Status"
-            value={unit.immobilized ? "Held" : "Ready"}
-          />
-        </div>
+      <div style={{ display: "flex", flexDirection: isPhone ? "column" : "row", padding: isPhone ? "7px 10px 8px" : "15px 16px 16px", gap: isPhone ? 5 : 16, alignItems: "stretch", flex: 1, minHeight: 0 }}>
+        {/* Left: stats row — flattened to inline icon+value+label chips on
+            phone (PhoneStatChip) instead of StatCell's stacked column,
+            since three stacked columns is what was making the panel tall. */}
+        {isPhone ? (
+          <div style={{ display: "flex", gap: 12, alignItems: "center", justifyContent: "center" }}>
+            <PhoneStatChip
+              color={STR_COLOR}
+              icon={<img src={ICON_STRENGTH} alt="" style={{
+                width: 11, height: 11, objectFit: "contain", display: "block",
+                filter: `brightness(1.1) drop-shadow(0 0 4px ${STR_COLOR}aa)`,
+              }} />}
+              label="Strength"
+              value={eff.strength}
+            />
+            <PhoneStatChip
+              color={MOV_COLOR}
+              icon={<MovementGlyph color={MOV_COLOR} size={11} />}
+              label="Moves"
+              value={`${unit.moveRemaining ?? eff.movement}/${eff.movement}`}
+            />
+            <PhoneStatChip
+              color={unit.immobilized ? STOPPED : READY}
+              icon={<StatusGlyph color={unit.immobilized ? STOPPED : READY} blocked={unit.immobilized} size={9} />}
+              label="Status"
+              value={unit.immobilized ? "Held" : "Ready"}
+            />
+          </div>
+        ) : (
+          <div style={{ flex: 1, display: "flex", gap: 6, alignItems: "center", justifyContent: "center" }}>
+            <StatCell
+              color={STR_COLOR}
+              icon={<img src={ICON_STRENGTH} alt="" style={{
+                width: 22, height: 22, objectFit: "contain", display: "block",
+                filter: `brightness(1.1) drop-shadow(0 0 4px ${STR_COLOR}aa)`,
+              }} />}
+              label="Strength"
+              value={eff.strength}
+              delta={typeof eff.strength === "number" && typeof unit.strength === "number" ? eff.strength - unit.strength : 0}
+            />
+            <StatCell
+              color={MOV_COLOR}
+              icon={<MovementGlyph color={MOV_COLOR} size={22} />}
+              label="Moves"
+              value={`${unit.moveRemaining ?? eff.movement}/${eff.movement}`}
+            />
+            <StatCell
+              color={unit.immobilized ? STOPPED : READY}
+              icon={<StatusGlyph color={unit.immobilized ? STOPPED : READY} blocked={unit.immobilized} size={22} />}
+              label="Status"
+              value={unit.immobilized ? "Held" : "Ready"}
+            />
+          </div>
+        )}
 
         {/* Divider — vertical between side-by-side columns, horizontal once stacked */}
         <div style={isPhone ? { height: 1, background: "rgba(86,211,198,0.18)" } : { width: 1, background: "rgba(86,211,198,0.18)" }} />
 
         {/* Right: tags + location + (reinforce when needed) + helper */}
         <div style={{
-          width: isPhone ? "auto" : 158, display: "flex", flexDirection: "column", gap: 7, minWidth: 0,
+          width: isPhone ? "auto" : 158, display: "flex", flexDirection: "column", gap: isPhone ? 4 : 7, minWidth: 0,
         }}>
           {(unit.veteran || unit.fortified) && (
             <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
@@ -307,7 +362,7 @@ export default function UnitPanel({ unit, hex, owned = true, canAct, reinforce, 
 
           {hex && (
             <div style={{
-              fontFamily: C.font, fontSize: 9.5, letterSpacing: 1.3, textTransform: "uppercase",
+              fontFamily: C.font, fontSize: isPhone ? 8.5 : 9.5, letterSpacing: 1.3, textTransform: "uppercase",
               color: "rgba(143,246,234,0.62)", display: "flex", alignItems: "center", gap: 6,
               whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
             }}>
@@ -327,7 +382,7 @@ export default function UnitPanel({ unit, hex, owned = true, canAct, reinforce, 
           )}
 
           {/* Chip bay — installed upgrades + remaining slots. */}
-          <ChipBay chips={unit.chips || []} />
+          <ChipBay chips={unit.chips || []} compact={isPhone} />
 
           {canReinforce && (
             <button
@@ -378,7 +433,7 @@ export default function UnitPanel({ unit, hex, owned = true, canAct, reinforce, 
           })}
 
           <div style={{
-            fontFamily: C.font, fontSize: 8.5, letterSpacing: 0.5, lineHeight: 1.45,
+            fontFamily: C.font, fontSize: isPhone ? 7.5 : 8.5, letterSpacing: 0.5, lineHeight: isPhone ? 1.3 : 1.45,
             color: "rgba(143,246,234,0.45)",
             marginTop: "auto",
           }}>

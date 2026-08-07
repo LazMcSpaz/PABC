@@ -222,7 +222,7 @@ export default function EventFeed({ engineState, tick, topOffset = 14 }) {
         top: topOffset,
         right: isPhone ? 8 : 14,
         width: isPhone ? 170 : 270,
-        maxHeight: isPhone ? 190 : 260,
+        maxHeight: isPhone ? 130 : 260,
         background: "rgba(20, 17, 13, 0.92)",
         border: `1px solid ${theme.border}`,
         borderRadius: 7,
