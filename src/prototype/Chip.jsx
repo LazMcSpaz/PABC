@@ -1,10 +1,9 @@
-// An upgrade chip. Face shows name + cost + family colour; hovering
-// raises a floating popover (fixed-positioned, so it escapes any
-// clipping parent) with the full effect text.
-import { useRef, useState } from "react";
+// An upgrade chip. Face shows name + cost + family colour; hovering (or,
+// on touch, tapping) raises a floating popover (fixed-positioned, so it
+// escapes any clipping parent) with the full effect text.
 import { createPortal } from "react-dom";
 import { ALL_UPGRADES, CHIP_COLOR, theme } from "./data.js";
-import { Coin } from "./kit.jsx";
+import { Coin, useTapTooltip } from "./kit.jsx";
 
 function ChipTooltip({ chip, accent, anchor }) {
   const W = 212;
@@ -73,8 +72,7 @@ function ChipTooltip({ chip, accent, anchor }) {
 }
 
 export default function Chip({ chipId, width = 84, dim = false }) {
-  const ref = useRef(null);
-  const [anchor, setAnchor] = useState(null);
+  const { ref, anchor, onMouseEnter, onMouseLeave, onClick } = useTapTooltip();
   const chip = ALL_UPGRADES[chipId];
   if (!chip) return null;
 
@@ -82,18 +80,14 @@ export default function Chip({ chipId, width = 84, dim = false }) {
   const height = Math.round(width * 1.2);
   const small = width < 70;
 
-  const show = () => {
-    const r = ref.current?.getBoundingClientRect();
-    if (r) setAnchor({ cx: r.left + r.width / 2, top: r.top, bottom: r.bottom });
-  };
-
   return (
     <>
       <div
         ref={ref}
         className="pc-int"
-        onMouseEnter={show}
-        onMouseLeave={() => setAnchor(null)}
+        onMouseEnter={onMouseEnter}
+        onMouseLeave={onMouseLeave}
+        onClick={onClick}
         style={{
           width,
           height,
@@ -106,6 +100,7 @@ export default function Chip({ chipId, width = 84, dim = false }) {
           flexDirection: "column",
           justifyContent: "space-between",
           cursor: "default",
+          touchAction: "manipulation",
           boxShadow: `0 3px 7px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.06)`,
         }}
       >

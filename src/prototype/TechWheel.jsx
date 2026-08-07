@@ -151,8 +151,21 @@ function buildSegments(assigned, points) {
   return segs;
 }
 
-function Segment({ seg, hovered, onHover, onClick }) {
-  const isHover = hovered === seg.id;
+// Mouse gets the old hover→click flow unchanged (hovering arms `active`
+// before the click ever fires, so a click always lands on the confirm
+// branch below). Touch has no real hover, but mobile browsers SYNTHESIZE
+// mouseenter+mouseleave+click around every tap anyway (so CSS :hover can
+// briefly "flash" and clear) — all three fire in one burst, before React
+// gets a chance to re-render in between, so a plain onMouseEnter here
+// would arm `active` and then the synthesized onMouseLeave would un-arm
+// it again before the click handler's own render ever saw the update.
+// Fix: use Pointer Events (which carry the TRUE originating device,
+// unlike synthetic MouseEvents) and only let a real mouse arm `active` via
+// hover. Touch has no other way to fire enter/leave, so it's naturally
+// left to arm/confirm purely through two separate onClick calls (tap 1
+// previews, tap 2 — a genuinely separate later event — confirms).
+function Segment({ seg, active, onPreview, onConfirm }) {
+  const isHover = active === seg.id;
   const col = PATH_COLOR[seg.path];
   const { ri, ro } = RINGS[seg.ring];
   const d = donut(CTR, CTR, ri, ro, seg.a0, seg.a1, GAP_PX);
@@ -173,24 +186,32 @@ function Segment({ seg, hovered, onHover, onClick }) {
       strokeLinejoin="round"
       style={{
         cursor: canAssign ? "pointer" : "default",
+        touchAction: "manipulation",
         filter: glow ? `drop-shadow(0 0 ${glow}px ${col})` : undefined,
         transition: "fill-opacity .14s ease, stroke-width .14s ease, filter .14s ease, stroke-opacity .14s ease",
       }}
-      onMouseEnter={() => onHover(seg.id)}
-      onMouseLeave={() => onHover((h) => (h === seg.id ? null : h))}
-      onClick={() => canAssign && onClick(seg.id)}
+      onPointerEnter={(e) => { if (e.pointerType === "mouse") onPreview(seg.id); }}
+      onPointerLeave={(e) => {
+        if (e.pointerType !== "mouse") return;
+        onPreview((h) => (h === seg.id ? null : h));
+      }}
+      onClick={(e) => {
+        e.stopPropagation();
+        if (active !== seg.id) { onPreview(seg.id); return; } // tap/click 1 — preview only
+        if (canAssign) onConfirm(seg.id); // tap/click 2 on the already-previewed segment
+      }}
       className={canAssign ? "tech-pulse" : undefined}
     />
   );
 }
 
-function SegmentContent({ seg, hovered }) {
+function SegmentContent({ seg, active }) {
   const midR = (RINGS[seg.ring].ri + RINGS[seg.ring].ro) / 2;
   const midA = (seg.a0 + seg.a1) / 2;
   const [cx, cy] = pt(CTR, CTR, midR, midA);
   const col = PATH_COLOR[seg.path];
   const { isAssigned, canAssign } = seg;
-  const isHover = hovered === seg.id;
+  const isHover = active === seg.id;
   const isDim = !isAssigned && !canAssign && !isHover;
   return (
     <div style={{
@@ -218,11 +239,14 @@ function SegmentContent({ seg, hovered }) {
 
 export default function TechWheel({ player, onAssign, onClose, levelInfo }) {
   useEscClose(onClose);
-  const [hover, setHover] = useState(null);
+  // Doubles as mouse-hover preview AND the touch tap-to-preview /
+  // tap-again-to-confirm primitive — see the Segment component below.
+  const [active, setActive] = useState(null);
   const assigned = new Set(player?.techWheel || []);
   const points = player?.abilityPointsAvailable || 0;
   const segs = buildSegments(assigned, points);
-  const hovered = hover ? TECH_NODES[hover] : null;
+  const activeSeg = active ? segs.find((s) => s.id === active) : null;
+  const hovered = activeSeg?.node || null;
   const byRing = { entry: [], layer2: [], layer3: [] };
   segs.forEach((s) => byRing[s.ring].push(s));
 
@@ -285,7 +309,7 @@ export default function TechWheel({ player, onAssign, onClose, levelInfo }) {
                 transition={{ duration: 0.32, delay: 0.12 + ri * 0.13, ease: "easeOut" }}
               >
                 {byRing[ring].map((seg) => (
-                  <Segment key={seg.id} seg={seg} hovered={hover} onHover={setHover} onClick={onAssign} />
+                  <Segment key={seg.id} seg={seg} active={active} onPreview={setActive} onConfirm={onAssign} />
                 ))}
               </motion.g>
             ))}
@@ -318,7 +342,7 @@ export default function TechWheel({ player, onAssign, onClose, levelInfo }) {
               transition={{ duration: 0.32, delay: 0.22 + ri * 0.13, ease: "easeOut" }}
             >
               {byRing[ring].map((seg) => (
-                <SegmentContent key={`c-${seg.id}`} seg={seg} hovered={hover} />
+                <SegmentContent key={`c-${seg.id}`} seg={seg} active={active} />
               ))}
             </motion.div>
           ))}
@@ -349,6 +373,13 @@ export default function TechWheel({ player, onAssign, onClose, levelInfo }) {
               <div className="pc-prose" style={{ fontSize: 12.5, color: "#cfd6dc", marginTop: 4, lineHeight: 1.5 }}>
                 {nodeText(hovered)}
               </div>
+              {activeSeg?.canAssign && (
+                <div style={{
+                  fontFamily: "'Oswald',sans-serif", fontSize: 10.5, letterSpacing: 1.6,
+                  textTransform: "uppercase", color: HOLO_HI, marginTop: 6,
+                  textShadow: `0 0 8px ${HOLO}66`,
+                }}>Tap again to research</div>
+              )}
             </>
           ) : (
             <>
@@ -367,7 +398,7 @@ export default function TechWheel({ player, onAssign, onClose, levelInfo }) {
                 marginTop: 6, textShadow: points > 0 ? `0 0 8px ${HOLO}66` : undefined,
               }}>
                 {points > 0
-                  ? `${points} Ability Point${points === 1 ? "" : "s"} to spend — click a glowing slice`
+                  ? `${points} Ability Point${points === 1 ? "" : "s"} to spend — tap a glowing slice`
                   : "No Ability Points — reach the next Tech Level to earn one"}
               </div>
             </>

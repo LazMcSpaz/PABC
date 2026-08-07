@@ -1,10 +1,11 @@
-// A garrison Strength readout with a hover breakdown that shows how the
-// number is reached — the base garrison plus each upgrade chip's bonus.
-// The breakdown is portalled to <body> so it escapes any clipping or
-// transformed parent (the board viewport, a flipping card).
-import { useRef, useState } from "react";
+// A garrison Strength readout with a hover (or, on touch, tap) breakdown
+// that shows how the number is reached — the base garrison plus each
+// upgrade chip's bonus. The breakdown is portalled to <body> so it
+// escapes any clipping or transformed parent (the board viewport, a
+// flipping card).
 import { createPortal } from "react-dom";
 import { garrisonBreakdown, theme } from "./data.js";
+import { useTapTooltip } from "./kit.jsx";
 
 function Shield({ height, color }) {
   const width = Math.round((height * 14) / 16);
@@ -107,14 +108,8 @@ export default function GarrisonValue({
   color = theme.textDim,
   pill = false,
 }) {
-  const ref = useRef(null);
-  const [anchor, setAnchor] = useState(null);
+  const { ref, anchor, onMouseEnter, onMouseLeave, onClick } = useTapTooltip();
   const data = garrisonBreakdown(locationId, control);
-
-  const show = () => {
-    const r = ref.current?.getBoundingClientRect();
-    if (r) setAnchor({ cx: r.left + r.width / 2, top: r.top, bottom: r.bottom });
-  };
 
   const wrap = pill
     ? {
@@ -125,12 +120,13 @@ export default function GarrisonValue({
         padding: "1px 8px",
         borderRadius: 999,
         cursor: "help",
+        touchAction: "manipulation",
       }
-    : { display: "inline-flex", alignItems: "center", gap: 5, cursor: "help" };
+    : { display: "inline-flex", alignItems: "center", gap: 5, cursor: "help", touchAction: "manipulation" };
 
   return (
     <>
-      <span ref={ref} onMouseEnter={show} onMouseLeave={() => setAnchor(null)} style={wrap}>
+      <span ref={ref} onMouseEnter={onMouseEnter} onMouseLeave={onMouseLeave} onClick={onClick} style={wrap}>
         <Shield height={height} color={color} />
         <span style={{ fontFamily: theme.fontDisplay, fontWeight: 700, fontSize, color: theme.text }}>
           {data.total}

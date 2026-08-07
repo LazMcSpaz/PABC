@@ -23,6 +23,14 @@ export default function BoardViewport({ children, cameraTarget = null, cameraPan
   const viewRef = useRef(view);
   viewRef.current = view;
   const panStopRef = useRef(null);
+  // Two-finger pinch-to-zoom (touch only — mouse only ever produces one
+  // pointer, so this branch is simply unreachable for mouse input, no
+  // desktop behavior change). `pointers` tracks every currently-down
+  // pointer by id; `pinch` holds the previous frame's midpoint/distance
+  // between the first two fingers so each move applies an incremental
+  // scale + pan, exactly like a native map/photo app pinch.
+  const pointers = useRef(new Map());
+  const pinch = useRef(null);
 
   const fitToView = useCallback(() => {
     const vp = vpRef.current;
@@ -96,8 +104,26 @@ export default function BoardViewport({ children, cameraTarget = null, cameraPan
     });
   };
 
+  // The first two pointers down, in touch order — a stray 3rd/4th finger
+  // is tracked (so counts stay right) but never enters the pinch math.
+  const pinchPair = () => [...pointers.current.values()].slice(0, 2);
+  const midOf = (pts) => ({ x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 });
+  const distOf = (pts) => Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+
   const onPointerDown = (e) => {
     if (e.button !== 0) return;
+    pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pointers.current.size >= 2) {
+      // A 2nd finger landed — hand off from single-finger pan to pinch.
+      if (drag.current?.captured) {
+        try { vpRef.current?.releasePointerCapture(drag.current.pointerId); } catch {}
+      }
+      drag.current = null;
+      const pts = pinchPair();
+      pinch.current = { lastMid: midOf(pts), lastDist: distOf(pts) };
+      moved.current = true; // suppress any click once fingers lift
+      return;
+    }
     // Don't capture yet — capture redirects pointerup (and the
     // subsequent click) to the viewport, which would steal clicks
     // from hex / unit / button targets nested inside the board. We
@@ -110,6 +136,32 @@ export default function BoardViewport({ children, cameraTarget = null, cameraPan
     setGrabbing(true);
   };
   const onPointerMove = (e) => {
+    if (pointers.current.has(e.pointerId)) {
+      pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    }
+    if (pinch.current && pointers.current.size >= 2) {
+      const rect = vpRef.current?.getBoundingClientRect();
+      const ox = rect?.left || 0, oy = rect?.top || 0;
+      const pts = pinchPair();
+      const curMid = midOf(pts);
+      const curDist = distOf(pts);
+      const { lastMid, lastDist } = pinch.current;
+      setView((v) => {
+        const scaleRatio = lastDist > 0 ? curDist / lastDist : 1;
+        const scale = clamp(v.scale * scaleRatio, MIN_SCALE, MAX_SCALE);
+        const appliedRatio = scale / v.scale;
+        // Two-finger drag pans first (viewport-local, so subtract origin)...
+        let x = v.x + (curMid.x - lastMid.x);
+        let y = v.y + (curMid.y - lastMid.y);
+        // ...then zoom anchored at the current midpoint.
+        const px = curMid.x - ox, py = curMid.y - oy;
+        x = px - (px - x) * appliedRatio;
+        y = py - (py - y) * appliedRatio;
+        return { scale, x, y };
+      });
+      pinch.current = { lastMid: curMid, lastDist: curDist };
+      return;
+    }
     const d = drag.current;
     if (!d) return;
     const dx = e.clientX - d.sx;
@@ -127,6 +179,18 @@ export default function BoardViewport({ children, cameraTarget = null, cameraPan
     if (moved.current) setView((v) => ({ ...v, x: d.ox + dx, y: d.oy + dy }));
   };
   const endDrag = (e) => {
+    pointers.current.delete(e.pointerId);
+    if (pointers.current.size < 2) pinch.current = null;
+    if (pointers.current.size === 1) {
+      // One finger remains after a pinch — resume it as a pan from here
+      // rather than leaving a dead zone until it's lifted and re-pressed.
+      // Already know this is a drag (we were just pinching), so capture
+      // immediately instead of waiting for the usual 4px tap/drag threshold.
+      const [remainingId, pt] = [...pointers.current.entries()][0];
+      try { vpRef.current?.setPointerCapture(remainingId); } catch {}
+      drag.current = { sx: pt.x, sy: pt.y, ox: view.x, oy: view.y, pointerId: remainingId, captured: true };
+      return;
+    }
     const vp = vpRef.current;
     const d = drag.current;
     if (d?.captured && vp?.hasPointerCapture?.(e.pointerId)) {
