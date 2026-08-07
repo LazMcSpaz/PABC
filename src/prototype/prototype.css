@@ -334,3 +334,20 @@
 @media (prefers-reduced-motion: reduce) {
   .tech-pulse { animation: none; }
 }
+
+/* Faction-select portrait — a slow, subtle "living portrait" breathe on
+ * the currently-picked faction card so the setup screen isn't static.
+ * Keeps the img's own centering translate baked into every keyframe
+ * step since an active CSS animation overrides an element's inline
+ * `transform` entirely (they don't merge) — dropping the translate here
+ * would let the portrait drift off-centre while it scales. */
+@keyframes portrait-slow-zoom {
+  0%, 100% { transform: translate(-50%, -50%) scale(1); }
+  50% { transform: translate(-50%, -50%) scale(1.07); }
+}
+.portrait-slow-zoom {
+  animation: portrait-slow-zoom 9s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .portrait-slow-zoom { animation: none; }
+}

@@ -133,16 +133,22 @@ function FactionCard({ fid, picked, onPick }) {
         overflow: "hidden",
         borderBottom: `1px solid ${on ? f.color : "rgba(86,211,198,0.18)"}`,
       }}>
-        <img src={PORTRAITS[fid]} alt={f.name} style={{
-          position: "absolute", top: "50%", left: "50%",
-          transform: "translate(-50%, -50%)",
-          height: "100%",
-          objectFit: "cover",
-          filter: on
-            ? `saturate(1.05) drop-shadow(0 0 12px ${f.color}55)`
-            : "saturate(0.7) brightness(0.78)",
-          transition: "filter .22s ease",
-        }} />
+        <img
+          src={PORTRAITS[fid]}
+          alt={f.name}
+          className={on ? "portrait-slow-zoom" : undefined}
+          style={{
+            position: "absolute", top: "50%", left: "50%",
+            transform: "translate(-50%, -50%)",
+            width: "100%",
+            height: "100%",
+            objectFit: "cover",
+            filter: on
+              ? `saturate(1.05) drop-shadow(0 0 12px ${f.color}55)`
+              : "saturate(0.7) brightness(0.78)",
+            transition: "filter .22s ease",
+          }}
+        />
         <div className="hud-scanlines" style={{ position: "absolute", inset: 0 }} />
       </div>
       <div style={{ padding: "9px 11px 11px" }}>
