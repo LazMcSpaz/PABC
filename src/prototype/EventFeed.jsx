@@ -20,10 +20,8 @@ function formatEvent(ev, engineState) {
   switch (ev.name) {
     case "turn_started":
       return { color: factionColor(p.player), text: `${who(p.player)} — turn start` };
-    case "unit_moved": {
-      const u = engineState.units[p.unit];
-      return { color: factionColor(u?.owner), text: `${who(u?.owner)} moved ${p.from} → ${p.to}` };
-    }
+    case "unit_moved":
+      return { color: factionColor(p.player), text: `${who(p.player)} moved ${p.from} → ${p.to}` };
     case "unit_recruited":
       return { color: factionColor(p.player), text: `${who(p.player)} recruited a unit` };
     case "unit_retreated": {

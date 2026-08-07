@@ -547,7 +547,7 @@ function offerRetreat(state, unit, ctx, preferred) {
   }
   const from = unit.node;
   unit.node = dest;
-  emit(state, "unit_retreated", { unit: unit.uid, from, to: dest });
+  emit(state, "unit_retreated", { unit: unit.uid, player: unit.owner, from, to: dest });
 }
 
 // A player wins immediately at the VP threshold (§3 / §14.1). Checked

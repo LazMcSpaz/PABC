@@ -62,7 +62,15 @@ function runMove(state, { params, ctx }) {
   // blockade stop, so the remaining budget at the destination is exact.
   unit.moveRemaining = Math.max(0, field[params.to] ?? 0);
   unit.movedSinceUpkeep = true; // §16.6 fortify — moving voids "dug in"
-  emit(state, "unit_moved", { unit: unit.uid, from, to: params.to });
+  // movement/moveRemaining are snapshotted here (not left for a log
+  // consumer to read off the live unit later) because both are mutable —
+  // by the time anyone exports state.log, a unit that moved many times
+  // (or died) would only show its FINAL values against every historical
+  // move, not what was true at each one.
+  emit(state, "unit_moved", {
+    unit: unit.uid, player: unit.owner, from, to: params.to,
+    movement: unit.movement, moveRemaining: unit.moveRemaining,
+  });
 
   // §19.11 — INCREMENTAL recompute (the scale guard): a move only changes
   // the MOVER's own sight footprint, so we refresh that one faction's
@@ -117,7 +125,7 @@ function tryPickupLoot(state, unit, hex, ctx) {
   else delete state.hexLoot[hex];
   if (taken.length) {
     recomputeStats(state);
-    emit(state, "loot_claimed", { killer: unit.uid, hex, chips: taken });
+    emit(state, "loot_claimed", { killer: unit.uid, player: unit.owner, hex, chips: taken });
   }
 }
 

@@ -23,6 +23,7 @@ import { bfsDistances } from "../game/board.js";
 import { unitReach, unitMovePath } from "../game/movement.js";
 import { CHIPS as ENGINE_CHIPS, LOCATIONS as ENGINE_LOCATIONS } from "../game/content.js";
 import { CONFIG } from "../game/config.js";
+import { downloadGameLog } from "./gameLogExport.js";
 import { NEUTRAL } from "./data.js";
 import { getEncounter } from "../game/encounters.js";
 import { encounterRedrawBudget } from "../game/encounters.js";
@@ -929,6 +930,20 @@ export default function Prototype({ config, onNewGame }) {
               enemy turns — the next round still replays. Choose <em>Skip — instant</em>
               above to turn the replay off for good.
             </p>
+          </div>
+          <div style={{ marginTop: 16, borderTop: `1px solid ${theme.border}`, paddingTop: 14 }}>
+            <span style={{ fontFamily: HUD.font, fontSize: 13, fontWeight: 700, letterSpacing: 0.6, color: HUD.text }}>
+              Playtest log
+            </span>
+            <p className="pc-prose" style={{ margin: "4px 0 8px", fontSize: 12, lineHeight: 1.5, color: HUD.textDim }}>
+              Every action this session, in detail — moves, contests (full dice
+              and modifier breakdown), tech assignments, diplomacy, everything.
+              Downloads as a text file you can read start to finish.
+            </p>
+            <Btn onClick={() => {
+              downloadGameLog(gameRef.current);
+              setToast({ kind: "info", text: "Playtest log downloaded." });
+            }}>Export Playtest Log</Btn>
           </div>
           <div style={{ marginTop: 16, borderTop: `1px solid ${theme.border}`, paddingTop: 14 }}>
             <Btn variant="primary" onClick={onNewGame}>Abandon &amp; New Game</Btn>
