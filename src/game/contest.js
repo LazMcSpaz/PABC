@@ -226,6 +226,23 @@ function flipSection(state, loc, victor, params) {
     idx = loc.sections.indexOf(rival);
   }
   loc.sections[idx] = victor;
+  // A section lost to a contest can drop the location's PREVIOUS full
+  // controller below full control (winning one of their three sections
+  // without yet winning all three). `resolveLocationWin` below only ever
+  // SETS loc.controller (via captureLocation, once the victor holds all
+  // three) — nothing previously cleared it when the old controller no
+  // longer does, so it went stale: still pointing at a player who now
+  // holds only 1-2 of 3 sections. That stale flag is read everywhere
+  // (`loc.controller`) as "this player fully controls this hex" — output
+  // collection, build/upgrade rights, passive heal, ZoC/movement
+  // blocking, and — the reported bug — contest eligibility, since "you
+  // already fully control this location" no longer matched reality while
+  // the stale flag still granted every other full-control right. Mirrors
+  // the reset turn.js's Loyalty-decay peel already does on the same
+  // condition, applied here for the contest-loss path it didn't cover.
+  if (loc.controller && !loc.sections.every((s) => s === loc.controller)) {
+    loc.controller = null;
+  }
   emit(state, "section_flipped", { hex: loc.hexId, to: victor, cause: "contest" });
 }
 
@@ -245,7 +262,14 @@ function destroyLocationChip(state, loc, chipUid) {
 // destroyed, any Capital is removed (never inherited), the rest carry
 // over, and Loyalty initialises low for the new controller (§18.2).
 function captureLocation(state, loc, victor) {
-  const from = loc.controller;
+  // loc.controller now clears the moment full control is lost (see
+  // flipSection's fix above), so by the time a rival completes full
+  // capture it's already null — `loyaltyOwner` is the right fallback for
+  // "who this is being captured FROM": it only clears once a Location
+  // decays fully to neutral (turn.js), so it still names the last
+  // meaningful holder through a partial-control interim. Read before it's
+  // overwritten below.
+  const from = loc.controller || loc.loyaltyOwner;
   if (loc.chips.length)
     destroyLocationChip(state, loc, loc.chips[loc.chips.length - 1]);
   for (const c of [...loc.chips])
