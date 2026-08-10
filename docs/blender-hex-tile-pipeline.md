@@ -173,10 +173,88 @@ referenced or reused later.
 
 ## Integration note (for whoever wires the art in, not the modeling instance)
 
-The current board renderer has no notion of draw order beyond row position —
-it draws flat gradient fills today. Once tiles have real vertical relief, a
-tall tile needs to visually occlude the tile "above" it in screen space, which
-requires back-to-front (row-by-row) paint order — standard painter's-algorithm
-handling for isometric tile grids. This is a code change on the game side, not
-something the asset pipeline needs to solve, but land it before the first real
-tile set ships or tall settlement tiles will render with visible glitches.
+**Update (verified, 2026-08-07):** this was originally flagged as a required
+code change before tall art could land safely. Turned out not to be true —
+verified empirically (an injected marker with real vertical bleed, in an
+adjacent row, with conflicting internal z-index values) that draw order
+across rows already resolves correctly today. Every hex cell (`Hex.jsx`) sets
+a non-`none` CSS `filter` (its drop-shadow), which independently creates a
+stacking context per cell per the CSS spec — so row-order-correct painting
+already falls out of plain DOM order, no explicit z-index needed. An explicit
+`zIndex: rowIdx` was added to each row in `HexBoard.jsx` anyway as defensive
+hardening (so this doesn't silently break if a future code path ever renders
+a cell with `filter: "none"`), but it's not fixing an observed bug — the
+board can already take tall isometric art with no further engine change.
+
+---
+
+## Art resolver — `src/prototype/hexArt.js`
+
+Prep work, built ahead of any real files existing: a pure module that decides
+which tile image belongs on a hex, once art lands. Nothing calls it yet —
+`Hex.jsx`/`HexBoard.jsx` still render the current flat CSS fills. Wiring it in
+(with an `<img onError>` fallback to today's gradient fill for any tile whose
+art hasn't shipped yet) is a small follow-up once real files exist, not
+included here to avoid broken-image regressions on the live game before then.
+
+- `resolveTerrainArt(hex, owner)` — flat vs. mountain bucket comes from the
+  real `hex.elevation` boolean (already mechanically meaningful: it blocks
+  line of sight and halts movement — see `src/game/board.js`), not an
+  invented/random split. `owner` is a factionId from `regionOwnerMap` below.
+- `resolveSettlementArt(locationId)` — tier comes from the real
+  `LOCATIONS[id].strategicValue` in `src/game/content.js` (`low`/`medium` →
+  small, `high` → medium, `veryHigh` → large — matches the actual
+  distribution of the 10 locations defined today). Faction skin comes from
+  `LOCATIONS[id].affiliation`, which is permanent content data, decoupled
+  from the live, conquest-changeable `controller` — a captured city doesn't
+  change its architecture the turn it's captured.
+- `regionOwnerMap(state)` — there's no static "which faction's territory is
+  this" field on a plain terrain hex; that's normally 100% emergent at
+  runtime via Zone of Control (`src/game/influence.js`), which shifts as
+  armies move. Art can't work that way without visibly flickering, so this
+  computes a **separate, static** region assignment once: a multi-source BFS
+  from every faction's permanently-affiliated Location hexes, over the
+  existing `state.board.adjacency` — a Voronoi partition seeded by home
+  cities, not current front lines. Pure function of already-persisted state;
+  no engine/save-format change.
+- Both variant-selection and region-assignment are deterministic (a stable
+  string hash, not `Math.random` or the engine's seeded `state.rng`) — the
+  same hex always resolves to the same art, forever, so tiles don't visibly
+  reshuffle their art between renders.
+- Verified against 5 seeds × multiple map sizes: 100% terrain-hex region
+  coverage, all resolved owners are real playable factions, deterministic
+  repeat calls, elevation hexes correctly resolve to the mountain bucket,
+  and (on a Huge map) all 3 flat and multiple mountain variants actually get
+  used rather than the hash degenerating to one index.
+
+## Roads & rails — current state (informational; not implemented here)
+
+Flagged as future scope, not acted on. Worth knowing before that work starts:
+
+- **Roads are already a real, live mechanic.** `hex.road` (boolean,
+  `src/game/board.js`) is laid as a minimum-spanning-tree of shortest paths
+  between faction capitals at generation time, and negates both the
+  mountain-halt and the forest movement-cost penalty. Cosmetically it's
+  already drawn today as `RoadBand` in `Hex.jsx` — a flat band across the
+  hex, not edge-connected art. A real connected-road art system (the tile
+  showing a path that lines up with its specific neighbors) needs edge-socket
+  tile variants — this pipeline's tiles don't have that concept yet.
+- **Rail has zero mechanical existence anywhere in the engine.** No
+  `hex.rail` field, no rail terrain type, no rail movement rule. The only
+  hits for "rail" in the whole codebase are flavor text (an ability named
+  `rail-corridor`, a "Rail Walker" encounter character) — unrelated to any
+  tile mechanic. Building a rail system means designing the mechanic from
+  scratch, not re-skinning roads.
+- **The engine already anticipates a fuller terrain sub-type system than
+  this pipeline's flat/mountain split.** `hex.terrain` is a real field
+  referenced by combat (`contest.js`'s mountain defense bonus) and by
+  encounter content filters (`encounters.js`), with a documented intended
+  enum of `mountain`/`forest`/`rubble`/`wetland`/… in
+  `docs/content-schema-v0.1.md` — but `setup.js` always stamps it `null` in
+  real games, so none of that is currently live; only the `elevation`/`cover`
+  booleans are. That's the "terrain+roads work track" `encounters.js`'s own
+  comments refer to. This pipeline deliberately does not touch it — flagging
+  it here since it's the natural next step whenever terrain/road art depth
+  becomes a priority, and it would let `resolveTerrainArt`'s flat/mountain
+  split grow into the forest/rubble/wetland variety the schema already
+  anticipates without changing this module's shape.

@@ -39,6 +39,21 @@ export default function HexBoard({
             display: "flex",
             justifyContent: "center",
             marginTop: rowIdx === 0 ? 0 : -ROW_OVERLAP,
+            position: "relative",
+            // Explicit, row-index-driven stacking so a row further
+            // "south" always paints over the row(s) above it — needed
+            // once isometric tile art with real height (a tower, a
+            // hill) bleeds upward past its own hex box and needs to
+            // visually overlap the tile behind it. Verified this is
+            // NOT currently load-bearing: every Hex.jsx cell already
+            // sets a non-"none" CSS `filter` (its drop-shadow), which
+            // independently creates a stacking context per cell, so
+            // cross-row order already falls out correctly from plain
+            // DOM order today. This makes that ordering an explicit,
+            // documented contract instead of a side effect of every
+            // cell always having a filter — safe hardening, not a fix
+            // for an observed bug.
+            zIndex: rowIdx,
           }}
         >
           {row.map((hexId) => {
