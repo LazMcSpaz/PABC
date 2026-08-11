@@ -29,6 +29,11 @@ is bad at is what stops it being attached to a shot it will drag off-target.
 > Attach them only for construction and material, always alongside §13's
 > negative block, and never as the sole anchor on a shot with a labelable
 > surface. Clean replacements are worth generating.
+>
+> **Anchors marked FRAMING** break §15's clean-sheet rule some other way —
+> painted ground, studio lighting, a non-square crop. They are still usable for
+> construction and material, but they carry their staging forward, so pair them
+> with a clean anchor rather than letting one set the frame alone.
 
 Entry format:
 
@@ -80,6 +85,12 @@ Added: 2026-08-11
 URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/goldgrass-quilted-cuirass-03.jpg
 Use for: the core Goldgrass statement in §4 — thickness built in layers of quilted cloth rather than plate, soft bulky outline, no hard edge anywhere; the concealed-plate rule read exactly right, a salvaged panel sandwiched inside the quilting and betrayed only by its stitched outline and two rows of rivet heads; madder-and-gold woven geometric banding at collar, armscye and hem; the warm ochre-to-cream palette that makes Goldgrass the only faction with color; front and side pairing
 Do not use for: anything Versari or Laker — it will soften faceted plate and flatten cast curvature on contact; figure scale. Note this is the only 2K anchor in the set, so it carries more surface detail than its neighbours
+Added: 2026-08-11
+
+## goldgrass-scythe-02.jpg
+URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/goldgrass-scythe-02.jpg
+Use for: §4's weapon rule made literal — a reforged agricultural head bought on its own and bolted to a locally made haft, the join left as a plain strap collar on two rivets; cord lash wrapping in bands with madder accents; the worn tool blade with its unground back and cutout, somebody else's metal on Goldgrass work
+Do not use for: **FRAMING** — the ground here is painted, with brushwork and bare canvas weave showing at the edges, not §15's plain flat-lit grey; it will carry canvas texture and painterly facture into anything it anchors. This is also the only anchor in the set that is not square (896×1200), so it will bias composition toward a portrait crop
 Added: 2026-08-11
 
 ## goldgrass-sunhood-01.jpg
