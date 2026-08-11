@@ -76,6 +76,18 @@ Added: 2026-08-11
 
 ## Objects
 
+## goldgrass-quilted-cuirass-03.jpg
+URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/goldgrass-quilted-cuirass-03.jpg
+Use for: the core Goldgrass statement in §4 — thickness built in layers of quilted cloth rather than plate, soft bulky outline, no hard edge anywhere; the concealed-plate rule read exactly right, a salvaged panel sandwiched inside the quilting and betrayed only by its stitched outline and two rows of rivet heads; madder-and-gold woven geometric banding at collar, armscye and hem; the warm ochre-to-cream palette that makes Goldgrass the only faction with color; front and side pairing
+Do not use for: anything Versari or Laker — it will soften faceted plate and flatten cast curvature on contact; figure scale. Note this is the only 2K anchor in the set, so it carries more surface detail than its neighbours
+Added: 2026-08-11
+
+## goldgrass-sunhood-01.jpg
+URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/goldgrass-sunhood-01.jpg
+Use for: quilted crown-and-brim construction with a loose neck drape; the woven band applied at both brim edge and drape hem; sun-bleached cream-to-ochre gradient with dust soiling worked up from the hem; front and three-quarter pairing
+Do not use for: any structural or load-bearing read — this is entirely soft goods with no plate at all, and as an anchor it will suppress the concealed-plate rule the cuirass establishes; head shape or face
+Added: 2026-08-11
+
 ## versari-core-cradle-01.jpg
 URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/versari-core-cradle-01.jpg
 Use for: §10's keystone object — the sealed seamless matte-grey cylinder, inert and featureless, in a laminated cut-plate yoke with bolted clamps, copper bus bars, ceramic insulators and analog gauges. Judge new Versari work against this one

@@ -385,8 +385,11 @@ can be referenced.
 
 Tracked so they are not silently resolved by whatever gets generated first.
 
-- **No Goldgrass canon object.** The woven-and-stitched logic is written but
-  unproven against output.
+- ~~**No Goldgrass canon object.**~~ Closed 2026-08-11 by
+  `goldgrass-quilted-cuirass-03.jpg` and `goldgrass-sunhood-01.jpg`. The
+  woven-and-stitched logic is now proven against output, including the
+  concealed-plate rule — a salvaged panel inside the quilting, read from
+  outside only as a stitched outline and rows of rivet heads.
 - **No Free Plainers canon object.** Same. Their accretion logic is the one
   most likely to collapse into "shantytown" without a proven reference.
 - ~~**No land vessel canon object.**~~ Closed 2026-08-11 by
