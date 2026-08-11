@@ -16,8 +16,10 @@ publishes only the Vite `dist/` artifact — there is no Jekyll build and no
 counts against no site limit. No exclusion needed.
 
 **Raw URLs verified.** `https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/<file>`
-returns committed files over unauthenticated plain HTTP (confirmed 2026-08-11
-with a placeholder, since removed). Filenames must be lowercase-hyphen only —
-a space breaks the URL.
+returns committed files over unauthenticated plain HTTP — confirmed 2026-08-11
+by fetching a placeholder from this path with no credentials and no proxy
+(200, `image/png`, bytes identical); the check ran against this branch's ref
+before merge, and the placeholder has been removed. Filenames must be
+lowercase-hyphen only — a space breaks the URL.
 
 One `style/<world>.md` and one `anchors/<world>/` per world. Never mix worlds.
