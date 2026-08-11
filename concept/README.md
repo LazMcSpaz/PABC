@@ -15,7 +15,6 @@ artifact — no Jekyll, no `_config.yml` — so `concept/` is never copied into 
 published site and needs no `exclude`.
 
 **Raw URLs verified.** `https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/<file>`
-serves committed files over unauthenticated plain HTTP: confirmed 2026-08-11 by
+serves committed files over unauthenticated plain HTTP — confirmed 2026-08-11 by
 fetching a placeholder from this path with no credentials (200, `image/png`,
 bytes identical), against this branch's ref pre-merge; placeholder since removed.
-Filenames are lowercase-hyphen only — a space breaks the URL.
