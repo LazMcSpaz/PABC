@@ -65,6 +65,12 @@ Added: 2026-08-11
 
 ## Figures
 
+## goldgrass-levyman-02.jpg
+URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/goldgrass-levyman-02.jpg
+Use for: the full Goldgrass silhouette — soft bulky outline with no hard edge, quilted cuirass and sunhood worn on a body, woven madder-and-gold banding at collar, hem and sash, loose cream trousers and soft shoes; a farmer levied rather than a soldier, unarmoured at the arms; the reforged scythe carried at rest as a scale key
+Do not use for: plate armour of any kind; the head covering here is simplified against goldgrass-sunhood-01 and should not override it
+Added: 2026-08-11
+
 ## versari-soldier-01.jpg
 URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/versari-soldier-01.jpg
 Use for: the full Versari silhouette — plate over a green wool greatcoat, skirted below the belt; how cuirass, pauldron and vambrace sit on a body; strap-and-buckle attachment; the muted green-and-steel palette at figure scale
