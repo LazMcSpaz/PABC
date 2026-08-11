@@ -65,6 +65,18 @@ Added: 2026-08-11
 
 ## Figures
 
+## goldgrass-commander-01.jpg
+URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/goldgrass-commander-01.jpg
+Use for: §4's "their metal is somebody else's" rule at its clearest — an angular faceted cut-plate pauldron and a rounded cast hip plate worn on the same body, mismatched by origin and rope-lashed on rather than strapped or bolted; patchwork quilting in ochre, cream and madder as blocks of differing cloth; rank read through accumulated salvage rather than through insignia; an older, weathered face
+Do not use for: fitted armour — every plate here is tied on and sits proud of the body, which is the point and will fight any close-fitted design; the levy silhouette, which is softer and unplated
+Added: 2026-08-11
+
+## goldgrass-saddle-horse-01.jpg
+URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/goldgrass-saddle-horse-01.jpg
+Use for: textile-first tack — a quilted saddle pad with braided cord edging and woven madder-and-gold banding, plaited rope bridle and reins, and metal admitted only where it cannot be avoided, at the stirrup and bit; full side profile against a clean grey ground
+Do not use for: the horse's own build or colour as breed canon, which has not been decided; ridden poses, since this is a standing profile with no rider
+Added: 2026-08-11
+
 ## goldgrass-levyman-02.jpg
 URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/goldgrass-levyman-02.jpg
 Use for: the full Goldgrass silhouette — soft bulky outline with no hard edge, quilted cuirass and sunhood worn on a body, woven madder-and-gold banding at collar, hem and sash, loose cream trousers and soft shoes; a farmer levied rather than a soldier, unarmoured at the arms; the reforged scythe carried at rest as a scale key
@@ -91,6 +103,12 @@ Added: 2026-08-11
 URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/goldgrass-quilted-cuirass-03.jpg
 Use for: the core Goldgrass statement in §4 — thickness built in layers of quilted cloth rather than plate, soft bulky outline, no hard edge anywhere; the concealed-plate rule read exactly right, a salvaged panel sandwiched inside the quilting and betrayed only by its stitched outline and two rows of rivet heads; madder-and-gold woven geometric banding at collar, armscye and hem; the warm ochre-to-cream palette that makes Goldgrass the only faction with color; front and side pairing
 Do not use for: anything Versari or Laker — it will soften faceted plate and flatten cast curvature on contact; figure scale. Note this is the only 2K anchor in the set, so it carries more surface detail than its neighbours
+Added: 2026-08-11
+
+## goldgrass-tilt-wagon-01.jpg
+URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/goldgrass-tilt-wagon-01.jpg
+Use for: the trading-nation vehicle — a quilted tilt stretched over hoops and laced down to the body rail, carrying the same diamond quilting and woven banding as the armour, so the cloth logic reads at vehicle scale; plain timber body with no metal skin; full side elevation
+Do not use for: the running gear, which is conventional wooden wheels and will pull output pre-industrial; also not for §5.1's one-subject rule, since the draught pair shares the frame
 Added: 2026-08-11
 
 ## goldgrass-scythe-02.jpg
