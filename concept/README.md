@@ -1,25 +1,21 @@
 # concept/
 
-Reference images for concept work, not game assets. Nothing here is wired
-into the build; runtime art lives in `public/assets/`.
+Reference images for concept work, not game assets — nothing here is wired into
+the build (runtime art lives in `public/assets/`). One `style/<world>.md` and one
+`anchors/<world>/` per world; never mix worlds.
 
 The authority on how images are made is
-[`style/remnant-continent-art-direction.md`](style/remnant-continent-art-direction.md)
-(moved here from the repo root). Read §14 for generation settings, §15 for the
-anchor registry this directory implements. Approved anchors and their usage
-notes are indexed in
+[`style/remnant-continent-art-direction.md`](style/remnant-continent-art-direction.md),
+moved here from the repo root — §14 generation settings, §15 anchor registry.
+Approved anchors are indexed in
 [`anchors/remnant-continent/ANCHORS.md`](anchors/remnant-continent/ANCHORS.md).
 
-**Pages.** GitHub Pages is built by `.github/workflows/pages.yml`, which
-publishes only the Vite `dist/` artifact — there is no Jekyll build and no
-`_config.yml`, so `concept/` is never copied into the published site and
-counts against no site limit. No exclusion needed.
+**Pages.** `.github/workflows/pages.yml` publishes only the Vite `dist/`
+artifact — no Jekyll, no `_config.yml` — so `concept/` is never copied into the
+published site and needs no `exclude`.
 
 **Raw URLs verified.** `https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/<file>`
-returns committed files over unauthenticated plain HTTP — confirmed 2026-08-11
-by fetching a placeholder from this path with no credentials and no proxy
-(200, `image/png`, bytes identical); the check ran against this branch's ref
-before merge, and the placeholder has been removed. Filenames must be
-lowercase-hyphen only — a space breaks the URL.
-
-One `style/<world>.md` and one `anchors/<world>/` per world. Never mix worlds.
+serves committed files over unauthenticated plain HTTP: confirmed 2026-08-11 by
+fetching a placeholder from this path with no credentials (200, `image/png`,
+bytes identical), against this branch's ref pre-merge; placeholder since removed.
+Filenames are lowercase-hyphen only — a space breaks the URL.
