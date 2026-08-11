@@ -118,16 +118,16 @@ Use for: overlapping faceted lames on a shoulder; laminated stacked-plate edge t
 Do not use for: bolt density — this piece is nearly bolt-free and will suppress the rationed-bolt language §4 wants elsewhere; head hardware; figure scale
 Added: 2026-08-11
 
-## versari-solar-cart-01.jpg
-URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/versari-solar-cart-01.jpg
-Use for: light open-frame chassis in cut and welded flat stock with triangulated members; the tilting panel canopy and its clamp mounts; wire-spoke wheels; stowed canvas and battery-bank detail
+## versari-sunrunner-01.jpg
+URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/versari-sunrunner-01.jpg
+Use for: the Sunrunner — light open-frame chassis in cut and welded flat stock with triangulated members; the tilting panel canopy and its clamp mounts; wire-spoke wheels; stowed canvas and battery-bank detail
 Do not use for: the anchor framing standard — this is a studio product render with a gradient ground and a soft cast shadow, not §15's plain flat-lit grey, so it will bake studio lighting into anything it anchors
 Added: 2026-08-11
 
-## versari-solar-wagon-01.jpg
-URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/versari-solar-wagon-01.jpg
-Use for: the heavier four-wheel plate-body variant of the same canopy idea; exposed battery bank with copper bus bars and ceramic insulators at vehicle scale; telescoping canopy stanchions; heavy spoked wheels
-Do not use for: the running gear, which is closer to a horse-drawn wagon than the cart's engineered frame and will pull output pre-industrial; figure scale
+## versari-sunhauler-01.jpg
+URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/versari-sunhauler-01.jpg
+Use for: the Sunhauler — the heavy four-wheel plate-body counterpart to the Sunrunner; exposed battery bank with copper bus bars and ceramic insulators at vehicle scale; telescoping canopy stanchions; heavy spoked wheels
+Do not use for: the running gear, which is closer to a horse-drawn wagon than the Sunrunner's engineered frame and will pull output pre-industrial; figure scale
 Added: 2026-08-11
 
 ---
