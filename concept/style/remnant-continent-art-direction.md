@@ -184,6 +184,9 @@ what finish it carries]
 | Two masses instead of one object | "Divided into upper and lower, bridged by piers" | "A slot cut through the wall of one solid box; plating continuous above and below" |
 | Figure looks like a display piece | Uniform finish quality across all surfaces | Name exactly which surfaces are bright; everything else rough and dirty |
 | Squad figures lack detail | Multiple figures in one generation | One figure per generation |
+| Output covered in English callout labels and a title block | Asked for an "annotated reference sheet" or "design sheet" — the words summon the whole diagram convention, labels included | Ask for orthographic views only, never for annotation. Labels belong in `ANCHORS.md`, not in the image |
+| Output contains the prompt's own placeholder text, e.g. "ref. &lt;Image 1&gt;" | Referred to an attached anchor inside the prompt body, so the model drew the reference token as a caption | Never name the attachments in the prompt. Describe what to take from them, or say nothing — §5.3 already spends words on everything *except* the referenced parts |
+| Gauge faces and palette swatches come back with misspelled English | Any labelable flat surface invites lettering, and a misspelling is still a §13 violation | Keep §13's negative block on every prompt, and prefer numerals-only gauges. A garbled word is not "close enough" — it is canon-breaking |
 
 ---
 
@@ -386,7 +389,11 @@ Tracked so they are not silently resolved by whatever gets generated first.
   unproven against output.
 - **No Free Plainers canon object.** Same. Their accretion logic is the one
   most likely to collapse into "shantytown" without a proven reference.
-- **No land vessel canon object.** Section 12 is inference until one exists.
+- ~~**No land vessel canon object.**~~ Closed 2026-08-11 by
+  `versari-land-vessel-01.jpg` — a Versari hull with the continuous-plating
+  form rule and hover skirt. Section 12 is no longer pure inference, though the
+  vessel class question below is still open, and the anchor carries §13 text in
+  its palette block.
 - **No hex-tile terrain studies.** Section 8 describes four terrain types in
   prose; none has been generated as a tile.
 - **No figure canon outside Versari and Laker.**

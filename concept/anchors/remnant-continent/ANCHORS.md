@@ -23,8 +23,14 @@ for reference sheets and hard edges, `.jpg` for landscape and atmospheric work.
 qualities into a generation, including the wrong ones; recording what an anchor
 is bad at is what stops it being attached to a shot it will drag off-target.
 
-Entry format, and the first intended anchor from §10 (uncomment once the file
-is actually committed):
+> **Four anchors carry English lettering, in violation of §13.** They are
+> marked **TEXT** below. Lettering in an anchor teaches the model that lettering
+> belongs on the subject, which is the exact failure §13 exists to prevent.
+> Attach them only for construction and material, always alongside §13's
+> negative block, and never as the sole anchor on a shot with a labelable
+> surface. Clean replacements are worth generating.
+
+Entry format:
 
 <!--
 ## versari-core-cradle-01.png
@@ -38,13 +44,61 @@ Added: YYYY-MM-DD
 
 ## Vessels
 
-_None yet._
+## versari-land-vessel-01.jpg
+URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/versari-land-vessel-01.jpg
+Use for: the one continuous armored hull form §5.4 asks for — faceted plating carried unbroken bow to stern with no seam at the raised bow; the hover skirt and its dust plume; deck furniture recessed rather than hung; the human silhouette as a scale key
+Do not use for: **TEXT** — the palette block is misspelled English ("BLUGT'ARED", "BLUINING", "BUST" for bus bar) and will propagate lettering; also not for close material detail, which is too small here to read, nor for the grey-ground framing, since this one carries a painted ground and sky
+Added: 2026-08-11
+
+## versari-hull-module-01.jpg
+URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/versari-hull-module-01.jpg
+Use for: a deckhouse or superstructure box as faceted chamfered plate; the stacked-plate slot band carried onto architecture rather than armor; bolt rows rationed to panel edges; conduit entering from underneath
+Do not use for: scale, which is genuinely ambiguous in this image — nothing in frame fixes whether this is a metre or five metres across; also not for weathering, which is lighter here than the rest of the set
+Added: 2026-08-11
+
+---
 
 ## Figures
 
-_None yet._
+## versari-soldier-01.jpg
+URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/versari-soldier-01.jpg
+Use for: the full Versari silhouette — plate over a green wool greatcoat, skirted below the belt; how cuirass, pauldron and vambrace sit on a body; strap-and-buckle attachment; the muted green-and-steel palette at figure scale
+Do not use for: face or head detail at close range; the helmet here is simplified against versari-helmet-01 and should not override it
+Added: 2026-08-11
+
+## versari-soldier-sheet-01.jpg
+URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/versari-soldier-sheet-01.jpg
+Use for: the shorter tunic loadout as distinct from the greatcoat; two-view figure pairing on one sheet; polearm proportion against a standing figure
+Do not use for: **TEXT** — this sheet is entirely annotated, and the model rendered its own prompt placeholders ("ref. <Image 1>") into the image; it will drag callout lines and labels into anything it anchors. Also not for §5.1's one-subject rule, since two figures share the frame and both lose fidelity
+Added: 2026-08-11
+
+---
 
 ## Objects
+
+## versari-core-cradle-01.jpg
+URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/versari-core-cradle-01.jpg
+Use for: §10's keystone object — the sealed seamless matte-grey cylinder, inert and featureless, in a laminated cut-plate yoke with bolted clamps, copper bus bars, ceramic insulators and analog gauges. Judge new Versari work against this one
+Do not use for: **TEXT** — the gauge panel reads "FLUX LEVEL / TEMP / CONTACTOR STATUS"; crop or counter-prompt it. Also not for figure scale or for exterior lighting, since this is an interior installation shot
+Added: 2026-08-11
+
+## versari-lift-emitter-01.jpg
+URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/versari-lift-emitter-01.jpg
+Use for: §10's lift emitter — sealed truncated cone, flat dull-black featureless aperture, machined saddle ring, and the radiating heat scorch that makes hover read as expensive rather than magical; two-view orthographic pairing
+Do not use for: **TEXT** — a full callout layer with a title block, the heaviest lettering in the set. Also not for the painted-sheet rendering style, since the annotation flattens it
+Added: 2026-08-11
+
+## versari-sword-01.jpg
+URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/versari-sword-01.jpg
+Use for: §10's sword — blade cut from flat plate at constant thickness, hard-edged bevels, machined channel with square shoulders, cut-angle tip, bolted hardwood scales on an exposed flat tang, and the single unused bolt hole from the plate's previous life. The clearest statement of cut-and-bolted in the set
+Do not use for: figure scale; and note the render is cleaner than the painted sheets, so it will pull toward CG surfacing
+Added: 2026-08-11
+
+## versari-bolt-thrower-01.jpg
+URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/versari-bolt-thrower-01.jpg
+Use for: crew-served weapon staging — two figures working one machine at consistent scale; armored conduit and cable runs as a visual element; the wheeled plate carriage; ammunition crates as set dressing
+Do not use for: the §7 medieval trap — the bow-limb form is the one object here that risks reading as a siege engine, and it should not be anchored to anything that could tip that way; also not for §5.1's one-subject rule
+Added: 2026-08-11
 
 ## versari-helmet-01.jpg
 URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/versari-helmet-01.jpg
@@ -63,6 +117,20 @@ URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remna
 Use for: overlapping faceted lames on a shoulder; laminated stacked-plate edge trim matching the helmet brow; leather strap-and-buckle mounting to the body; outboard/inboard view pairing
 Do not use for: bolt density — this piece is nearly bolt-free and will suppress the rationed-bolt language §4 wants elsewhere; head hardware; figure scale
 Added: 2026-08-11
+
+## versari-solar-cart-01.jpg
+URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/versari-solar-cart-01.jpg
+Use for: light open-frame chassis in cut and welded flat stock with triangulated members; the tilting panel canopy and its clamp mounts; wire-spoke wheels; stowed canvas and battery-bank detail
+Do not use for: the anchor framing standard — this is a studio product render with a gradient ground and a soft cast shadow, not §15's plain flat-lit grey, so it will bake studio lighting into anything it anchors
+Added: 2026-08-11
+
+## versari-solar-wagon-01.jpg
+URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/versari-solar-wagon-01.jpg
+Use for: the heavier four-wheel plate-body variant of the same canopy idea; exposed battery bank with copper bus bars and ceramic insulators at vehicle scale; telescoping canopy stanchions; heavy spoked wheels
+Do not use for: the running gear, which is closer to a horse-drawn wagon than the cart's engineered frame and will pull output pre-industrial; figure scale
+Added: 2026-08-11
+
+---
 
 ## Terrain
 
