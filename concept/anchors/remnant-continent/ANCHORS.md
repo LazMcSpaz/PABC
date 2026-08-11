@@ -9,7 +9,9 @@ hour after creation — if it is not committed here, it is gone.
 **Paste the `URL` line straight into a prompt's `image_input`.** The model
 fetches it by unauthenticated HTTP GET, so the file must be committed to `main`
 before the URL resolves. Up to 14 inputs per generation; they are free (billing
-is per output image).
+is per output image). `raw.githubusercontent.com` is CDN-cached for a few
+minutes, so curl a newly committed anchor once before relying on it in a
+generation — and expect a deleted one to keep serving briefly after removal.
 
 **Naming:** `<category>-<subject>-<nn>.<ext>` — lowercase and hyphens only, no
 spaces, no underscores, no parentheses. Two-digit zero-padded sequence, never
