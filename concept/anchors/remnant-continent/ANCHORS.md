@@ -111,9 +111,27 @@ Added: 2026-08-11
 
 ## Objects
 
+## plainer-crossbow-01.jpg
+URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/plainer-crossbow-01.jpg
+Use for: the canon replacement for `wip-crossbow-01.jpg`, and a worked example of accretion applied to a weapon — a heavy split-timber prod and stock with steel straps bolted along the limbs to take the load, wire cable string, turnbuckles for tension, a bare bent-steel trigger lever and no guard. Every part is doing structural work and nothing is decorative
+Do not use for: fine machining or fitted joinery, which this deliberately lacks; figure scale
+Added: 2026-08-11
+
+## plainer-cart-01.jpg
+URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/plainer-cart-01.jpg
+Use for: accretion at object scale — a timber frame with steel corner straps and oversized bolts, body panels riveted up from mismatched salvaged sheet in different metals and paint states, leather panniers patched from unmatched hides, and two wheels that do not match each other. Sound and in service, not derelict
+Do not use for: symmetry or matched sets of any kind; also not for Versari or Laker construction, which it will scruff up on contact
+Added: 2026-08-11
+
+## plainer-building-01.jpg
+URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/plainer-building-01.jpg
+Use for: Plainer construction at building scale — board siding against corrugated sheet on the same structure, a canvas awning on lashed timber poles as a bolted-on later addition, plain strap hinges and shuttered openings. Maintained and weathertight, which is the §4 distinction that keeps it out of shantytown territory
+Do not use for: the accretion depth §4 asks for — this is a single tidy structure without the three-generations-of-additions read, so it understates the logic and should be paired with `plainer-cart-01.jpg` rather than anchoring a settlement alone
+Added: 2026-08-11
+
 ## wip-crossbow-01.jpg
 URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/wip-crossbow-01.jpg
-Use for: **NOT CANON** — a stepping stone, kept only to generate the real one against. Take from it the mechanical ideas that work: steel strap reinforcement bolted along wooden limbs, a wire cable string, and turnbuckles as the tensioning method
+Use for: **NOT CANON, SUPERSEDED** — the stepping stone that produced `plainer-crossbow-01.jpg`, which carried its strap-reinforced limbs, cable string and turnbuckles forward and dropped the stock. Kept only as a record of that step; reach for the Plainer one instead
 Do not use for: anything final, and never as the sole anchor on an approved shot. It carries no faction fabrication logic — the sporting-rifle stock and trigger guard in particular belong to no one in §4 — so it will drag output toward a generic modern crossbow, which is the exact §5.2 trap of naming an object type with a famous instance
 Added: 2026-08-11
 
