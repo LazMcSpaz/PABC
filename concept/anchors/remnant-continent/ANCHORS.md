@@ -34,6 +34,12 @@ is bad at is what stops it being attached to a shot it will drag off-target.
 > painted ground, studio lighting, a non-square crop. They are still usable for
 > construction and material, but they carry their staging forward, so pair them
 > with a clean anchor rather than letting one set the frame alone.
+>
+> **Anchors marked NOT CANON** are working references kept to generate the real
+> object against, not approved designs. They carry a `wip-` prefix instead of a
+> faction one so they cannot be mistaken for canon later. Attach them for the
+> one mechanical idea they get right and say what that is; never let one stand
+> alone on an approved shot.
 
 Entry format:
 
@@ -64,6 +70,12 @@ Added: 2026-08-11
 ---
 
 ## Figures
+
+## plainer-figure-01.jpg
+URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/plainer-figure-01.jpg
+Use for: §4's accretion logic proven on a body — a sound leather coat with three generations of mismatched panels patched and riveted onto it, salvaged plate bolted flat over a shirt with no attempt to fit it, one lone pauldron with no partner, chain-and-shackle hardware doing a belt's job. Competent and maintained, not ragged: this is the anchor that keeps the Plainers out of shantytown territory
+Do not use for: matched or symmetrical kit of any kind — every element here is deliberately unpaired; also not for the Versari and Goldgrass palettes, since this figure is almost entirely browns
+Added: 2026-08-11
 
 ## goldgrass-commander-01.jpg
 URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/goldgrass-commander-01.jpg
@@ -98,6 +110,12 @@ Added: 2026-08-11
 ---
 
 ## Objects
+
+## wip-crossbow-01.jpg
+URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/wip-crossbow-01.jpg
+Use for: **NOT CANON** — a stepping stone, kept only to generate the real one against. Take from it the mechanical ideas that work: steel strap reinforcement bolted along wooden limbs, a wire cable string, and turnbuckles as the tensioning method
+Do not use for: anything final, and never as the sole anchor on an approved shot. It carries no faction fabrication logic — the sporting-rifle stock and trigger guard in particular belong to no one in §4 — so it will drag output toward a generic modern crossbow, which is the exact §5.2 trap of naming an object type with a famous instance
+Added: 2026-08-11
 
 ## goldgrass-quilted-cuirass-03.jpg
 URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/goldgrass-quilted-cuirass-03.jpg

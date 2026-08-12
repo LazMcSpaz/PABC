@@ -390,8 +390,11 @@ Tracked so they are not silently resolved by whatever gets generated first.
   woven-and-stitched logic is now proven against output, including the
   concealed-plate rule — a salvaged panel inside the quilting, read from
   outside only as a stitched outline and rows of rivet heads.
-- **No Free Plainers canon object.** Same. Their accretion logic is the one
-  most likely to collapse into "shantytown" without a proven reference.
+- ~~**No Free Plainers canon object.**~~ Closed 2026-08-11 by
+  `plainer-figure-01.jpg` — accretion proven on a body: a sound coat carrying
+  mismatched riveted patches, salvaged plate bolted flat without fitting, one
+  unpaired pauldron. Maintained rather than ragged, which is the distinction
+  that keeps it out of shantytown territory.
 - ~~**No land vessel canon object.**~~ Closed 2026-08-11 by
   `versari-land-vessel-01.jpg` — a Versari hull with the continuous-plating
   form rule and hover skirt. Section 12 is no longer pure inference, though the
@@ -399,5 +402,8 @@ Tracked so they are not silently resolved by whatever gets generated first.
   its palette block.
 - **No hex-tile terrain studies.** Section 8 describes four terrain types in
   prose; none has been generated as a tile.
-- **No figure canon outside Versari and Laker.**
+- ~~**No figure canon outside Versari and Laker.**~~ Closed 2026-08-11 by
+  `goldgrass-levyman-02.jpg`, `goldgrass-commander-01.jpg` and
+  `plainer-figure-01.jpg`. All four factions now have at least one figure,
+  though the Plainers have one only.
 - **Vessel class question** — one hull design or several (section 12).
