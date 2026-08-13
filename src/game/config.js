@@ -100,7 +100,10 @@ export const CONFIG = {
   // Derived per the spec — garrison Strength and base chip slots by a
   // location's strategic value.
   garrisonByValue: { low: 4, medium: 6, high: 8, veryHigh: 10 },
-  chipSlotsByValue: { low: 0, medium: 1, high: 2, veryHigh: 3 },
+  // Playtest: one slot per medium city meant a single build ended a town's
+  // development (and scrap piled up with nothing to sink into). Raised one
+  // across the board; the Loyalty-6 bonus slot still adds one more.
+  chipSlotsByValue: { low: 1, medium: 2, high: 3, veryHigh: 4 },
 
   // The v0.1 test board.
   testMap: [3, 4, 5, 6, 5, 4, 3], // 30 hexes
@@ -193,9 +196,21 @@ export const CONFIG = {
     standingMin: -10, standingMax: 12,
     tiers: { hostile: -6, wary: -3, neutral: -1, friendly: 5, allied: 8 }, // value >= → tier (0 = Neutral)
     pactStandingReq: 6, // §18.7 Standing needed to form a pact (Friendly+)
-    driftPerRound: 1, // §18.5 Standing drifts toward Neutral when unreinforced…
+    driftPerRound: 1, // §18.5 Standing drifts toward its BASELINE when unreinforced…
     grudgeDriftScale: 1, // …modulated by the faction's grudge (high grudge → slower fade)
     seedJitter: 3, // §18.4.1 per-seed jitter on seeded faction↔faction standing
+
+    // Standing baselines — history leaves a mark. Drift pulls Standing toward
+    // an EARNED per-pair baseline (not zero): honored calls raise it, betrayal
+    // lowers it, long alliances warm it. Capped so no pair is permanent.
+    baseline: {
+      cap: 4, // baselines live in [-cap, +cap]
+      pactHonoredGain: 2, // caller's baseline toward an ally who answered the call
+      pactBrokenLoss: 2, // victim's baseline toward the breaker
+      surpriseAttackLoss: 2, // victim's baseline toward a treacherous attacker
+      tenureRounds: 4, // every N full rounds of unbroken pact…
+      tenureGain: 1, // …warms both parties' baselines by this
+    },
 
     // §18.5 Menace — reputation for UNJUSTIFIED aggression, scored vs target.
     menace: {
@@ -226,7 +241,10 @@ export const CONFIG = {
     // Menace < each contributor's Tolerance and Honor > its floor. Threshold
     // ≈ a majority of the field's worth of acknowledgement (e.g. 3 vassals,
     // or 2 vassals + 2 allies) so the peaceful win is earned, not trivial.
-    recognition: { alliedWeight: 1, vassalWeight: 2, threshold: 6 },
+    // `summitVp`: the first time each faction EVER backs you, you bank VP —
+    // diplomacy pays into the same race conquest does, not only the long-shot
+    // instant win. Once per backer per game, majors only (minors don't win).
+    recognition: { alliedWeight: 1, vassalWeight: 2, threshold: 6, summitVp: 1 },
 
     // §18.9 Vassalage.
     vassal: {

@@ -524,6 +524,9 @@ function adaptDiplomacy(state, viewer) {
     return {
       id: f,
       name: def.name || f,
+      // Public scoreboard — VP is common knowledge (the race is visible
+      // even when the map is not). Null for factions with no player seat.
+      vp: state.players[f]?.vp ?? null,
       color: def.color || "#888",
       tier: def.tier || "major",
       temperament: def.temperament,
@@ -538,8 +541,10 @@ function adaptDiplomacy(state, viewer) {
       inCoalition: (coalitionAgainst(state, viewer)?.members || []).includes(f),
       menace: state.players[f]?.menace || 0,
       honor: state.players[f]?.honor ?? CONFIG.diplomacy.honor.start,
-      tolerance: Math.round(tol * 10) / 10,
-      trustFloor: Math.round(floor * 10) / 10,
+      // Exact gate numbers are espionage product — Spy Ring (int-b1) only.
+      // The anonymised markers below stay public (coarse read, no numbers).
+      tolerance: spyRing ? Math.round(tol * 10) / 10 : null,
+      trustFloor: spyRing ? Math.round(floor * 10) / 10 : null,
       threat: Math.round(threatScore(state, f) * 10) / 10,
       wants: factionWants(def),
       // §3.2 — plain-English sentiment, derived from tier + reputation
@@ -575,7 +580,20 @@ function adaptDiplomacy(state, viewer) {
     menace: me?.menace || 0,
     honor: me?.honor ?? CONFIG.diplomacy.honor.start,
     threat: Math.round(threatScore(state, viewer) * 10) / 10,
-    recognition: { score: rec.total, threshold: CONFIG.diplomacy.recognition.threshold, contributors: rec.contributors, met: rec.total >= CONFIG.diplomacy.recognition.threshold },
+    recognition: {
+      score: rec.total,
+      threshold: CONFIG.diplomacy.recognition.threshold,
+      contributors: rec.contributors,
+      met: rec.total >= CONFIG.diplomacy.recognition.threshold,
+      // Per-faction backing checklist — WHO backs your claim and, for the
+      // rest, a coarse why-not. Coarse status is common knowledge; the
+      // precise numbers behind it (their exact Standing toward you, their
+      // Menace tolerance / Honor floor) are Spy Ring product.
+      backing: recognitionBacking(state, viewer, spyRing),
+      // Summit VP already banked (first-time backers, once each per game).
+      summits: [...(dip.recognizedEver?.[viewer] || [])],
+      summitVp: CONFIG.diplomacy.recognition.summitVp,
+    },
     coalitionAgainstYou: coalitionAgainst(state, viewer)?.members || null,
     factions,
     pacts: dip.pacts.map((p) => ({ a: p.a, b: p.b, vassal: !!p.vassal })),
@@ -598,6 +616,53 @@ function adaptDiplomacy(state, viewer) {
       ifRefuse: `−${CONFIG.diplomacy.pactCall.declineStandingHit} Standing with ${factionDef(c.from)?.name || c.from} · −${CONFIG.diplomacy.honor.breakLoss} Honor`,
     })),
   };
+}
+
+// Recognition checklist — one row per other faction, mirroring
+// recognitionScore's gates exactly so the screen never lies about the
+// score. Coarse `status`/`hint` are common knowledge; `detail` (exact
+// Standing and gate numbers) rides only with the Spy Ring.
+function recognitionBacking(state, viewer, spyRing) {
+  const rc = CONFIG.diplomacy.recognition;
+  const tiers = CONFIG.diplomacy.tiers;
+  const me = state.players[viewer];
+  const coal = coalitionAgainst(state, viewer);
+  return factionIds(state).filter((f) => f !== viewer).map((f) => {
+    const def = factionDef(f) || {};
+    const s = getStanding(state, f, viewer);
+    const isVassal = vassalLord(state, f) === viewer;
+    const allied = arePacted(state, f, viewer) && standingTier(s) === "allied";
+    const gatesPass = passesRepGates(state, f, viewer);
+    let status, weight = 0, hint;
+    if (coal && coal.members.includes(f)) {
+      status = "coalition";
+      hint = "Marches in the coalition against you — lends your claim nothing while it stands.";
+    } else if (!gatesPass) {
+      status = "blocked";
+      hint = "Your reputation fails their gates — too much Menace for their tolerance, or your Honor sits below their floor.";
+    } else if (isVassal) {
+      status = "backs"; weight = rc.vassalWeight;
+      hint = "Your vassal — full backing.";
+    } else if (allied) {
+      status = "backs"; weight = rc.alliedWeight;
+      hint = "A sworn ally at Allied regard — backs your claim.";
+    } else if (arePacted(state, f, viewer)) {
+      status = "warming";
+      hint = "Pacted, but their regard hasn't reached Allied yet.";
+    } else {
+      status = "cold";
+      hint = "No pact — courtship hasn't begun.";
+    }
+    const detail = spyRing ? {
+      standing: s,
+      needStanding: tiers.allied,
+      yourMenace: me?.menace || 0,
+      theirTolerance: Math.round(tolerance(state, f, viewer) * 10) / 10,
+      yourHonor: me?.honor ?? CONFIG.diplomacy.honor.start,
+      theirFloor: Math.round(trustFloor(state, f) * 10) / 10,
+    } : null;
+    return { id: f, name: def.name || f, tier: def.tier || "major", status, weight, hint, detail };
+  });
 }
 
 // Per-faction qualitative sentiment, modulated by reputation extremes.
@@ -783,10 +848,17 @@ function availableVerbsAgainst(state, viewer, fid) {
   }
 
   // 8) Vassalize (engine handles eligibility; UI shows disabled with reason).
-  if (!myLord && !myVassal && !pacted) {
+  // A pacted faction that would ACCEPT still shows the verb — patronage's
+  // ally → protectorate upgrade is the peaceful road to a vassal.
+  if (!myLord && !myVassal) {
     if (aiAcceptsVassalage(state, fid, viewer)) {
-      out.push({ verb: "vassalize", state: "enabled", outcome: "They will accept submission." });
-    } else {
+      const cornered = atWar(state, fid, viewer)
+        || getStanding(state, fid, viewer) <= CONFIG.diplomacy.tiers.wary;
+      out.push({
+        verb: "vassalize", state: "enabled",
+        outcome: cornered ? "They will accept submission." : "They would welcome your protection.",
+      });
+    } else if (!pacted) {
       out.push({ verb: "vassalize", state: "disabled", reason: "They will not submit." });
     }
   }

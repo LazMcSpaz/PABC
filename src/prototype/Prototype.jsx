@@ -54,6 +54,7 @@ import UnitPanel from "./UnitPanel.jsx";
 import ContestOverlay from "./ContestOverlay.jsx";
 import SalvageModal from "./SalvageModal.jsx";
 import { ConfirmModal, CoalitionModal, isPromptDismissed } from "./ConfirmModal.jsx";
+import { HeraldLayer, heraldFromLog } from "./HeraldBanners.jsx";
 import { atWar } from "../game/diplomacy.js";
 import { useAIReplay } from "./aiReplay/useAIReplay.js";
 import ReplayLayer from "./aiReplay/ReplayLayer.jsx";
@@ -345,6 +346,25 @@ export default function Prototype({ config, onNewGame }) {
     return () => clearTimeout(t);
   }, [diploResult]);
 
+  // Herald — scan log entries appended since the last tick and surface the
+  // political moves as transient banners. The cursor starts at the current
+  // log length so setup noise never banners; each batch self-expires.
+  const [heralds, setHeralds] = useState([]);
+  const heraldCursor = useRef(gameRef.current?.log?.length ?? 0);
+  const dismissHerald = useCallback((id) => setHeralds((q) => q.filter((b) => b.id !== id)), []);
+  useEffect(() => {
+    const log = gameRef.current?.log || [];
+    if (heraldCursor.current > log.length) heraldCursor.current = 0; // log replaced (new game)
+    if (heraldCursor.current === log.length) return;
+    const fresh = log.slice(heraldCursor.current);
+    heraldCursor.current = log.length;
+    const msgs = heraldFromLog(fresh, state.youId);
+    if (!msgs.length) return;
+    setHeralds((q) => [...q, ...msgs].slice(-4));
+    const ids = new Set(msgs.map((m) => m.id));
+    setTimeout(() => setHeralds((q) => q.filter((b) => !ids.has(b.id))), 7000);
+  }, [tick, state.youId]);
+
   // Manage the selection's lifetime. Enemy units stay selectable so the
   // player can inspect their stats and owner read-only — control actions
   // (move, contest, reinforce) are gated on ownership everywhere they're
@@ -578,10 +598,11 @@ export default function Prototype({ config, onNewGame }) {
 
     if (allies.length > 0) {
       // The split-or-pool decision belongs to the player whenever a stack
-      // could fight together.
+      // could fight together. Every row is toggleable — the engine's
+      // initiator is picked at confirm time from the checked units, so an
+      // already-acted unit never blocks the fresh ones.
       setCoalitionPrompt({
-        initiator: unitRow(attacker),
-        allies: allies.map(unitRow),
+        units: [unitRow(attacker), ...allies.map(unitRow)],
         defender: defPreview,
         wildcards: game.players[attacker.owner]?.actions.remaining ?? 0,
         warnPeace,
@@ -1072,6 +1093,8 @@ export default function Prototype({ config, onNewGame }) {
       )}
       </AnimatePresence>
 
+      <HeraldLayer banners={heralds} onDismiss={dismissHerald} topOffset={hudOffset + 14} />
+
       {toast && (
         <div
           style={{
@@ -1172,8 +1195,18 @@ export default function Prototype({ config, onNewGame }) {
       {coalitionPrompt && (
         <CoalitionModal
           prompt={coalitionPrompt}
-          onConfirm={(coalition) => {
-            const params = { ...coalitionPrompt.params, coalition };
+          onConfirm={(selectedUids) => {
+            // Root the contest on a checked unit that still has its own
+            // action (the initiator takes the loser's attrition, so prefer
+            // one that pays for itself); the rest join as the coalition.
+            const game = gameRef.current;
+            const lead = selectedUids.find((u) => (game.units[u]?.actionsRemaining ?? 0) > 0)
+              ?? selectedUids[0];
+            const params = {
+              ...coalitionPrompt.params,
+              unit: lead,
+              coalition: selectedUids.filter((u) => u !== lead),
+            };
             setCoalitionPrompt(null);
             resolveContest(params);
           }}

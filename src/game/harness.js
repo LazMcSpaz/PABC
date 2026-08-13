@@ -21,6 +21,9 @@ import {
   findWar, warExhaustion, aiAcceptsPeace, evaluatePactCall,
   canDemandTribute, caveOnDemand, hasOpenBorders, formTradingPact,
   findPactAgreement, honorOf, powerOf,
+  // diplomacy robustness pass — baselines, patronage, summit VP
+  getBaseline, adjustBaseline, aiAcceptsVassalage, breakPact,
+  resolvePactCall, checkRecognitionVictory,
 } from "./diplomacy.js";
 import { setStanding } from "./standing.js";
 import { factionDef, MINOR_FACTIONS } from "./content.js";
@@ -3538,6 +3541,9 @@ line("\n  [Phase 11] text-token resolver");
   ensureDiplomacy(gV);
   const vassal = gV.turnOrder.find((f) => f !== lord);
   gV.diplomacy.vassals[vassal] = lord;
+  // pre-mark the summit dividend as paid so this check measures ONLY the
+  // dominion faucet (summit VP has its own Phase 19 checks).
+  gV.diplomacy.recognizedEver = { [lord]: [vassal] };
   const fief = foreignCity(gV, lord);
   grabFor(gV, vassal, fief, 8);
   const vGuard = Object.values(gV.units).find((u) => u.owner === vassal);
@@ -3554,6 +3560,11 @@ line("\n  [Phase 11] text-token resolver");
   const others14 = gT.turnOrder.filter((f) => f !== dip);
   formPact(gT, dip, others14[0]);
   formPact(gT, dip, others14[1]); // 2 of 3 = majority
+  // pre-mark summit dividends so this check measures ONLY the trickle.
+  gT.diplomacy.recognizedEver = {
+    [dip]: [others14[0], others14[1]],
+    [others14[0]]: [dip], [others14[1]]: [dip],
+  };
   const dipVp = gT.players[dip].vp;
   cycleTo(gT, dip);
   check("alliance trickle: majority of pacts pays +1 VP per Upkeep",
@@ -3874,6 +3885,91 @@ line("\n  [Phase 11] text-token resolver");
   walker.moveRemaining = 3;
   const forestRoad = unitReach(g18, walker);
   check("road through a forest: costs 1", forestRoad[mtHex] === 2);
+}
+
+// Phase 19 — diplomacy robustness pass: standing baselines (drift toward
+// earned history, not zero), patronage vassalage for minors, and the
+// Recognition summit VP dividend.
+{
+  line("\n  [Phase 19] diplomacy robustness — baselines, patronage, summit VP");
+  const bl = CONFIG.diplomacy.baseline;
+
+  // --- baselines: cap + event hooks ---
+  const g = createGame({ seed: 191 });
+  ensureDiplomacy(g);
+  const majors19 = g.turnOrder.filter((f) => factionDef(f)?.tier === "major");
+  const [a, b, c, d19] = majors19;
+  adjustBaseline(g, a, b, 99, "test");
+  check("baseline: clamped to +cap", getBaseline(g, a, b) === bl.cap);
+  adjustBaseline(g, a, b, -bl.cap, "test"); // back to 0
+  formPact(g, a, b, "test");
+  breakPact(g, a, b, "test");
+  check("baseline: breaking a pact scars the victim's baseline toward the breaker",
+    getBaseline(g, b, a) === -bl.pactBrokenLoss);
+  check("baseline: the breaker's own baseline is unmarked", getBaseline(g, a, b) === 0);
+  resolvePactCall(g, c, b, d19, true); // c called, b honored
+  check("baseline: an honored pact call warms the caller's baseline toward the honorer",
+    getBaseline(g, c, b) === bl.pactHonoredGain);
+  const surpriseBefore = getBaseline(g, c, a);
+  onAttack(g, a, c); // no prior war — treachery
+  check("baseline: a surprise attack scars the victim's baseline toward the attacker",
+    getBaseline(g, c, a) === surpriseBefore - bl.surpriseAttackLoss);
+
+  // --- baselines: drift pulls toward the baseline, not zero ---
+  // Measured on a human→AI pair: human rows sit outside seeded standings,
+  // AI politics, and mediation, so ONLY drift moves this number.
+  const g3 = createGame({ seed: 193, humanFactionId: "versari" });
+  ensureDiplomacy(g3);
+  const other19 = g3.turnOrder.find((f) => f !== "versari");
+  adjustBaseline(g3, "versari", other19, 3, "test");
+  const target = getBaseline(g3, "versari", other19);
+  setStanding(g3, "versari", other19, 0, "test");
+  runDiplomacyRound(g3);
+  check("drift: standing below its baseline climbs toward it",
+    getStanding(g3, "versari", other19) > 0 && getStanding(g3, "versari", other19) <= target);
+  setStanding(g3, "versari", other19, CONFIG.diplomacy.tiers.friendly - 1, "test"); // above baseline
+  for (let i = 0; i < 6; i++) runDiplomacyRound(g3);
+  check("drift: standing settles AT the baseline instead of fading to zero",
+    getStanding(g3, "versari", other19) === target);
+
+  // --- patronage: a friendly minor takes a protector without a war ---
+  const g2 = createGame({ seed: 192, humanFactionId: "versari", minors: ["croppers"] });
+  ensureDiplomacy(g2);
+  const lord = "goldgrass", minor = "croppers";
+  // make the minor clearly weaker than the lord (patronage keeps the power gate)
+  for (const u of Object.values(g2.units)) if (u.owner === minor) delete g2.units[u.uid];
+  setStanding(g2, minor, lord, CONFIG.diplomacy.tiers.friendly + 1, "test");
+  for (const o of factionIds(g2)) {
+    if (o !== minor && o !== lord) setStanding(g2, minor, o, 0, "test");
+  }
+  check("patronage: a weak minor at Friendly+ accepts its best friend as protector — no war needed",
+    !atWar(g2, lord, minor) && aiAcceptsVassalage(g2, minor, lord));
+  setStanding(g2, minor, "plainers", CONFIG.diplomacy.tiers.friendly + 2, "test");
+  const patronNotTop = aiAcceptsVassalage(g2, minor, lord);
+  setStanding(g2, minor, "plainers", 0, "test");
+  check("patronage: refused when the suitor isn't the minor's top standing", !patronNotTop);
+  setStanding(g2, minor, lord, CONFIG.diplomacy.tiers.friendly - 1, "test");
+  check("patronage: refused below Friendly standing", !aiAcceptsVassalage(g2, minor, lord));
+  setStanding(g2, minor, lord, CONFIG.diplomacy.tiers.friendly + 1, "test");
+  // a MAJOR in the same posture (weak, friendly, uncornered) still refuses
+  const weakMajor = majors19.find((f) => f !== lord && g2.players[f]);
+  for (const u of Object.values(g2.units)) if (u.owner === weakMajor) delete g2.units[u.uid];
+  setStanding(g2, weakMajor, lord, CONFIG.diplomacy.tiers.friendly + 1, "test");
+  check("patronage is minors-only: an uncornered major never bends the knee",
+    !aiAcceptsVassalage(g2, weakMajor, lord));
+
+  // --- summit VP: first-time backers pay once, ever ---
+  const lp = g2.players[lord];
+  const vpBefore = lp.vp;
+  const res19 = performDiplomacy(g2, lord, "vassalize", { faction: minor });
+  check("patronage: the vassalize verb lands peacefully end-to-end", res19.ok && res19.accepted === true);
+  check("summit: the first-time backer banks summit VP for the lord",
+    lp.vp === vpBefore + CONFIG.diplomacy.recognition.summitVp
+    && (g2.diplomacy.recognizedEver[lord] || []).includes(minor));
+  checkRecognitionVictory(g2);
+  check("summit: re-checking never double-pays", lp.vp === vpBefore + CONFIG.diplomacy.recognition.summitVp);
+  const summitLog = g2.log.filter((e) => e.name === "recognition_summit" && e.payload.player === lord);
+  check("summit: recognition_summit emitted exactly once for the pair", summitLog.length === 1);
 }
 
 line(`\n  v0.2 verification: ${v2pass} passed, ${v2fail} failed`);

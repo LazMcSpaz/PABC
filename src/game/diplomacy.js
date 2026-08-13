@@ -30,10 +30,14 @@ export function ensureDiplomacy(state) {
       recognition: {}, // pid -> number (cached)
       giftCounter: {}, // §1.2 — { fromPid: { toPid: gifts-in-window } }
       pendingCalls: [], // AI→human pact-call inbox: { id, from, target, since, expiresOnRound }
+      standingBaselines: {}, // earned drift targets: { a: { b: -cap..+cap } }
+      recognizedEver: {}, // summit VP bookkeeping: { pid: [fids that ever backed pid] }
     };
   }
   if (!state.diplomacy.giftCounter) state.diplomacy.giftCounter = {};
   if (!state.diplomacy.pendingCalls) state.diplomacy.pendingCalls = [];
+  if (!state.diplomacy.standingBaselines) state.diplomacy.standingBaselines = {};
+  if (!state.diplomacy.recognizedEver) state.diplomacy.recognizedEver = {};
   for (const p of Object.values(state.players)) {
     if (p.menace == null) p.menace = 0;
     if (p.honor == null) p.honor = CONFIG.diplomacy.honor.start;
@@ -115,6 +119,28 @@ export function factionIds(state) {
 
 // --- relationship queries -------------------------------------------
 const D = () => CONFIG.diplomacy;
+
+// --- Standing baselines ----------------------------------------------
+// History leaves a mark: drift pulls a↔b Standing toward an EARNED per-pair
+// baseline instead of zero. Honored pact calls raise the caller's baseline
+// toward the honorer; betrayal (broken pacts/promises, surprise attacks)
+// lowers the victim's toward the traitor; long unbroken pacts warm both.
+// Capped to ±baseline.cap so no relationship is beyond politics.
+export function getBaseline(state, a, b) {
+  return state.diplomacy?.standingBaselines?.[a]?.[b] || 0;
+}
+
+export function adjustBaseline(state, a, b, delta, cause) {
+  if (!a || !b || a === b || !delta) return getBaseline(state, a, b);
+  const bl = state.diplomacy.standingBaselines = state.diplomacy.standingBaselines || {};
+  bl[a] = bl[a] || {};
+  const cap = D().baseline.cap;
+  const next = Math.max(-cap, Math.min(cap, (bl[a][b] || 0) + delta));
+  if (next === (bl[a][b] || 0)) return next;
+  bl[a][b] = next;
+  emit(state, "standing_baseline_changed", { faction: a, toward: b, value: next, delta, cause });
+  return next;
+}
 
 export function arePacted(state, a, b) {
   return state.diplomacy.pacts.some((p) => (p.a === a && p.b === b) || (p.a === b && p.b === a));
@@ -433,6 +459,7 @@ export function breakPact(state, a, b, cause = "broken") {
     // breaking your word is the canonical Honor-dinging event (global).
     if (state.players[a]) adjustHonor(state, a, -D().honor.breakLoss, "pact-broken");
     adjustStanding(state, b, a, -6, cause);
+    adjustBaseline(state, b, a, -D().baseline.pactBrokenLoss, "pact-broken"); // the victim remembers
     emit(state, "pact_broken", { a, b, cause });
   }
 }
@@ -689,6 +716,7 @@ export function resolvePactCall(state, caller, ally, target, honored) {
   if (honored) {
     declareWar(state, ally, target, "pact-call");
     adjustStanding(state, caller, ally, 3, "pact-honored");
+    adjustBaseline(state, caller, ally, D().baseline.pactHonoredGain, "pact-honored");
     if (state.players[ally]) adjustHonor(state, ally, D().honor.keepGain, "pact-honored");
   } else {
     adjustStanding(state, caller, ally, -5, "pact-declined");
@@ -766,6 +794,7 @@ function breakPromiseIfAny(state, a, b, kinds) {
   if (broke) {
     if (state.players[a]) adjustHonor(state, a, -D().honor.breakLoss, "promise-broken");
     adjustStanding(state, b, a, -6, "promise-broken");
+    adjustBaseline(state, b, a, -D().baseline.pactBrokenLoss, "promise-broken");
   }
   return broke;
 }
@@ -789,6 +818,7 @@ export function onAttack(state, attackerPid, targetFid) {
     emit(state, "surprise_attack_honor_lost", {
       attacker: attackerPid, target: targetFid, amount: D().honor.surpriseAttackLoss,
     });
+    adjustBaseline(state, targetFid, attackerPid, -D().baseline.surpriseAttackLoss, "surprise-attack");
   }
   if (arePacted(state, attackerPid, targetFid)) breakPact(state, attackerPid, targetFid, "attacked-ally");
   breakPromiseIfAny(state, attackerPid, targetFid, ["nonAggression", "peace"]);
@@ -823,15 +853,33 @@ export function recognitionMet(state, pid) {
 
 // Win-condition gate — sets winnerId on a met Recognition (parallel to the
 // VP-12 path). Called from the round-end pipeline + after deals/vassalage.
+// Also pays the SUMMIT dividend: the first time each faction EVER backs a
+// major, that major banks summitVp — so diplomacy feeds the same VP race
+// conquest does instead of being all-or-nothing at the threshold. Once per
+// backer per game (kept in recognizedEver; losing and re-winning a backer
+// doesn't pay twice). The VP winner check is inline — turn.js imports this
+// module, so awardVp can't be imported here without a cycle.
 export function checkRecognitionVictory(state) {
   if (state.winnerId) return;
+  const rc = D().recognition;
   for (const pid of factionIds(state)) {
     const sc = recognitionScore(state, pid);
     if (state.diplomacy.recognition[pid] !== sc.total) {
       state.diplomacy.recognition[pid] = sc.total;
       emit(state, "recognition_changed", { player: pid, value: sc.total, contributors: sc.contributors });
     }
-    if (sc.total >= D().recognition.threshold) { state.winnerId = pid; return; }
+    const p = state.players[pid];
+    if (rc.summitVp && p && factionDef(pid)?.tier === "major") {
+      const ever = state.diplomacy.recognizedEver[pid] = state.diplomacy.recognizedEver[pid] || [];
+      for (const backer of sc.contributors) {
+        if (ever.includes(backer)) continue;
+        ever.push(backer);
+        p.vp += rc.summitVp;
+        emit(state, "recognition_summit", { player: pid, backer, vp: rc.summitVp });
+        if (p.vp >= CONFIG.vpThreshold && !state.winnerId) { state.winnerId = pid; return; }
+      }
+    }
+    if (sc.total >= rc.threshold) { state.winnerId = pid; return; }
   }
 }
 
@@ -890,6 +938,9 @@ function vassalTick(state) {
 }
 
 // --- Standing drift (§18.5) -----------------------------------------
+// Unreinforced Standing fades toward the pair's earned BASELINE (not zero):
+// a betrayed faction settles back into distrust; a proven ally stays warm
+// enough that one quiet stretch doesn't reset the relationship.
 function driftStanding(state) {
   const d = D();
   for (const a of factionIds(state)) {
@@ -898,11 +949,26 @@ function driftStanding(state) {
       if (vassalLord(state, a) === b) continue; // vassal standing locked
       if (arePacted(state, a, b) || atWar(state, a, b)) continue; // active relations don't fade
       const cur = getStanding(state, a, b);
-      if (cur === 0) continue;
+      const target = getBaseline(state, a, b);
+      if (cur === target) continue;
       const grudge = factionDef(a)?.grudge ?? 0.4;
       const step = Math.max(1, Math.round(d.driftPerRound * (1 - grudge * d.grudgeDriftScale * 0.5)));
-      if (cur > 0) setStanding(state, a, b, Math.max(0, cur - step), "drift");
-      else setStanding(state, a, b, Math.min(0, cur + step), "drift");
+      if (cur > target) setStanding(state, a, b, Math.max(target, cur - step), "drift");
+      else setStanding(state, a, b, Math.min(target, cur + step), "drift");
+    }
+  }
+}
+
+// A pact that survives `tenureRounds` full rounds warms BOTH parties'
+// baselines — old alliances don't fade back to strangers.
+function pactTenureBaselines(state) {
+  const bl = D().baseline;
+  if (!bl.tenureRounds || !bl.tenureGain) return;
+  for (const p of state.diplomacy.pacts) {
+    const age = state.round - (p.since ?? state.round);
+    if (age > 0 && age % bl.tenureRounds === 0) {
+      adjustBaseline(state, p.a, p.b, bl.tenureGain, "pact-tenure");
+      adjustBaseline(state, p.b, p.a, bl.tenureGain, "pact-tenure");
     }
   }
 }
@@ -1004,6 +1070,7 @@ export function runDiplomacyRound(state) {
       if (h !== tgt) adjustHonor(state, pid, Math.sign(tgt - h) * D().honor.decayPerRound, "decay");
     }
   }
+  pactTenureBaselines(state); // warm long-alliance baselines before the fade
   driftStanding(state);
   guestHouseDrift(state);
   runFlows(state);
@@ -1183,6 +1250,7 @@ export function performDiplomacy(state, pid, action, params = {}) {
       if (honor) {
         declareWar(state, ally, target, "pact-call");
         adjustStanding(state, ally, pid, D().pactCall.honorGainOnHonor, "pact-honored");
+        adjustBaseline(state, pid, ally, D().baseline.pactHonoredGain, "pact-honored");
         emit(state, "pact_call_honored", { caller: pid, ally, target });
         return r({ honored: true });
       }
@@ -1201,6 +1269,7 @@ export function performDiplomacy(state, pid, action, params = {}) {
       if (params.accept) {
         declareWar(state, pid, target, "pact-call");
         adjustStanding(state, pid, caller, D().pactCall.honorGainOnHonor, "pact-honored");
+        adjustBaseline(state, caller, pid, D().baseline.pactHonoredGain, "pact-honored");
         emit(state, "pact_call_honored", { caller, ally: pid, target });
         return r({ honored: true });
       }
@@ -1249,14 +1318,26 @@ export function aiAcceptsPact(state, f, proposer) {
 }
 
 // §18.9 — a faction accepts vassalage when subordination beats its
-// alternatives: it is much weaker than the lord and cornered (at war / very
-// low Standing), or has no better ally.
+// alternatives. Two doors in:
+//  · Submission — much weaker than the lord AND cornered (at war / very low
+//    Standing). The conquest route; the only door for MAJOR factions.
+//  · Patronage — a MINOR faction takes a protector it genuinely likes:
+//    Friendly+ Standing, the lord is its best friend on the board, and the
+//    lord's reputation passes its gates. This is the peaceful road to the
+//    vassal weight Recognition needs — courtship, not coercion.
 export function aiAcceptsVassalage(state, f, lord) {
   if (f === lord || vassalLord(state, f)) return false;
   if (!mayEngage(state, f, lord)) return false;
   const ratio = powerOf(state, f) / Math.max(1, powerOf(state, lord));
+  if (ratio > D().ai.vassalPowerRatio) return false;
   const cornered = atWar(state, lord, f) || getStanding(state, f, lord) <= D().tiers.wary;
-  return ratio <= D().ai.vassalPowerRatio && cornered;
+  if (cornered) return true;
+  if ((factionDef(f)?.tier || "major") === "major") return false;
+  const s = getStanding(state, f, lord);
+  if (s < D().tiers.friendly) return false;
+  if (!passesRepGates(state, f, lord)) return false;
+  // the lord must be this minor's top Standing on the board (ties count)
+  return factionIds(state).every((o) => o === f || o === lord || getStanding(state, f, o) <= s);
 }
 
 export { standingTier, getStanding, adjustStanding };
