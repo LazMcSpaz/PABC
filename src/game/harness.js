@@ -24,6 +24,8 @@ import {
   // diplomacy robustness pass — baselines, patronage, summit VP
   getBaseline, adjustBaseline, aiAcceptsVassalage, breakPact,
   resolvePactCall, checkRecognitionVictory,
+  // diplomacy tuning pass — cooldowns + citations
+  mediate,
 } from "./diplomacy.js";
 import { setStanding } from "./standing.js";
 import { factionDef, MINOR_FACTIONS } from "./content.js";
@@ -3010,17 +3012,19 @@ line("\n  [§1.6/§1.10] Open borders contract");
 const lastTrespassEvent = (g) => [...g.log].reverse().find((e) => e.name === "territory_trespassed");
 line("\n  [Open borders] territory trespass penalty");
 {
-  // Move a unit into another faction's ZoC with no open borders → relations hit.
+  // Move a unit into a DISTRUSTFUL faction's ZoC with no open borders →
+  // the full relations + reputation hit. (At Neutral-or-better the tuning
+  // pass downgrades trespass to a warning — asserted in Phase 20.)
   const g = createGame({ seed }); startTurn(g); ensureDiplomacy(g);
   const mover = g.turnOrder[0], owner = g.turnOrder[1];
-  setStanding(g, owner, mover, 0);
+  setStanding(g, owner, mover, CONFIG.diplomacy.tiers.wary - 1);
   const u = Object.values(g.units).find((x) => x.owner === mover);
   const dest = (g.board.adjacency[u.node] || []).find((h) => !g.locations[h]);
   g.world.zoc = g.world.zoc || {}; g.world.zoc[dest] = owner; // owner's territory
   u.moveRemaining = 2; recomputeStats(g);
   performAction(g, "move", { unit: u.uid, to: dest });
   const ev = lastTrespassEvent(g);
-  check("moving into a faction's territory without open borders hits relationship + reputation",
+  check("trespassing on distrustful ground hits relationship + reputation in full",
     !!ev && ev.payload.standingHit === CONFIG.diplomacy.trespass.standingPenalty &&
     ev.payload.repHit === CONFIG.diplomacy.trespass.reputationPenalty &&
     CONFIG.diplomacy.trespass.standingPenalty > CONFIG.diplomacy.trespass.reputationPenalty);
@@ -3970,6 +3974,124 @@ line("\n  [Phase 11] text-token resolver");
   check("summit: re-checking never double-pays", lp.vp === vpBefore + CONFIG.diplomacy.recognition.summitVp);
   const summitLog = g2.log.filter((e) => e.name === "recognition_summit" && e.payload.player === lord);
   check("summit: recognition_summit emitted exactly once for the pair", summitLog.length === 1);
+}
+
+// Phase 20 — diplomacy tuning (2026-08-13 playtest log): coalitions never
+// conscript the player or mint pacts, menace can't be laundered by
+// attacking warlords, trespass is a rate-limited citation, mediation and
+// rebellion carry cooldowns, gifts leave a durable baseline mark, and
+// encounter standing rewards can't target the player's own faction.
+{
+  line("\n  [Phase 20] diplomacy tuning — conscription, cooldowns, citations");
+
+  // --- coalitions: no conscription, no bloc pacts, voluntary join ---
+  const g = createGame({ seed: 201, humanFactionId: "versari" });
+  ensureDiplomacy(g);
+  const target20 = "plainers";
+  g.players[target20].menace = 10;
+  g.players[target20].vp = 8; // power lead → threat past the threshold
+  const pactsBefore = g.diplomacy.pacts.length;
+  runDiplomacyRound(g);
+  const coal20 = g.diplomacy.coalitions.find((c) => c.target === target20);
+  check("coalition still forms against a menace-backed leader", !!coal20);
+  check("the human is never conscripted into a coalition",
+    !!coal20 && !coal20.members.includes("versari"));
+  check("the human is not dragged to war by a coalition", !atWar(g, "versari", target20));
+  check("coalition members mint NO pacts (no allied web, no free summit VP)",
+    g.diplomacy.pacts.length === pactsBefore
+    && !g.diplomacy.pacts.some((p) => p.a === "versari" || p.b === "versari"));
+  performDiplomacy(g, "versari", "declare-war", { faction: target20 });
+  check("declaring war on the target is the human's road INTO the coalition",
+    !!coal20 && coal20.members.includes("versari"));
+
+  // --- menace clamp: no laundering by attacking warlords ---
+  g.players.versari.menace = 5;
+  menaceFromAttack(g, "versari", "lakers"); // aggression 0.9 → raw −2, clamped −1
+  check("attacking a warlord soothes Menace by at most 1 (no laundering)",
+    g.players.versari.menace === 4);
+
+  // --- trespass: one citation per pair per round; Neutral = warning ---
+  const g2 = createGame({ seed: 202, humanFactionId: "versari" });
+  ensureDiplomacy(g2);
+  const u20 = Object.values(g2.units).find((u) => u.owner === "versari");
+  const hex20 = Object.values(g2.board.hexes).find((h) => !g2.locations[h.id]).id;
+  g2.world.zoc = g2.world.zoc || {};
+  g2.world.zoc[hex20] = "goldgrass";
+  setStanding(g2, "goldgrass", "versari", 0, "test");
+  const menBefore = g2.players.versari.menace || 0;
+  emit(g2, "unit_moved", { unit: u20.uid, from: u20.node, to: hex20 });
+  check("trespass at Neutral relations is a warning: −1 Standing, no Menace",
+    getStanding(g2, "goldgrass", "versari") === -1
+    && (g2.players.versari.menace || 0) === menBefore);
+  emit(g2, "unit_moved", { unit: u20.uid, from: u20.node, to: hex20 });
+  check("only one trespass citation per faction pair per round",
+    getStanding(g2, "goldgrass", "versari") === -1);
+  setStanding(g2, "goldgrass", "versari", -4, "test"); // Wary — now it's a probe
+  g2.round += 1; // fresh round, fresh citation
+  emit(g2, "unit_moved", { unit: u20.uid, from: u20.node, to: hex20 });
+  check("trespass on distrustful ground still bites: −2 Standing + Menace",
+    getStanding(g2, "goldgrass", "versari") === -6
+    && (g2.players.versari.menace || 0) === menBefore + 1);
+
+  // --- mediation cooldown: no Honor pump off a recurring feud ---
+  const g3 = createGame({ seed: 203 });
+  ensureDiplomacy(g3);
+  const [ma, mb, mc] = g3.turnOrder.filter((f) => factionDef(f)?.tier === "major");
+  declareWar(g3, ma, mb, "test");
+  check("mediation still works the first time", mediate(g3, mc, ma, mb) === true);
+  declareWar(g3, ma, mb, "test2");
+  check("a just-mediated pair is on cooldown", mediate(g3, mc, ma, mb) === false);
+  g3.round += CONFIG.diplomacy.ai.mediateCooldownRounds;
+  check("mediation works again once the feud has aged", mediate(g3, mc, ma, mb) === true);
+
+  // --- rebellion cooldown: no same-round re-vassalizing ---
+  const g4 = createGame({ seed: 204, humanFactionId: "versari", minors: ["tempest"] });
+  ensureDiplomacy(g4);
+  for (const u of Object.values(g4.units)) if (u.owner === "tempest") delete g4.units[u.uid];
+  vassalize(g4, "lakers", "tempest", "test");
+  g4.diplomacy.resentment.tempest = 99;
+  runDiplomacyRound(g4);
+  check("a resentful vassal rebels",
+    vassalLord(g4, "tempest") == null && atWar(g4, "tempest", "lakers"));
+  check("a fresh rebel refuses its old lord (revolving door closed)",
+    !aiAcceptsVassalage(g4, "tempest", "lakers"));
+  g4.round += CONFIG.diplomacy.vassal.rebellionCooldownRounds;
+  check("after the cooldown, a cornered rebel can be re-subjugated",
+    aiAcceptsVassalage(g4, "tempest", "lakers"));
+
+  // --- gift ladder: capped counting + durable baseline warmth ---
+  const g5 = createGame({ seed: 205, humanFactionId: "versari" });
+  ensureDiplomacy(g5);
+  g5.players.versari.resource = 30;
+  const r20 = performDiplomacy(g5, "versari", "gift", { faction: "goldgrass", amount: 20 });
+  check("gift scrap counted is capped (a 20-scrap bribe buys the 8-scrap rate)",
+    r20.ok && getStanding(g5, "goldgrass", "versari") === 4);
+  check("a landed gift warms the baseline — drift can't erase generosity",
+    getBaseline(g5, "goldgrass", "versari") === CONFIG.diplomacy.gift.baselineWarmth);
+
+  // --- encounter standing rewards: self-standing is a no-op ---
+  const g6 = createGame({ seed: 206, humanFactionId: "versari" });
+  const logBefore6 = g6.log.length;
+  applyEffect(g6, { type: "ADJUST_STANDING", player: "versari", faction: "versari", amount: 2 }, {});
+  check("an encounter can't move a faction's standing toward itself",
+    getStanding(g6, "versari", "versari") === 0
+    && !g6.log.slice(logBefore6).some((e) => e.name === "standing_changed"));
+  applyEffect(g6, { type: "ADJUST_STANDING", player: "versari", faction: "goldgrass", amount: 2 }, {});
+  check("encounter standing rewards still land on real pairs",
+    getStanding(g6, "goldgrass", "versari") === 2);
+
+  // --- AI casus belli: a pacifist at Neutral doesn't blind-attack ---
+  const g7 = createGame({ seed: 207, humanFactionId: "versari" });
+  ensureDiplomacy(g7);
+  const pacifist = "goldgrass"; // aggression 0.1
+  const homeLoc = Object.values(g7.locations).find((l) => l.controller === "versari");
+  const gUnit = Object.values(g7.units).find((u) => u.owner === pacifist);
+  gUnit.node = homeLoc.hexId;
+  setStanding(g7, pacifist, "versari", 0, "test");
+  while (g7.turnOrder[g7.activeIndex] !== pacifist) endTurn(g7);
+  takeAITurn(g7);
+  check("a pacifist at Neutral standing does not blind-attack the human",
+    !atWar(g7, pacifist, "versari"));
 }
 
 line(`\n  v0.2 verification: ${v2pass} passed, ${v2fail} failed`);
