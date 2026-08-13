@@ -1,7 +1,12 @@
-Ability ID,Name,Eligible Tier,Effect,Flavor
-rail-corridor,Rail Corridor,Very High,"Activated (2 Scrap): Move one of your units from any location to this one immediately.",The rails don't care who laid them.
-knowledge-cache,Knowledge Cache,Very High,"Activated (1 Action): Draw one Reactive card.",Someone was storing things here they didn't want found.
-fortified-ruins,Fortified Ruins,High,"Passive: Contesting units cannot benefit from chip bonuses during contests at this location.",The old world built things to last. Some of them still do.
-staging-ground,Staging Ground,High,"Activated (free, once per turn): A unit moving from this location may move one additional hex.",Every good campaign starts somewhere.
-blacksite,Blacksite,Very High,"Activated (1 Action): Choose one chip installed on an enemy unit or location anywhere on the board. Disable it until the start of your next turn.",Whatever was happening here it wasn't in any public record.
-scrapyard,Scrapyard,High,"Activated (2 Scrap): Remove one chip from an enemy unit at this location and add it to the Market Row.",One faction's loss is everyone's opportunity.
+# GENERATED from src/game/content.js — do not hand-edit; run scripts/export-chips.mjs
+Ability ID,Name,Eligible Tier,Effect
+rail-corridor,Rail Corridor,veryHigh,Activated (2 Scrap): MODIFY_STAT.
+knowledge-cache,Knowledge Cache,veryHigh,Activated (1 Action): MOVE_CARD.
+blacksite,Blacksite,veryHigh,Activated (1 Action): DISABLE_CHIP.
+old-armory,Old Armory,veryHigh,"Activated (1 Action, once per game): GRANT_CHIP."
+staging-ground,Staging Ground,high,Activated (2 Scrap): GRANT_ACTIONS.
+fortified-ruins,Fortified Ruins,high,Passive: attacking units get no chip Strength in contests here.
+scrapyard,Scrapyard,high,Activated (2 Scrap): STRIP_CHIP.
+beacon-hill,Beacon Hill,high,Passive: +1 Influence range for this location.
+the-springs,The Springs,high,Passive: units standing here (any owner) heal +2 at Upkeep.
+toll-gate,Toll Gate,high,Passive: enemies pay +1 movement entering this location's hex or its ring.

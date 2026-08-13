@@ -295,7 +295,9 @@ export function chargeChipUpkeep(state, pid) {
     if (player.resource >= b.upkeep) {
       player.resource -= b.upkeep;
       emit(state, "resource_spent", { player: pid, resource: "Resource", amount: -b.upkeep, source: "upkeep" });
-      if (inst.disabled) {
+      // A Blacksite-suppressed chip stays dark even when its upkeep is
+      // paid — sabotage outranks bookkeeping until the window passes.
+      if (inst.disabled && inst.suppressedUntil == null) {
         inst.disabled = false;
         changed = true;
         emit(state, "chip_reactivated", { chip: b.uid, chipId: inst.chipId });

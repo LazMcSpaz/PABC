@@ -6,7 +6,7 @@
 // controlled Location hexes block the same way.
 import { CONFIG } from "./config.js";
 import { movementField, movementRoute } from "./board.js";
-import { CHIPS } from "./content.js";
+import { CHIPS, ABILITIES } from "./content.js";
 import { getStanding } from "./standing.js";
 import { arePacted, vassalLord } from "./diplomacy.js";
 
@@ -59,12 +59,31 @@ function unitPassesThroughUnits(state, unit) {
   );
 }
 
+// Toll Gate (ability passive MOVE_TAX): the hexes where a non-passing
+// faction's toll Location taxes this mover — the Location's own hex and
+// its ring. Entry there costs +amount movement.
+export function tollTaxedHexes(state, ownerId) {
+  const taxed = new Map(); // hexId -> extra cost
+  for (const loc of Object.values(state.locations)) {
+    if (!loc.controller || loc.controller === ownerId) continue;
+    if (passesFreely(state, ownerId, loc.controller)) continue;
+    if (!loc.abilityId) continue;
+    for (const pv of ABILITIES[loc.abilityId]?.passives || []) {
+      if (pv.type !== "MOVE_TAX") continue;
+      const ring = [loc.hexId, ...(state.board.adjacency[loc.hexId] || [])];
+      for (const h of ring) taxed.set(h, Math.max(taxed.get(h) || 0, pv.amount || 0));
+    }
+  }
+  return taxed;
+}
+
 export function unitReach(state, unit) {
   if (!unit) return {};
   const budget = unit.moveRemaining ?? unit.movement ?? 0;
   return movementField(state, unit.node, budget, {
     blockedThrough: movementBlockers(state, unit.owner, { ignoreUnits: unitPassesThroughUnits(state, unit) }),
     ignoreTerrain: unitIgnoresTerrain(state, unit),
+    extraCost: tollTaxedHexes(state, unit.owner),
   });
 }
 
@@ -76,6 +95,7 @@ export function unitMovePath(state, unit, dest) {
   return movementRoute(state, unit.node, budget, dest, {
     blockedThrough: movementBlockers(state, unit.owner, { ignoreUnits: unitPassesThroughUnits(state, unit) }),
     ignoreTerrain: unitIgnoresTerrain(state, unit),
+    extraCost: tollTaxedHexes(state, unit.owner),
   });
 }
 

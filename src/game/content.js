@@ -236,19 +236,25 @@ export function chipDefOf(state, chipUid) {
 
 // Location abilities (mechanical-spec §6.3, §13.2). Every High / Very
 // High location is assigned ONE of these at setup; it occupies one of
-// that location's chip slots. Names and tiers match
-// content/location-abilities.csv; knowledge-cache and fortified-ruins now
-// carry their REAL effects (they were identical +1 VP stubs). Rail
-// Corridor's true effect (unit teleport) waits on the rail system
-// (docs/rail-road-blockade-design.md) — its scrap stub is repriced so it
-// no longer strictly beats a Factory chip.
+// that location's chip slots. The v0.2 roster (ability-brainstorm pass,
+// docs/vp-and-actions-design.md era): 4 veryHigh + 6 high abilities so
+// each game seeds a different subset onto the 2 veryHigh / 4 high seats.
+// Passive types (each read by its one engine hook):
+//   SUPPRESS_CHIP_BONUSES  contest.js — attackers get no chip Strength here
+//   INFLUENCE_RANGE        influence.js — this Location projects farther
+//   HEAL_HERE              turn.js — units standing here mend extra (ANY owner)
+//   MOVE_TAX               movement/board — enemies pay +amount entering
+//                          this Location's hex or any adjacent hex
+// Rail Corridor's true effect (unit teleport) waits on the rail system —
+// its interim effect is rail-flavored tempo, not a scrap faucet.
 export const ABILITIES = {
+  // --- veryHigh tier ---
   "rail-corridor": {
     id: "rail-corridor", name: "Rail Corridor", eligibleTier: "veryHigh",
     passives: [],
     activated: [{
       cost: { resource: 2 },
-      effects: [{ type: "ADJUST_RESOURCE", resource: "Resource", amount: 4, target: "controller" }],
+      effects: [{ type: "MODIFY_STAT", stat: "Movement", amount: 2, target: "stationed_unit", duration: "this_turn" }],
     }],
   },
   "knowledge-cache": {
@@ -259,11 +265,31 @@ export const ABILITIES = {
       effects: [{ type: "MOVE_CARD", from: "reactiveDeck", to: "hand:controller" }],
     }],
   },
+  blacksite: {
+    id: "blacksite", name: "Blacksite", eligibleTier: "veryHigh",
+    passives: [],
+    activated: [{
+      cost: { action: 1 },
+      effects: [{ type: "DISABLE_CHIP", target: "chosen_enemy_chip" }],
+    }],
+  },
+  "old-armory": {
+    id: "old-armory", name: "Old Armory", eligibleTier: "veryHigh",
+    passives: [],
+    activated: [{
+      cost: { action: 1 }, oncePerGame: true,
+      effects: [{ type: "GRANT_CHIP", pool: "reward", target: "controller" }],
+    }],
+  },
+  // --- high tier ---
   "staging-ground": {
     id: "staging-ground", name: "Staging Ground", eligibleTier: "high",
     passives: [],
     activated: [{
-      cost: {},
+      // 2 scrap — free +1 Action strictly dominated the Logistics Hub
+      // chip (cost 12, 2 slots, upkeep). Priced, it's a scrap-for-tempo
+      // trade with the same launchpad identity.
+      cost: { resource: 2 },
       effects: [{ type: "GRANT_ACTIONS", amount: 1, target: "controller" }],
     }],
   },
@@ -272,6 +298,31 @@ export const ABILITIES = {
     // Attacking units get no chip Strength in contests here — the ruins
     // channel the fight into corridors old-world gear can't exploit.
     passives: [{ type: "SUPPRESS_CHIP_BONUSES" }],
+    activated: [],
+  },
+  scrapyard: {
+    id: "scrapyard", name: "Scrapyard", eligibleTier: "high",
+    passives: [],
+    activated: [{
+      cost: { resource: 2 },
+      effects: [{ type: "STRIP_CHIP" }],
+    }],
+  },
+  "beacon-hill": {
+    id: "beacon-hill", name: "Beacon Hill", eligibleTier: "high",
+    passives: [{ type: "INFLUENCE_RANGE", amount: 1 }],
+    activated: [],
+  },
+  "the-springs": {
+    id: "the-springs", name: "The Springs", eligibleTier: "high",
+    // The neutral oasis — heals WHOEVER stands here, any owner. Worth
+    // camping, worth denying.
+    passives: [{ type: "HEAL_HERE", amount: 2 }],
+    activated: [],
+  },
+  "toll-gate": {
+    id: "toll-gate", name: "Toll Gate", eligibleTier: "high",
+    passives: [{ type: "MOVE_TAX", amount: 1 }],
     activated: [],
   },
 };

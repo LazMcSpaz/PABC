@@ -427,6 +427,8 @@ function validateActivate(state, { pid, player, params }) {
   // spammed for unlimited resources / actions.
   if (got.loc.abilityActivatedTurn === turnOrdinal(state))
     return fail("this ability was already activated this turn");
+  if (got.opt.oncePerGame && got.loc.abilityUsedEver)
+    return fail("this ability has already been used this game");
   const cost = got.opt.cost || {};
   if (cost.resource && player.resource < cost.resource) return fail("not enough scrap");
   return { ok: true };
@@ -442,6 +444,7 @@ function runActivate(state, { pid, player, params, ctx }) {
     });
   }
   loc.abilityActivatedTurn = turnOrdinal(state); // once-per-turn lock
+  if (opt.oncePerGame) loc.abilityUsedEver = true; // Old Armory — once EVER
   applyEffects(state, opt.effects || [], { ...ctx, sourcePlayer: pid, source: loc });
   return { location: loc.hexId, ability: ability.id };
 }

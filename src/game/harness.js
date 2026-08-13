@@ -841,6 +841,7 @@ line("\n  [Phase 4] passive heal + instant / field reinforcement");
     const g = createGame({ seed }); startTurn(g);
     const me = g.turnOrder[0];
     const home = Object.values(g.locations).find((l) => l.controller === me);
+    home.abilityId = null; // pin: a seeded HEAL_HERE ability would skew the exact +1
     const u = Object.values(g.units).find((x) => x.owner === me);
     u.node = home.hexId; u.baseStrength = 2; recomputeStats(g);
     for (let i = 0; i < g.turnOrder.length; i++) endTurn(g); // round-trip to me
@@ -1500,6 +1501,7 @@ line("\n  [Tech Wheel §17.5] Logistics branch (Maneuver / Sustainment)");
     const g = createGame({ seed }); startTurn(g);
     const me = g.turnOrder[0];
     const loc = Object.values(g.locations).find((l) => l.controller === me);
+    loc.abilityId = null; // pin: a seeded HEAL_HERE ability would skew the exact +2
     const u = Object.values(g.units).find((x) => x.owner === me);
     u.node = loc.hexId; u.baseStrength = 1; recomputeStats(g);
     g.players[me].techLevel = 5; g.players[me].techWheel = ["log-entry", "log-b1"];
@@ -3570,6 +3572,123 @@ line("\n  [Phase 11] text-token resolver");
   const capUid = rHome.chips.find((c) => gR.chips[c]?.chipId === "capital");
   const noCap = performAction(gR, "remove-chip", { at: rHome.hexId, chip: capUid });
   check("remove-chip: the Capital is never removable", !noCap.ok);
+}
+
+
+// Phase 15 — location ability roster v0.2: interim Rail Corridor, priced
+// Staging Ground, Blacksite, Scrapyard, Old Armory, The Springs, Toll Gate.
+{
+  line("\n  [Phase 15] location ability roster v0.2");
+  const gA = createGame({ seed: 151 });
+  startTurn(gA);
+  const aPid = gA.turnOrder[gA.activeIndex];
+  const aP = gA.players[aPid];
+  aP.resource = 99; aP.actions.remaining = 99;
+  const aHome = Object.values(gA.locations).find((l) => l.controller === aPid);
+  const aUnit = Object.values(gA.units).find((u) => u.owner === aPid);
+  aUnit.node = aHome.hexId;
+
+  // -- rail corridor (interim): 2 scrap → +2 Movement this turn for a
+  // stationed unit.
+  aHome.abilityId = "rail-corridor";
+  const movBefore = aUnit.movement;
+  const rode = performAction(gA, "activate", { location: aHome.hexId });
+  check("rail corridor (interim): 2 scrap boosts a stationed unit +2 Movement",
+    !!rode.ok && aUnit.movement === movBefore + 2);
+
+  // -- staging ground: now costs 2 scrap (the free +1 Action dominated the
+  // Logistics Hub chip).
+  aHome.abilityId = "staging-ground";
+  aHome.abilityActivatedTurn = undefined;
+  aP.resource = 1;
+  const broke = performAction(gA, "activate", { location: aHome.hexId });
+  check("staging ground: refuses without its 2-scrap cost", !broke.ok);
+
+  // -- old armory: once per game, arms a stationed unit with a reward chip.
+  aHome.abilityId = "old-armory";
+  aHome.abilityActivatedTurn = undefined;
+  aP.resource = 99;
+  const before15 = aUnit.chips.length + (gA.hexLoot?.[aHome.hexId]?.length || 0);
+  const dug = performAction(gA, "activate", { location: aHome.hexId });
+  const after15 = aUnit.chips.length + (gA.hexLoot?.[aHome.hexId]?.length || 0);
+  check("old armory: digs up a reward chip for the garrison", !!dug.ok && after15 === before15 + 1);
+  aHome.abilityActivatedTurn = undefined;
+  const again15 = performAction(gA, "activate", { location: aHome.hexId });
+  check("old armory: once per game — second use refused", !again15.ok);
+
+  // -- scrapyard: strips a chip from an enemy unit at this location → loot.
+  aHome.abilityId = "scrapyard";
+  aHome.abilityActivatedTurn = undefined;
+  const foe15 = gA.turnOrder.find((f) => f !== aPid);
+  const mark = Object.values(gA.units).find((u) => u.owner === foe15);
+  const stolenGear = gA.nextId("chip");
+  gA.chips[stolenGear] = { uid: stolenGear, chipId: "navigator" };
+  mark.chips.push(stolenGear);
+  mark.node = aHome.hexId;
+  recomputeStats(gA);
+  performAction(gA, "activate", { location: aHome.hexId });
+  check("scrapyard: rips an enemy chip into hex loot",
+    !mark.chips.includes(stolenGear) && (gA.hexLoot?.[aHome.hexId] || []).includes(stolenGear));
+
+  // -- blacksite: an enemy chip goes dark and STAYS dark through its
+  // owner's paid upkeep, until the suppressor's window passes.
+  const gB = createGame({ seed: 152 });
+  startTurn(gB);
+  const bPid = gB.turnOrder[gB.activeIndex];
+  const bFoe = gB.turnOrder.find((f) => f !== bPid);
+  const bFoeLoc = Object.values(gB.locations).find((l) => l.controller === bFoe);
+  const lab = gB.nextId("chip");
+  gB.chips[lab] = { uid: lab, chipId: "advanced-lab" }; // upkeep 1 — the guard case
+  bFoeLoc.chips.push(lab);
+  gB.players[bFoe].resource = 99;
+  applyEffect(gB, { type: "DISABLE_CHIP" }, { sourcePlayer: bPid });
+  const suppressed = Object.values(gB.chips).find((c) => c.suppressedUntil != null);
+  check("blacksite: an enemy chip is suppressed (dormant with a window)",
+    !!suppressed && suppressed.disabled === true);
+  endTurn(gB); // into the next seat's turn — foe's upkeep pays but cannot revive it
+  const stillDark = suppressed.disabled === true;
+  for (let i = 0; i < gB.turnOrder.length; i++) endTurn(gB); // past the window
+  check("blacksite: paid upkeep cannot revive it early; the window expiring does",
+    stillDark && suppressed.disabled === false && suppressed.suppressedUntil == null);
+
+  // -- the springs: heals ANY owner's damaged unit standing on it.
+  const gS = createGame({ seed: 153 });
+  startTurn(gS);
+  const sPid = gS.turnOrder[gS.activeIndex];
+  const oasis = Object.values(gS.locations).find((l) => !l.controller);
+  oasis.abilityId = "the-springs";
+  const pilgrim = Object.values(gS.units).find((u) => u.owner === sPid);
+  pilgrim.node = oasis.hexId;
+  pilgrim.baseStrength = 1; recomputeStats(gS);
+  do { endTurn(gS); } while (gS.turnOrder[gS.activeIndex] !== sPid);
+  check("the springs: a unit camping the oasis heals +2 even off friendly ground",
+    pilgrim.baseStrength === 3);
+
+  // -- toll gate: entering the taxed ring costs +1 movement.
+  const gG = createGame({ seed: 154 });
+  startTurn(gG);
+  const gPid = gG.turnOrder[gG.activeIndex];
+  const gFoe = gG.turnOrder.find((f) => f !== gPid);
+  const tollLoc = Object.values(gG.locations).find((l) => l.controller === gFoe);
+  tollLoc.abilityId = "toll-gate";
+  const ringHex = (gG.board.adjacency[tollLoc.hexId] || []).find(
+    (h) => !gG.locations[h] && !gG.board.hexes[h].elevation && !gG.board.hexes[h].cover);
+  const walker = Object.values(gG.units).find((u) => u.owner === gPid);
+  if (ringHex) {
+    const ringNeighbor = (gG.board.adjacency[ringHex] || []).find(
+      (h) => h !== tollLoc.hexId && !gG.locations[h] && !gG.board.hexes[h].elevation && !gG.board.hexes[h].cover);
+    if (ringNeighbor) {
+      walker.node = ringNeighbor;
+      walker.moveRemaining = 1;
+      const reach = unitReach(gG, walker);
+      check("toll gate: a taxed hex costs 2 to enter (unreachable on budget 1)",
+        !(ringHex in reach));
+      walker.moveRemaining = 2;
+      const reach2 = unitReach(gG, walker);
+      check("toll gate: budget 2 enters the taxed hex with nothing left",
+        reach2[ringHex] === 0);
+    }
+  }
 }
 
 line(`\n  v0.2 verification: ${v2pass} passed, ${v2fail} failed`);

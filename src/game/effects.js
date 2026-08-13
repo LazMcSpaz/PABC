@@ -104,12 +104,23 @@ const EFFECTS = {
   // and the one-per-stat rule allows; otherwise the chip drops as hex loot
   // at the unit's feet — found, not lost.
   GRANT_CHIP(state, e, ctx) {
-    const def = CHIPS[e.chipId];
-    if (!def) throw new Error(`GRANT_CHIP: unknown chip "${e.chipId}"`);
+    // pool: "reward" draws a random reward-tier chip (Old Armory) instead
+    // of a fixed chipId.
+    let chipId = e.chipId;
+    if (!chipId && e.pool === "reward") {
+      const rewards = Object.values(CHIPS).filter((c) => c.reward).map((c) => c.id);
+      chipId = state.rng.pick(rewards);
+    }
+    const def = CHIPS[chipId];
+    if (!def) throw new Error(`GRANT_CHIP: unknown chip "${chipId}"`);
     let unit = state.units[e.unit] || state.units[ctx.sourceUnit] || null;
     if (!unit) {
       const pids = resolveTargets(state, e.target || "self", ctx);
-      unit = Object.values(state.units).find((u) => pids.includes(u.owner)) || null;
+      // Prefer a unit standing on the source Location (ability grants arm
+      // the garrison), then any unit of the resolved player.
+      const hex = ctx.source?.hexId;
+      const owned = Object.values(state.units).filter((u) => pids.includes(u.owner));
+      unit = (hex && owned.find((u) => u.node === hex)) || owned[0] || null;
     }
     if (!unit) return; // no possible recipient — the grant fizzles
     const uid = state.nextId("chip");
@@ -128,6 +139,67 @@ const EFFECTS = {
       emit(state, "chip_granted", { unit: unit.uid, player: unit.owner, chip: uid, chipId: def.id, installed: false, hex: unit.node });
       emit(state, "loot_dropped", { hex: unit.node, chips: [uid] });
     }
+  },
+
+  // Blacksite: disable one enemy chip (anywhere) until the start of the
+  // acting player's next turn. Sets the §20.9 dormant flag plus a
+  // suppressedUntil ordinal; the startTurn sweep lifts it and the upkeep
+  // charger refuses to reactivate early.
+  DISABLE_CHIP(state, e, ctx) {
+    const actor = ctx.sourcePlayer;
+    const candidates = [];
+    for (const loc of Object.values(state.locations)) {
+      if (!loc.controller || loc.controller === actor) continue;
+      for (const c of loc.chips) {
+        const inst = state.chips[c];
+        if (inst && !inst.disabled && inst.chipId !== "capital") candidates.push(c);
+      }
+    }
+    for (const u of Object.values(state.units)) {
+      if (u.owner === actor) continue;
+      for (const c of u.chips) {
+        const inst = state.chips[c];
+        if (inst && !inst.disabled) candidates.push(c);
+      }
+    }
+    if (!candidates.length) return;
+    let uid = candidates[0];
+    if (ctx.interact) {
+      const pick = ctx.interact({ kind: "chooseChip", options: candidates });
+      if (candidates.includes(pick)) uid = pick;
+    }
+    const inst = state.chips[uid];
+    inst.disabled = true;
+    inst.suppressedUntil = state.round * state.turnOrder.length + state.activeIndex +
+      state.turnOrder.length - 1;
+    recomputeStats(state);
+    recomputeResearch(state);
+    emit(state, "chip_dormant", { chip: uid, chipId: inst.chipId, suppressed: true, by: actor });
+  },
+
+  // Scrapyard: rip one chip off an enemy unit standing at the source
+  // Location; it drops as hex loot there — anyone may claim it.
+  STRIP_CHIP(state, e, ctx) {
+    const actor = ctx.sourcePlayer;
+    const hex = ctx.source?.hexId;
+    if (!hex) return;
+    const marks = Object.values(state.units).filter(
+      (u) => u.owner !== actor && u.node === hex && u.chips.length,
+    );
+    if (!marks.length) return;
+    const mark = marks[0];
+    const options = [...mark.chips];
+    let uid = options[0];
+    if (ctx.interact) {
+      const pick = ctx.interact({ kind: "chooseChip", options });
+      if (options.includes(pick)) uid = pick;
+    }
+    mark.chips.splice(mark.chips.indexOf(uid), 1);
+    state.hexLoot = state.hexLoot || {};
+    (state.hexLoot[hex] = state.hexLoot[hex] || []).push(uid);
+    recomputeStats(state);
+    emit(state, "chip_removed", { hex, chip: uid, chipId: state.chips[uid]?.chipId, player: actor, holder: "unit", stripped: true });
+    emit(state, "loot_dropped", { hex, chips: [uid] });
   },
 
   GRANT_ACTIONS(state, e, ctx) {

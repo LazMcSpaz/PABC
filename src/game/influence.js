@@ -17,7 +17,7 @@
 // Fog builds the separate Vision set later; keep them distinct — nothing
 // here writes or reads a vision set.
 import { CONFIG } from "./config.js";
-import { CHIPS, CAPITAL } from "./content.js";
+import { CHIPS, CAPITAL, ABILITIES } from "./content.js";
 import { emit } from "./events.js";
 import { bfsDistances } from "./board.js";
 
@@ -59,6 +59,13 @@ function locationRange(state, loc) {
   for (const c of loc.chips) {
     const def = chipDef(state, c);
     if (def) r += def.influenceRange || 0;
+  }
+  // Beacon Hill (ability passive INFLUENCE_RANGE): some hills just carry
+  // a signal farther — the Location projects beyond the base range.
+  if (loc.abilityId) {
+    for (const pv of ABILITIES[loc.abilityId]?.passives || []) {
+      if (pv.type === "INFLUENCE_RANGE") r += pv.amount || 0;
+    }
   }
   return r;
 }

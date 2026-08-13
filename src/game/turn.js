@@ -15,7 +15,7 @@ import { applyOutputAndBuilds, chargeChipUpkeep, enforceLoyaltySlotCap } from ".
 import { runDiplomacyRound, vassalsOf, arePacted } from "./diplomacy.js";
 import { hasTechNode } from "./tech.js";
 import { chargePostUpkeep } from "./posts.js";
-import { CHIPS, LOCATIONS } from "./content.js";
+import { CHIPS, LOCATIONS, ABILITIES } from "./content.js";
 
 // Sum a numeric chip field across a Location's installed, non-dormant
 // chips — the shared reader for the per-Location behavior chips
@@ -219,17 +219,25 @@ function passiveHeal(state, pid) {
       if (state.chips[c]?.disabled) continue;
       fieldMedics += CHIPS[state.chips[c]?.chipId]?.healAnywhere || 0;
     }
-    if (!onHeldLoc && fieldMedics <= 0) continue;
+    // The Springs (ability passive HEAL_HERE): the oasis mends WHOEVER
+    // stands on it — any owner, held or not.
+    let springs = 0;
+    if (loc?.abilityId) {
+      for (const pv of ABILITIES[loc.abilityId]?.passives || []) {
+        if (pv.type === "HEAL_HERE") springs += pv.amount || 0;
+      }
+    }
+    if (!onHeldLoc && fieldMedics <= 0 && springs <= 0) continue;
     const cap = effectiveVeteran(state, u) ? CONFIG.unit.veteranStrengthCap : CONFIG.unit.baseStrengthCap;
     if (u.baseStrength >= cap) continue;
     const before = u.baseStrength;
     // §17.5 Logistics B1 (Field Hospital): +1 more heal/Upkeep — ADDS to the
     // §16.5 base, so a holder mends 2/Upkeep on held Locations. An Infirmary
     // chip on this Location (healBonus) adds on top of both.
-    const healAmt = onHeldLoc
+    const healAmt = (onHeldLoc
       ? CONFIG.heal.passivePerTurn + (hasTechNode(state, pid, "log-b1") ? 1 : 0) +
         locChipSum(state, loc, "healBonus") + fieldMedics
-      : fieldMedics;
+      : fieldMedics) + springs;
     u.baseStrength = Math.min(cap, u.baseStrength + healAmt);
     recomputeStats(state);
     emit(state, "unit_reinforced", { unit: u.uid, amount: u.baseStrength - before });
@@ -264,6 +272,24 @@ export function startTurn(state) {
     }
     return true;
   });
+
+  // Blacksite suppression expires once the suppressor's window has passed
+  // (suppressedUntil is a turn ordinal; see DISABLE_CHIP).
+  {
+    const ordinal = state.round * state.turnOrder.length + state.activeIndex;
+    let lifted = false;
+    for (const inst of Object.values(state.chips)) {
+      if (inst.suppressedUntil != null && ordinal > inst.suppressedUntil) {
+        delete inst.suppressedUntil;
+        if (inst.disabled) {
+          inst.disabled = false;
+          lifted = true;
+          emit(state, "chip_reactivated", { chip: inst.uid, chipId: inst.chipId });
+        }
+      }
+    }
+    if (lifted) { recomputeStats(state); recomputeResearch(state); recomputeInfluence(state); }
+  }
 
   expireModifiers(state, pid);
   // Waystation (chip `turnStartMovement`): a friendly unit opening its turn

@@ -4,7 +4,7 @@
 // this export exists so anyone browsing content/ sees the real chip set.
 // Run: node scripts/export-chips.mjs
 import { writeFileSync } from "node:fs";
-import { CHIPS, CHIP_SKINS } from "../src/game/content.js";
+import { CHIPS, CHIP_SKINS, ABILITIES } from "../src/game/content.js";
 
 const esc = (v) => {
   const s = String(v ?? "");
@@ -35,3 +35,33 @@ const out = [
 
 writeFileSync(new URL("../content/upgrade-chips.csv", import.meta.url), out);
 console.log(`wrote content/upgrade-chips.csv (${rows.length} chips)`);
+
+// --- location abilities mirror ---------------------------------------
+const abilityHeader = ["Ability ID", "Name", "Eligible Tier", "Effect"];
+const describe = (a) => {
+  const parts = [];
+  for (const pv of a.passives || []) {
+    if (pv.type === "SUPPRESS_CHIP_BONUSES") parts.push("Passive: attacking units get no chip Strength in contests here.");
+    if (pv.type === "INFLUENCE_RANGE") parts.push(`Passive: +${pv.amount} Influence range for this location.`);
+    if (pv.type === "HEAL_HERE") parts.push(`Passive: units standing here (any owner) heal +${pv.amount} at Upkeep.`);
+    if (pv.type === "MOVE_TAX") parts.push(`Passive: enemies pay +${pv.amount} movement entering this location's hex or its ring.`);
+  }
+  for (const opt of a.activated || []) {
+    const cost = [];
+    if (opt.cost?.action) cost.push(`${opt.cost.action} Action`);
+    if (opt.cost?.resource) cost.push(`${opt.cost.resource} Scrap`);
+    const once = opt.oncePerGame ? ", once per game" : "";
+    const eff = (opt.effects || []).map((e) => e.type).join(", ");
+    parts.push(`Activated (${cost.join(" + ") || "free"}${once}): ${eff}.`);
+  }
+  return parts.join(" ");
+};
+const abilityRows = Object.values(ABILITIES).map((a) =>
+  [a.id, a.name, a.eligibleTier, describe(a)].map(esc).join(","));
+const abilityOut = [
+  "# GENERATED from src/game/content.js — do not hand-edit; run scripts/export-chips.mjs",
+  abilityHeader.join(","),
+  ...abilityRows,
+].join("\n") + "\n";
+writeFileSync(new URL("../content/location-abilities.csv", import.meta.url), abilityOut);
+console.log(`wrote content/location-abilities.csv (${abilityRows.length} abilities)`);
