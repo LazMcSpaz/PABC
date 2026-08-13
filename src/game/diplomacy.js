@@ -9,7 +9,7 @@
 // the AI-to-AI engine is deterministic thresholds, so it never perturbs the
 // contest RNG stream.
 import { CONFIG } from "./config.js";
-import { FACTIONS, MINOR_FACTIONS, factionDef, LOCATIONS } from "./content.js";
+import { FACTIONS, MINOR_FACTIONS, factionDef, LOCATIONS, CHIPS } from "./content.js";
 import { emit, registerEventHook } from "./events.js";
 import { getStanding, adjustStanding, setStanding, standingTier } from "./standing.js";
 import { bfsDistances, reinforcementRoute } from "./board.js";
@@ -82,6 +82,9 @@ function installDiplomacyListeners(state) {
 function onTrespass(state, payload) {
   const unit = state.units[payload.unit];
   if (!unit) return;
+  // Safe Conduct (chip `safeConduct`): forged papers — this unit's
+  // trespass draws no Standing hit and no Menace.
+  if (unit.chips.some((c) => !state.chips[c]?.disabled && CHIPS[state.chips[c]?.chipId]?.safeConduct)) return;
   const mover = unit.owner;
   const owner = state.world?.zoc?.[payload.to];
   if (!owner || owner === mover) return;          // neutral ground or your own land
@@ -904,6 +907,31 @@ function driftStanding(state) {
   }
 }
 
+// Guest House (chip `standingDrift`): hospitality works against the §18.5
+// fade — every faction the host is NOT at war with warms toward the host
+// each round, capped at the Friendly tier (goodwill opens doors; it does
+// not mint alliances on its own). Runs after driftStanding so the welcome
+// outpaces the fade.
+function guestHouseDrift(state) {
+  const cap = CONFIG.diplomacy.tiers.friendly;
+  for (const loc of Object.values(state.locations)) {
+    if (!loc.controller) continue;
+    let warmth = 0;
+    for (const c of loc.chips) {
+      if (state.chips[c]?.disabled) continue;
+      warmth += CHIPS[state.chips[c]?.chipId]?.standingDrift || 0;
+    }
+    if (warmth <= 0) continue;
+    const host = loc.controller;
+    for (const other of factionIds(state)) {
+      if (other === host || atWar(state, other, host)) continue;
+      const cur = getStanding(state, other, host);
+      if (cur >= cap) continue;
+      setStanding(state, other, host, Math.min(cap, cur + warmth), "guest-house");
+    }
+  }
+}
+
 // --- AI-to-AI politics (§18.8) --------------------------------------
 // Deterministic threshold machinery — factions form pacts with compatible,
 // high-Standing neighbours, declare war on low-Standing ones per aggression,
@@ -977,6 +1005,7 @@ export function runDiplomacyRound(state) {
     }
   }
   driftStanding(state);
+  guestHouseDrift(state);
   runFlows(state);
   // diplomacy-spec.md §6.5 — gift-counter decay + trading-pact route check run
   // BEFORE the AI-to-AI politics step.

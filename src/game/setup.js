@@ -23,6 +23,7 @@ export function makeUnit(uid, owner, node, factionName) {
     strength: CONFIG.unit.baseStrength,
     movement: CONFIG.unit.baseMovement,
     moveRemaining: CONFIG.unit.baseMovement,
+    actionsRemaining: 0, // acts from its owner's NEXT Upkeep (no same-turn strike)
     movedSinceUpkeep: false,
     fortified: false,
     contestsWon: 0,

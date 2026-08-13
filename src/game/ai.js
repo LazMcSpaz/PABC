@@ -24,7 +24,17 @@ import {
   getStanding, passesRepGates, formPact, vassalize, applyDeal, checkRecognitionVictory,
 } from "./diplomacy.js";
 
-const SAFETY_CAP = 10; // hard stop if priority loop ever spins
+const SAFETY_CAP = 16; // hard stop if priority loop ever spins
+
+// Per-entity actions: the AI keeps acting while ANY of its assets (or a
+// wildcard) can still pay for something. Interim until the AI overhaul
+// turns this into per-asset policies.
+function hasActionBudget(state, pid) {
+  if (state.players[pid].actions.remaining > 0) return true;
+  if (Object.values(state.units).some((u) => u.owner === pid && (u.actionsRemaining ?? 0) > 0)) return true;
+  return Object.values(state.locations).some(
+    (l) => l.controller === pid && (l.actionsRemaining ?? 0) > 0);
+}
 
 export function takeAITurn(state) {
   if (state.winnerId) return;
@@ -33,11 +43,7 @@ export function takeAITurn(state) {
   // live this turn.
   maybeAssignTech(state, pid);
   let guard = SAFETY_CAP;
-  while (
-    state.players[pid].actions.remaining > 0 &&
-    guard-- > 0 &&
-    !state.winnerId
-  ) {
+  while (hasActionBudget(state, pid) && guard-- > 0 && !state.winnerId) {
     if (!tryOneAction(state, pid)) break;
   }
   // §20 — the AI runs its economy every turn regardless of the Action budget:

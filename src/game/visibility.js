@@ -110,7 +110,14 @@ function locationDetection(state, loc) {
 }
 
 function unitHasStealth(state, unit) {
-  return !!unit.stealth || chipAny(state, unit.chips, "stealth");
+  if (unit.stealth || chipAny(state, unit.chips, "stealth")) return true;
+  // Cold Camp: timed stealth from the activate-chip action — concealed
+  // while the current turn ordinal sits inside the paid window.
+  if (unit.stealthUntil != null) {
+    const ordinal = state.round * state.turnOrder.length + state.activeIndex;
+    if (ordinal <= unit.stealthUntil) return true;
+  }
+  return false;
 }
 
 // --- line-of-sight cast (§19.4) --------------------------------------

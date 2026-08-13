@@ -3,7 +3,24 @@
 
 export const CONFIG = {
   vpThreshold: 12,
-  baseActions: 2,
+  // Per-entity actions (docs/vp-and-actions-design.md §2/§4): every unit
+  // and Location gets 1 action per turn; the old global pool survives as a
+  // WILDCARD pool (base 0) that effect-granted actions (Staging Ground,
+  // reactive cards) feed — any entity may spend a wildcard when its own
+  // action is gone.
+  baseActions: 0,
+
+  // Repeatable VP faucets (docs/vp-and-actions-design.md §1). Dominion:
+  // +vpPerCity per Upkeep for each high/veryHigh Location the player (or a
+  // vassal of theirs) fully holds at Loyalty >= loyaltyMin that is NOT one
+  // of the player's own affiliated cities — dominion is rule over others'
+  // land, so a homeland never ticks. Alliance trickle: +allianceTrickle
+  // per Upkeep while pacted with a majority of the other surviving majors.
+  victory: {
+    dominionLoyaltyMin: 6,
+    dominionPerCity: 1,
+    allianceTrickle: 1,
+  },
 
   // §18.2 Loyalty — the 8-slice centre pie that replaces foothold/decay.
   // The ceiling is fixed; the rest are TBD-in-spec tunables, set here for
@@ -96,6 +113,13 @@ export const CONFIG = {
     loyaltyScale: 1, // local influence = loyaltyScale × the Location's Loyalty
     falloff: 0.5, // per-hop multiplier — contribution at d hops = source × falloff^d
     dominanceThreshold: 3, // a hex needs at least this Influence to join any ZoC
+    // Influence pressure (docs/vp-and-actions-design.md §1): a Location
+    // whose OWN hex sits in a rival's dominant ZoC bleeds Loyalty each
+    // Upkeep — the soft-power siege. Garrisoning cancels it (rise 1 −
+    // bleed 1 = stalemate); Civic Hall's rise beats it; out-projecting
+    // ends it. Over-exertion is soft hostility: each bleeding Upkeep
+    // costs the presser Standing with the owner and raises their Menace.
+    pressure: { bleed: 1, standingHit: 1, menaceHit: 1 },
   },
   // §20 Economy & City Development — chips are the output of the economy,
   // built off each Location's Output via the guns/butter slider (Market retired).
@@ -105,9 +129,14 @@ export const CONFIG = {
     // §20.6 Loyalty rung granting the +1 chip slot (drop below → eject newest, §20.8).
     bonusSlotLoyalty: 6,
     // §20.3 default guns/butter split f∈[0,1]: scrapBank += (1−f)·Output, build += f·Output.
-    defaultSlider: 0,
-    // §20.7 rush rate — banked scrap per build-point.
-    rushScrapPerPoint: 1,
+    // 0.5 (was 0): half of Output feeds the active build by default, so
+    // organic building happens without slider micromanagement — and banked
+    // scrap is no longer a free 100% by default (docs/chip-set-v0.1.md).
+    defaultSlider: 0.5,
+    // §20.7 rush rate — banked scrap per build-point. 2 (was 1): Rush now
+    // carries a real premium over organic building, so it's an emergency
+    // lever, not a strictly-dominant default (docs/chip-economy-handoff.md).
+    rushScrapPerPoint: 2,
   },
 
   // §19 Exploration, Vision & Fog of War. Per-faction sight; LoS over

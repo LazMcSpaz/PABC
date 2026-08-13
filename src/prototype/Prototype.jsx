@@ -22,7 +22,7 @@ import { takeAITurn } from "../game/ai.js";
 import { activePlayerId } from "../game/targeting.js";
 import { bfsDistances } from "../game/board.js";
 import { unitReach, unitMovePath } from "../game/movement.js";
-import { CHIPS as ENGINE_CHIPS, LOCATIONS as ENGINE_LOCATIONS } from "../game/content.js";
+import { CHIPS as ENGINE_CHIPS, LOCATIONS as ENGINE_LOCATIONS, chipDisplayName } from "../game/content.js";
 import { CONFIG } from "../game/config.js";
 import { downloadGameLog } from "./gameLogExport.js";
 import { NEUTRAL } from "./data.js";
@@ -159,11 +159,10 @@ function buildLocView(state, hex, isYourTurn) {
     const e = hex.economy;
     const chipDefs = (control.chipUids || []).map((uid, i) => {
       const engineId = state.engineState.chips[uid]?.chipId;
-      const def = ENGINE_CHIPS[engineId];
       return {
         uid,
         chipId: engineId,
-        name: def?.name || engineId,
+        name: chipDisplayName(engineId, ctrl),
         disabled: !!state.engineState.chips[uid]?.disabled,
         upgrade: e.upgrades[uid] || null,
       };

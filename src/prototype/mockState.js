@@ -100,12 +100,12 @@ export const HEXES = {
   "t-se": terrain("t-se"),
   // row 6
   "t-s1": terrain("t-s1"),
-  dambar: location("dambar", held("lakers", 8, ["capital", "townHall"]), "gl-tidewardens"),
+  dambar: location("dambar", held("lakers", 8, ["capital", "civicHall"]), "gl-tidewardens"),
   "t-s2": terrain("t-s2"),
 };
 
 // Market Row — face-down upgrade chips on offer.
-export const MARKET = ["cannons", "defenseTurrets", "logisticsHub", "navigator", "trainingGrounds"];
+export const MARKET = ["bombard", "defenseTurrets", "logisticsHub", "navigator", "trainingGrounds"];
 
 export const mockState = {
   round: 4,

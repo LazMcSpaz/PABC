@@ -117,6 +117,16 @@ export function assignTechNode(state, pid, nodeId) {
   return { ok: true, node: nodeId };
 }
 
+// Old Hands (chip `veteranEquiv`): the unit counts as a veteran while the
+// chip is installed and paid up. Every veteran read (contest bonus,
+// Strength cap, heal cap) goes through this so the rental is complete.
+export function effectiveVeteran(state, unit) {
+  if (unit.veteran) return true;
+  return unit.chips.some(
+    (c) => !state.chips[c]?.disabled && CHIPS[state.chips[c]?.chipId]?.veteranEquiv,
+  );
+}
+
 // §17.5 Military B2 (Citadel): Locations a B2 holder controls gain +2
 // garrison Strength. Derived at read (never mutates loc.garrison) so it can
 // neither double-apply nor strand a bonus when the node is peeled or the
