@@ -169,7 +169,18 @@ section count and with or without defender gear. Two bonus findings:
    each bleeding Upkeep costs the presser 1 Standing with the owner and
    +1 Menace (`CONFIG.influence.pressure`). AI-vs-AI still converges
    (rounds 16–42, all four factions winning across sample seeds).
-5. AI overhaul, written once against the per-entity model.
+5. ✅ Policy-sim validation DONE (scripts/sim-vp-race.mjs, 60 trials per
+   archetype, idealized frictionless timelines): conqueror-2-cities
+   reaches 12 VP ~round 10, conqueror-3 ~9.5, diplomat (2 pacts + a
+   vassal) ~11, hybrid ~9, turtle NEVER — the faucets are within ~2
+   rounds of each other and turtling cannot win on VP (Recognition is
+   its only road). Real games with opposition run roughly 2× these
+   floors (AI-vs-AI: rounds 16–42) — consistent. Numbers ship as-is
+   pending human playtests. Reward-chip encounter/quest authoring goes
+   through the content editor (field-encounters.js is editor-generated;
+   engine-side GRANT_CHIP + Old Armory already make rewards reachable).
+6. AI overhaul, written once against the per-entity model — NEXT, and
+   now unblocked: every system the AI must reason about exists.
 
 ## 4. Action rework — implementation plan (next up)
 
