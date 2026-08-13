@@ -236,17 +236,19 @@ export function chipDefOf(state, chipUid) {
 
 // Location abilities (mechanical-spec §6.3, §13.2). Every High / Very
 // High location is assigned ONE of these at setup; it occupies one of
-// that location's chip slots. The v0.1 stubs here keep to existing
-// effect types — the real effects from content/location-abilities.csv
-// need new effect types (teleport, suppress-chip-bonuses, …) authored
-// with the content batch. Names and tiers match the CSV.
+// that location's chip slots. Names and tiers match
+// content/location-abilities.csv; knowledge-cache and fortified-ruins now
+// carry their REAL effects (they were identical +1 VP stubs). Rail
+// Corridor's true effect (unit teleport) waits on the rail system
+// (docs/rail-road-blockade-design.md) — its scrap stub is repriced so it
+// no longer strictly beats a Factory chip.
 export const ABILITIES = {
   "rail-corridor": {
     id: "rail-corridor", name: "Rail Corridor", eligibleTier: "veryHigh",
     passives: [],
     activated: [{
       cost: { resource: 2 },
-      effects: [{ type: "ADJUST_RESOURCE", resource: "Resource", amount: 5, target: "controller" }],
+      effects: [{ type: "ADJUST_RESOURCE", resource: "Resource", amount: 4, target: "controller" }],
     }],
   },
   "knowledge-cache": {
@@ -254,7 +256,7 @@ export const ABILITIES = {
     passives: [],
     activated: [{
       cost: { action: 1 },
-      effects: [{ type: "ADJUST_RESOURCE", resource: "VP", amount: 1, target: "controller" }],
+      effects: [{ type: "MOVE_CARD", from: "reactiveDeck", to: "hand:controller" }],
     }],
   },
   "staging-ground": {
@@ -267,11 +269,10 @@ export const ABILITIES = {
   },
   "fortified-ruins": {
     id: "fortified-ruins", name: "Fortified Ruins", eligibleTier: "high",
-    passives: [],
-    activated: [{
-      cost: { resource: 1 },
-      effects: [{ type: "ADJUST_RESOURCE", resource: "VP", amount: 1, target: "controller" }],
-    }],
+    // Attacking units get no chip Strength in contests here — the ruins
+    // channel the fight into corridors old-world gear can't exploit.
+    passives: [{ type: "SUPPRESS_CHIP_BONUSES" }],
+    activated: [],
   },
 };
 

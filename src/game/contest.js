@@ -7,7 +7,7 @@
 import { emit } from "./events.js";
 import { openReactionWindow } from "./reactions.js";
 import { CONFIG } from "./config.js";
-import { CHIPS, LOCATIONS, FACTIONS, factionDef } from "./content.js";
+import { CHIPS, LOCATIONS, FACTIONS, ABILITIES, factionDef } from "./content.js";
 import { recomputeStats, recomputeResearch, citadelGarrison, effectiveVeteran } from "./stats.js";
 import { recomputeInfluence } from "./influence.js";
 import { recomputeVisibility, recomputeVisibilityFor, isUnitVisibleTo } from "./visibility.js";
@@ -18,6 +18,26 @@ import { TECH_NODES, hasTechNode } from "./tech.js";
 import { destroyPost } from "./posts.js";
 
 const fail = (reason) => ({ ok: false, reason });
+
+// Fortified Ruins (ability passive SUPPRESS_CHIP_BONUSES): attacking units
+// get no chip-derived Strength when contesting this Location. Schema-driven
+// off the ability def — the engine never branches on ability ids.
+function abilitySuppressesChips(loc) {
+  const ab = loc?.abilityId && ABILITIES[loc.abilityId];
+  return !!ab?.passives?.some((pv) => pv.type === "SUPPRESS_CHIP_BONUSES");
+}
+
+function stackChipStrength(state, owner, hex) {
+  let n = 0;
+  for (const u of Object.values(state.units)) {
+    if (u.owner !== owner || u.node !== hex) continue;
+    for (const c of u.chips) {
+      if (state.chips[c]?.disabled) continue;
+      n += CHIPS[state.chips[c]?.chipId]?.strength || 0;
+    }
+  }
+  return n;
+}
 
 // Garrison Strength contributed by a Location's installed chips. No v0.1
 // chip carries a structured `garrison` bonus yet, so this is 0 today —
@@ -78,7 +98,13 @@ function concentration(state, owner, hex, excludeUid) {
 // the d6. Used both by the UI (pre-contest odds) and by the AI (EV-gating
 // whether to pick a fight at all) — no dice, no mutation.
 export function previewAttackerStrength(state, hexId, ownerId) {
-  const strength = stackStrength(state, ownerId, hexId);
+  let strength = stackStrength(state, ownerId, hexId);
+  // Fortified Ruins on the contested hex — the preview must show the same
+  // suppressed number runContest will use.
+  const loc = state.locations[hexId];
+  if (loc && loc.controller !== ownerId && abilitySuppressesChips(loc)) {
+    strength -= stackChipStrength(state, ownerId, hexId);
+  }
   const stack = Object.values(state.units).filter(
     (u) => u.owner === ownerId && u.node === hexId,
   );
@@ -695,8 +721,11 @@ export function runContest(state, { pid, params, ctx = {} }) {
 
   // Combined stack Strength: every friendly unit on the contesting hex
   // fights together, so their Strengths sum (Concentration is added on top).
-  const atkStrength = stackStrength(state, pid, unit.node);
+  let atkStrength = stackStrength(state, pid, unit.node);
   const atkAllies = atkStrength - unit.strength; // contribution from stacked allies
+  const chipsSuppressed = t.kind === "location" && abilitySuppressesChips(t.loc)
+    ? stackChipStrength(state, pid, unit.node) : 0;
+  atkStrength -= chipsSuppressed;
   const defAllies = defenderUnit
     ? stackStrength(state, defenderUnit.owner, defHex) - defenderUnit.strength
     : 0;
@@ -782,7 +811,7 @@ export function runContest(state, { pid, params, ctx = {} }) {
     defenderAllies: defAllies, defenderMilitary: defMilitary, defenderTurrets: defTurrets,
     // §19.5 ambush
     attackerAmbush, defenderAmbush, attackerAmbushBonus: atkAmbush, defenderAmbushBonus: defAmbush,
-    attackerSiege: siege,
+    attackerSiege: siege, attackerChipsSuppressed: chipsSuppressed,
   };
   const winnerUnit = won ? attackerUnit : defenderUnit;
   const loserUnit = won ? defenderUnit : attackerUnit;

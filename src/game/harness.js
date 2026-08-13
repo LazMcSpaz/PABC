@@ -1806,20 +1806,23 @@ line("\n  [AI sanity] tech-wheel use + game termination");
   check("AI assigns a tech-wheel node when it has a free Ability Point",
     g.players[aiPid].techWheel.length > 0);
 
-  // (2) A full AI-vs-AI game still terminates with a winner (no infinite
-  // loop). Seed 5 converges comfortably (~round 27) — seed 42 specifically
-  // can settle into a genuine 4-way stalemate (no one snowballs, VP
-  // progress plateaus well under the threshold for hundreds of rounds;
-  // verified it's not an infinite loop — the turn loop keeps completing,
-  // locations keep changing hands, VP just never crosses the line) and
-  // isn't what this check is for: it exists to catch a true engine hang,
-  // not to assert a balance guarantee that every seed's emergent AI
-  // dynamics must converge to a winner within a fixed turn budget.
+  // (2) A full AI-vs-AI game never hangs: the turn loop keeps completing
+  // and rounds keep advancing. This check exists to catch a true engine
+  // hang, NOT to assert that AI dynamics converge to a winner — and with
+  // the chip-content batch that distinction became load-bearing: the old
+  // "seed 5 converges ~round 27" behavior was an ARTIFACT of the
+  // knowledge-cache / fortified-ruins placeholder abilities, which both
+  // granted a repeatable +1 VP per activation. With their real effects in
+  // (draw-a-Reactive / suppress-chip-bonuses), the game currently has NO
+  // repeatable VP source — capture VP is first-time-only — so AI games
+  // stall in multi-faction stalemates. That is an open DESIGN gap
+  // (win-condition pacing), tracked in docs/chip-set-v0.1.md's open
+  // questions, not an engine hang.
   const g2 = createGame({ seed: 5 });
-  let safety = 2000;
+  let safety = 600;
   while (!g2.winnerId && safety-- > 0) takeAITurn(g2);
-  check("a full AI-vs-AI game terminates with a winner (no infinite loop)",
-    safety > 0 && !!g2.winnerId);
+  check("a full AI-vs-AI game never hangs (rounds advance or a winner emerges)",
+    !!g2.winnerId || g2.round > 50);
 }
 
 // The old maybeAssignTech picked ONE path by faction dial — military,

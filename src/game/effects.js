@@ -143,8 +143,12 @@ const EFFECTS = {
   },
 
   MOVE_CARD(state, e, ctx) {
-    const from = getZone(state, e.from);
-    const to = getZone(state, e.to);
+    // "hand:controller" resolves to the activating player (abilities pass
+    // ctx.sourcePlayer) so authored content needn't know faction ids.
+    const spec = (z) => typeof z === "string" && ctx.sourcePlayer
+      ? z.replace(/:controller$/, `:${ctx.sourcePlayer}`) : z;
+    const from = getZone(state, spec(e.from));
+    const to = getZone(state, spec(e.to));
     if (!from || !to) return;
     const count = e.count || 1;
     for (let i = 0; i < count && from.length; i++) {

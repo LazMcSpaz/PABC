@@ -146,5 +146,17 @@ One field, no new content.
   permanence is the price of Old Hands et al. — needs a rule).
 - Location-chip pass: Garrison/Unit-cap/Foothold/Encounter/Actions are
   still single-chip dead ends; Burning Glass is the first planned addition.
-- The two stub abilities (`knowledge-cache`, `fortified-ruins`) still
-  resolve to identical +1 VP effects — untouched by this pass.
+- ~~The two stub abilities (`knowledge-cache`, `fortified-ruins`) still
+  resolve to identical +1 VP effects~~ — fixed: knowledge-cache now draws
+  a Reactive card, fortified-ruins suppresses attacker chip Strength.
+- **Win-condition pacing (open, surfaced by the stub fix):** those +1 VP
+  stubs were the game's only REPEATABLE VP source — AI-vs-AI games
+  previously "converged" by grinding them. With real effects in, capture
+  VP (first-time-only, 18 total on the board) is the only VP, and full AI
+  games stall in stalemates around 5–7 VP. The win condition needs a
+  designed repeatable source (per-turn VP from held veryHigh Locations?
+  quest VP? the diplomacy Recognition path?).
+- **Faction elimination (open, same investigation):** a faction that
+  loses its last Location sits dead forever with a growing scrap bank —
+  it cannot build, recruit, or recover. Needs an elimination rule or a
+  comeback mechanic.
