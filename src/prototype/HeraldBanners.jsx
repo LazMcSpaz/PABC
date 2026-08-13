@@ -10,6 +10,18 @@ import { C } from "./HudChrome.jsx";
 const name = (f) => factionDef(f)?.name || f;
 const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
 
+// Diplomacy portraits — painted envoy scenes for the four majors. A banner
+// whose "speaker" is a major carries their portrait; minors (no art yet)
+// fall back to the plain banner. object-position keeps the envoy's face in
+// the square crop.
+const A = import.meta.env.BASE_URL;
+const DIPLO_PORTRAITS = {
+  versari:   { src: `${A}assets/portraits/factions/versari/versari_diplomacy_1.webp`, pos: "50% 25%" },
+  lakers:    { src: `${A}assets/portraits/factions/lakers/lakers_diplomacy_1.webp`, pos: "50% 22%" },
+  goldgrass: { src: `${A}assets/portraits/factions/goldgrass/goldgrass_diplomacy_1.webp`, pos: "66% 22%" },
+  plainers:  { src: `${A}assets/portraits/factions/plainers/plainers_diplomacy_1.webp`, pos: "72% 22%" },
+};
+
 // Map fresh log entries to banner messages. Moves the HUMAN initiated are
 // skipped (they clicked the button — no telegraph needed), as are the
 // event echoes of composite moves (the wars/pacts a coalition mints emit
@@ -17,61 +29,62 @@ const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
 export function heraldFromLog(entries, youId) {
   const out = [];
   let n = 0;
-  const push = (icon, text, tone) => out.push({ id: `h${Date.now()}-${n++}`, icon, text, tone });
+  const push = (icon, text, tone, speaker) =>
+    out.push({ id: `h${Date.now()}-${n++}`, icon, text, tone, portrait: DIPLO_PORTRAITS[speaker] || null });
   for (const e of entries) {
     const p = e.payload || {};
     switch (e.name) {
       case "war_declared":
         if (p.a === youId || p.cause === "coalition") break;
-        push("⚔", p.b === youId ? `${name(p.a)} declares war on YOU` : `${name(p.a)} declares war on ${name(p.b)}`, "war");
+        push("⚔", p.b === youId ? `${name(p.a)} declares war on YOU` : `${name(p.a)} declares war on ${name(p.b)}`, "war", p.a);
         break;
       case "peace_made":
         if (p.a === youId || ["pact-peace", "vassal-peace", "coalition-dissolved"].includes(p.cause)) break;
-        push("🕊", `${name(p.a)} and ${name(p.b)} make peace`, "good");
+        push("🕊", `${name(p.a)} and ${name(p.b)} make peace`, "good", p.a);
         break;
       case "pact_formed":
         if (p.a === youId || p.cause === "coalition-bloc") break;
-        push("🤝", p.b === youId ? `${name(p.a)} swears a pact with you` : `${name(p.a)} and ${name(p.b)} swear a pact`, p.b === youId ? "good" : "info");
+        push("🤝", p.b === youId ? `${name(p.a)} swears a pact with you` : `${name(p.a)} and ${name(p.b)} swear a pact`, p.b === youId ? "good" : "info", p.a);
         break;
       case "pact_broken":
         if (p.a === youId) break;
-        push("🗡", p.b === youId ? `${name(p.a)} breaks their pact with YOU` : `${name(p.a)} breaks their pact with ${name(p.b)}`, "war");
+        push("🗡", p.b === youId ? `${name(p.a)} breaks their pact with YOU` : `${name(p.a)} breaks their pact with ${name(p.b)}`, "war", p.a);
         break;
       case "coalition_formed":
         push("🛡", p.target === youId
           ? `A coalition rises against YOU: ${(p.members || []).map(name).join(", ")}`
-          : `A coalition rises against ${name(p.target)}`, p.target === youId ? "war" : "warn");
+          : `A coalition rises against ${name(p.target)}`, p.target === youId ? "war" : "warn", p.target === youId ? null : p.target);
         break;
       case "coalition_dissolved":
         push("🛡", `The coalition against ${p.target === youId ? "you" : name(p.target)} dissolves`, "info");
         break;
       case "vassal_established":
         if (p.lord === youId) break;
-        push("⛓", `${name(p.vassal)} bends the knee to ${name(p.lord)}`, "warn");
+        push("⛓", `${name(p.vassal)} bends the knee to ${name(p.lord)}`, "warn", p.lord);
         break;
       case "vassal_rebelled":
         push("🔥", `${name(p.vassal)} rises against ${p.lord === youId ? "YOU" : name(p.lord)}`, p.lord === youId ? "war" : "info");
         break;
       case "vassal_freed":
         if (p.lord === youId) break;
-        push("🕊", `${name(p.lord)} frees ${name(p.vassal)}`, "info");
+        push("🕊", `${name(p.lord)} frees ${name(p.vassal)}`, "info", p.lord);
         break;
       case "denounced":
         if (p.denouncer === youId) break;
         push("📣", p.target === youId
           ? `${name(p.denouncer)} denounces YOU before the powers`
-          : `${name(p.denouncer)} denounces ${name(p.target)}`, p.target === youId ? "warn" : "info");
+          : `${name(p.denouncer)} denounces ${name(p.target)}`, p.target === youId ? "warn" : "info", p.denouncer);
         break;
       case "recognition_summit":
         push("★", p.player === youId
           ? `${name(p.backer)} backs your claim — +${p.vp} VP`
-          : `${name(p.backer)} backs ${name(p.player)}'s claim — +${p.vp} VP`, p.player === youId ? "good" : "warn");
+          : `${name(p.backer)} backs ${name(p.player)}'s claim — +${p.vp} VP`, p.player === youId ? "good" : "warn", p.backer);
         break;
       case "pact_call_requested":
-        if (p.ally === youId) push("📯", `${name(p.caller)} calls you to war against ${name(p.target)}`, "warn");
+        if (p.ally === youId) push("📯", `${name(p.caller)} calls you to war against ${name(p.target)}`, "warn", p.caller);
         break;
       case "tribute_demanded":
-        if (p.target === youId) push("💰", `${name(p.demander)} demands tribute from you`, "warn");
+        if (p.target === youId) push("💰", `${name(p.demander)} demands tribute from you`, "warn", p.demander);
         break;
       case "standing_changed": {
         // Tier crossings TOWARD the human only — "how they see you" shifts.
@@ -80,7 +93,7 @@ export function heraldFromLog(entries, youId) {
         const now = standingTier(p.value);
         if (prev === now) break;
         const warmer = p.delta > 0;
-        push(warmer ? "▲" : "▼", `${name(p.faction)} now regards you as ${cap(now)}`, warmer ? "good" : "warn");
+        push(warmer ? "▲" : "▼", `${name(p.faction)} now regards you as ${cap(now)}`, warmer ? "good" : "warn", p.faction);
         break;
       }
       default: break;
@@ -115,7 +128,7 @@ export function HeraldLayer({ banners, onDismiss, topOffset = 74 }) {
             style={{
               pointerEvents: "auto", cursor: "pointer",
               display: "flex", alignItems: "center", gap: 10,
-              padding: "8px 16px", borderRadius: 7,
+              padding: b.portrait ? "6px 16px 6px 6px" : "8px 16px", borderRadius: 7,
               border: `1px solid ${t.border}`,
               background: "linear-gradient(180deg, rgba(12,22,23,0.94), rgba(6,13,14,0.94))",
               boxShadow: `0 4px 18px rgba(0,0,0,0.55), 0 0 18px ${t.glow}`,
@@ -124,6 +137,18 @@ export function HeraldLayer({ banners, onDismiss, topOffset = 74 }) {
               animation: "herald-in 240ms ease-out",
             }}
           >
+            {b.portrait && (
+              <img
+                src={b.portrait.src}
+                alt=""
+                style={{
+                  width: 44, height: 44, borderRadius: 6, flexShrink: 0,
+                  objectFit: "cover", objectPosition: b.portrait.pos,
+                  border: `1px solid ${t.border}88`,
+                  boxShadow: "0 1px 6px rgba(0,0,0,0.5)",
+                }}
+              />
+            )}
             <span style={{ fontSize: 15 }}>{b.icon}</span>
             <span>{b.text}</span>
           </div>
