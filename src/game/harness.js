@@ -2123,9 +2123,10 @@ line("\n  [§20 Economy] Output slider, build/upgrade/rush, upkeep dormancy, gat
     const actsAfterBuild = g.players[me].actions.remaining;
     const before = g.players[me].resource;
     const r = performAction(g, "rush", { at: loc.hexId });
-    check("rush completes the build at once and spends scrap",
+    check("rush completes the build at once and spends scrap (at the §20.7 premium rate)",
       r.ok && loc.chips.some((c) => g.chips[c]?.chipId === "labs") &&
-      loc.activeBuild == null && g.players[me].resource === before - 3);
+      loc.activeBuild == null &&
+      g.players[me].resource === before - 3 * CONFIG.economy.rushScrapPerPoint);
     check("build is free of Actions; rush costs 1 Action",
       actsAfterBuild === actsStart && g.players[me].actions.remaining === actsAfterBuild - 1);
   }

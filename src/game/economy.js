@@ -164,7 +164,7 @@ function processLocationEconomy(state, loc) {
   // throughput has nowhere to go, so it is never wasted).
   if (!ab) return output;
 
-  const f = Math.max(0, Math.min(1, loc.buildSlider ?? 0));
+  const f = Math.max(0, Math.min(1, loc.buildSlider ?? CONFIG.economy.defaultSlider));
   const scrapGain = Math.floor((1 - f) * output);
   let buildGain = output - scrapGain; // conserve the total; build keeps the remainder
   // Works chip: flat extra build progress, outside the slider split (it's

@@ -105,9 +105,14 @@ export const CONFIG = {
     // §20.6 Loyalty rung granting the +1 chip slot (drop below → eject newest, §20.8).
     bonusSlotLoyalty: 6,
     // §20.3 default guns/butter split f∈[0,1]: scrapBank += (1−f)·Output, build += f·Output.
-    defaultSlider: 0,
-    // §20.7 rush rate — banked scrap per build-point.
-    rushScrapPerPoint: 1,
+    // 0.5 (was 0): half of Output feeds the active build by default, so
+    // organic building happens without slider micromanagement — and banked
+    // scrap is no longer a free 100% by default (docs/chip-set-v0.1.md).
+    defaultSlider: 0.5,
+    // §20.7 rush rate — banked scrap per build-point. 2 (was 1): Rush now
+    // carries a real premium over organic building, so it's an emergency
+    // lever, not a strictly-dominant default (docs/chip-economy-handoff.md).
+    rushScrapPerPoint: 2,
   },
 
   // §19 Exploration, Vision & Fog of War. Per-faction sight; LoS over
