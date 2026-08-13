@@ -129,11 +129,14 @@ export function isRoad(hex) {
 // Best-first expansion (maximise movement left = minimise cost), tracking a
 // predecessor for each hex so the exact ROUTE can be reconstructed. Returns
 // { best: {hex: remaining}, prev: {hex: cameFrom} } including `start`.
-function expandMovement(state, start, budget, blocked) {
+function expandMovement(state, start, budget, blocked, ignoreTerrain) {
   const adj = state.board.adjacency;
   const hexes = state.board.hexes;
-  const halts = CONFIG.movement.mountainHalts;
-  const forestCost = CONFIG.movement.forestCost;
+  // A Landship-class mover (chip `ignoresTerrain`) treats every hex as
+  // road-grade: forest costs 1, mountains do not halt. Blockade halts and
+  // per-hex budget still apply — it drives over terrain, not through armies.
+  const halts = CONFIG.movement.mountainHalts && !ignoreTerrain;
+  const forestCost = ignoreTerrain ? 1 : CONFIG.movement.forestCost;
   const best = { [start]: budget };
   const prev = { [start]: null };
   const queue = [start];
@@ -159,8 +162,8 @@ function expandMovement(state, start, budget, blocked) {
 
 // Reachable hexes → { hexId: movement points remaining } (start excluded; a
 // halting hex stores 0).
-export function movementField(state, start, budget, { blockedThrough } = {}) {
-  const { best } = expandMovement(state, start, budget, blockedThrough || null);
+export function movementField(state, start, budget, { blockedThrough, ignoreTerrain } = {}) {
+  const { best } = expandMovement(state, start, budget, blockedThrough || null, !!ignoreTerrain);
   const out = {};
   for (const hex in best) if (hex !== start) out[hex] = best[hex];
   return out;
@@ -171,9 +174,9 @@ export function movementField(state, start, budget, { blockedThrough } = {}) {
 // Returns the ordered hex list [start, …, dest], or null if `dest` isn't
 // reachable within `budget`. Pass a large budget for a budget-agnostic route
 // (e.g. replay display).
-export function movementRoute(state, start, budget, dest, { blockedThrough } = {}) {
+export function movementRoute(state, start, budget, dest, { blockedThrough, ignoreTerrain } = {}) {
   if (dest === start) return [start];
-  const { best, prev } = expandMovement(state, start, budget, blockedThrough || null);
+  const { best, prev } = expandMovement(state, start, budget, blockedThrough || null, !!ignoreTerrain);
   if (best[dest] === undefined) return null;
   const path = [];
   for (let c = dest; c != null; c = prev[c]) path.unshift(c);

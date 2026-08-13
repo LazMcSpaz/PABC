@@ -3,7 +3,7 @@
 // layer can be verified without the UI.
 import { createGame } from "./setup.js";
 import { startTurn, endTurn, tickLoyalty } from "./turn.js";
-import { performAction } from "./actions.js";
+import { performAction, recruitCostAt } from "./actions.js";
 import { applyEffect } from "./effects.js";
 import { recomputeStats, recomputeResearch, assignTechNode } from "./stats.js";
 import { recomputeInfluence, zocOwner, inZoC } from "./influence.js";
@@ -35,7 +35,7 @@ import { evalCond, evalStrength } from "./dsl.js";
 import { registerQuest } from "./quests.js";
 import { CONFIG } from "./config.js";
 import { takeAITurn, maybeAssignTech } from "./ai.js";
-import { enforceLoyaltySlotCap, chargeChipUpkeep, slotCapacity, effectiveBuildCost } from "./economy.js";
+import { enforceLoyaltySlotCap, chargeChipUpkeep, slotCapacity, effectiveBuildCost, buildableChips, applyOutputAndBuilds } from "./economy.js";
 
 const seed = Number(process.argv[2]) || 42;
 const line = (s = "") => console.log(s);
@@ -3194,6 +3194,143 @@ line("\n  [Phase 11] text-token resolver");
   const both = resolveTokens(g, "{faction:active} marches on {location:active-capital}");
   check("multiple tokens resolve independently in one pass",
     both.includes(activeName) && !both.includes("{"));
+}
+
+
+// Phase 12 — chip content batch v0.1 (docs/chip-set-v0.1.md,
+// docs/location-chips-v0.1.md): the one-chip-per-stat rule, faction-locked
+// signatures, and the per-Location behavior chips.
+{
+  line("\n  [Phase 12] chip content batch v0.1");
+  const install = (g, holder, chipId) => {
+    const uid = g.nextId("chip");
+    g.chips[uid] = { uid, chipId };
+    holder.chips.push(uid);
+    recomputeStats(g); recomputeResearch(g); recomputeInfluence(g);
+    return uid;
+  };
+
+  // -- logistics-hub actionBonus: install BEFORE the first startTurn so the
+  // Upkeep grant is observable on the opening turn.
+  const gH = createGame({ seed: 91 });
+  const hubPid = gH.turnOrder[gH.activeIndex];
+  const hubLoc = Object.values(gH.locations).find((l) => l.controller === hubPid);
+  install(gH, hubLoc, "logistics-hub");
+  startTurn(gH);
+  check("logistics-hub grants +1 Action at Upkeep (actionBonus)",
+    gH.players[hubPid].actions.remaining === gH.players[hubPid].actions.max + 1);
+
+  const g12 = createGame({ seed: 92 });
+  startTurn(g12);
+  const pid = g12.turnOrder[g12.activeIndex];
+  const p12 = g12.players[pid];
+  p12.resource = 99;
+  p12.actions.remaining = 99;
+  p12.permanentResearch = 20; recomputeResearch(g12); // Tech L5 — nothing gated
+  const home = Object.values(g12.locations).find((l) => l.controller === pid);
+  const grunt = Object.values(g12.units).find((u) => u.owner === pid);
+  grunt.node = home.hexId;
+
+  // -- one-chip-per-stat: a strength chip blocks a second strength chip on
+  // the same unit but not a movement chip.
+  install(g12, grunt, "drilled-troops");
+  const dupe = performAction(g12, "build", { at: home.hexId, chipId: "sharpened-blades" });
+  check("one-per-stat: second Strength chip refused on the same unit", !dupe.ok);
+  const cross = performAction(g12, "build", { at: home.hexId, chipId: "navigator" });
+  check("one-per-stat: a Movement chip still installs beside a Strength chip", !!cross.ok);
+  home.activeBuild = null; home.buildProgress = 0; // clear for later checks
+
+  // -- faction lock: only your own signature shows in the build menu.
+  const menuIds = buildableChips(g12, home).map((o) => o.chipId);
+  const ownSig = { versari: "burning-glass", goldgrass: "guest-house", lakers: "motor-pool", plainers: "waystation" }[pid];
+  const foreignSigs = ["burning-glass", "guest-house", "motor-pool", "waystation"].filter((c) => c !== ownSig);
+  check("faction lock: own signature chip is offered", menuIds.includes(ownSig));
+  check("faction lock: foreign signature chips are hidden", foreignSigs.every((c) => !menuIds.includes(c)));
+  const foreign = performAction(g12, "build", { at: home.hexId, chipId: foreignSigs[0] });
+  check("faction lock: building a foreign signature is refused", !foreign.ok);
+
+  // -- civic-hall: faster rise while garrisoned, no decay while neglected.
+  const town = Object.values(g12.locations).find((l) => !l.controller);
+  town.controller = pid; town.loyaltyOwner = pid;
+  town.sections = town.sections.map(() => pid);
+  town.loyalty = 4;
+  install(g12, town, "civic-hall");
+  const sentry = Object.values(g12.units).filter((u) => u.owner === pid)[1] || grunt;
+  const sentryHome = sentry.node;
+  sentry.node = town.hexId;
+  tickLoyalty(g12, pid);
+  check("civic-hall: garrisoned Loyalty rises 2/Upkeep (base 1 + chip 1)", town.loyalty === 6);
+  sentry.node = sentryHome; grunt.node = home.hexId;
+  tickLoyalty(g12, pid);
+  check("civic-hall: neglected Loyalty holds instead of decaying", town.loyalty === 6);
+
+  // -- works: +1 build progress even with the slider fully on scrap.
+  town.activeBuild = { kind: "build", chipId: "recyclers", cost: 99, targetSlot: 0 };
+  town.buildProgress = 0; town.buildSlider = 0;
+  install(g12, town, "works");
+  applyOutputAndBuilds(g12, pid);
+  check("works: active build advances +1/turn outside the slider split", town.buildProgress >= 1);
+  town.activeBuild = null;
+
+  // -- motor-pool: recruit discount reads through recruitCostAt.
+  install(g12, town, "motor-pool"); // install directly — build path is faction-locked elsewhere
+  check("motor-pool: recruit cost drops by the chip discount", recruitCostAt(g12, town) === CONFIG.unitRecruitCost - 2);
+
+  // -- waystation: a unit opening its turn on the chip's Location gets +1
+  // Movement for that turn via an until_your_next_turn modifier.
+  install(g12, home, "waystation");
+  grunt.node = home.hexId;
+  const baseMove = grunt.movement;
+  startTurn(g12); // cycles to the next player's Upkeep…
+  while (g12.turnOrder[g12.activeIndex] !== pid) { endTurn(g12); startTurn(g12); }
+  check("waystation: +1 Movement on the turn a unit starts there", grunt.movement === baseMove + 1);
+
+  // -- burning-glass: pre-contest erosion on the attacker.
+  const gBG = createGame({ seed: 93 });
+  startTurn(gBG);
+  const atkPid = gBG.turnOrder[gBG.activeIndex];
+  gBG.players[atkPid].actions.remaining = 9;
+  const foePid = gBG.turnOrder.find((f) => f !== atkPid);
+  const foeLoc = Object.values(gBG.locations).find((l) => l.controller === foePid);
+  const igniter = gBG.nextId("chip");
+  gBG.chips[igniter] = { uid: igniter, chipId: "burning-glass" };
+  foeLoc.chips.push(igniter);
+  const raider = Object.values(gBG.units).find((u) => u.owner === atkPid);
+  raider.node = foeLoc.hexId;
+  performAction(gBG, "contest", { unit: raider.uid });
+  const burn = gBG.log.find((e) => e.name === "garrison_erosion");
+  check("burning-glass: attacker erodes 1 base Strength before the contest",
+    !!burn && burn.payload.amount === 1 && burn.payload.unit === raider.uid);
+
+  // -- bombard: static defenses zeroed on a Location contest.
+  const gSG = createGame({ seed: 94 });
+  startTurn(gSG);
+  const sgPid = gSG.turnOrder[gSG.activeIndex];
+  gSG.players[sgPid].actions.remaining = 9;
+  const sgFoe = gSG.turnOrder.find((f) => f !== sgPid);
+  const sgLoc = Object.values(gSG.locations).find((l) => l.controller === sgFoe);
+  const defU = Object.values(gSG.units).find((u) => u.owner === sgFoe);
+  defU.node = sgLoc.hexId; defU.fortified = true; defU.movedSinceUpkeep = false;
+  const sgAtk = Object.values(gSG.units).find((u) => u.owner === sgPid);
+  sgAtk.node = sgLoc.hexId;
+  install(gSG, sgAtk, "bombard");
+  const sgRes = performAction(gSG, "contest", { unit: sgAtk.uid });
+  check("bombard: a fortified defender's static bonus is flattened (siege)",
+    sgRes.attackerSiege === true && sgRes.defenderFortify === 0);
+
+  // -- guest-house: standing toward the host rises for non-belligerents.
+  const gGH = createGame({ seed: 95 });
+  const host = gGH.turnOrder[0];
+  const hostLoc = Object.values(gGH.locations).find((l) => l.controller === host);
+  const parlor = gGH.nextId("chip");
+  gGH.chips[parlor] = { uid: parlor, chipId: "guest-house" };
+  hostLoc.chips.push(parlor);
+  const guest = gGH.turnOrder[1];
+  const before = getStanding(gGH, guest, host);
+  runDiplomacyRound(gGH);
+  const after = getStanding(gGH, guest, host);
+  check("guest-house: a non-belligerent's Standing toward the host rises",
+    after > before || after >= CONFIG.diplomacy.tiers.friendly);
 }
 
 line(`\n  v0.2 verification: ${v2pass} passed, ${v2fail} failed`);

@@ -74,22 +74,35 @@ export const CHIP_COLOR = {
 // Unit upgrade chips. Costs are placeholders (scrap). `str`/`mov` are
 // the structured deltas the UI uses to compute effective unit stats.
 export const UNIT_UPGRADES = {
-  landship: { id: "landship", name: "Landship", kind: "unit", cost: 5, rare: true, str: 0, mov: 2, effect: "+2 Movement" },
-  sharpenedBlades: { id: "sharpenedBlades", name: "Sharpened Blades", kind: "unit", cost: 3, str: 2, mov: 0, effect: "+2 Strength" },
-  drilledTroops: { id: "drilledTroops", name: "Drilled Troops", kind: "unit", cost: 2, str: 1, mov: 0, effect: "+1 Strength" },
-  navigator: { id: "navigator", name: "Navigator", kind: "unit", cost: 2, str: 0, mov: 1, effect: "+1 Movement" },
-  cannons: { id: "cannons", name: "Cannons", kind: "unit", cost: 5, str: 3, mov: 0, effect: "+3 Strength" },
+  drilledTroops: { id: "drilledTroops", name: "Drilled Troops", kind: "unit", cost: 3, str: 1, mov: 0, effect: "+1 Strength" },
+  sharpenedBlades: { id: "sharpenedBlades", name: "Sharpened Blades", kind: "unit", cost: 6, str: 2, mov: 0, effect: "+2 Strength" },
+  bombard: { id: "bombard", name: "Bombard", kind: "unit", cost: 12, rare: true, str: 3, mov: 0, effect: "+3 Strength; ignores static defenses" },
+  navigator: { id: "navigator", name: "Navigator", kind: "unit", cost: 3, str: 0, mov: 1, effect: "+1 Movement" },
+  troopCarrier: { id: "troopCarrier", name: "Troop Carrier", kind: "unit", cost: 6, str: 0, mov: 2, effect: "+2 Movement" },
+  landship: { id: "landship", name: "Landship", kind: "unit", cost: 12, rare: true, str: 0, mov: 3, effect: "+3 Movement; ignores terrain" },
+  fieldGlass: { id: "fieldGlass", name: "Field Glass", kind: "unit", cost: 3, str: 0, mov: 0, effect: "+1 Vision" },
+  spotterNet: { id: "spotterNet", name: "Spotter Net", kind: "unit", cost: 6, str: 0, mov: 0, effect: "+1 Vision, +1 Detection" },
 };
 
 // Location upgrade chips. Costs are placeholders (scrap).
 export const LOCATION_UPGRADES = {
   defenseTurrets: { id: "defenseTurrets", name: "Defense Turrets", kind: "location", cost: 4, short: "+2 Garrison", effect: "+2 Strength to this location's garrison." },
-  townHall: { id: "townHall", name: "Town Hall", kind: "location", cost: 3, short: "+1 Decay Limit", effect: "+1 to this location's decay limit (foothold cap)." },
+  stronghold: { id: "stronghold", name: "Stronghold", kind: "location", cost: 7, short: "+4 Garrison", effect: "+4 Strength to this location's garrison (upkeep 1)." },
   recyclers: { id: "recyclers", name: "Recyclers", kind: "location", cost: 3, short: "+1 Scrap / turn", effect: "+1 scrap production each turn." },
-  factory: { id: "factory", name: "Factory", kind: "location", cost: 5, short: "+2 Scrap / turn", effect: "+2 scrap production each turn." },
+  factory: { id: "factory", name: "Factory", kind: "location", cost: 6, short: "+2 Scrap / turn", effect: "+2 scrap production each turn." },
+  works: { id: "works", name: "Works", kind: "location", cost: 4, short: "+1 Build / turn", effect: "+1 build progress each turn toward this location's active build." },
   reconTeam: { id: "reconTeam", name: "Recon Team", kind: "location", cost: 3, short: "Encounter Redraw", effect: "When you draw from the encounter deck, you may discard it and draw again." },
   trainingGrounds: { id: "trainingGrounds", name: "Training Grounds", kind: "location", cost: 4, short: "+1 Unit Cap", effect: "Prerequisite for creating units. Raises your unit cap by 1." },
-  logisticsHub: { id: "logisticsHub", name: "Logistics Hub", kind: "location", cost: 6, rare: true, short: "+1 Action / turn", effect: "+1 Action each of your turns." },
+  infirmary: { id: "infirmary", name: "Infirmary", kind: "location", cost: 5, short: "+1 Heal / turn", effect: "Units here heal +1 more per Upkeep; instant reinforce costs 1 scrap per Strength." },
+  watchtower: { id: "watchtower", name: "Watchtower", kind: "location", cost: 3, short: "+1 Vision / Detection", effect: "This location sees +1 further and pierces concealment at +1." },
+  beacon: { id: "beacon", name: "Beacon", kind: "location", cost: 4, short: "+2 Influence", effect: "+2 Influence projected by this location." },
+  broadcast: { id: "broadcast", name: "Broadcast", kind: "location", cost: 7, short: "+2 Influence, +1 Range", effect: "+2 Influence projected by this location and +1 Influence range." },
+  civicHall: { id: "civicHall", name: "Civic Hall", kind: "location", cost: 5, short: "Loyalty Engine", effect: "Loyalty rises +1 extra while garrisoned and never decays while neglected." },
+  logisticsHub: { id: "logisticsHub", name: "Logistics Hub", kind: "location", cost: 12, rare: true, short: "+1 Action / turn", effect: "+1 Action each of your turns." },
+  burningGlass: { id: "burningGlass", name: "Burning Glass", kind: "location", cost: 6, short: "+2 Garrison, Burn", effect: "Versari signature. +2 garrison; attackers lose 1 Strength before the contest." },
+  guestHouse: { id: "guestHouse", name: "Guest House", kind: "location", cost: 5, short: "Standing Rises", effect: "Goldgrass signature. Standing toward you rises each round with factions you are not at war with." },
+  motorPool: { id: "motorPool", name: "Motor Pool", kind: "location", cost: 5, short: "Cheap Recruits", effect: "Lakers signature. Recruiting here costs 2 less scrap; +1 unit cap." },
+  waystation: { id: "waystation", name: "Waystation", kind: "location", cost: 5, short: "+1 Move at Start", effect: "Plainers signature. Friendly units starting their turn here gain +1 Movement that turn." },
   capital: { id: "capital", name: "Capital", kind: "capital", cost: 0, special: true, short: "Capital Seat", effect: "This location cannot decay. +1 garrison Strength and +1 scrap production. One per player; removed if the location is captured." },
 };
 

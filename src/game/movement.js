@@ -6,6 +6,7 @@
 // controlled Location hexes block the same way.
 import { CONFIG } from "./config.js";
 import { movementField, movementRoute } from "./board.js";
+import { CHIPS } from "./content.js";
 import { getStanding } from "./standing.js";
 import { arePacted, vassalLord } from "./diplomacy.js";
 
@@ -42,11 +43,20 @@ export function movementBlockers(state, ownerId) {
 // Terrain-, road- and blockade-aware reachability for `unit` this turn →
 // { hexId: movement points remaining }. The single source of truth shared by
 // the Move action, the AI, and the UI's reachable-hex highlight.
+// Landship-class chips (`ignoresTerrain`) let their carrier treat forest
+// and mountains as open ground. Dormant chips grant nothing.
+export function unitIgnoresTerrain(state, unit) {
+  return unit.chips.some(
+    (c) => !state.chips[c]?.disabled && CHIPS[state.chips[c]?.chipId]?.ignoresTerrain,
+  );
+}
+
 export function unitReach(state, unit) {
   if (!unit) return {};
   const budget = unit.moveRemaining ?? unit.movement ?? 0;
   return movementField(state, unit.node, budget, {
     blockedThrough: movementBlockers(state, unit.owner),
+    ignoreTerrain: unitIgnoresTerrain(state, unit),
   });
 }
 
@@ -57,6 +67,7 @@ export function unitMovePath(state, unit, dest) {
   const budget = unit.moveRemaining ?? unit.movement ?? 0;
   return movementRoute(state, unit.node, budget, dest, {
     blockedThrough: movementBlockers(state, unit.owner),
+    ignoreTerrain: unitIgnoresTerrain(state, unit),
   });
 }
 

@@ -15,6 +15,19 @@ import { applyOutputAndBuilds, chargeChipUpkeep, enforceLoyaltySlotCap } from ".
 import { runDiplomacyRound } from "./diplomacy.js";
 import { hasTechNode } from "./tech.js";
 import { chargePostUpkeep } from "./posts.js";
+import { CHIPS } from "./content.js";
+
+// Sum a numeric chip field across a Location's installed, non-dormant
+// chips — the shared reader for the per-Location behavior chips
+// (loyaltyRise, healBonus, actionBonus, …).
+function locChipSum(state, loc, field) {
+  let n = 0;
+  for (const c of loc.chips) {
+    if (state.chips[c]?.disabled) continue;
+    n += CHIPS[state.chips[c]?.chipId]?.[field] || 0;
+  }
+  return n;
+}
 
 function expireModifiers(state, pid) {
   const own = new Set(
@@ -50,10 +63,18 @@ export function tickLoyalty(state, pid) {
     if (garrisoned) {
       // Integrating — Loyalty rises to the fixed ceiling. A returning unit
       // also halts any in-progress peel simply by not reaching the peel path.
+      // A Civic Hall chip (loyaltyRise) accelerates the climb.
       if ((loc.loyalty ?? 0) < cfg.ceiling) {
-        loc.loyalty = Math.min((loc.loyalty ?? 0) + cfg.risePerUpkeep, cfg.ceiling);
+        const rise = cfg.risePerUpkeep + locChipSum(state, loc, "loyaltyRise");
+        loc.loyalty = Math.min((loc.loyalty ?? 0) + rise, cfg.ceiling);
         emit(state, "loyalty_changed", { hex: loc.hexId, owner: pid, loyalty: loc.loyalty });
       }
+      continue;
+    }
+
+    // A Civic Hall chip holds Loyalty where it stands while neglected — no
+    // bleed, and therefore never the peel path either.
+    if (loc.chips.some((c) => !state.chips[c]?.disabled && CHIPS[state.chips[c]?.chipId]?.noLoyaltyDecay)) {
       continue;
     }
 
@@ -128,8 +149,10 @@ function passiveHeal(state, pid) {
     if (u.baseStrength >= cap) continue;
     const before = u.baseStrength;
     // §17.5 Logistics B1 (Field Hospital): +1 more heal/Upkeep — ADDS to the
-    // §16.5 base, so a holder mends 2/Upkeep on held Locations.
-    const healAmt = CONFIG.heal.passivePerTurn + (hasTechNode(state, pid, "log-b1") ? 1 : 0);
+    // §16.5 base, so a holder mends 2/Upkeep on held Locations. An Infirmary
+    // chip on this Location (healBonus) adds on top of both.
+    const healAmt = CONFIG.heal.passivePerTurn + (hasTechNode(state, pid, "log-b1") ? 1 : 0) +
+      locChipSum(state, loc, "healBonus");
     u.baseStrength = Math.min(cap, u.baseStrength + healAmt);
     recomputeStats(state);
     emit(state, "unit_reinforced", { unit: u.uid, amount: u.baseStrength - before });
@@ -145,6 +168,12 @@ export function startTurn(state) {
 
   const p = state.players[pid];
   p.actions.remaining = p.actions.max;
+  // Logistics Hub (chip `actionBonus`): +1 Action per installed, paid-up hub
+  // on a Location this player holds.
+  for (const loc of Object.values(state.locations)) {
+    if (loc.controller !== pid) continue;
+    p.actions.remaining += locChipSum(state, loc, "actionBonus");
+  }
   state.pendingActionGrants = state.pendingActionGrants.filter((g) => {
     if (g.player === pid) {
       p.actions.remaining += g.amount;
@@ -154,6 +183,22 @@ export function startTurn(state) {
   });
 
   expireModifiers(state, pid);
+  // Waystation (chip `turnStartMovement`): a friendly unit opening its turn
+  // on the chip's Location gets +1 Movement for this turn only — expressed
+  // as an until_your_next_turn modifier so the existing stat/expiry
+  // machinery does all the bookkeeping (expireModifiers above just cleared
+  // last turn's grants).
+  for (const u of Object.values(state.units)) {
+    if (u.owner !== pid) continue;
+    const loc = state.locations[u.node];
+    if (!loc || loc.controller !== pid) continue;
+    const bonus = locChipSum(state, loc, "turnStartMovement");
+    if (bonus > 0) {
+      state.modifiers.push({
+        target: u.uid, stat: "Movement", amount: bonus, duration: "until_your_next_turn",
+      });
+    }
+  }
   recomputeStats(state);
   refreshMoveBudget(state, pid);
   tickLoyalty(state, pid);

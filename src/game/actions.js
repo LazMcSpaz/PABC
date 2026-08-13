@@ -147,21 +147,33 @@ function ownedUnitCount(state, pid) {
   return Object.values(state.units).filter((u) => u.owner === pid).length;
 }
 
+// Motor Pool (and future recruiter chips): per-Location discount off the
+// base recruit cost, floored at 1 scrap. Dormant chips grant nothing.
+export function recruitCostAt(state, loc) {
+  let cost = CONFIG.unitRecruitCost;
+  for (const c of loc.chips) {
+    if (state.chips[c]?.disabled) continue;
+    cost -= CHIPS[state.chips[c]?.chipId]?.recruitDiscount || 0;
+  }
+  return Math.max(1, cost);
+}
+
 function validateRecruit(state, { pid, player, params }) {
   const loc = state.locations[params.at];
   if (!loc) return fail("no such location");
   if (loc.controller !== pid) return fail("you do not control that location");
   const capBonus = recruitCapBonus(state, pid);
   if (capBonus < 1) return fail("requires a chip that unlocks recruiting");
-  if (player.resource < CONFIG.unitRecruitCost) return fail("not enough scrap");
+  if (player.resource < recruitCostAt(state, loc)) return fail("not enough scrap");
   if (ownedUnitCount(state, pid) >= CONFIG.baseUnitCap + capBonus) return fail("unit cap reached");
   return { ok: true };
 }
 
 function runRecruit(state, { pid, player, params }) {
-  player.resource -= CONFIG.unitRecruitCost;
+  const cost = recruitCostAt(state, state.locations[params.at]);
+  player.resource -= cost;
   emit(state, "resource_spent", {
-    player: pid, resource: "Resource", amount: -CONFIG.unitRecruitCost,
+    player: pid, resource: "Resource", amount: -cost,
   });
 
   const loc = state.locations[params.at];
@@ -183,9 +195,16 @@ function unitStrengthCap(unit) {
 }
 
 // §17.5 Logistics B2 (Supply Convoys): a holder heals at 1 scrap per Strength
-// (was 2). Plain reinforcement uses the §16.5 base rate.
-function scrapPerStrengthFor(state, pid) {
-  return hasTechNode(state, pid, "log-b2") ? 1 : CONFIG.heal.scrapPerStrength;
+// (was 2). An Infirmary chip on the unit's own hex gives the same rate for
+// instant top-ups there. Plain reinforcement uses the §16.5 base rate.
+function scrapPerStrengthFor(state, pid, unit) {
+  if (hasTechNode(state, pid, "log-b2")) return 1;
+  const loc = unit && state.locations[unit.node];
+  if (loc && loc.controller === pid &&
+      loc.chips.some((c) => !state.chips[c]?.disabled && CHIPS[state.chips[c]?.chipId]?.cheapReinforce)) {
+    return 1;
+  }
+  return CONFIG.heal.scrapPerStrength;
 }
 
 function validateReinforce(state, { pid, player, params }) {
@@ -195,7 +214,7 @@ function validateReinforce(state, { pid, player, params }) {
   const cap = unitStrengthCap(unit);
   const deficit = cap - unit.baseStrength;
   if (deficit <= 0) return fail("unit is already at full Strength");
-  const cost = scrapPerStrengthFor(state, pid) * deficit;
+  const cost = scrapPerStrengthFor(state, pid, unit) * deficit;
   if (player.resource < cost) return fail("not enough scrap");
 
   const mode = params.mode || "instant";
@@ -217,7 +236,7 @@ function runReinforce(state, { pid, player, params }) {
   const unit = state.units[params.unit];
   const cap = unitStrengthCap(unit);
   const deficit = cap - unit.baseStrength;
-  const cost = scrapPerStrengthFor(state, pid) * deficit;
+  const cost = scrapPerStrengthFor(state, pid, unit) * deficit;
   player.resource -= cost;
   emit(state, "resource_spent", { player: pid, resource: "Resource", amount: -cost });
 
@@ -262,11 +281,14 @@ function validateBuild(state, { pid, player, params }) {
   if (loc.controller !== pid) return fail("you do not fully control that location");
   const def = CHIPS[params.chipId];
   if (!def) return fail("unknown chip");
+  if (def.faction && def.faction !== pid) return fail("that chip is another faction's signature");
   if (!meetsTech(player, def)) return fail(`needs Tech Level ${techLevelReqFor(def.techLevel || 1)}`);
   if (!meetsLoyalty(loc, def)) return fail(`needs Loyalty ${def.loyaltyReq}`);
   if (def.kind === "unit") {
-    if (!stationedUnitWithBay(state, loc, def.slots || 1))
-      return fail("needs a friendly unit stationed here with bay space");
+    if (!stationedUnitWithBay(state, loc, def.slots || 1, def.statType))
+      return fail(def.statType
+        ? `needs a stationed friendly unit with bay space and no ${def.statType} chip`
+        : "needs a friendly unit stationed here with bay space");
   } else if (slotsUsed(state, loc.chips) + (def.slots || 1) > slotCapacity(loc, state)) {
     return fail("not enough chip slots");
   }
@@ -279,7 +301,7 @@ function runBuild(state, { params }) {
   const targetUnit = def.kind === "unit"
     ? (params.into?.unit && state.units[params.into.unit]?.node === loc.hexId
         ? params.into.unit
-        : stationedUnitWithBay(state, loc, def.slots || 1)?.uid)
+        : stationedUnitWithBay(state, loc, def.slots || 1, def.statType)?.uid)
     : null;
   loc.activeBuild = {
     kind: "build", chipId: def.id, cost: effectiveBuildCost(state, loc.controller, def),

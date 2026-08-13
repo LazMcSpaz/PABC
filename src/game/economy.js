@@ -94,6 +94,9 @@ export function buildableChips(state, loc) {
   if (!player) return [];
   const out = [];
   for (const def of Object.values(CHIPS)) {
+    // Signature chips are faction-locked — invisible to everyone else,
+    // including a captor browsing a captured Location's menu.
+    if (def.faction && def.faction !== loc.controller) continue;
     if (!meetsTech(player, def)) continue; // Tech-forbidden → not shown at all
     const locked = !meetsLoyalty(loc, def);
     out.push({
@@ -131,11 +134,21 @@ export function upgradeOption(state, loc, chipUid) {
   };
 }
 
-// A friendly unit stationed at the Location with room for `slots` more bay,
-// or null. Unit chips (§20.4) install into such a unit's Bay.
-export function stationedUnitWithBay(state, loc, slots) {
+// One-chip-per-stat rule (docs/chip-set-v0.1.md): does this unit already
+// carry a chip of `statType`? Dormant chips still hold their slot AND
+// their stat claim — dormancy is a payment lapse, not removal.
+export function unitHasStatType(state, unit, statType) {
+  if (!statType) return false;
+  return unit.chips.some((c) => CHIPS[state.chips[c]?.chipId]?.statType === statType);
+}
+
+// A friendly unit stationed at the Location with room for `slots` more bay
+// (and, when `statType` is given, no chip of that stat family already
+// installed), or null. Unit chips (§20.4) install into such a unit's Bay.
+export function stationedUnitWithBay(state, loc, slots, statType) {
   for (const u of Object.values(state.units)) {
     if (u.owner !== loc.controller || u.node !== loc.hexId) continue;
+    if (statType && unitHasStatType(state, u, statType)) continue;
     if (slotsUsed(state, u.chips) + slots <= CONFIG.unit.baySlots) return u;
   }
   return null;
@@ -153,7 +166,13 @@ function processLocationEconomy(state, loc) {
 
   const f = Math.max(0, Math.min(1, loc.buildSlider ?? 0));
   const scrapGain = Math.floor((1 - f) * output);
-  const buildGain = output - scrapGain; // conserve the total; build keeps the remainder
+  let buildGain = output - scrapGain; // conserve the total; build keeps the remainder
+  // Works chip: flat extra build progress, outside the slider split (it's
+  // labor, not Output). Only while something is actually under construction.
+  for (const c of loc.chips) {
+    if (state.chips[c]?.disabled) continue;
+    buildGain += chipDefOf(state, c)?.buildRate || 0;
+  }
   loc.buildProgress = (loc.buildProgress || 0) + buildGain;
   completeBuildIfDone(state, loc);
   return scrapGain;
@@ -193,9 +212,10 @@ export function completeBuildIfDone(state, loc) {
     if (def?.kind === "unit") {
       const u = ab.targetUnit && state.units[ab.targetUnit];
       const target = u && u.node === loc.hexId && u.owner === loc.controller &&
-        slotsUsed(state, u.chips) + (def.slots || 1) <= CONFIG.unit.baySlots
+        slotsUsed(state, u.chips) + (def.slots || 1) <= CONFIG.unit.baySlots &&
+        !unitHasStatType(state, u, def.statType)
         ? u
-        : stationedUnitWithBay(state, loc, def.slots || 1);
+        : stationedUnitWithBay(state, loc, def.slots || 1, def.statType);
       if (!target) {
         // No friendly unit to arm — forfeit (the chip never lands).
         delete state.chips[uid];

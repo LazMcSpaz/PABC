@@ -615,6 +615,26 @@ export function runContest(state, { pid, params, ctx = {} }) {
     return { won: false, cancelled: true, kind: t.kind };
   }
 
+  // Burning Glass (chip `garrisonErosion`): marching on the mirror wall
+  // costs the attacker base Strength BEFORE the contest resolves. Floor 1 —
+  // the beam burns, it doesn't finish the job — so a weakened attacker
+  // limps into the fight rather than dying on approach.
+  if (t.kind === "location") {
+    let erosion = 0;
+    for (const c of t.loc.chips) {
+      if (state.chips[c]?.disabled) continue;
+      erosion += CHIPS[state.chips[c]?.chipId]?.garrisonErosion || 0;
+    }
+    if (erosion > 0 && unit.baseStrength > 1) {
+      const before = unit.baseStrength;
+      unit.baseStrength = Math.max(1, unit.baseStrength - erosion);
+      recomputeStats(state);
+      emit(state, "garrison_erosion", {
+        hex: t.loc.hexId, unit: unit.uid, player: pid, amount: before - unit.baseStrength,
+      });
+    }
+  }
+
   // §9 step 2 — roll. defValue and unit.strength are read AFTER the
   // window so any MODIFY_STAT from on-mode subscribers is reflected.
   //
@@ -657,7 +677,14 @@ export function runContest(state, { pid, params, ctx = {} }) {
   // §16.6 combat levers — additive modifiers computed before the roll.
   const atkConcentration = concentration(state, pid, unit.node, unit.uid);
   const atkVeteran = unit.veteran ? CONFIG.combat.veteranBonus : 0;
-  const defMountain =
+  // Bombard (chip `siege`): a siege piece contesting a LOCATION negates the
+  // defence's static bonuses — high ground, dug-in fortify (incl. the
+  // Turrets doubling) and the Turrets contest point. Raids (units in the
+  // open) have no walls to flatten, so siege does nothing there.
+  const siege = t.kind === "location" && unit.chips.some(
+    (c) => !state.chips[c]?.disabled && CHIPS[state.chips[c]?.chipId]?.siege,
+  );
+  let defMountain =
     state.board.hexes[defHex]?.terrain === "mountain" ? CONFIG.combat.mountainDefenseBonus : 0;
   let defConcentration = 0, defFortify = 0, defVeteran = 0;
   if (defenderUnit) {
@@ -666,6 +693,7 @@ export function runContest(state, { pid, params, ctx = {} }) {
     if (defenderUnit.fortified) defFortify = CONFIG.combat.fortifyBonus * (turrets ? 2 : 1);
     if (defenderUnit.veteran) defVeteran = CONFIG.combat.veteranBonus;
   }
+  if (siege) { defMountain = 0; defFortify = 0; }
 
   // §17.5 Military entry (Doctrine): +1 to that player's contest roll,
   // whether they are attacking or defending. The defending player is the
@@ -680,8 +708,9 @@ export function runContest(state, { pid, params, ctx = {} }) {
   // §17.5 Military A1 (Vanguard): +1 to the INITIATOR's roll (you attacking) —
   // ADDS to Doctrine (so +2 attacking, +1 defending for a holder of both).
   const atkVanguard = hasTechNode(state, pid, "mil-a1") ? 1 : 0;
-  // §17.5 Military B1 (Turrets): +1 contest for the defender on its own hex.
-  const defTurrets = turrets ? 1 : 0;
+  // §17.5 Military B1 (Turrets): +1 contest for the defender on its own hex
+  // (flattened by a siege attacker along with the other static defences).
+  const defTurrets = turrets && !siege ? 1 : 0;
 
   // House rule (departs from spec §9): a Location defended purely by its
   // garrison — no defending unit — does NOT roll a d6.
@@ -718,6 +747,7 @@ export function runContest(state, { pid, params, ctx = {} }) {
     defenderAllies: defAllies, defenderMilitary: defMilitary, defenderTurrets: defTurrets,
     // §19.5 ambush
     attackerAmbush, defenderAmbush, attackerAmbushBonus: atkAmbush, defenderAmbushBonus: defAmbush,
+    attackerSiege: siege,
   };
   const winnerUnit = won ? attackerUnit : defenderUnit;
   const loserUnit = won ? defenderUnit : attackerUnit;

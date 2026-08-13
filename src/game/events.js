@@ -37,7 +37,7 @@ export const EVENT_NAMES = new Set([
   // Influence branch never collides). The Market is retired, so `market_churned`
   // is dropped with it.
   "build_started", "build_completed", "chip_upgraded",
-  "chip_dormant", "chip_reactivated", "slider_changed",
+  "chip_dormant", "chip_reactivated", "slider_changed", "garrison_erosion",
   // §19 Exploration, Vision & Fog of War (APPEND-ONLY — distinct keys).
   "hex_explored", "unit_spotted", "unit_lost_sight", "ambush_triggered",
   // §17.7 Listening Post (Intelligence A2) lifecycle (APPEND-ONLY).

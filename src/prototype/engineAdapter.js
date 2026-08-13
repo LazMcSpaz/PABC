@@ -11,6 +11,7 @@ import {
   LOCATIONS as ENGINE_LOCATIONS,
   CHIPS as ENGINE_CHIPS,
   ABILITIES as ENGINE_ABILITIES,
+  chipDisplayName,
 } from "../game/content.js";
 import {
   buildableChips, upgradeOption, slotCapacity, slotsUsed, locationOutput,
@@ -41,11 +42,17 @@ const ENGINE_TO_UI_LOC = {
 const ENGINE_TO_UI_CHIP = {
   "sharpened-blades": "sharpenedBlades",
   "drilled-troops": "drilledTroops",
+  "troop-carrier": "troopCarrier",
+  "field-glass": "fieldGlass",
+  "spotter-net": "spotterNet",
   "training-grounds": "trainingGrounds",
   "defense-turrets": "defenseTurrets",
   "logistics-hub": "logisticsHub",
-  "town-hall": "townHall",
   "recon-team": "reconTeam",
+  "civic-hall": "civicHall",
+  "burning-glass": "burningGlass",
+  "guest-house": "guestHouse",
+  "motor-pool": "motorPool",
 };
 const UI_TO_ENGINE_CHIP = Object.fromEntries(
   Object.entries(ENGINE_TO_UI_CHIP).map(([e, u]) => [u, e]),
@@ -414,7 +421,7 @@ function adaptEconomy(state, loc) {
     return {
       chipId: o.chipId,
       uiChipId: engineChipIdToUi(o.chipId),
-      name: o.def.name,
+      name: chipDisplayName(o.chipId, loc.controller),
       kind: o.def.kind,
       cost: o.def.buildCost ?? o.def.cost ?? 0,
       slots: o.def.slots || 1,
@@ -432,7 +439,7 @@ function adaptEconomy(state, loc) {
       upgrades[chipUid] = {
         chipId: opt.chipId,
         uiChipId: engineChipIdToUi(opt.chipId),
-        name: opt.def.name,
+        name: chipDisplayName(opt.chipId, loc.controller),
         cost: opt.def.buildCost ?? opt.def.cost ?? 0,
         desc: opt.def.desc || "",
         locked: opt.locked,
@@ -456,7 +463,7 @@ function adaptEconomy(state, loc) {
           kind: ab.kind,
           chipId: ab.chipId,
           uiChipId: engineChipIdToUi(ab.chipId),
-          name: ENGINE_CHIPS[ab.chipId]?.name || ab.chipId,
+          name: chipDisplayName(ab.chipId, loc.controller),
           cost: ab.cost,
           progress: loc.buildProgress || 0,
           remaining: Math.max(0, ab.cost - (loc.buildProgress || 0)),
