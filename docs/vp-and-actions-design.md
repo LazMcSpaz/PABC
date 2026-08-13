@@ -152,3 +152,38 @@ section count and with or without defender gear. Two bonus findings:
    chip/tech re-mappings; HUD).
 4. Influence pressure (own pass — ZoC dominance bleed + Menace cost).
 5. AI overhaul, written once against the per-entity model.
+
+## 4. Action rework — implementation plan (next up)
+
+The locked cost table (who pays for what once the global pool retires):
+
+| Action | Payer | Notes |
+|---|---|---|
+| move | nobody | already its own per-unit budget (v0.2) |
+| contest | initiating UNIT + every coalition member | `params.coalition` exists; dispatcher charges members |
+| build-post | UNIT | the builder digs in |
+| recruit | LOCATION | the town musters |
+| reinforce (instant) | LOCATION the unit stands on | the depot does the fitting |
+| reinforce (field) | ORIGIN Location of the convoy route | it dispatches the convoy |
+| rush | LOCATION | |
+| remove-chip | LOCATION | the refit yard works |
+| activate (ability) | LOCATION | replaces `cost.action`; scrap costs stay |
+| build / upgrade / set-slider | free | queuing intent stays free |
+| activate-chip | free | scrap is the cost (Cold Camp) |
+| sabotage / diplomacy verbs | player-scoped | sabotage keeps its once-per-round stamp |
+
+Re-mappings: chip `actionBonus` (Logistics Hub) grants its LOCATION +1
+action ("the city works overtime"); Staging Ground's GRANT_ACTIONS
+retargets to `stationed_unit` (+1 unit action — the launchpad);
+GRANT_ACTIONS becomes entity-scoped generally (pendingActionGrants and
+reactive-card grants resolve onto an entity).
+
+File inventory: state (unit.actionsRemaining / loc.actionsRemaining,
+reset in startTurn), actions.js dispatcher (per-action payer resolution
+replaces the flat `cost` field), effects.js GRANT_ACTIONS, ai.js (loops
+over the global pool today — becomes per-asset policies; this IS the AI
+overhaul's entry point), HudChrome/engineAdapter (per-entity action
+pips replace the global counter), harness (many fixtures set
+`players[x].actions.remaining = 99` — replace with entity-budget
+helpers). Sim script model definitions collapse: model C becomes simply
+"the rules".
