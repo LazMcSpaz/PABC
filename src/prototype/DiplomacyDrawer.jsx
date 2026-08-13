@@ -100,7 +100,7 @@ const TIER_COLOR = {
 // Verbs the drawer renders. Order = how they appear in the actions
 // menu. Each carries label / description / destructive flag.
 const VERB_META = {
-  "gift":                  { label: "Gift", body: "Send scrap. Raises their Standing toward you." },
+  "gift":                  { label: "Gift", body: "Send scrap. Raises their Standing toward you.", isPane: "gift" },
   "propose-deal":          { label: "Custom Deal", body: "Build a give/get offer. Opens the deal builder.", isPane: "deal" },
   "demand-tribute":        { label: "Demand Tribute", body: "Take, don't ask. Stains Honor if refused.", isPane: "tribute", destructive: true },
   "sue-for-peace":         { label: "Sue for Peace", body: "Offer terms alongside the peace promise.", isPane: "peace" },
@@ -1224,6 +1224,7 @@ function DealPane({ f, dip, kind = "custom", onBack, onSubmit }) {
   const [openBorders, setOpenBorders] = useState(false);
   const isPeace = kind === "peace";
   const isTribute = kind === "tribute";
+  const isGift = kind === "gift";
 
   const deal = useMemo(() => {
     const give = [];
@@ -1236,8 +1237,10 @@ function DealPane({ f, dip, kind = "custom", onBack, onSubmit }) {
     return { proposer: dip.youId, recipient: f.id, give, get };
   }, [scrapGive, scrapGet, pactOffer, openBorders, dip.youId, f.id, isPeace, isTribute]);
 
-  const title = isPeace ? "Sue for peace" : isTribute ? "Demand tribute" : "Custom deal";
-  const subtitle = isPeace
+  const title = isGift ? "Send a gift" : isPeace ? "Sue for peace" : isTribute ? "Demand tribute" : "Custom deal";
+  const subtitle = isGift
+    ? "No strings attached — scrap for goodwill. Standing rises with the size of the gift."
+    : isPeace
     ? "The peace promise is fixed; everything else is yours to shape."
     : isTribute
     ? "Make them an offer they can refuse. Then live with the cost."
@@ -1261,10 +1264,12 @@ function DealPane({ f, dip, kind = "custom", onBack, onSubmit }) {
             <Card style={{ flex: 1 }}>
               <SectionLabel>You give</SectionLabel>
               <NumberRow label="Scrap" value={scrapGive} onChange={setScrapGive} max={50} disabled={isTribute} />
-              {!isPeace && (
+              {!isPeace && !isGift && (
                 <Toggle label="Offer pact" value={pactOffer} onChange={setPactOffer} />
               )}
-              <Toggle label="Open borders" value={openBorders} onChange={setOpenBorders} />
+              {!isGift && (
+                <Toggle label="Open borders" value={openBorders} onChange={setOpenBorders} />
+              )}
               {isPeace && (
                 <div style={{
                   fontFamily: C.font, fontSize: 10, letterSpacing: 1.2,
@@ -1275,19 +1280,22 @@ function DealPane({ f, dip, kind = "custom", onBack, onSubmit }) {
               )}
             </Card>
           )}
-          <Card style={{ flex: 1 }}>
-            <SectionLabel>You get</SectionLabel>
-            <NumberRow label="Scrap" value={scrapGet} onChange={setScrapGet} max={50} />
-          </Card>
+          {!isGift && (
+            <Card style={{ flex: 1 }}>
+              <SectionLabel>You get</SectionLabel>
+              <NumberRow label="Scrap" value={scrapGet} onChange={setScrapGet} max={50} />
+            </Card>
+          )}
         </div>
 
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
           <button onClick={onBack} className="hud-int" style={btnGhostStyle()}>Back</button>
           <button
             onClick={() => onSubmit(deal, kind)}
+            disabled={isGift && scrapGive <= 0}
             className="hud-int"
-            style={btnHoloStyle()}
-          >{isTribute ? "Demand" : isPeace ? "Sue for peace" : "Propose"}</button>
+            style={{ ...btnHoloStyle(), opacity: isGift && scrapGive <= 0 ? 0.5 : 1 }}
+          >{isGift ? "Send gift" : isTribute ? "Demand" : isPeace ? "Sue for peace" : "Propose"}</button>
         </div>
       </div>
     </div>
@@ -1722,6 +1730,18 @@ export default function DiplomacyDrawer({
                   onSubmit={(deal) => runFromPane("propose-deal", {
                     faction: selectedFaction.id,
                     give: deal.give, get: deal.get,
+                  })}
+                />
+              )}
+              {pane === "gift" && (
+                <DealPane
+                  kind="gift"
+                  f={selectedFaction}
+                  dip={dip}
+                  onBack={() => setPane(null)}
+                  onSubmit={(deal) => runFromPane("gift", {
+                    faction: selectedFaction.id,
+                    amount: deal.give.find((g) => g.resource)?.resource.amount || 0,
                   })}
                 />
               )}

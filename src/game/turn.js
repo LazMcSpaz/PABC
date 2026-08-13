@@ -17,7 +17,7 @@ import { adjustStanding } from "./standing.js";
 import { zocOwner } from "./influence.js";
 import { hasTechNode } from "./tech.js";
 import { chargePostUpkeep } from "./posts.js";
-import { CHIPS, LOCATIONS, ABILITIES } from "./content.js";
+import { CHIPS, LOCATIONS, ABILITIES, factionDef } from "./content.js";
 
 // Sum a numeric chip field across a Location's installed, non-dormant
 // chips — the shared reader for the per-Location behavior chips
@@ -168,10 +168,18 @@ function awardVp(state, pid, amount, source) {
   const p = state.players[pid];
   p.vp += amount;
   emit(state, "resource_gained", { player: pid, resource: "VP", amount, source });
-  if (p.vp >= CONFIG.vpThreshold && !state.winnerId) state.winnerId = pid;
+  // Only MAJOR factions race the victory threshold — a seeded minor can
+  // bank VP (captures etc.) but never wins the game.
+  if (p.vp >= CONFIG.vpThreshold && !state.winnerId && factionDef(pid)?.tier === "major") {
+    state.winnerId = pid;
+  }
 }
 
 function tickVictoryFaucets(state, pid) {
+  // The victory faucets are the MAJORS' race — seeded minors hold their
+  // ground but don't tick dominion or collect the alliance trickle
+  // (playtest log: Croppers/Dambarans were quietly accruing dominion VP).
+  if (factionDef(pid)?.tier !== "major") return;
   // Foreign dominion — cities you hold yourself.
   let dominion = 0;
   for (const loc of Object.values(state.locations)) {
@@ -187,9 +195,10 @@ function tickVictoryFaucets(state, pid) {
     }
   }
   awardVp(state, pid, vassalCities * CONFIG.victory.dominionPerCity, "vassal-dominion");
-  // Alliance trickle — pacted with a majority of the other surviving majors.
+  // Alliance trickle — pacted with a majority of the other surviving
+  // MAJORS (seeded minors in the turn order don't move the denominator).
   const others = state.turnOrder.filter(
-    (f) => f !== pid && !state.players[f]?.eliminated,
+    (f) => f !== pid && !state.players[f]?.eliminated && factionDef(f)?.tier === "major",
   );
   if (others.length > 0) {
     const pacts = others.filter((f) => arePacted(state, pid, f)).length;

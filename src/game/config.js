@@ -100,7 +100,10 @@ export const CONFIG = {
   // Derived per the spec — garrison Strength and base chip slots by a
   // location's strategic value.
   garrisonByValue: { low: 4, medium: 6, high: 8, veryHigh: 10 },
-  chipSlotsByValue: { low: 0, medium: 1, high: 2, veryHigh: 3 },
+  // Playtest: one slot per medium city meant a single build ended a town's
+  // development (and scrap piled up with nothing to sink into). Raised one
+  // across the board; the Loyalty-6 bonus slot still adds one more.
+  chipSlotsByValue: { low: 1, medium: 2, high: 3, veryHigh: 4 },
 
   // The v0.1 test board.
   testMap: [3, 4, 5, 6, 5, 4, 3], // 30 hexes
