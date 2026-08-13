@@ -3,6 +3,7 @@
 // props so the same chrome drives both the live game (Prototype.jsx) and
 // the static look-pass (HudShowcase.jsx).
 import { useEffect, useState } from "react";
+import { CONFIG } from "../game/config.js";
 import { motion } from "framer-motion";
 import ControlMeter from "./ControlMeter.jsx";
 import { useIsPhone, useViewportSize } from "./useViewport.js";
@@ -550,7 +551,7 @@ export function LocationWindow({ view, onClose, onActivate, onContest, onRecruit
             <SectionLabel>{v.ability.name}</SectionLabel>
             <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 6 }}>
               <p className="pc-prose" style={{ margin: 0, fontSize: 12.5, lineHeight: 1.5, color: C.text, flex: 1 }}>{v.ability.text}</p>
-              {v.ability.canActivate != null && (
+              {v.ability.canActivate != null && !v.ability.passiveOnly && (
                 <button className="hud-int" onClick={v.ability.canActivate ? () => onActivate?.(v.hexId) : undefined} disabled={!v.ability.canActivate}
                   style={{ flexShrink: 0, ...holoBtn, cursor: v.ability.canActivate ? "pointer" : "not-allowed", opacity: v.ability.canActivate ? 1 : 0.5 }}>
                   {v.ability.usedThisTurn ? "Used" : "Activate"}
@@ -641,9 +642,12 @@ function EconomyPanel({ hexId, eco, onBuild, onUpgrade, onRush, onSetSlider }) {
               {Math.floor(eco.activeBuild.progress)}/{eco.activeBuild.cost} · {eco.activeBuild.remaining} to go
             </div>
           </div>
-          <button className="hud-int" disabled={!can || eco.scrap < 1} onClick={can && eco.scrap >= 1 ? () => onRush?.(hexId) : undefined}
-            style={{ flexShrink: 0, fontFamily: C.font, fontSize: 11, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", color: "#1a1206", padding: "7px 12px", borderRadius: 6, border: "1px solid #8a6a16", background: `linear-gradient(180deg, #f0c44e, ${C.gold})`, boxShadow: `0 0 12px ${C.gold}55`, cursor: can && eco.scrap >= 1 ? "pointer" : "not-allowed", opacity: can && eco.scrap >= 1 ? 1 : 0.5 }}>
-            Rush
+          <button className="hud-int" disabled={!can || eco.scrap < CONFIG.economy.rushScrapPerPoint} onClick={can && eco.scrap >= CONFIG.economy.rushScrapPerPoint ? () => onRush?.(hexId) : undefined}
+            style={{ flexShrink: 0, fontFamily: C.font, fontSize: 11, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", color: "#1a1206", padding: "7px 12px", borderRadius: 6, border: "1px solid #8a6a16", background: `linear-gradient(180deg, #f0c44e, ${C.gold})`, boxShadow: `0 0 12px ${C.gold}55`, cursor: can && eco.scrap >= CONFIG.economy.rushScrapPerPoint ? "pointer" : "not-allowed", opacity: can && eco.scrap >= CONFIG.economy.rushScrapPerPoint ? 1 : 0.5 }}>
+            <span style={{ display: "block" }}>Rush</span>
+            <span style={{ display: "block", fontSize: 8.5, fontWeight: 600, letterSpacing: 0.4, textTransform: "none", opacity: 0.8 }}>
+              {CONFIG.economy.rushScrapPerPoint} scrap / point
+            </span>
           </button>
         </div>
       ) : (

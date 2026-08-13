@@ -167,6 +167,16 @@ function describeEffectShort(e) {
     }
     case "ADJUST_TRACK":
       return `${e.amount >= 0 ? "+" : ""}${e.amount} ${e.track}`;
+    case "MODIFY_STAT":
+      return `give a stationed unit ${e.amount >= 0 ? "+" : ""}${e.amount} ${e.stat}${e.duration === "this_turn" ? " this turn" : ""}`;
+    case "MOVE_CARD":
+      return "draw a Reactive card";
+    case "DISABLE_CHIP":
+      return "disable an enemy chip until your next turn";
+    case "STRIP_CHIP":
+      return "rip a chip off an enemy unit here (drops as loot)";
+    case "GRANT_CHIP":
+      return e.pool === "reward" ? "dig up a random reward chip" : "grant a chip";
     default:
       return e.type;
   }
