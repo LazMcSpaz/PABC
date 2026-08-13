@@ -151,7 +151,12 @@ export const CONFIG = {
                       // even point-blank; Detection comes from scout/recon/
                       // watchtower chips + the Intelligence vision path (§19.7).
     locationVisionBase: 1, // §19.3 a controlled Location's base sight
-    locationVisionPerLoyalty: 0.25, // + floor(loyalty × this): a loyal core sees farther
+    // + floor(loyalty × this): a loyal core sees farther — capped in
+    // practice at radius 2 (loyalty 8 → +1). At the old 0.25 a capital saw
+    // radius 3 = virtually the whole 30-hex board from turn one (the
+    // "why can I see everything" playtest report). Settlements now top out
+    // at 2; Watchtower/vision chips are the way to see farther.
+    locationVisionPerLoyalty: 0.125,
     zocVision: 0, // §19.3 ZoC-owned hexes contribute sight at this radius (0 = the hex itself)
     elevationVisionBonus: 1, // §19.4 a source on elevation sees +this (and over ridges)
     coverSightCost: 1, // §19.4 extra sight cost to see INTO a cover hex
