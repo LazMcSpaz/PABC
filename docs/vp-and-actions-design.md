@@ -127,8 +127,16 @@ section count and with or without defender gear. Two bonus findings:
 
 ## 3. Implementation order
 
-1. Dominion tick (foreign + vassal) + alliance trickle + elimination
-   rule — small, engine-side; games start ending.
+1. ✅ **DONE** — Dominion tick (foreign + vassal), alliance trickle (+1),
+   elimination + last-standing rule, and the chip-removal ruling
+   (remove-chip action: unit chips drop as hex loot, location chips are
+   demolished, the Capital is locked). Validation: all 8 tested seeds of
+   AI-vs-AI now END (winners at rounds 21–54, previously 0/8 by round
+   376+), with eliminations occurring and winners spread across
+   temperaments — including Goldgrass winning most via naturally-formed
+   pacts feeding the trickle. Versari never won in the sample: expected,
+   their influence-pressure tools don't exist yet (item 4) and the AI
+   doesn't scheme (item 5).
 2. Ability roster pass (Staging Ground nerf, Rail Corridor interim,
    Blacksite, Scrapyard, new passives) — per the ability brainstorm.
 3. Per-entity action rework (units/locations 1 action; coalition charging;

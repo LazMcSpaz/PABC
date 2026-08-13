@@ -5,6 +5,18 @@ export const CONFIG = {
   vpThreshold: 12,
   baseActions: 2,
 
+  // Repeatable VP faucets (docs/vp-and-actions-design.md §1). Dominion:
+  // +vpPerCity per Upkeep for each high/veryHigh Location the player (or a
+  // vassal of theirs) fully holds at Loyalty >= loyaltyMin that is NOT one
+  // of the player's own affiliated cities — dominion is rule over others'
+  // land, so a homeland never ticks. Alliance trickle: +allianceTrickle
+  // per Upkeep while pacted with a majority of the other surviving majors.
+  victory: {
+    dominionLoyaltyMin: 6,
+    dominionPerCity: 1,
+    allianceTrickle: 1,
+  },
+
   // §18.2 Loyalty — the 8-slice centre pie that replaces foothold/decay.
   // The ceiling is fixed; the rest are TBD-in-spec tunables, set here for
   // the demo. Capture starts low; a garrisoned, fully-held Location climbs

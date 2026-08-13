@@ -9,7 +9,7 @@ import { unitReach } from "./movement.js";
 import { CONFIG } from "./config.js";
 import { FACTIONS, CHIPS, ABILITIES, chipDefOf, factionDef } from "./content.js";
 import { validateContest, runContest } from "./contest.js";
-import { recomputeStats, effectiveVeteran } from "./stats.js";
+import { recomputeStats, recomputeResearch, effectiveVeteran } from "./stats.js";
 import { recomputeInfluence } from "./influence.js";
 import { recomputeVisibility } from "./visibility.js";
 import { applyEffects } from "./effects.js";
@@ -477,6 +477,45 @@ function runBuildPost(state, { pid, player, params }) {
   return { hex: post.hex };
 }
 
+// --- Remove chip (design ruling: chips are removable/replaceable) ------
+// Refit happens at a friendly Location. A removed UNIT chip drops as hex
+// loot (old gear hits the ground — anyone may claim it); a removed
+// LOCATION chip is demolished outright (buildings don't travel). The
+// Capital is never removable. Costs 1 Action.
+function validateRemoveChip(state, { pid, params }) {
+  const loc = state.locations[params.at];
+  if (!loc) return fail("no such location");
+  if (loc.controller !== pid) return fail("you do not fully control that location");
+  if (state.chips[params.chip]?.chipId === "capital") return fail("the Capital cannot be removed");
+  if (!findChipHolder(state, loc, params.chip, pid))
+    return fail("that chip is not installed at this location");
+  return { ok: true };
+}
+
+function runRemoveChip(state, { pid, params }) {
+  const loc = state.locations[params.at];
+  const holder = findChipHolder(state, loc, params.chip, pid);
+  const chipId = state.chips[params.chip]?.chipId;
+  if (holder.kind === "unit") {
+    const u = state.units[holder.uid];
+    u.chips.splice(u.chips.indexOf(params.chip), 1);
+    state.hexLoot = state.hexLoot || {};
+    (state.hexLoot[loc.hexId] = state.hexLoot[loc.hexId] || []).push(params.chip);
+    emit(state, "loot_dropped", { hex: loc.hexId, chips: [params.chip] });
+  } else {
+    loc.chips.splice(loc.chips.indexOf(params.chip), 1);
+    state.removed.push(params.chip);
+  }
+  emit(state, "chip_removed", {
+    hex: loc.hexId, chip: params.chip, chipId, player: pid, holder: holder.kind,
+  });
+  recomputeStats(state);
+  recomputeResearch(state);
+  recomputeInfluence(state);
+  recomputeVisibility(state, pid, { emitEvents: false });
+  return { chip: params.chip, chipId };
+}
+
 // --- Activate chip (docs/chip-set-v0.1.md — Cold Camp) ----------------
 // A chip with an `activatable` block is switched on by paying its scrap
 // cost; the effect lasts until the start of the owner's next turn. Free of
@@ -554,6 +593,7 @@ const ACTIONS = {
   reinforce: { cost: 1, validate: validateReinforce, run: runReinforce },
   contest: { cost: 1, validate: validateContest, run: runContest },
   "activate-chip": { cost: 0, validate: validateActivateChip, run: runActivateChip },
+  "remove-chip": { cost: 1, validate: validateRemoveChip, run: runRemoveChip },
   // §20.4–20.7 — economic directives. Queuing a build/upgrade and setting the
   // slider are free (the cost is the slider split + scrap); RUSH costs 1 Action
   // since it actively converts banked scrap into immediate construction.

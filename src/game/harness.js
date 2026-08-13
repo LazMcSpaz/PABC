@@ -3447,5 +3447,130 @@ line("\n  [Phase 11] text-token resolver");
   check("pathfinders: ignoresTerrain flag reads through", unitIgnoresTerrain(g15, scout));
 }
 
+
+// Phase 14 — repeatable VP faucets, elimination, chip removal
+// (docs/vp-and-actions-design.md §1; removability ruling).
+{
+  line("\n  [Phase 14] VP faucets, elimination, chip removal");
+  const install14 = (g, holder, chipId) => {
+    const uid = g.nextId("chip");
+    g.chips[uid] = { uid, chipId };
+    holder.chips.push(uid);
+    recomputeStats(g);
+    return uid;
+  };
+  const cycleTo = (g, pid) => { do { endTurn(g); } while (!g.winnerId && g.turnOrder[g.activeIndex] !== pid); };
+  // A foreign (non-affiliated, non-capital) high/veryHigh city for pid.
+  const foreignCity = (g, pid) => Object.values(g.locations).find((l) => {
+    const def = LOCATIONS[l.locationId];
+    return def && def.affiliation && def.affiliation !== pid &&
+      (def.strategicValue === "high" || def.strategicValue === "veryHigh") &&
+      !l.chips.some((c) => g.chips[c]?.chipId === "capital");
+  });
+  const grabFor = (g, pid, loc, loyalty) => {
+    loc.controller = pid; loc.loyaltyOwner = pid;
+    loc.sections = loc.sections.map(() => pid);
+    loc.loyalty = loyalty;
+  };
+
+  // -- foreign dominion ticks; homeland and low loyalty never do.
+  const gD = createGame({ seed: 141 });
+  startTurn(gD);
+  const dPid = gD.turnOrder[gD.activeIndex];
+  const prize = foreignCity(gD, dPid);
+  grabFor(gD, dPid, prize, 6);
+  const sentry = Object.values(gD.units).find((u) => u.owner === dPid);
+  sentry.node = prize.hexId; // garrisoned: loyalty holds/rises through the tick
+  const vp0 = gD.players[dPid].vp;
+  cycleTo(gD, dPid);
+  check("dominion: a foreign high city at Loyalty 6+ ticks +1 VP",
+    gD.players[dPid].vp === vp0 + 1);
+  prize.loyalty = 4; // below the rung (rises to 5 at Upkeep — still short)
+  const vp1 = gD.players[dPid].vp;
+  cycleTo(gD, dPid);
+  check("dominion: below the Loyalty rung there is no tick",
+    gD.players[dPid].vp === vp1);
+  // Homeland check: pid's own affiliated city never ticks even fully held.
+  const home14 = Object.values(gD.locations).find(
+    (l) => LOCATIONS[l.locationId]?.affiliation === dPid && l.controller === dPid);
+  check("dominion: your own affiliated city never qualifies",
+    !!home14 && (() => {
+      const before = gD.players[dPid].vp;
+      prize.loyalty = 0;
+      cycleTo(gD, dPid);
+      return gD.players[dPid].vp === before;
+    })());
+
+  // -- vassal dominion: a vassal's qualifying city ticks for the overlord.
+  const gV = createGame({ seed: 142 });
+  startTurn(gV);
+  const lord = gV.turnOrder[gV.activeIndex];
+  ensureDiplomacy(gV);
+  const vassal = gV.turnOrder.find((f) => f !== lord);
+  gV.diplomacy.vassals[vassal] = lord;
+  const fief = foreignCity(gV, lord);
+  grabFor(gV, vassal, fief, 8);
+  const vGuard = Object.values(gV.units).find((u) => u.owner === vassal);
+  vGuard.node = fief.hexId;
+  const lordVp = gV.players[lord].vp;
+  cycleTo(gV, lord);
+  check("vassal dominion: a vassal's qualifying city ticks +1 for the overlord",
+    gV.players[lord].vp === lordVp + 1);
+
+  // -- alliance trickle: pacted with a majority of the other majors.
+  const gT = createGame({ seed: 143 });
+  startTurn(gT);
+  const dip = gT.turnOrder[gT.activeIndex];
+  const others14 = gT.turnOrder.filter((f) => f !== dip);
+  formPact(gT, dip, others14[0]);
+  formPact(gT, dip, others14[1]); // 2 of 3 = majority
+  const dipVp = gT.players[dip].vp;
+  cycleTo(gT, dip);
+  check("alliance trickle: majority of pacts pays +1 VP per Upkeep",
+    gT.players[dip].vp === dipVp + 1);
+
+  // -- elimination: a stripped faction is flagged, skipped, and excluded;
+  // last faction standing wins outright.
+  const gE = createGame({ seed: 144 });
+  startTurn(gE);
+  const alivePid = gE.turnOrder[gE.activeIndex];
+  const doomed = gE.turnOrder.find((f) => f !== alivePid);
+  for (const l of Object.values(gE.locations)) {
+    if (l.controller === doomed) { l.controller = null; l.loyaltyOwner = null; l.loyalty = null; l.sections = l.sections.map(() => "neutral"); }
+  }
+  for (const u of Object.values(gE.units)) if (u.owner === doomed) delete gE.units[u.uid];
+  cycleTo(gE, alivePid);
+  check("elimination: a faction with nothing left is flagged and skipped",
+    gE.players[doomed].eliminated === true &&
+    gE.log.some((e) => e.name === "faction_eliminated" && e.payload.player === doomed));
+  for (const f of gE.turnOrder) {
+    if (f === alivePid) continue;
+    for (const l of Object.values(gE.locations)) {
+      if (l.controller === f) { l.controller = null; l.loyaltyOwner = null; l.loyalty = null; l.sections = l.sections.map(() => "neutral"); }
+    }
+    for (const u of Object.values(gE.units)) if (u.owner === f) delete gE.units[u.uid];
+  }
+  endTurn(gE);
+  check("elimination: last faction standing wins outright", gE.winnerId === alivePid);
+
+  // -- chip removal: unit chips drop as hex loot and free their stat slot.
+  const gR = createGame({ seed: 145 });
+  startTurn(gR);
+  const rPid = gR.turnOrder[gR.activeIndex];
+  gR.players[rPid].actions.remaining = 9;
+  const rHome = Object.values(gR.locations).find((l) => l.controller === rPid);
+  const rUnit = Object.values(gR.units).find((u) => u.owner === rPid);
+  rUnit.node = rHome.hexId;
+  const blade = install14(gR, rUnit, "drilled-troops");
+  const removed = performAction(gR, "remove-chip", { at: rHome.hexId, chip: blade });
+  check("remove-chip: a unit chip drops as hex loot and frees its stat slot",
+    !!removed.ok &&
+    (gR.hexLoot?.[rHome.hexId] || []).includes(blade) &&
+    !rUnit.chips.includes(blade));
+  const capUid = rHome.chips.find((c) => gR.chips[c]?.chipId === "capital");
+  const noCap = performAction(gR, "remove-chip", { at: rHome.hexId, chip: capUid });
+  check("remove-chip: the Capital is never removable", !noCap.ok);
+}
+
 line(`\n  v0.2 verification: ${v2pass} passed, ${v2fail} failed`);
 line("");

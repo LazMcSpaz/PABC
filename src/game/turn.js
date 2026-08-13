@@ -12,10 +12,10 @@ import { sweepDeferred } from "./deferred.js";
 import { evaluateTriggers } from "./triggers.js";
 import { evaluateConditionalBeats } from "./quests.js";
 import { applyOutputAndBuilds, chargeChipUpkeep, enforceLoyaltySlotCap } from "./economy.js";
-import { runDiplomacyRound } from "./diplomacy.js";
+import { runDiplomacyRound, vassalsOf, arePacted } from "./diplomacy.js";
 import { hasTechNode } from "./tech.js";
 import { chargePostUpkeep } from "./posts.js";
-import { CHIPS } from "./content.js";
+import { CHIPS, LOCATIONS } from "./content.js";
 
 // Sum a numeric chip field across a Location's installed, non-dormant
 // chips — the shared reader for the per-Location behavior chips
@@ -124,6 +124,73 @@ export function tickLoyalty(state, pid) {
   recomputeVisibility(state, pid, { emitEvents: false });
 }
 
+// docs/vp-and-actions-design.md §1 — the repeatable VP faucets, awarded at
+// the player's Upkeep (after the Loyalty tick so a city that just reached
+// the rung counts this turn).
+function dominionQualifies(state, loc, beneficiary) {
+  const def = LOCATIONS[loc.locationId];
+  if (!def) return false;
+  if (def.strategicValue !== "high" && def.strategicValue !== "veryHigh") return false;
+  if (def.affiliation === beneficiary) return false; // your homeland never ticks
+  const loy = loc.loyalty == null ? CONFIG.loyalty.ceiling : loc.loyalty;
+  return loy >= CONFIG.victory.dominionLoyaltyMin;
+}
+
+function awardVp(state, pid, amount, source) {
+  if (amount <= 0) return;
+  const p = state.players[pid];
+  p.vp += amount;
+  emit(state, "resource_gained", { player: pid, resource: "VP", amount, source });
+  if (p.vp >= CONFIG.vpThreshold && !state.winnerId) state.winnerId = pid;
+}
+
+function tickVictoryFaucets(state, pid) {
+  // Foreign dominion — cities you hold yourself.
+  let dominion = 0;
+  for (const loc of Object.values(state.locations)) {
+    if (loc.controller === pid && dominionQualifies(state, loc, pid)) dominion += 1;
+  }
+  awardVp(state, pid, dominion * CONFIG.victory.dominionPerCity, "dominion");
+  // Vassal dominion — qualifying cities your vassals hold tick for YOU
+  // (still never your own affiliated cities, even in a vassal's hands).
+  let vassalCities = 0;
+  for (const vid of vassalsOf(state, pid)) {
+    for (const loc of Object.values(state.locations)) {
+      if (loc.controller === vid && dominionQualifies(state, loc, pid)) vassalCities += 1;
+    }
+  }
+  awardVp(state, pid, vassalCities * CONFIG.victory.dominionPerCity, "vassal-dominion");
+  // Alliance trickle — pacted with a majority of the other surviving majors.
+  const others = state.turnOrder.filter(
+    (f) => f !== pid && !state.players[f]?.eliminated,
+  );
+  if (others.length > 0) {
+    const pacts = others.filter((f) => arePacted(state, pid, f)).length;
+    if (pacts > others.length / 2) {
+      awardVp(state, pid, CONFIG.victory.allianceTrickle, "alliance");
+    }
+  }
+}
+
+// Elimination (docs/vp-and-actions-design.md §1): a faction with no
+// Locations and no units is out — flagged, skipped by the turn loop, and
+// excluded from the trickle majority. Last faction standing wins outright.
+function sweepEliminations(state) {
+  for (const pid of state.turnOrder) {
+    const p = state.players[pid];
+    if (!p || p.eliminated) continue;
+    const holdsAnything =
+      Object.values(state.locations).some((l) => l.controller === pid) ||
+      Object.values(state.units).some((u) => u.owner === pid);
+    if (!holdsAnything) {
+      p.eliminated = true;
+      emit(state, "faction_eliminated", { player: pid });
+    }
+  }
+  const survivors = state.turnOrder.filter((f) => !state.players[f]?.eliminated);
+  if (survivors.length === 1 && !state.winnerId) state.winnerId = survivors[0];
+}
+
 // v0.2 §16.2 — refresh each owned unit's move budget from its effective
 // Movement, and roll the §16.6 fortify flag (a unit that didn't move on
 // its previous turn is "dug in"). Must run after recomputeStats so
@@ -173,6 +240,12 @@ function passiveHeal(state, pid) {
 export function startTurn(state) {
   if (state.winnerId) return state;
   const pid = activePlayerId(state);
+  sweepEliminations(state);
+  if (state.winnerId) return state;
+  // An eliminated faction's turn is skipped entirely (endTurn advances and
+  // re-enters startTurn for the next seat; recursion is bounded by the
+  // seat count and the last-standing check above).
+  if (state.players[pid]?.eliminated) return endTurn(state);
   state.phase = "Upkeep";
   emit(state, "turn_started", { player: pid });
 
@@ -212,6 +285,9 @@ export function startTurn(state) {
   recomputeStats(state);
   refreshMoveBudget(state, pid);
   tickLoyalty(state, pid);
+  // Repeatable VP faucets — after the Loyalty tick so integration counts
+  // the turn it lands (docs/vp-and-actions-design.md §1).
+  tickVictoryFaucets(state, pid);
   // §20.8 — a Loyalty drop below the bonus-slot rung ejects the chip in that
   // extra slot (newest-first). Runs right after the Loyalty tick, before the
   // economy step reads slot capacity.
