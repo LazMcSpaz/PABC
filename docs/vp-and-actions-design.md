@@ -110,6 +110,21 @@ Readings:
   the dominion clock adds win pressure — but watch pacing in playtests;
   the levers are garrison bands and section count.
 
+### Sensitivity run (sections 3/4/5 × geared defenders, 200 trials/cell)
+
+The model ordering NEVER flips: B fastest, A middle, C slowest, at every
+section count and with or without defender gear. Two bonus findings:
+
+- **Section count is a pure linear pacing dial under the coalition
+  rule** (3 sections → 3.0 turns, 4 → 4.0, 5 → 5.0 for the big push),
+  while naive per-unit actions mostly ignore it (1.0 / 1.0 / 2.0) —
+  more evidence B deletes the capture clock entirely. If sieges need
+  slowing later, sections are the knob.
+- **Geared defense is a proportional counter**: Stronghold + T2-armed
+  defenders drop capture rates from 100% to ~82% for every model
+  equally — the earlier zero-loss geared-attacker result was an
+  artifact of naked defenders, as suspected.
+
 ## 3. Implementation order
 
 1. Dominion tick (foreign + vassal) + alliance trickle + elimination

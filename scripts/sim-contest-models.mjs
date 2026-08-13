@@ -60,13 +60,20 @@ function runTrial(seed, scenario, schedule) {
   // attacker stack on the wall. Strip the capital chip so loyalty behaves
   // like a normal city and garrison is exactly the band.
   loc.garrison = scenario.garrison;
-  loc.sections = loc.sections.map(() => def);
+  loc.sections = Array(scenario.sections || 3).fill(def);
   loc.chips = loc.chips.filter((c) => g.chips[c]?.chipId !== "capital");
   loc.loyalty = 8; loc.loyaltyOwner = def;
 
   const defUnits = Object.values(g.units).filter((u) => u.owner === def);
   defUnits.forEach((u, i) => {
-    if (i < scenario.defenders) { u.node = loc.hexId; u.movedSinceUpkeep = false; u.fortified = true; }
+    if (i < scenario.defenders) {
+      u.node = loc.hexId; u.movedSinceUpkeep = false; u.fortified = true;
+      if (scenario.defGear) {
+        const uid = g.nextId("chip");
+        g.chips[uid] = { uid, chipId: "sharpened-blades" };
+        u.chips = [uid];
+      }
+    }
     else delete g.units[u.uid]; // spare defenders leave the board
   });
 
@@ -88,9 +95,14 @@ function runTrial(seed, scenario, schedule) {
       u.chips = [uid];
     }
   });
-  if (scenario.gear) {
-    const { recomputeStats } = gStats;
-    recomputeStats(g);
+  if (scenario.gear || scenario.defGear) {
+    gStats.recomputeStats(g);
+  }
+  if (scenario.defGear) {
+    // Geared city: a Stronghold chip on the walls (+4 garrison).
+    const uid = g.nextId("chip");
+    g.chips[uid] = { uid, chipId: "stronghold" };
+    loc.chips.push(uid);
   }
 
   for (let round = 1; round <= MAX_ROUNDS; round++) {
@@ -133,5 +145,29 @@ for (const scenario of SCENARIOS) {
     const turns = caps ? (turnSum / caps).toFixed(1).padStart(9) : "      —  ";
     const lost = (lostSum / TRIALS).toFixed(1).padStart(11);
     console.log(`${name.padEnd(19)}|${rate}% |${turns}  |${lost}`);
+  }
+}
+
+// --- Sensitivity: section count (the capture clock) and geared defenders.
+const SENS_MODELS = ["A  legacy 2-action", "B  naive per-unit", "C  one big push"];
+console.log("\n=== SENSITIVITY: sections × geared defenders (veryHigh, both sides geared) ===");
+console.log("sections | defense           | model              | capture% | mean turns");
+console.log("---------|-------------------|--------------------|----------|----------");
+for (const sections of [3, 4, 5]) {
+  for (const defGear of [false, true]) {
+    for (const name of SENS_MODELS) {
+      const scenario = {
+        garrison: 10, defenders: 2, attackers: 4, gear: true, defGear, sections,
+        name: "sens",
+      };
+      let caps = 0, turnSum = 0;
+      for (let i = 0; i < TRIALS; i++) {
+        const r = runTrial(40000 + i, scenario, MODELS[name]);
+        if (r.captured) { caps++; turnSum += r.turns; }
+      }
+      const rate = ((100 * caps) / TRIALS).toFixed(0).padStart(7);
+      const turns = caps ? (turnSum / caps).toFixed(1).padStart(8) : "     —  ";
+      console.log(`    ${sections}    | ${(defGear ? "geared (str+2, +4 wall)" : "plain").padEnd(18)}| ${name.padEnd(19)}|${rate}% |${turns}`);
+    }
   }
 }
