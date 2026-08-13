@@ -82,6 +82,17 @@ export const UNIT_UPGRADES = {
   landship: { id: "landship", name: "Landship", kind: "unit", cost: 12, rare: true, str: 0, mov: 3, effect: "+3 Movement; ignores terrain" },
   fieldGlass: { id: "fieldGlass", name: "Field Glass", kind: "unit", cost: 3, str: 0, mov: 0, effect: "+1 Vision" },
   spotterNet: { id: "spotterNet", name: "Spotter Net", kind: "unit", cost: 6, str: 0, mov: 0, effect: "+1 Vision, +1 Detection" },
+  fieldMedics: { id: "fieldMedics", name: "Field Medics", kind: "unit", cost: 4, str: 0, mov: 0, effect: "Heals +1/Upkeep anywhere" },
+  pathfinders: { id: "pathfinders", name: "Pathfinders", kind: "unit", cost: 5, str: 0, mov: 0, effect: "Ignores terrain penalties" },
+  rearguard: { id: "rearguard", name: "Rearguard", kind: "unit", cost: 4, str: 0, mov: 0, effect: "Retreat 2; no rout spill" },
+  trailwise: { id: "trailwise", name: "Trailwise", kind: "unit", cost: 3, str: 0, mov: 0, effect: "Redraw a triggered encounter" },
+  entrenchingTools: { id: "entrenchingTools", name: "Entrenching Tools", kind: "unit", cost: 3, str: 0, mov: 0, effect: "+1 fortify bonus" },
+  coldCamp: { id: "coldCamp", name: "Cold Camp", kind: "unit", cost: 0, rare: true, str: 0, mov: 0, effect: "Pay 2 scrap: unseen until your next turn" },
+  nightMarch: { id: "nightMarch", name: "Night March", kind: "unit", cost: 0, rare: true, str: 0, mov: 0, effect: "Passes through enemy units" },
+  warBanner: { id: "warBanner", name: "War Banner", kind: "unit", cost: 0, rare: true, str: 0, mov: 0, effect: "Extra unit for concentration; cap +1" },
+  oldHands: { id: "oldHands", name: "Old Hands", kind: "unit", cost: 0, rare: true, str: 0, mov: 0, effect: "Counts as a veteran" },
+  safeConduct: { id: "safeConduct", name: "Safe Conduct", kind: "unit", cost: 0, rare: true, str: 0, mov: 0, effect: "No trespass penalties" },
+  relayKit: { id: "relayKit", name: "Relay Kit", kind: "unit", cost: 0, rare: true, str: 0, mov: 0, effect: "Builds Listening Posts without tech" },
 };
 
 // Location upgrade chips. Costs are placeholders (scrap).

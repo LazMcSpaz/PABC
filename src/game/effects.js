@@ -4,6 +4,8 @@ import { CONFIG } from "./config.js";
 import { emit } from "./events.js";
 import { resolveTargets } from "./targeting.js";
 import { recomputeStats, recomputeResearch } from "./stats.js";
+import { CHIPS } from "./content.js";
+import { unitHasStatType } from "./economy.js";
 import { destroyUnit } from "./contest.js";
 import { bfsDistances } from "./board.js";
 import { revealRegion, plantFalseGhost, ensureVisibility } from "./visibility.js";
@@ -92,6 +94,39 @@ const EFFECTS = {
         unit: t, amount: e.amount, baseStrength: unit.baseStrength,
       });
       if (unit.baseStrength <= 0) destroyUnit(state, t, null, ctx);
+    }
+  },
+
+  // docs/chip-system-dependencies.md S4 — reward-chip delivery. Grants a
+  // chip (usually a `reward: true` def) to a unit: e.unit, or the ctx's
+  // triggering unit (encounters pass ctx.sourceUnit), or any unit of the
+  // resolved target player with bay room. Installs when the bay has space
+  // and the one-per-stat rule allows; otherwise the chip drops as hex loot
+  // at the unit's feet — found, not lost.
+  GRANT_CHIP(state, e, ctx) {
+    const def = CHIPS[e.chipId];
+    if (!def) throw new Error(`GRANT_CHIP: unknown chip "${e.chipId}"`);
+    let unit = state.units[e.unit] || state.units[ctx.sourceUnit] || null;
+    if (!unit) {
+      const pids = resolveTargets(state, e.target || "self", ctx);
+      unit = Object.values(state.units).find((u) => pids.includes(u.owner)) || null;
+    }
+    if (!unit) return; // no possible recipient — the grant fizzles
+    const uid = state.nextId("chip");
+    state.chips[uid] = { uid, chipId: def.id };
+    const slotsHeld = unit.chips.reduce(
+      (n, c) => n + (state.chips[c]?.chipId === "capital" ? 1 : CHIPS[state.chips[c]?.chipId]?.slots ?? 1), 0);
+    const fits = slotsHeld + (def.slots || 1) <= CONFIG.unit.baySlots &&
+      !unitHasStatType(state, unit, def.statType);
+    if (fits) {
+      unit.chips.push(uid);
+      recomputeStats(state);
+      emit(state, "chip_granted", { unit: unit.uid, player: unit.owner, chip: uid, chipId: def.id, installed: true });
+    } else {
+      state.hexLoot = state.hexLoot || {};
+      (state.hexLoot[unit.node] = state.hexLoot[unit.node] || []).push(uid);
+      emit(state, "chip_granted", { unit: unit.uid, player: unit.owner, chip: uid, chipId: def.id, installed: false, hex: unit.node });
+      emit(state, "loot_dropped", { hex: unit.node, chips: [uid] });
     }
   },
 

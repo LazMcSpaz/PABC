@@ -157,6 +157,22 @@ export const CHIPS = {
   // --- location chips: utility ---
   "recon-team": { id: "recon-team", name: "Recon Team", kind: "location", slots: 1, techLevel: 1, cost: 3, buildCost: 3, loyaltyReq: 0, encounterRedraws: 1, desc: "Discard a drawn encounter and draw again" },
   "logistics-hub": { id: "logistics-hub", name: "Logistics Hub", kind: "location", slots: 2, techLevel: 3, cost: 12, buildCost: 12, loyaltyReq: 6, upkeep: 1, actionBonus: 1, desc: "+1 Action each turn (rare, 2-slot; upkeep 1)" },
+  // --- special unit chips: buildable (docs/chip-set-v0.1.md) ---
+  // No statType — specials compete for bay slots but not stat families.
+  "field-medics": { id: "field-medics", name: "Field Medics", kind: "unit", slots: 1, techLevel: 2, cost: 4, buildCost: 4, loyaltyReq: 3, healAnywhere: 1, desc: "Heals +1 at Upkeep anywhere, not only on a held Location" },
+  pathfinders: { id: "pathfinders", name: "Pathfinders", kind: "unit", slots: 1, techLevel: 2, cost: 5, buildCost: 5, loyaltyReq: 3, ignoresTerrain: true, desc: "Forest costs 1 to enter; mountains don't halt the move" },
+  rearguard: { id: "rearguard", name: "Rearguard", kind: "unit", slots: 1, techLevel: 2, cost: 4, buildCost: 4, loyaltyReq: 3, retreatBonus: 1, routSpillImmune: true, desc: "On losing a contest, may retreat 2 hexes; never takes rout spill damage" },
+  trailwise: { id: "trailwise", name: "Trailwise", kind: "unit", slots: 1, techLevel: 1, cost: 3, buildCost: 3, loyaltyReq: 0, encounterRedraws: 1, desc: "Discard an encounter this unit triggers and draw again" },
+  "entrenching-tools": { id: "entrenching-tools", name: "Entrenching Tools", kind: "unit", slots: 1, techLevel: 1, cost: 3, buildCost: 3, loyaltyReq: 0, fortifyBonus: 1, desc: "+1 to this unit's fortify bonus" },
+  // --- special unit chips: quest/encounter rewards (reward: true — never
+  // in a build menu; granted via the GRANT_CHIP effect. One world-wide
+  // name each: found artifacts have no faction).
+  "cold-camp": { id: "cold-camp", name: "Cold Camp", kind: "unit", slots: 1, reward: true, cost: 0, activatable: { cost: 2, grants: "stealth" }, desc: "Pay 2 scrap: unseen until the start of your next turn" },
+  "night-march": { id: "night-march", name: "Night March", kind: "unit", slots: 1, reward: true, cost: 0, passThroughUnits: true, desc: "Passes through enemy units without being halted (Locations still halt)" },
+  "war-banner": { id: "war-banner", name: "War Banner", kind: "unit", slots: 1, reward: true, cost: 0, concentrationBonus: 1, concentrationCapBonus: 1, desc: "Counts as an extra unit for concentration and raises its stack's concentration cap by 1" },
+  "old-hands": { id: "old-hands", name: "Old Hands", kind: "unit", slots: 1, reward: true, cost: 0, veteranEquiv: true, desc: "This unit counts as a veteran while the chip is installed" },
+  "safe-conduct": { id: "safe-conduct", name: "Safe Conduct", kind: "unit", slots: 1, reward: true, cost: 0, safeConduct: true, desc: "No Standing or Menace penalty for entering another faction's territory" },
+  "relay-kit": { id: "relay-kit", name: "Relay Kit", kind: "unit", slots: 1, reward: true, cost: 0, postsWithoutTech: true, desc: "This unit can build Listening Posts without the Intelligence tech (normal costs)" },
   // --- faction signature chips (docs/location-chips-v0.1.md) ---
   "burning-glass": { id: "burning-glass", name: "Burning Glass", kind: "location", faction: "versari", slots: 1, techLevel: 2, cost: 6, garrison: 2, garrisonErosion: 1, buildCost: 6, loyaltyReq: 3, desc: "+2 garrison Strength; attackers suffer 1 Strength erosion before the contest" },
   "guest-house": { id: "guest-house", name: "Guest House", kind: "location", faction: "goldgrass", slots: 1, techLevel: 2, cost: 5, standingDrift: 1, buildCost: 5, loyaltyReq: 3, desc: "Each round, Standing toward you rises with every faction you are not at war with" },

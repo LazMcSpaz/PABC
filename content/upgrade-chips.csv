@@ -23,6 +23,17 @@ broadcast,Broadcast,location,,1,2,7,,3,,,+2 Influence and +1 Influence range,Sig
 civic-hall,Civic Hall,location,,1,2,5,,3,,,Loyalty rises +1 extra while garrisoned and never decays while neglected,The Ministry,Grange Hall,Company Store,Watering Hole
 recon-team,Recon Team,location,,1,1,3,,0,,,Discard a drawn encounter and draw again,Field Agents,Town Criers,Block Captains,Trail Scouts
 logistics-hub,Logistics Hub,location,,2,3,12,1,6,,,"+1 Action each turn (rare, 2-slot; upkeep 1)",,,,
+field-medics,Field Medics,unit,,1,2,4,,3,,,"Heals +1 at Upkeep anywhere, not only on a held Location",,,,
+pathfinders,Pathfinders,unit,,1,2,5,,3,,,Forest costs 1 to enter; mountains don't halt the move,,,,
+rearguard,Rearguard,unit,,1,2,4,,3,,,"On losing a contest, may retreat 2 hexes; never takes rout spill damage",,,,
+trailwise,Trailwise,unit,,1,1,3,,0,,,Discard an encounter this unit triggers and draw again,,,,
+entrenching-tools,Entrenching Tools,unit,,1,1,3,,0,,,+1 to this unit's fortify bonus,,,,
+cold-camp,Cold Camp,unit,,1,1,0,,0,,,Pay 2 scrap: unseen until the start of your next turn,,,,
+night-march,Night March,unit,,1,1,0,,0,,,Passes through enemy units without being halted (Locations still halt),,,,
+war-banner,War Banner,unit,,1,1,0,,0,,,Counts as an extra unit for concentration and raises its stack's concentration cap by 1,,,,
+old-hands,Old Hands,unit,,1,1,0,,0,,,This unit counts as a veteran while the chip is installed,,,,
+safe-conduct,Safe Conduct,unit,,1,1,0,,0,,,No Standing or Menace penalty for entering another faction's territory,,,,
+relay-kit,Relay Kit,unit,,1,1,0,,0,,,This unit can build Listening Posts without the Intelligence tech (normal costs),,,,
 burning-glass,Burning Glass,location,,1,2,6,,3,,versari,+2 garrison Strength; attackers suffer 1 Strength erosion before the contest,,,,
 guest-house,Guest House,location,,1,2,5,,3,,goldgrass,"Each round, Standing toward you rises with every faction you are not at war with",,,,
 motor-pool,Motor Pool,location,,1,2,5,,3,,lakers,Recruiting here costs 2 less scrap; +1 unit cap,,,,

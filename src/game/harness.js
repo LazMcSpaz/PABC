@@ -5,10 +5,11 @@ import { createGame } from "./setup.js";
 import { startTurn, endTurn, tickLoyalty } from "./turn.js";
 import { performAction, recruitCostAt } from "./actions.js";
 import { applyEffect } from "./effects.js";
-import { recomputeStats, recomputeResearch, assignTechNode } from "./stats.js";
+import { emit } from "./events.js";
+import { recomputeStats, recomputeResearch, assignTechNode, effectiveVeteran } from "./stats.js";
 import { recomputeInfluence, zocOwner, inZoC } from "./influence.js";
 import { reinforcementRoute, bfsDistances, movementField, movementRoute } from "./board.js";
-import { passesFreely, movementBlockers, unitReach } from "./movement.js";
+import { passesFreely, movementBlockers, unitReach, unitIgnoresTerrain } from "./movement.js";
 import { recomputeVisibility, isUnitVisibleTo, revealRegion, unitVision, isHexVisible } from "./visibility.js";
 import {
   ensureDiplomacy, menaceFromAttack, onAttack,
@@ -3332,6 +3333,115 @@ line("\n  [Phase 11] text-token resolver");
   const after = getStanding(gGH, guest, host);
   check("guest-house: a non-belligerent's Standing toward the host rises",
     after > before || after >= CONFIG.diplomacy.tiers.friendly);
+}
+
+
+// Phase 13 — special chips batch 2: reward delivery (GRANT_CHIP), chip
+// activation (Cold Camp), and the per-chip hooks (docs/chip-set-v0.1.md).
+{
+  line("\n  [Phase 13] special chips: rewards, activation, hooks");
+  const install = (g, holder, chipId) => {
+    const uid = g.nextId("chip");
+    g.chips[uid] = { uid, chipId };
+    holder.chips.push(uid);
+    recomputeStats(g);
+    return uid;
+  };
+  const g13 = createGame({ seed: 131 });
+  startTurn(g13);
+  const pid = g13.turnOrder[g13.activeIndex];
+  const p13 = g13.players[pid];
+  p13.resource = 99; p13.actions.remaining = 99;
+  const home = Object.values(g13.locations).find((l) => l.controller === pid);
+  const vet = Object.values(g13.units).find((u) => u.owner === pid);
+
+  // -- reward chips never appear in a build menu.
+  const menu = buildableChips(g13, home).map((o) => o.chipId);
+  check("reward chips are absent from every build menu",
+    ["cold-camp", "night-march", "war-banner", "old-hands", "safe-conduct", "relay-kit"]
+      .every((c) => !menu.includes(c)));
+
+  // -- GRANT_CHIP installs into the triggering unit's bay…
+  applyEffect(g13, { type: "GRANT_CHIP", chipId: "old-hands" }, { sourceUnit: vet.uid });
+  check("GRANT_CHIP installs the reward into the triggering unit's bay",
+    vet.chips.some((c) => g13.chips[c]?.chipId === "old-hands"));
+  // …and overflows to hex loot when the bay is full.
+  install(g13, vet, "trailwise"); // bay now 2/2
+  applyEffect(g13, { type: "GRANT_CHIP", chipId: "night-march" }, { sourceUnit: vet.uid });
+  check("GRANT_CHIP drops as hex loot when the bay is full",
+    (g13.hexLoot?.[vet.node] || []).some((c) => g13.chips[c]?.chipId === "night-march"));
+
+  // -- old-hands: the unit counts as veteran (cap 8, contest bonus reads).
+  check("old-hands: unit counts as a veteran while installed", effectiveVeteran(g13, vet));
+
+  // -- trailwise: the drawing unit adds its own redraw to the budget.
+  check("trailwise: unit-carried encounter redraw joins the budget",
+    encounterRedrawBudget(g13, pid, vet) === encounterRedrawBudget(g13, pid) + 1);
+
+  // -- cold camp: pay scrap, unseen even in contact, expires on your next turn.
+  const g14 = createGame({ seed: 132 });
+  startTurn(g14);
+  const spid = g14.turnOrder[g14.activeIndex];
+  g14.players[spid].resource = 99; g14.players[spid].actions.remaining = 99;
+  const sneak = Object.values(g14.units).find((u) => u.owner === spid);
+  const camp = g14.nextId("chip");
+  g14.chips[camp] = { uid: camp, chipId: "cold-camp" };
+  sneak.chips.push(camp);
+  const foe = g14.turnOrder.find((f) => f !== spid);
+  const watcher = Object.values(g14.units).find((u) => u.owner === foe);
+  watcher.node = sneak.node; // contact — normally reveals point-blank
+  recomputeVisibility(g14, foe);
+  const seenBefore = isUnitVisibleTo(g14, foe, sneak);
+  const scrapBefore = g14.players[spid].resource;
+  const act = performAction(g14, "activate-chip", { unit: sneak.uid, chip: camp });
+  recomputeVisibility(g14, foe);
+  check("cold camp: activation costs its scrap and conceals even in contact",
+    act.ok && g14.players[spid].resource === scrapBefore - 2 &&
+    seenBefore && !isUnitVisibleTo(g14, foe, sneak));
+  const again = performAction(g14, "activate-chip", { unit: sneak.uid, chip: camp });
+  check("cold camp: cannot re-activate while already concealed", !again.ok);
+  for (let i = 0; i < g14.turnOrder.length; i++) { endTurn(g14); startTurn(g14); }
+  recomputeVisibility(g14, foe);
+  check("cold camp: concealment expires at the owner's next turn",
+    isUnitVisibleTo(g14, foe, sneak));
+
+  // -- night march: unit blockers vanish for the carrier; Locations still halt.
+  const nmBlockersAll = movementBlockers(g14, spid);
+  const nmBlockersNM = movementBlockers(g14, spid, { ignoreUnits: true });
+  const foeLocHexes = Object.values(g14.locations)
+    .filter((l) => l.controller && l.controller !== spid).map((l) => l.hexId);
+  check("night march: foreign units stop blocking; enemy Locations still do",
+    nmBlockersNM.size <= nmBlockersAll.size &&
+    foeLocHexes.every((h) => !nmBlockersAll.has(h) || nmBlockersNM.has(h)));
+
+  // -- safe conduct: moving into another faction's ZoC draws no trespass hit.
+  const g15 = createGame({ seed: 133 });
+  startTurn(g15);
+  const scPid = g15.turnOrder[g15.activeIndex];
+  const envoy = Object.values(g15.units).find((u) => u.owner === scPid);
+  install(g15, envoy, "safe-conduct");
+  const scFoe = g15.turnOrder.find((f) => f !== scPid);
+  const scFoeLoc = Object.values(g15.locations).find((l) => l.controller === scFoe);
+  g15.world.zoc = g15.world.zoc || {};
+  g15.world.zoc[scFoeLoc.hexId] = scFoe; // force the destination into foe ZoC
+  const trespassCountBefore = g15.log.filter((e) => e.name === "territory_trespassed").length;
+  emit(g15, "unit_moved", { unit: envoy.uid, player: scPid, from: envoy.node, to: scFoeLoc.hexId });
+  check("safe conduct: no trespass penalty fires for the carrier",
+    g15.log.filter((e) => e.name === "territory_trespassed").length === trespassCountBefore);
+
+  // -- relay kit: listening post buildable without Intelligence A2.
+  const kit = install(g15, envoy, "relay-kit");
+  const fieldHex = Object.values(g15.board.hexes).find(
+    (h) => !g15.locations[h.id] && !postAt(g15, h.id));
+  envoy.node = fieldHex.id;
+  g15.players[scPid].resource = 99; g15.players[scPid].actions.remaining = 99;
+  const post = performAction(g15, "build-post", { hex: fieldHex.id });
+  check("relay kit: listening post deploys without the Intelligence tech", !!post.ok);
+
+  // -- pathfinders shares the landship ignoresTerrain read.
+  const scout = Object.values(g15.units).filter((u) => u.owner === scPid)[1] || envoy;
+  install(g15, scout, "pathfinders");
+  check("pathfinders: ignoresTerrain flag reads through", unitIgnoresTerrain(g15, scout));
 }
 
 line(`\n  v0.2 verification: ${v2pass} passed, ${v2fail} failed`);

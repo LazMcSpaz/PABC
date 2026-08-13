@@ -138,11 +138,16 @@ const FIELD_HEX_COOLDOWN = 3;
 // rather than an id special case — content.js's own header says the
 // engine never branches on chip ids, so this reads the field like every
 // other chip bonus does.
-export function encounterRedrawBudget(state, pid) {
+export function encounterRedrawBudget(state, pid, unit) {
   let n = hasTechNode(state, pid, "int-entry") ? 1 : 0;
   for (const loc of Object.values(state.locations)) {
     if (loc.controller !== pid) continue;
     for (const c of loc.chips) n += CHIPS[state.chips[c]?.chipId]?.encounterRedraws || 0;
+  }
+  // Trailwise: the drawing unit's own chips grant redraws too.
+  for (const c of unit?.chips || []) {
+    if (state.chips[c]?.disabled) continue;
+    n += CHIPS[state.chips[c]?.chipId]?.encounterRedraws || 0;
   }
   return n;
 }
@@ -162,7 +167,7 @@ export function drawFieldEncounter(state, unit, ctx = {}) {
   // and draws the next; after the last discard the player is committed.
   // Headless / AI (no ctx.interact) commit to the first draw, so the
   // harness stays deterministic.
-  let redraws = encounterRedrawBudget(state, unit.owner);
+  let redraws = encounterRedrawBudget(state, unit.owner, unit);
   while (redraws > 0 && ctx.interact && state.encounterDeck.length > 1) {
     const top = state.encounterDeck[0];
     const wantDiscard = ctx.interact({
@@ -182,7 +187,7 @@ export function drawFieldEncounter(state, unit, ctx = {}) {
     { mode: "private", recipient: unit.owner },
     // §18.3 — carry the draw hex so a choice's `zoc_contains` condition
     // can read "recipient's ZoC contains this hex" without extra wiring.
-    { ...ctx, sourcePlayer: unit.owner, sourceHex: unit.node },
+    { ...ctx, sourcePlayer: unit.owner, sourceHex: unit.node, sourceUnit: unit.uid },
   );
 }
 

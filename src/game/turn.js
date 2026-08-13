@@ -2,7 +2,7 @@
 // Upkeep work (action reset, modifier expiry, Loyalty tick, scrap
 // production) and Cleanup.
 import { emit } from "./events.js";
-import { recomputeStats, recomputeResearch } from "./stats.js";
+import { recomputeStats, recomputeResearch, effectiveVeteran } from "./stats.js";
 import { recomputeInfluence } from "./influence.js";
 import { recomputeVisibility } from "./visibility.js";
 import { reinforcementRoute } from "./board.js";
@@ -144,15 +144,25 @@ function passiveHeal(state, pid) {
   for (const u of Object.values(state.units)) {
     if (u.owner !== pid) continue;
     const loc = state.locations[u.node];
-    if (!loc || loc.controller !== pid) continue;
-    const cap = u.veteran ? CONFIG.unit.veteranStrengthCap : CONFIG.unit.baseStrengthCap;
+    const onHeldLoc = !!loc && loc.controller === pid;
+    // Field Medics (chip `healAnywhere`): the unit mends in the field, held
+    // Location or not — at the chip's own rate (no tech/infirmary stacking).
+    let fieldMedics = 0;
+    for (const c of u.chips) {
+      if (state.chips[c]?.disabled) continue;
+      fieldMedics += CHIPS[state.chips[c]?.chipId]?.healAnywhere || 0;
+    }
+    if (!onHeldLoc && fieldMedics <= 0) continue;
+    const cap = effectiveVeteran(state, u) ? CONFIG.unit.veteranStrengthCap : CONFIG.unit.baseStrengthCap;
     if (u.baseStrength >= cap) continue;
     const before = u.baseStrength;
     // §17.5 Logistics B1 (Field Hospital): +1 more heal/Upkeep — ADDS to the
     // §16.5 base, so a holder mends 2/Upkeep on held Locations. An Infirmary
     // chip on this Location (healBonus) adds on top of both.
-    const healAmt = CONFIG.heal.passivePerTurn + (hasTechNode(state, pid, "log-b1") ? 1 : 0) +
-      locChipSum(state, loc, "healBonus");
+    const healAmt = onHeldLoc
+      ? CONFIG.heal.passivePerTurn + (hasTechNode(state, pid, "log-b1") ? 1 : 0) +
+        locChipSum(state, loc, "healBonus") + fieldMedics
+      : fieldMedics;
     u.baseStrength = Math.min(cap, u.baseStrength + healAmt);
     recomputeStats(state);
     emit(state, "unit_reinforced", { unit: u.uid, amount: u.baseStrength - before });

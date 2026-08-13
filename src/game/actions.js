@@ -9,7 +9,7 @@ import { unitReach } from "./movement.js";
 import { CONFIG } from "./config.js";
 import { FACTIONS, CHIPS, ABILITIES, chipDefOf, factionDef } from "./content.js";
 import { validateContest, runContest } from "./contest.js";
-import { recomputeStats } from "./stats.js";
+import { recomputeStats, effectiveVeteran } from "./stats.js";
 import { recomputeInfluence } from "./influence.js";
 import { recomputeVisibility } from "./visibility.js";
 import { applyEffects } from "./effects.js";
@@ -190,8 +190,8 @@ function runRecruit(state, { pid, player, params }) {
 // `mode:"field"` dispatches a convoy that arrives in N round-ends, where
 // N is the supply distance through friendly/neutral hexes (re-targets a
 // moving unit, §16.5). Both cost 1 Action.
-function unitStrengthCap(unit) {
-  return unit.veteran ? CONFIG.unit.veteranStrengthCap : CONFIG.unit.baseStrengthCap;
+function unitStrengthCap(state, unit) {
+  return effectiveVeteran(state, unit) ? CONFIG.unit.veteranStrengthCap : CONFIG.unit.baseStrengthCap;
 }
 
 // §17.5 Logistics B2 (Supply Convoys): a holder heals at 1 scrap per Strength
@@ -211,7 +211,7 @@ function validateReinforce(state, { pid, player, params }) {
   const unit = state.units[params.unit];
   if (!unit) return fail("no such unit");
   if (unit.owner !== pid) return fail("not your unit");
-  const cap = unitStrengthCap(unit);
+  const cap = unitStrengthCap(state, unit);
   const deficit = cap - unit.baseStrength;
   if (deficit <= 0) return fail("unit is already at full Strength");
   const cost = scrapPerStrengthFor(state, pid, unit) * deficit;
@@ -234,7 +234,7 @@ function validateReinforce(state, { pid, player, params }) {
 
 function runReinforce(state, { pid, player, params }) {
   const unit = state.units[params.unit];
-  const cap = unitStrengthCap(unit);
+  const cap = unitStrengthCap(state, unit);
   const deficit = cap - unit.baseStrength;
   const cost = scrapPerStrengthFor(state, pid, unit) * deficit;
   player.resource -= cost;
@@ -282,6 +282,7 @@ function validateBuild(state, { pid, player, params }) {
   const def = CHIPS[params.chipId];
   if (!def) return fail("unknown chip");
   if (def.faction && def.faction !== pid) return fail("that chip is another faction's signature");
+  if (def.reward) return fail("that chip cannot be built — it is found, not made");
   if (!meetsTech(player, def)) return fail(`needs Tech Level ${techLevelReqFor(def.techLevel || 1)}`);
   if (!meetsLoyalty(loc, def)) return fail(`needs Loyalty ${def.loyaltyReq}`);
   if (def.kind === "unit") {
@@ -450,14 +451,18 @@ function runActivate(state, { pid, player, params, ctx }) {
 // Validates the A2 assignment, a friendly unit on the hex, a non-Location
 // hex, and ≥3 scrap; costs 1 Action + 3 scrap (paid immediately).
 function validateBuildPost(state, { pid, player, params }) {
-  if (!hasTechNode(state, pid, "int-a2"))
-    return fail("requires Intelligence A2 (Listening Post)");
   const hex = params.hex;
   if (!state.board.hexes[hex]) return fail("no such hex");
   if (state.locations[hex]) return fail("cannot build a post on a Location hex");
   if (postAt(state, hex)) return fail("a listening post already occupies that hex");
-  const friendlyHere = Object.values(state.units).some((u) => u.owner === pid && u.node === hex);
-  if (!friendlyHere) return fail("needs a friendly unit on the target hex");
+  const crew = Object.values(state.units).filter((u) => u.owner === pid && u.node === hex);
+  if (!crew.length) return fail("needs a friendly unit on the target hex");
+  // Relay Kit (chip `postsWithoutTech`): the artifact IS the know-how — a
+  // carrier on the hex stands in for the Intelligence A2 assignment.
+  const kitted = crew.some((u) =>
+    u.chips.some((c) => !state.chips[c]?.disabled && CHIPS[state.chips[c]?.chipId]?.postsWithoutTech));
+  if (!hasTechNode(state, pid, "int-a2") && !kitted)
+    return fail("requires Intelligence A2 (Listening Post)");
   if (player.resource < CONFIG.posts.buildCost) return fail("not enough scrap");
   return { ok: true };
 }
@@ -470,6 +475,49 @@ function runBuildPost(state, { pid, player, params }) {
   const post = buildPost(state, pid, params.hex);
   recomputeVisibility(state, pid, { emitEvents: false }); // §17.7 — a new Vision source
   return { hex: post.hex };
+}
+
+// --- Activate chip (docs/chip-set-v0.1.md — Cold Camp) ----------------
+// A chip with an `activatable` block is switched on by paying its scrap
+// cost; the effect lasts until the start of the owner's next turn. Free of
+// the Action budget (like build) — the scrap IS the cost.
+function findActivatableChip(state, unit, chipUid) {
+  if (!unit || !unit.chips.includes(chipUid)) return null;
+  const inst = state.chips[chipUid];
+  if (!inst || inst.disabled) return null;
+  const def = CHIPS[inst.chipId];
+  return def?.activatable ? def : null;
+}
+
+function validateActivateChip(state, { pid, player, params }) {
+  const unit = state.units[params.unit];
+  if (!unit) return fail("no such unit");
+  if (unit.owner !== pid) return fail("not your unit");
+  const def = findActivatableChip(state, unit, params.chip);
+  if (!def) return fail("that chip has no activation");
+  if (def.activatable.grants === "stealth" &&
+      unit.stealthUntil != null && turnOrdinal(state) <= unit.stealthUntil)
+    return fail("already active until your next turn");
+  if (player.resource < (def.activatable.cost || 0)) return fail("not enough scrap");
+  return { ok: true };
+}
+
+function runActivateChip(state, { pid, player, params }) {
+  const unit = state.units[params.unit];
+  const def = findActivatableChip(state, unit, params.chip);
+  const cost = def.activatable.cost || 0;
+  if (cost > 0) {
+    player.resource -= cost;
+    emit(state, "resource_spent", { player: pid, resource: "Resource", amount: -cost, source: "activate-chip" });
+  }
+  if (def.activatable.grants === "stealth") {
+    // Concealed through everyone else's turns; expires when the owner's
+    // next turn starts (same ordinal convention as immobilizedUntil).
+    unit.stealthUntil = turnOrdinal(state) + state.turnOrder.length - 1;
+    recomputeVisibility(state, pid, { emitEvents: false });
+  }
+  emit(state, "chip_activated", { unit: unit.uid, player: pid, chip: params.chip, chipId: def.id });
+  return { unit: unit.uid, chipId: def.id };
 }
 
 // --- Sabotage (§17.5 Intelligence B2 — Saboteurs) --------------------
@@ -505,6 +553,7 @@ const ACTIONS = {
   recruit: { cost: 1, validate: validateRecruit, run: runRecruit },
   reinforce: { cost: 1, validate: validateReinforce, run: runReinforce },
   contest: { cost: 1, validate: validateContest, run: runContest },
+  "activate-chip": { cost: 0, validate: validateActivateChip, run: runActivateChip },
   // §20.4–20.7 — economic directives. Queuing a build/upgrade and setting the
   // slider are free (the cost is the slider split + scrap); RUSH costs 1 Action
   // since it actively converts banked scrap into immediate construction.

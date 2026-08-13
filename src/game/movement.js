@@ -26,9 +26,11 @@ export function passesFreely(state, a, b) {
 // The set of hexes that HALT `ownerId`'s movement on entry (§16.2 blockade):
 // any hex holding a non-passing foreign unit, plus any enemy-controlled
 // Location hex (you can't freely march through a hostile city).
-export function movementBlockers(state, ownerId) {
+export function movementBlockers(state, ownerId, { ignoreUnits } = {}) {
   const blocked = new Set();
-  for (const u of Object.values(state.units)) {
+  // Night March (chip `passThroughUnits`): foreign UNITS no longer halt
+  // the mover; enemy Locations still do (a city is not a picket line).
+  if (!ignoreUnits) for (const u of Object.values(state.units)) {
     if (u.owner === ownerId) continue;
     if (!passesFreely(state, ownerId, u.owner)) blocked.add(u.node);
   }
@@ -51,11 +53,17 @@ export function unitIgnoresTerrain(state, unit) {
   );
 }
 
+function unitPassesThroughUnits(state, unit) {
+  return unit.chips.some(
+    (c) => !state.chips[c]?.disabled && CHIPS[state.chips[c]?.chipId]?.passThroughUnits,
+  );
+}
+
 export function unitReach(state, unit) {
   if (!unit) return {};
   const budget = unit.moveRemaining ?? unit.movement ?? 0;
   return movementField(state, unit.node, budget, {
-    blockedThrough: movementBlockers(state, unit.owner),
+    blockedThrough: movementBlockers(state, unit.owner, { ignoreUnits: unitPassesThroughUnits(state, unit) }),
     ignoreTerrain: unitIgnoresTerrain(state, unit),
   });
 }
@@ -66,7 +74,7 @@ export function unitMovePath(state, unit, dest) {
   if (!unit) return null;
   const budget = unit.moveRemaining ?? unit.movement ?? 0;
   return movementRoute(state, unit.node, budget, dest, {
-    blockedThrough: movementBlockers(state, unit.owner),
+    blockedThrough: movementBlockers(state, unit.owner, { ignoreUnits: unitPassesThroughUnits(state, unit) }),
     ignoreTerrain: unitIgnoresTerrain(state, unit),
   });
 }

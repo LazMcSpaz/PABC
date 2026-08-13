@@ -82,6 +82,9 @@ function installDiplomacyListeners(state) {
 function onTrespass(state, payload) {
   const unit = state.units[payload.unit];
   if (!unit) return;
+  // Safe Conduct (chip `safeConduct`): forged papers — this unit's
+  // trespass draws no Standing hit and no Menace.
+  if (unit.chips.some((c) => !state.chips[c]?.disabled && CHIPS[state.chips[c]?.chipId]?.safeConduct)) return;
   const mover = unit.owner;
   const owner = state.world?.zoc?.[payload.to];
   if (!owner || owner === mover) return;          // neutral ground or your own land

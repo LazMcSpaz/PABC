@@ -97,6 +97,8 @@ export function buildableChips(state, loc) {
     // Signature chips are faction-locked — invisible to everyone else,
     // including a captor browsing a captured Location's menu.
     if (def.faction && def.faction !== loc.controller) continue;
+    // Reward chips are found, never built (docs/chip-set-v0.1.md).
+    if (def.reward) continue;
     if (!meetsTech(player, def)) continue; // Tech-forbidden → not shown at all
     const locked = !meetsLoyalty(loc, def);
     out.push({

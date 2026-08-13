@@ -53,6 +53,14 @@ const ENGINE_TO_UI_CHIP = {
   "burning-glass": "burningGlass",
   "guest-house": "guestHouse",
   "motor-pool": "motorPool",
+  "field-medics": "fieldMedics",
+  "entrenching-tools": "entrenchingTools",
+  "cold-camp": "coldCamp",
+  "night-march": "nightMarch",
+  "war-banner": "warBanner",
+  "old-hands": "oldHands",
+  "safe-conduct": "safeConduct",
+  "relay-kit": "relayKit",
 };
 const UI_TO_ENGINE_CHIP = Object.fromEntries(
   Object.entries(ENGINE_TO_UI_CHIP).map(([e, u]) => [u, e]),
