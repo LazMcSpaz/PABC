@@ -551,6 +551,14 @@ function FactionRow({ f, onClick }) {
         {warn.map((w, i) => (
           <span key={i} title={w.title} style={{ fontSize: 13, color: "#d2913c" }}>{w.glyph}</span>
         ))}
+        {f.vp != null && (
+          <span title="Victory Points" style={{
+            fontFamily: C.font, fontSize: 11, fontWeight: 800, letterSpacing: 0.8,
+            color: "#e8c95a", border: "1px solid rgba(232,201,90,0.45)",
+            borderRadius: 4, padding: "1px 7px", background: "rgba(232,201,90,0.08)",
+            flexShrink: 0,
+          }}>★ {f.vp}</span>
+        )}
       </div>
       <div style={{
         display: "flex", alignItems: "center", gap: 8,
@@ -720,6 +728,7 @@ function StatusPill({ color, children }) {
 function StatusRow({ f, tierColor }) {
   const pills = [];
   pills.push({ color: tierColor, label: TIER_LABEL[f.standingTier] || f.standingTier });
+  if (f.vp != null) pills.push({ color: "#e8c95a", label: `★ ${f.vp} VP` });
   if (f.temperament) pills.push({ color: C.holo, label: f.temperament });
   if (f.atWar)        pills.push({ color: "#d2453f", label: "◤ At War" });
   if (f.pacted)       pills.push({ color: "#5fc27a", label: "◆ Pacted" });

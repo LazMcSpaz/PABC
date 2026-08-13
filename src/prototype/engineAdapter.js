@@ -524,6 +524,9 @@ function adaptDiplomacy(state, viewer) {
     return {
       id: f,
       name: def.name || f,
+      // Public scoreboard — VP is common knowledge (the race is visible
+      // even when the map is not). Null for factions with no player seat.
+      vp: state.players[f]?.vp ?? null,
       color: def.color || "#888",
       tier: def.tier || "major",
       temperament: def.temperament,
