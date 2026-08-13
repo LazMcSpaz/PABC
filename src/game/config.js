@@ -113,6 +113,13 @@ export const CONFIG = {
     loyaltyScale: 1, // local influence = loyaltyScale × the Location's Loyalty
     falloff: 0.5, // per-hop multiplier — contribution at d hops = source × falloff^d
     dominanceThreshold: 3, // a hex needs at least this Influence to join any ZoC
+    // Influence pressure (docs/vp-and-actions-design.md §1): a Location
+    // whose OWN hex sits in a rival's dominant ZoC bleeds Loyalty each
+    // Upkeep — the soft-power siege. Garrisoning cancels it (rise 1 −
+    // bleed 1 = stalemate); Civic Hall's rise beats it; out-projecting
+    // ends it. Over-exertion is soft hostility: each bleeding Upkeep
+    // costs the presser Standing with the owner and raises their Menace.
+    pressure: { bleed: 1, standingHit: 1, menaceHit: 1 },
   },
   // §20 Economy & City Development — chips are the output of the economy,
   // built off each Location's Output via the guns/butter slider (Market retired).

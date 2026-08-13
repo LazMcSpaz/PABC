@@ -162,7 +162,13 @@ section count and with or without defender gear. Two bonus findings:
    aggregate. Validation: AI games converge FASTER (rounds 16–35) and
    all four factions won across the sample seeds — the first Versari
    win appeared under this model.
-4. Influence pressure (own pass — ZoC dominance bleed + Menace cost).
+4. ✅ **DONE** — Influence pressure: a Location whose own hex sits in a
+   rival's dominant ZoC bleeds 1 Loyalty/Upkeep. A plain garrison stalls
+   flat under it (rise 1 − bleed 1); Civic Hall out-climbs it; allies
+   (pact/vassalage) never pressure each other. Soft hostility priced in:
+   each bleeding Upkeep costs the presser 1 Standing with the owner and
+   +1 Menace (`CONFIG.influence.pressure`). AI-vs-AI still converges
+   (rounds 16–42, all four factions winning across sample seeds).
 5. AI overhaul, written once against the per-entity model.
 
 ## 4. Action rework — implementation plan (next up)

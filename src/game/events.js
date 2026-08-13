@@ -39,6 +39,7 @@ export const EVENT_NAMES = new Set([
   "build_started", "build_completed", "chip_upgraded",
   "chip_dormant", "chip_reactivated", "slider_changed", "garrison_erosion",
   "chip_activated", "chip_granted", "chip_removed", "faction_eliminated",
+  "influence_pressure",
   // §19 Exploration, Vision & Fog of War (APPEND-ONLY — distinct keys).
   "hex_explored", "unit_spotted", "unit_lost_sight", "ambush_triggered",
   // §17.7 Listening Post (Intelligence A2) lifecycle (APPEND-ONLY).

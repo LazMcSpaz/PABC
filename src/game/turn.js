@@ -12,7 +12,9 @@ import { sweepDeferred } from "./deferred.js";
 import { evaluateTriggers } from "./triggers.js";
 import { evaluateConditionalBeats } from "./quests.js";
 import { applyOutputAndBuilds, chargeChipUpkeep, enforceLoyaltySlotCap } from "./economy.js";
-import { runDiplomacyRound, vassalsOf, arePacted } from "./diplomacy.js";
+import { runDiplomacyRound, vassalsOf, arePacted, adjustMenace } from "./diplomacy.js";
+import { adjustStanding } from "./standing.js";
+import { zocOwner } from "./influence.js";
 import { hasTechNode } from "./tech.js";
 import { chargePostUpkeep } from "./posts.js";
 import { CHIPS, LOCATIONS, ABILITIES } from "./content.js";
@@ -60,27 +62,52 @@ export function tickLoyalty(state, pid) {
       (u) => u.owner === pid && u.node === loc.hexId,
     );
 
+    // Influence pressure (§18.3 / docs/vp-and-actions-design.md §1): a
+    // rival whose ZoC DOMINATES this Location's own hex hollows it out —
+    // Loyalty bleeds each Upkeep, garrison or not. The pressure is felt as
+    // soft hostility: the presser loses Standing with the owner and gains
+    // Menace every Upkeep it squeezes. Allies (pact or vassalage either
+    // way) never pressure each other.
+    const pcfg = CONFIG.influence.pressure;
+    const presser = zocOwner(state, loc.hexId);
+    const pressured = !!(pcfg && presser && presser !== pid &&
+      state.players[presser] && !arePacted(state, pid, presser) &&
+      !vassalsOf(state, pid).includes(presser) && !vassalsOf(state, presser).includes(pid));
+    const bleed = pressured ? pcfg.bleed : 0;
+    if (pressured) {
+      adjustStanding(state, pid, presser, -pcfg.standingHit, "influence-pressure");
+      adjustMenace(state, presser, pcfg.menaceHit, "influence-pressure");
+      emit(state, "influence_pressure", { hex: loc.hexId, owner: pid, presser, bleed });
+    }
+
     if (garrisoned) {
-      // Integrating — Loyalty rises to the fixed ceiling. A returning unit
-      // also halts any in-progress peel simply by not reaching the peel path.
-      // A Civic Hall chip (loyaltyRise) accelerates the climb.
-      if ((loc.loyalty ?? 0) < cfg.ceiling) {
-        const rise = cfg.risePerUpkeep + locChipSum(state, loc, "loyaltyRise");
-        loc.loyalty = Math.min((loc.loyalty ?? 0) + rise, cfg.ceiling);
+      // Integrating — Loyalty rises to the fixed ceiling (a returning unit
+      // also halts any in-progress peel simply by not reaching the peel
+      // path); Civic Hall accelerates the climb; enemy influence pressure
+      // drags against both — a plain garrison under pressure stalls flat.
+      const delta = cfg.risePerUpkeep + locChipSum(state, loc, "loyaltyRise") - bleed;
+      if (delta !== 0 && (delta < 0 || (loc.loyalty ?? 0) < cfg.ceiling)) {
+        loc.loyalty = Math.max(0, Math.min((loc.loyalty ?? 0) + delta, cfg.ceiling));
         emit(state, "loyalty_changed", { hex: loc.hexId, owner: pid, loyalty: loc.loyalty });
       }
       continue;
     }
 
     // A Civic Hall chip holds Loyalty where it stands while neglected — no
-    // bleed, and therefore never the peel path either.
+    // passive bleed — but FOREIGN pressure still tells: the chip cancels
+    // neglect, not a rival's dominance.
     if (loc.chips.some((c) => !state.chips[c]?.disabled && CHIPS[state.chips[c]?.chipId]?.noLoyaltyDecay)) {
+      if (bleed > 0 && (loc.loyalty ?? 0) > 0) {
+        loc.loyalty = Math.max((loc.loyalty ?? 0) - bleed, 0);
+        emit(state, "loyalty_changed", { hex: loc.hexId, owner: pid, loyalty: loc.loyalty });
+      }
       continue;
     }
 
-    // Neglected and still loyal — bleed toward 0, never peeling Control yet.
+    // Neglected and still loyal — bleed toward 0 (plus any pressure),
+    // never peeling Control yet.
     if ((loc.loyalty ?? 0) > 0) {
-      loc.loyalty = Math.max((loc.loyalty ?? 0) - cfg.decayPerUpkeep, 0);
+      loc.loyalty = Math.max((loc.loyalty ?? 0) - cfg.decayPerUpkeep - bleed, 0);
       emit(state, "loyalty_changed", { hex: loc.hexId, owner: pid, loyalty: loc.loyalty });
       // Surface danger BEFORE any Control peels (§18.2 UI warning) — the
       // alert lands at least one Upkeep before the first section is lost.

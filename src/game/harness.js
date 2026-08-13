@@ -3759,5 +3759,50 @@ line("\n  [Phase 11] text-token resolver");
     g17.units[recruitUid].actionsRemaining === 0);
 }
 
+
+// Phase 17 — influence pressure: the soft-power siege and its Menace cost.
+{
+  line("\n  [Phase 17] influence pressure");
+  const g = createGame({ seed: 171 });
+  startTurn(g);
+  const owner17 = g.turnOrder[g.activeIndex];
+  const presser = g.turnOrder.find((f) => f !== owner17);
+  const town = Object.values(g.locations).find((l) => l.controller === owner17);
+  town.chips = town.chips.filter((c) => g.chips[c]?.chipId !== "capital");
+  town.loyalty = 5; town.loyaltyOwner = owner17;
+  const guard17 = Object.values(g.units).find((u) => u.owner === owner17);
+  guard17.node = town.hexId;
+  g.world.zoc = g.world.zoc || {};
+  g.world.zoc[town.hexId] = presser; // rival influence dominates the town's own hex
+  const menaceBefore = g.players[presser].menace || 0;
+  const standingBefore = getStanding(g, owner17, presser);
+  tickLoyalty(g, owner17);
+  check("pressure: a garrisoned town under rival dominance stalls flat (rise 1 − bleed 1)",
+    town.loyalty === 5);
+  check("pressure is soft hostility: presser loses Standing and gains Menace",
+    getStanding(g, owner17, presser) === standingBefore - 1 &&
+    (g.players[presser].menace || 0) === menaceBefore + 1);
+  // Ungarrisoned: neglect + pressure double-bleeds.
+  guard17.node = Object.values(g.board.hexes).find((h) => !g.locations[h.id]).id;
+  g.world.zoc[town.hexId] = presser; // tickLoyalty recomputed influence — re-pin
+  tickLoyalty(g, owner17);
+  check("pressure: neglected AND pressured bleeds 2/Upkeep", town.loyalty === 3);
+  // Civic Hall stops neglect but NOT foreign dominance.
+  const hall = g.nextId("chip");
+  g.chips[hall] = { uid: hall, chipId: "civic-hall" };
+  town.chips.push(hall);
+  g.world.zoc[town.hexId] = presser;
+  tickLoyalty(g, owner17);
+  check("pressure: Civic Hall cancels neglect but not the rival's dominance",
+    town.loyalty === 2);
+  // Allies never pressure each other.
+  formPact(g, owner17, presser);
+  g.world.zoc[town.hexId] = presser;
+  const loyBefore = town.loyalty;
+  tickLoyalty(g, owner17);
+  check("pressure: a pacted ally's ZoC does not bleed your towns",
+    town.loyalty === loyBefore - 0); // civic hall holds, no pressure, no neglect
+}
+
 line(`\n  v0.2 verification: ${v2pass} passed, ${v2fail} failed`);
 line("");
