@@ -59,6 +59,8 @@ export const EVENT_NAMES = new Set([
   "tribute_demanded", "tribute_caved", "tribute_refused",
   "allied_vision_toggled", "open_borders_toggled", "gift_counter_decayed",
   "territory_trespassed",
+  // Diplomacy robustness pass — earned drift baselines + summit VP.
+  "standing_baseline_changed", "recognition_summit",
 ]);
 
 // Resolve a chip / card instance uid to its content def. Covers Market

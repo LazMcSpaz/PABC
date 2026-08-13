@@ -54,6 +54,7 @@ import UnitPanel from "./UnitPanel.jsx";
 import ContestOverlay from "./ContestOverlay.jsx";
 import SalvageModal from "./SalvageModal.jsx";
 import { ConfirmModal, CoalitionModal, isPromptDismissed } from "./ConfirmModal.jsx";
+import { HeraldLayer, heraldFromLog } from "./HeraldBanners.jsx";
 import { atWar } from "../game/diplomacy.js";
 import { useAIReplay } from "./aiReplay/useAIReplay.js";
 import ReplayLayer from "./aiReplay/ReplayLayer.jsx";
@@ -344,6 +345,25 @@ export default function Prototype({ config, onNewGame }) {
     const t = setTimeout(() => setDiploResult(null), 4500);
     return () => clearTimeout(t);
   }, [diploResult]);
+
+  // Herald — scan log entries appended since the last tick and surface the
+  // political moves as transient banners. The cursor starts at the current
+  // log length so setup noise never banners; each batch self-expires.
+  const [heralds, setHeralds] = useState([]);
+  const heraldCursor = useRef(gameRef.current?.log?.length ?? 0);
+  const dismissHerald = useCallback((id) => setHeralds((q) => q.filter((b) => b.id !== id)), []);
+  useEffect(() => {
+    const log = gameRef.current?.log || [];
+    if (heraldCursor.current > log.length) heraldCursor.current = 0; // log replaced (new game)
+    if (heraldCursor.current === log.length) return;
+    const fresh = log.slice(heraldCursor.current);
+    heraldCursor.current = log.length;
+    const msgs = heraldFromLog(fresh, state.youId);
+    if (!msgs.length) return;
+    setHeralds((q) => [...q, ...msgs].slice(-4));
+    const ids = new Set(msgs.map((m) => m.id));
+    setTimeout(() => setHeralds((q) => q.filter((b) => !ids.has(b.id))), 7000);
+  }, [tick, state.youId]);
 
   // Manage the selection's lifetime. Enemy units stay selectable so the
   // player can inspect their stats and owner read-only — control actions
@@ -1072,6 +1092,8 @@ export default function Prototype({ config, onNewGame }) {
         </TitledWindow>
       )}
       </AnimatePresence>
+
+      <HeraldLayer banners={heralds} onDismiss={dismissHerald} topOffset={hudOffset + 14} />
 
       {toast && (
         <div

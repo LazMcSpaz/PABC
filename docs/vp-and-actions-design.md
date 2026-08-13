@@ -216,3 +216,54 @@ pips replace the global counter), harness (many fixtures set
 `players[x].actions.remaining = 99` — replace with entity-budget
 helpers). Sim script model definitions collapse: model C becomes simply
 "the rules".
+
+## 5. Diplomacy robustness pass — ✅ DONE
+
+Diagnosis (playtest): the peaceful road to victory was mathematically
+closed. Recognition needs 6 backing but the 4-major field caps at 3
+allied points, so the threshold runs through vassals — and vassalage
+required the target to be CORNERED (at war, or Wary-or-worse standing).
+Peace literally required war. On top of that, Standing drifted toward
+zero (history evaporated), and the AI's political moves happened in a
+log ticker nobody reads.
+
+Shipped (all engine-checked in harness Phase 19):
+
+- **Standing baselines** (`CONFIG.diplomacy.baseline`): drift now pulls
+  each pair toward an EARNED baseline instead of zero, capped ±4.
+  Honored pact calls +2 (caller → honorer); broken pacts/promises and
+  surprise attacks −2 (victim → traitor); every 4 full rounds of
+  unbroken pact +1 both ways. Betrayal scars; old alliances stay warm.
+- **Patronage**: a MINOR faction now accepts vassalage peacefully when
+  it is much weaker (same power gate), at Friendly+ standing, the suitor
+  is its top standing on the board, and reputation gates pass. Majors
+  still require the cornered gate. The vassalize verb stays visible for
+  pacted minors that would accept (ally → protectorate upgrade), and the
+  outcome hint distinguishes submission from welcome.
+- **Recognition legibility + summit VP**
+  (`CONFIG.diplomacy.recognition.summitVp`): the Hall of Powers now
+  carries a "Path to Recognition" checklist — per-faction backing status
+  (backs / warming / cold / distrusts / coalition) is public; the exact
+  numbers behind it (their Standing vs the Allied bar, your Menace vs
+  their tolerance, your Honor vs their floor) are espionage product,
+  gated behind Intelligence B1 Spy Ring like foreign tech wheels. The
+  raw per-row tolerance/trustFloor numbers in the adapter are gated the
+  same way (the anonymised bars stay public). Engine side, the first
+  time each faction EVER backs a major it banks +1 VP ("summit"), so
+  diplomacy pays into the same VP race conquest does — tracked in
+  `state.diplomacy.recognizedEver`, once per backer per game. VP-race
+  sim: diplomat now reaches 12 VP in 100% of trials, mean round 10.1
+  (conqueror 9.5, hybrid 8.1, turtle never).
+- **Herald callouts** (`src/prototype/HeraldBanners.jsx`): transient
+  banners telegraph political moves — AI wars/pacts/betrayals,
+  coalitions, vassalage, denouncements, summit VP, pact calls, tribute
+  demands, and tier crossings in how each power regards you. Moves the
+  human initiated and composite-event echoes are filtered; the event
+  feed keeps the full record.
+
+Flagged for later (explicitly NOT now, per design call): consolidate the
+logistics + construction tech trees and promote Diplomacy to the fourth
+tree — noted only; no tech-wheel changes in this pass. Also still
+deferred: treaty types (protection contract, non-aggression, territorial
+cession) and the AI overhaul (per-asset policies, un-fencing AI-initiated
+diplomacy toward the human).
