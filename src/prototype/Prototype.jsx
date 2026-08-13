@@ -578,10 +578,11 @@ export default function Prototype({ config, onNewGame }) {
 
     if (allies.length > 0) {
       // The split-or-pool decision belongs to the player whenever a stack
-      // could fight together.
+      // could fight together. Every row is toggleable — the engine's
+      // initiator is picked at confirm time from the checked units, so an
+      // already-acted unit never blocks the fresh ones.
       setCoalitionPrompt({
-        initiator: unitRow(attacker),
-        allies: allies.map(unitRow),
+        units: [unitRow(attacker), ...allies.map(unitRow)],
         defender: defPreview,
         wildcards: game.players[attacker.owner]?.actions.remaining ?? 0,
         warnPeace,
@@ -1172,8 +1173,18 @@ export default function Prototype({ config, onNewGame }) {
       {coalitionPrompt && (
         <CoalitionModal
           prompt={coalitionPrompt}
-          onConfirm={(coalition) => {
-            const params = { ...coalitionPrompt.params, coalition };
+          onConfirm={(selectedUids) => {
+            // Root the contest on a checked unit that still has its own
+            // action (the initiator takes the loser's attrition, so prefer
+            // one that pays for itself); the rest join as the coalition.
+            const game = gameRef.current;
+            const lead = selectedUids.find((u) => (game.units[u]?.actionsRemaining ?? 0) > 0)
+              ?? selectedUids[0];
+            const params = {
+              ...coalitionPrompt.params,
+              unit: lead,
+              coalition: selectedUids.filter((u) => u !== lead),
+            };
             setCoalitionPrompt(null);
             resolveContest(params);
           }}

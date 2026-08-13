@@ -90,24 +90,26 @@ export function ConfirmModal({ prompt, onConfirm, onCancel }) {
 
 // Coalition picker — the contest rule's core decision: every selected unit
 // spends its action on this one contest; unselected units keep theirs.
-// `prompt`: { initiator: {uid,name,strength,acted}, allies: [same...],
-//   defender: {name, value, rollsDie}, wildcards, warnPeace: factionName|null }
-// onConfirm(coalitionUids) — allies chosen to join (initiator implied).
+// EVERY row is toggleable (nobody is "locked in" — the initiator is chosen
+// at confirm time from the checked units that can still pay).
+// `prompt`: { units: [{uid,name,strength,acted}...], defender: {name,
+//   value, rollsDie}, wildcards, warnPeace: factionName|null }
+// onConfirm(selectedUids) — the units taking part, in display order.
 export function CoalitionModal({ prompt, onConfirm, onCancel }) {
-  const [picked, setPicked] = useState(() => new Set((prompt?.allies || []).map((a) => a.uid)));
+  const [picked, setPicked] = useState(() => new Set((prompt?.units || []).map((a) => a.uid)));
   if (!prompt) return null;
   const toggle = (uid) => setPicked((s) => {
     const n = new Set(s);
     if (n.has(uid)) n.delete(uid); else n.add(uid);
     return n;
   });
-  const selected = [prompt.initiator, ...prompt.allies.filter((a) => picked.has(a.uid))];
+  const selected = prompt.units.filter((a) => picked.has(a.uid));
   const combined = selected.reduce((n, u) => n + u.strength, 0);
   const shortfall = selected.filter((u) => u.acted).length;
-  const payable = shortfall <= prompt.wildcards;
-  const row = (u, locked) => (
-    <label key={u.uid} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 8px", borderRadius: 6, background: "rgba(0,0,0,0.25)", border: "1px solid rgba(86,211,198,0.2)", cursor: locked ? "default" : "pointer", opacity: 1 }}>
-      <input type="checkbox" checked={locked || picked.has(u.uid)} disabled={locked} onChange={() => toggle(u.uid)} />
+  const payable = selected.length > 0 && shortfall <= prompt.wildcards;
+  const row = (u) => (
+    <label key={u.uid} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 8px", borderRadius: 6, background: "rgba(0,0,0,0.25)", border: "1px solid rgba(86,211,198,0.2)", cursor: "pointer" }}>
+      <input type="checkbox" checked={picked.has(u.uid)} onChange={() => toggle(u.uid)} />
       <span style={{ fontSize: 12, fontWeight: 700, flex: 1 }}>{u.name}</span>
       <span style={{ fontSize: 11.5, color: C.holoHi }}>Str {u.strength}</span>
       {u.acted && <span style={{ fontSize: 9.5, color: C.red }}>acted — needs wildcard</span>}
@@ -123,8 +125,7 @@ export function CoalitionModal({ prompt, onConfirm, onCancel }) {
           just by standing here.
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-          {row(prompt.initiator, true)}
-          {prompt.allies.map((a) => row(a, false))}
+          {prompt.units.map(row)}
         </div>
         <div style={{ marginTop: 12, fontSize: 12.5 }}>
           Combined Strength <b style={{ color: C.holoHi }}>{combined}</b> + 1d6
@@ -138,10 +139,16 @@ export function CoalitionModal({ prompt, onConfirm, onCancel }) {
             Standing and raise your Menace.
           </div>
         )}
-        {!payable && (
+        {selected.length === 0 && (
+          <div style={{ marginTop: 8, fontSize: 11.5, color: C.red }}>
+            Commit at least one unit.
+          </div>
+        )}
+        {selected.length > 0 && !payable && (
           <div style={{ marginTop: 8, fontSize: 11.5, color: C.red }}>
             {shortfall} committed unit{shortfall === 1 ? " has" : "s have"} already
-            acted, but you only hold {prompt.wildcards} wildcard action{prompt.wildcards === 1 ? "" : "s"}.
+            acted, but you only hold {prompt.wildcards} wildcard action{prompt.wildcards === 1 ? "" : "s"}. Uncheck
+            {shortfall === 1 ? " it" : " them"} to attack with the rest.
           </div>
         )}
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 14 }}>
@@ -150,7 +157,7 @@ export function CoalitionModal({ prompt, onConfirm, onCancel }) {
             Cancel
           </button>
           <button className="hud-int" disabled={!payable}
-            onClick={payable ? () => onConfirm?.(prompt.allies.filter((a) => picked.has(a.uid)).map((a) => a.uid)) : undefined}
+            onClick={payable ? () => onConfirm?.(selected.map((a) => a.uid)) : undefined}
             style={{ ...btnBase, color: "#fff", border: `1px solid ${C.red}`,
               background: "linear-gradient(180deg, #e2554c, #a3322c)",
               opacity: payable ? 1 : 0.5, cursor: payable ? "pointer" : "not-allowed" }}>
