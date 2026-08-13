@@ -27,14 +27,20 @@ function abilitySuppressesChips(loc) {
   return !!ab?.passives?.some((pv) => pv.type === "SUPPRESS_CHIP_BONUSES");
 }
 
+function unitChipStrength(state, u) {
+  let n = 0;
+  for (const c of u.chips) {
+    if (state.chips[c]?.disabled) continue;
+    n += CHIPS[state.chips[c]?.chipId]?.strength || 0;
+  }
+  return n;
+}
+
 function stackChipStrength(state, owner, hex) {
   let n = 0;
   for (const u of Object.values(state.units)) {
     if (u.owner !== owner || u.node !== hex) continue;
-    for (const c of u.chips) {
-      if (state.chips[c]?.disabled) continue;
-      n += CHIPS[state.chips[c]?.chipId]?.strength || 0;
-    }
+    n += unitChipStrength(state, u);
   }
   return n;
 }
@@ -721,10 +727,27 @@ export function runContest(state, { pid, params, ctx = {} }) {
 
   // Combined stack Strength: every friendly unit on the contesting hex
   // fights together, so their Strengths sum (Concentration is added on top).
-  let atkStrength = stackStrength(state, pid, unit.node);
-  const atkAllies = atkStrength - unit.strength; // contribution from stacked allies
+  // Coalition contests (action-rework design): params.coalition names the
+  // allied units on this hex fighting alongside the initiator — only their
+  // Strengths join the attack. Absent → the whole stack fights (legacy
+  // §combined-stack rule, kept for back-compat until the per-entity action
+  // model lands). Under that model, joining a coalition costs each member
+  // its action — charged by the dispatcher, not here.
+  const coalition = Array.isArray(params.coalition)
+    ? params.coalition
+        .map((uid) => state.units[uid])
+        .filter((u) => u && u.owner === pid && u.node === unit.node && u.uid !== unit.uid)
+    : null;
+  let atkStrength = coalition
+    ? unit.strength + coalition.reduce((n, u) => n + u.strength, 0)
+    : stackStrength(state, pid, unit.node);
+  const atkAllies = atkStrength - unit.strength; // contribution from committed allies
+  const fighters = coalition ? [unit, ...coalition] : null;
   const chipsSuppressed = t.kind === "location" && abilitySuppressesChips(t.loc)
-    ? stackChipStrength(state, pid, unit.node) : 0;
+    ? (fighters
+        ? fighters.reduce((n, u) => n + unitChipStrength(state, u), 0)
+        : stackChipStrength(state, pid, unit.node))
+    : 0;
   atkStrength -= chipsSuppressed;
   const defAllies = defenderUnit
     ? stackStrength(state, defenderUnit.owner, defHex) - defenderUnit.strength
