@@ -267,3 +267,52 @@ tree — noted only; no tech-wheel changes in this pass. Also still
 deferred: treaty types (protection contract, non-aggression, territorial
 cession) and the AI overhaul (per-asset policies, un-fencing AI-initiated
 diplomacy toward the human).
+
+## 6. Diplomacy tuning pass (2026-08-13 playtest log) — ✅ DONE
+
+The first full playtest of §5 exposed five systemic failures, each traced
+to a specific log line and fixed with a harness check (Phase 20):
+
+- **Coalition conscription (the big one).** The R7 coalition against Free
+  Plainers drafted the HUMAN: declared war on their behalf, force-pacted
+  them with every member at Allied 8, and minted 4 free summit VP.
+  Coalitions now never enroll the human (they join by declaring war on
+  the target themselves — `declareWar` adds any volunteer to the member
+  list), members bury quarrels (peace + small warmth) but form NO pacts,
+  and a faction already hunted by one coalition can't be drafted into
+  another. No allied web, no free VP, no residue after dissolve.
+- **Menace laundering.** Attacking Grand Lakers (aggression 0.9) REDUCED
+  the attacker's Menace by 2 per strike — the playtest human went 5 → 0
+  by fighting. The "checking a warlord" discount is now clamped at −1.
+- **Trespass shredding.** 46 trespass citations in 8 rounds. Now one
+  citation per (mover, owner) pair per round; Neutral-or-better hosts
+  issue a warning (−1 Standing, no Menace); only distrustful hosts treat
+  passage as a probe (−2, +Menace).
+- **Mediation Honor pump.** Goldgrass re-mediated the same feud every
+  round (R2–R5), farming +2 Honor and +3 Standing per cycle. Mediated
+  pairs now carry a cooldown (`ai.mediateCooldownRounds`).
+- **Vassal revolving door.** Clan Tempest rebelled and was re-vassalized
+  by the same lord in the same round. Rebels now refuse their old lord
+  for `vassal.rebellionCooldownRounds`.
+
+Also in this pass:
+- **AI casus belli.** A 0.1-aggression diplomat faction declared four
+  wars via the blind combat loop (contest whatever you stand on). The AI
+  now opens hostilities only with a reason: existing war, Wary-or-worse
+  contempt, or aggression ≥ `ai.blindAttackAggressionMin`. Pacted
+  factions are never blind-struck; goal-seeking skips towns the faction
+  wouldn't fight for. The AI's vassalize move now routes through
+  `aiAcceptsVassalage` (gaining patronage + the rebellion cooldown).
+- **Gift ladder.** A gift's counted scrap is capped
+  (`gift.maxScrapPerGift`) so one bribe can't buy a pact, and a gift that
+  lands (≥2 Standing) warms the BASELINE (`gift.baselineWarmth`) — drift
+  no longer erases sustained generosity (playtest: +2 gift eaten in two
+  rounds).
+- **Encounter self-standing bug.** `fe_versari_courier` logged "Versari
+  standing toward Versari" — the ADJUST_STANDING effect bypassed the
+  engine guards. It now routes through `adjustStanding` (self no-op,
+  clamped, caused).
+
+Post-tuning: harness 377 green across seeds; AI-vs-AI winners spread
+across all four majors (was Goldgrass-skewed); VP race — conqueror
+9.6–10.1, diplomat 10.1, hybrid 8.1, turtle never.

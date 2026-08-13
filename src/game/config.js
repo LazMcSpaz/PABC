@@ -253,6 +253,7 @@ export const CONFIG = {
       resentmentPerRound: 1, // base autonomy/resentment growth
       rebellionThreshold: 10, // resentment past this → rebel
       lordWeaknessScale: 2, // a weak lord raises resentment faster
+      rebellionCooldownRounds: 4, // a rebel won't re-submit to the SAME lord this long
     },
 
     // §18.8 AI valuation / cadence dials.
@@ -263,11 +264,19 @@ export const CONFIG = {
       giftStandingPerScrap: 0.5, // Standing bought per scrap gifted
       warGrudgeThreshold: -5, // AI declares war when Standing falls to/below this (+ aggression)
       vassalPowerRatio: 0.4, // offer/accept vassalage when weak side power < ratio·strong side
+      mediateCooldownRounds: 3, // a mediated pair can't be re-mediated (no Honor pump)
+      // Casus belli — the AI's blind combat loop only opens hostilities with a
+      // reason: an existing war, contempt (Wary-), or a warlike temperament.
+      blindAttackAggressionMin: 0.5,
     },
 
     // --- diplomacy-spec.md §6.3 — the verb/AI/agreement layer on top of §18.
     // Playtest starting numbers (all TBD-tunable).
-    gift: { windowRounds: 3 }, // §1.2 — gift diminishing-returns window
+    gift: {
+      windowRounds: 3, // §1.2 — gift diminishing-returns window
+      maxScrapPerGift: 8, // scrap counted per gift — one giant gift can't buy a pact
+      baselineWarmth: 1, // a gift that lands (≥2 Standing) also warms the baseline
+    },
     tradingPact: { // §1.3
       scrapPerUpkeep: 2,
       permanentResearchOnFormation: 1, // Research FLOOR granted each party; removed on dissolve

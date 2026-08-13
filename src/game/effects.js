@@ -336,15 +336,15 @@ const EFFECTS = {
   },
 
   ADJUST_STANDING(state, e, ctx) {
-    // `player` is a token / pid; `faction` is a faction id.
+    // `player` is a token / pid; `faction` is a faction id. Routed through
+    // adjustStanding so the engine's guards apply: no self-standing (a
+    // faction encounter resolving for its own player is a no-op — the
+    // playtest log shows "Versari standing toward Versari"), and values
+    // clamp to the configured range.
     const pid = resolveTargets(state, e.player, ctx)[0];
     const fid = e.faction;
-    if (!pid || !fid) return;
-    state.factionStanding[fid] = state.factionStanding[fid] || {};
-    state.factionStanding[fid][pid] = (state.factionStanding[fid][pid] || 0) + (e.amount || 0);
-    emit(state, "standing_changed", {
-      faction: fid, player: pid, value: state.factionStanding[fid][pid], delta: e.amount,
-    });
+    if (!pid || !fid || pid === fid) return;
+    diplo.adjustStanding(state, fid, pid, e.amount || 0, "encounter");
   },
 
   SET_PLAYER_FLAG(state, e, ctx) {
