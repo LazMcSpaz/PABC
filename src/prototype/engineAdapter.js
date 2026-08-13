@@ -361,7 +361,17 @@ export function adaptState(state) {
       techLevel: p.techLevel || 1,
       techWheel: [...(p.techWheel || [])],
       abilityPointsAvailable: (p.techLevel || 1) - 1 - (p.techWheel?.length || 0),
-      actions: { ...p.actions },
+      // Per-entity actions: the HUD dial aggregates what this faction can
+      // still DO — every unit/Location action left plus wildcards. Max is
+      // the same census at full refresh.
+      actions: (() => {
+        const unitActs = Object.values(state.units).filter((u) => u.owner === p.id);
+        const locActs = Object.values(state.locations).filter((l) => l.controller === p.id);
+        const remaining = p.actions.remaining +
+          unitActs.reduce((n, u) => n + (u.actionsRemaining ?? 0), 0) +
+          locActs.reduce((n, l) => n + (l.actionsRemaining ?? 0), 0);
+        return { remaining, max: p.actions.remaining + unitActs.length + locActs.length };
+      })(),
       unitCap: CONFIG.baseUnitCap + recruitCapBonus(state, pid),
       isAI: !!p.isAI,
       isMinor: !!p.isMinor,

@@ -404,16 +404,34 @@ function runSetSlider(state, { params }) {
 // Invoke a location ability (§13.2). The dispatcher charges the
 // ability's own `cost.action`; the ability also pays any `cost.resource`
 // in its runner.
+// --- per-entity payers (docs/vp-and-actions-design.md §4) -------------
+// Each action names WHO spends: units and/or Locations. An entity out of
+// actions may burn one of the player's wildcards instead.
+const payLoc = (key) => (state, { params }) => ({ locations: [params[key]] });
+
+function reinforcePayer(state, { pid, params }) {
+  const unit = state.units[params.unit];
+  if (!unit) return null;
+  if ((params.mode || "instant") === "instant") return { locations: [unit.node] };
+  const route = reinforcementRoute(state, pid, unit.node);
+  return route ? { locations: [route.originHex] } : null;
+}
+
+function contestPayer(state, { params }) {
+  return { units: [params.unit, ...(params.coalition || [])] };
+}
+
+function buildPostPayer(state, { pid, params }) {
+  const crew = Object.values(state.units).find((u) => u.owner === pid && u.node === params.hex);
+  return crew ? { units: [crew.uid] } : null;
+}
+
 function getActivatable(state, params) {
   const loc = state.locations[params.location];
   if (!loc || !loc.abilityId) return null;
   const ability = ABILITIES[loc.abilityId];
   if (!ability) return null;
   return { loc, ability, opt: ability.activated?.[params.abilityIndex || 0] };
-}
-
-function activateActionCost(state, { params }) {
-  return getActivatable(state, params)?.opt?.cost?.action ?? 0;
 }
 
 function validateActivate(state, { pid, player, params }) {
@@ -591,25 +609,25 @@ function runSabotage(state, { pid, params }) {
 
 // --- dispatch --------------------------------------------------------
 const ACTIONS = {
-  move: { cost: 0, validate: validateMove, run: runMove }, // §16.2 — free of Actions
-  recruit: { cost: 1, validate: validateRecruit, run: runRecruit },
-  reinforce: { cost: 1, validate: validateReinforce, run: runReinforce },
-  contest: { cost: 1, validate: validateContest, run: runContest },
-  "activate-chip": { cost: 0, validate: validateActivateChip, run: runActivateChip },
-  "remove-chip": { cost: 1, validate: validateRemoveChip, run: runRemoveChip },
+  move: { validate: validateMove, run: runMove }, // §16.2 — free of Actions
+  recruit: { payer: payLoc("at"), validate: validateRecruit, run: runRecruit },
+  reinforce: { payer: reinforcePayer, validate: validateReinforce, run: runReinforce },
+  contest: { payer: contestPayer, validate: validateContest, run: runContest },
+  "activate-chip": { validate: validateActivateChip, run: runActivateChip },
+  "remove-chip": { payer: payLoc("at"), validate: validateRemoveChip, run: runRemoveChip },
   // §20.4–20.7 — economic directives. Queuing a build/upgrade and setting the
   // slider are free (the cost is the slider split + scrap); RUSH costs 1 Action
   // since it actively converts banked scrap into immediate construction.
-  build: { cost: 0, validate: validateBuild, run: runBuild },
-  upgrade: { cost: 0, validate: validateUpgrade, run: runUpgrade },
+  build: { validate: validateBuild, run: runBuild },
+  upgrade: { validate: validateUpgrade, run: runUpgrade },
   // Rushing is an active push of banked scrap into construction — it costs 1
   // Action (and scrap). Queuing a build/upgrade and the slider stay free.
-  rush: { cost: 1, validate: validateRush, run: runRush },
-  "set-slider": { cost: 0, validate: validateSetSlider, run: runSetSlider },
-  activate: { cost: activateActionCost, validate: validateActivate, run: runActivate },
+  rush: { payer: payLoc("at"), validate: validateRush, run: runRush },
+  "set-slider": { validate: validateSetSlider, run: runSetSlider },
+  activate: { payer: payLoc("location"), validate: validateActivate, run: runActivate },
   // §17.7 / §17.5 Intelligence A2 + B2 — deploy a Listening Post, run a Saboteur.
-  "build-post": { cost: 1, validate: validateBuildPost, run: runBuildPost },
-  sabotage: { cost: 1, validate: validateSabotage, run: runSabotage },
+  "build-post": { payer: buildPostPayer, validate: validateBuildPost, run: runBuildPost },
+  sabotage: { validate: validateSabotage, run: runSabotage }, // once/round stamp is its cost
 };
 
 export function performAction(state, type, params = {}, ctx = {}) {
@@ -624,11 +642,33 @@ export function performAction(state, type, params = {}, ctx = {}) {
 
   const check = def.validate(state, arg);
   if (!check.ok) return check;
-  const cost = typeof def.cost === "function" ? def.cost(state, arg) : def.cost;
-  if (player.actions.remaining < cost) return fail("not enough Actions");
 
-  player.actions.remaining -= cost;
-  emit(state, "action_spent", { player: pid, action: type, cost });
+  // Per-entity charging: every named unit/Location spends its action; an
+  // entity that has already acted may burn a player wildcard instead.
+  const payer = def.payer ? def.payer(state, arg) : null;
+  if (payer) {
+    const units = (payer.units || []).map((u) => state.units[u]).filter(Boolean);
+    const locs = (payer.locations || []).map((h) => state.locations[h]).filter(Boolean);
+    let shortfall = 0;
+    for (const u of units) if ((u.actionsRemaining ?? 0) < 1) shortfall += 1;
+    for (const l of locs) if ((l.actionsRemaining ?? 0) < 1) shortfall += 1;
+    if (shortfall > player.actions.remaining) {
+      return fail(units.length ? "that unit has already acted this turn"
+        : "that location has already acted this turn");
+    }
+    for (const u of units) {
+      if ((u.actionsRemaining ?? 0) >= 1) u.actionsRemaining -= 1;
+      else player.actions.remaining -= 1;
+    }
+    for (const l of locs) {
+      if ((l.actionsRemaining ?? 0) >= 1) l.actionsRemaining -= 1;
+      else player.actions.remaining -= 1;
+    }
+    emit(state, "action_spent", {
+      player: pid, action: type,
+      units: (payer.units || []), locations: (payer.locations || []),
+    });
+  }
 
   const result = def.run(state, arg) || {};
   return { ok: true, action: type, ...result };

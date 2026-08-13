@@ -708,6 +708,7 @@ line("\n  [Phase 2] two-unit start, cap 3, cheaper recruit");
   g.chips[tg] = { uid: tg, chipId: "training-grounds" };
   home.chips.push(tg);
   g.players[me].resource += 100;
+  g.players[me].actions.remaining = 9; // wildcards — 3 recruits at one Location this turn
   // Already at 2; recruit to 3 then 4 should work, 5th blocked.
   const r3 = performAction(g, "recruit", { at: home.hexId });
   const r4 = performAction(g, "recruit", { at: home.hexId });
@@ -734,6 +735,7 @@ line("\n  [Recruit] unitCapBonus is generic, not id-hardcoded");
     g.chips[c] = { uid: c, chipId: "__test-recruit-hut" };
     home.chips.push(c);
     g.players[me].resource += 100;
+  g.players[me].actions.remaining = 9; // wildcards for repeat recruits
     const r1 = performAction(g, "recruit", { at: home.hexId });
     const r2 = performAction(g, "recruit", { at: home.hexId });
     const r3b = performAction(g, "recruit", { at: home.hexId });
@@ -2084,6 +2086,7 @@ line("\n  [§20 Economy] Output slider, build/upgrade/rush, upkeep dormancy, gat
     loc.controller = pid; loc.loyaltyOwner = pid; loc.sections = [pid, pid, pid]; loc.loyalty = loy;
     loc.chips = loc.chips.filter((c) => g.chips[c]?.chipId !== "capital");
     loc.activeBuild = null; loc.buildProgress = 0; loc.buildSlider = 0;
+    loc.actionsRemaining = 1; // claimed mid-turn — grant the Upkeep action a held city would have
     return loc;
   };
 
@@ -2124,17 +2127,17 @@ line("\n  [§20 Economy] Output slider, build/upgrade/rush, upkeep dormancy, gat
     const me = g.turnOrder[0];
     const loc = grab(g, me);
     g.players[me].resource += 50;
-    const actsStart = g.players[me].actions.remaining;
-    performAction(g, "build", { at: loc.hexId, chipId: "labs" }); // buildCost 3, free of Actions
-    const actsAfterBuild = g.players[me].actions.remaining;
+    const locActsStart = loc.actionsRemaining;
+    performAction(g, "build", { at: loc.hexId, chipId: "labs" }); // buildCost 3, free of actions
+    const locActsAfterBuild = loc.actionsRemaining;
     const before = g.players[me].resource;
     const r = performAction(g, "rush", { at: loc.hexId });
     check("rush completes the build at once and spends scrap (at the §20.7 premium rate)",
       r.ok && loc.chips.some((c) => g.chips[c]?.chipId === "labs") &&
       loc.activeBuild == null &&
       g.players[me].resource === before - 3 * CONFIG.economy.rushScrapPerPoint);
-    check("build is free of Actions; rush costs 1 Action",
-      actsAfterBuild === actsStart && g.players[me].actions.remaining === actsAfterBuild - 1);
+    check("build is free of actions; rush spends the LOCATION's action",
+      locActsAfterBuild === locActsStart && loc.actionsRemaining === locActsAfterBuild - 1);
   }
 
   // Upgrade in place: labs → advanced-lab, same slot (scarcity preserved).
@@ -2143,6 +2146,7 @@ line("\n  [§20 Economy] Output slider, build/upgrade/rush, upkeep dormancy, gat
     const me = g.turnOrder[0];
     const loc = grab(g, me); // loyalty 8 clears advanced-lab's rung (3)
     g.players[me].resource += 50;
+    g.players[me].actions.remaining = 9; // wildcards — two rushes at one Location this turn
     g.players[me].permanentResearch = 4; recomputeResearch(g); // L3 clears techL2 gate
     performAction(g, "build", { at: loc.hexId, chipId: "labs" });
     performAction(g, "rush", { at: loc.hexId });
@@ -2182,6 +2186,7 @@ line("\n  [§20 Economy] Output slider, build/upgrade/rush, upkeep dormancy, gat
     const me = g.turnOrder[0];
     const loc = grab(g, me, 8); loc.chipSlots = 1; // base 1, +1 bonus slot at high loyalty
     g.players[me].resource += 50;
+    g.players[me].actions.remaining = 9; // wildcards — two rushes at one Location this turn
     performAction(g, "build", { at: loc.hexId, chipId: "labs" });
     performAction(g, "rush", { at: loc.hexId });
     performAction(g, "build", { at: loc.hexId, chipId: "recyclers" }); // uses the bonus slot
@@ -3224,8 +3229,8 @@ line("\n  [Phase 11] text-token resolver");
   const hubLoc = Object.values(gH.locations).find((l) => l.controller === hubPid);
   install(gH, hubLoc, "logistics-hub");
   startTurn(gH);
-  check("logistics-hub grants +1 Action at Upkeep (actionBonus)",
-    gH.players[hubPid].actions.remaining === gH.players[hubPid].actions.max + 1);
+  check("logistics-hub: its Location acts twice per turn (actionBonus)",
+    hubLoc.actionsRemaining === 2);
 
   const g12 = createGame({ seed: 92 });
   startTurn(g12);
@@ -3689,6 +3694,69 @@ line("\n  [Phase 11] text-token resolver");
         reach2[ringHex] === 0);
     }
   }
+}
+
+
+// Phase 16 — per-entity actions (docs/vp-and-actions-design.md §2/§4):
+// one action per unit/Location, coalition charging, wildcards.
+{
+  line("\n  [Phase 16] per-entity actions");
+  const g16 = createGame({ seed: 161 });
+  startTurn(g16);
+  const pid = g16.turnOrder[g16.activeIndex];
+  const p16 = g16.players[pid];
+  p16.resource = 99;
+  const home = Object.values(g16.locations).find((l) => l.controller === pid);
+  const foe = g16.turnOrder.find((f) => f !== pid);
+  const foeLoc = Object.values(g16.locations).find((l) => l.controller === foe);
+
+  check("Upkeep grants each unit and held Location exactly 1 action",
+    Object.values(g16.units).filter((u) => u.owner === pid).every((u) => u.actionsRemaining === 1) &&
+    home.actionsRemaining === 1);
+
+  // -- a unit acts once: two solo contests from one unit are refused.
+  const [uA, uB] = Object.values(g16.units).filter((u) => u.owner === pid);
+  uA.node = foeLoc.hexId; uB.node = foeLoc.hexId;
+  const c1 = performAction(g16, "contest", { unit: uA.uid, coalition: [] });
+  const c2 = performAction(g16, "contest", { unit: uA.uid, coalition: [] });
+  check("a unit's action is spent by its contest; a second is refused",
+    !!c1.ok && !c2.ok && uA.actionsRemaining === 0);
+
+  // -- coalition charging: joining a push spends the member's action too.
+  const c3 = performAction(g16, "contest", { unit: uB.uid, coalition: [] });
+  check("a fresh unit still has its own action", !!c3.ok && uB.actionsRemaining === 0);
+  // Wildcards cover an exhausted entity.
+  p16.actions.remaining = 1;
+  const c4 = performAction(g16, "contest", { unit: uA.uid, coalition: [] });
+  check("a wildcard action covers an already-acted unit",
+    !!c4.ok && p16.actions.remaining === 0);
+
+  // -- recruit charges the LOCATION, and a hub Location acts twice.
+  const g17 = createGame({ seed: 162 });
+  startTurn(g17);
+  const rPid = g17.turnOrder[g17.activeIndex];
+  g17.players[rPid].resource = 99;
+  const rHome = Object.values(g17.locations).find((l) => l.controller === rPid);
+  const tg16 = g17.nextId("chip");
+  g17.chips[tg16] = { uid: tg16, chipId: "training-grounds" };
+  rHome.chips.push(tg16);
+  const r1 = performAction(g17, "recruit", { at: rHome.hexId });
+  const r2 = performAction(g17, "recruit", { at: rHome.hexId });
+  check("recruit spends the Location's action; a second recruit there is refused",
+    !!r1.ok && !r2.ok && rHome.actionsRemaining === 0);
+
+  // -- staging ground feeds the wildcard pool (2 scrap → +1 anywhere).
+  rHome.abilityId = "staging-ground";
+  rHome.actionsRemaining = 1; // refit for the activation itself
+  const poolBefore = g17.players[rPid].actions.remaining;
+  const staged = performAction(g17, "activate", { location: rHome.hexId });
+  check("staging ground: 2 scrap buys a wildcard action",
+    !!staged.ok && g17.players[rPid].actions.remaining === poolBefore + 1);
+
+  // -- a fresh recruit cannot act the turn it musters.
+  const recruitUid = r1.unit;
+  check("a fresh recruit has no action until its next Upkeep",
+    g17.units[recruitUid].actionsRemaining === 0);
 }
 
 line(`\n  v0.2 verification: ${v2pass} passed, ${v2fail} failed`);

@@ -258,12 +258,15 @@ export function startTurn(state) {
   emit(state, "turn_started", { player: pid });
 
   const p = state.players[pid];
-  p.actions.remaining = p.actions.max;
-  // Logistics Hub (chip `actionBonus`): +1 Action per installed, paid-up hub
-  // on a Location this player holds.
+  p.actions.remaining = p.actions.max; // wildcard pool (base 0)
+  // Per-entity actions: every owned unit and held Location refreshes to 1.
+  // Logistics Hub (chip `actionBonus`) makes its own Location act twice.
+  for (const u of Object.values(state.units)) {
+    if (u.owner === pid) u.actionsRemaining = 1;
+  }
   for (const loc of Object.values(state.locations)) {
     if (loc.controller !== pid) continue;
-    p.actions.remaining += locChipSum(state, loc, "actionBonus");
+    loc.actionsRemaining = 1 + locChipSum(state, loc, "actionBonus");
   }
   state.pendingActionGrants = state.pendingActionGrants.filter((g) => {
     if (g.player === pid) {

@@ -3,7 +3,12 @@
 
 export const CONFIG = {
   vpThreshold: 12,
-  baseActions: 2,
+  // Per-entity actions (docs/vp-and-actions-design.md §2/§4): every unit
+  // and Location gets 1 action per turn; the old global pool survives as a
+  // WILDCARD pool (base 0) that effect-granted actions (Staging Ground,
+  // reactive cards) feed — any entity may spend a wildcard when its own
+  // action is gone.
+  baseActions: 0,
 
   // Repeatable VP faucets (docs/vp-and-actions-design.md §1). Dominion:
   // +vpPerCity per Upkeep for each high/veryHigh Location the player (or a

@@ -203,14 +203,23 @@ const EFFECTS = {
   },
 
   GRANT_ACTIONS(state, e, ctx) {
-    for (const pid of resolveTargets(state, e.target, ctx)) {
-      const p = state.players[pid];
+    for (const t of resolveTargets(state, e.target, ctx)) {
+      // A unit target gains its own action (Staging Ground-style grants);
+      // a player target feeds the wildcard pool (reactive cards, content).
+      const unit = state.units[t];
+      if (unit) {
+        unit.actionsRemaining = (unit.actionsRemaining ?? 0) + e.amount;
+        emit(state, "action_spent", { player: unit.owner, action: "grant", units: [t], amount: e.amount });
+        continue;
+      }
+      const p = state.players[t];
       if (!p) continue;
       if (e.when === "next_turn") {
-        state.pendingActionGrants.push({ player: pid, amount: e.amount });
+        state.pendingActionGrants.push({ player: t, amount: e.amount });
       } else {
-        p.actions.remaining = Math.max(0, p.actions.remaining + e.amount);
+        p.actions.remaining += e.amount;
       }
+      emit(state, "action_spent", { player: t, action: "grant", amount: e.amount });
     }
   },
 
