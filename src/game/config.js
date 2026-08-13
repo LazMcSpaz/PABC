@@ -56,6 +56,11 @@ export const CONFIG = {
   movement: {
     forestCost: 2,     // entering a cover/forest hex costs this (vs 1) — "−1 speed"
     mountainHalts: true, // entering an elevation/mountain hex ends the move
+    // A unit beginning its turn ON a road hex marches +this Movement that
+    // turn — the highway network is a fast lane for armies, not only a
+    // terrain-negator (playtest: roads otherwise only differ from open
+    // ground on the map's few forest/mountain hexes).
+    roadStartBonus: 1,
   },
 
   // v0.2 §16.4 attrition
@@ -164,7 +169,10 @@ export const CONFIG = {
     ghostMaxAge: null, // §19.11 ghost aging (TBD) — null = ghosts never expire
     intelVisionBonus: 1, // §19.8 Intelligence vision-branch faction-wide sight bonus
     intelDetection: 1, // §19.8 Intelligence vision-branch detection
-    terrainSeedDensity: { elevation: 0.18, cover: 0.22 }, // §19.4 share of terrain hexes
+    // §19.4 share of terrain (wasteland) hexes carrying features. Raised
+    // from 0.18/0.22 — at those rates a 30-hex map carried ~3 feature
+    // hexes total and terrain almost never touched movement or combat.
+    terrainSeedDensity: { elevation: 0.35, cover: 0.4 },
   },
 
   // §17.7 Listening Post (Intelligence A2) — a unit-built, concealed Vision

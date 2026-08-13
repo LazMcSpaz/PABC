@@ -535,21 +535,44 @@ line("\n  [Phase 1] movement budget");
   startTurn(g);
   const me = activePlayerId(g);
   const u = Object.values(g.units).find((x) => x.owner === me);
-  check("base Movement is 2", u.movement === 2 && u.moveRemaining === 2);
+  // Capitals sit on the road network, so a unit opening its turn there
+  // marches +roadStartBonus — the budget starts at base + bonus.
+  const roadBonus = g.board.hexes[u.node]?.road ? CONFIG.movement.roadStartBonus : 0;
+  check("base Movement is 2 (+1 road march when starting on the highway)",
+    u.movement === 2 && u.moveRemaining === 2 + roadBonus);
   const actionsBefore = g.players[me].actions.remaining;
   // Two plain (non-forest/mountain) single-cost hops: pick a first hop `a`
   // adjacent to the unit, then a second hop `b` adjacent to `a` — clearing
   // any terrain features so this exercises the budget, not terrain cost
   // (terrain movement has its own block below).
-  const plain = (h) => !g.locations[h] && !g.board.hexes[h].elevation && !g.board.hexes[h].cover;
+  // "plain" = a quiet wasteland hex: no Location, no terrain features, and
+  // NOT an encounter hex (an encounter draw can rewrite the very budget
+  // this fixture measures).
+  const plain = (h) => !g.locations[h] && g.board.hexes[h].type !== "encounter" &&
+    !g.board.hexes[h].elevation && !g.board.hexes[h].cover;
   const a = g.board.adjacency[u.node].find(plain) || g.board.adjacency[u.node][0];
+  g.board.hexes[a].type = "terrain"; // pin — the fallback pick may be an encounter hex
   g.board.hexes[a].elevation = false; g.board.hexes[a].cover = false;
   const m1 = performAction(g, "move", { unit: u.uid, to: a });
-  const b = (g.board.adjacency[a] || []).find((h) => h !== u.node && plain)
+  const clear = (h) => plain(h) && !Object.values(g.units).some(
+    (x) => x.owner !== me && x.node === h);
+  const b = (g.board.adjacency[a] || []).find((h) => h !== u.node && clear(h))
     || (g.board.adjacency[a] || []).find((h) => h !== u.node);
-  if (b) { g.board.hexes[b].elevation = false; g.board.hexes[b].cover = false; }
+  if (b) {
+    // Pin the second hop too — the fallback pick may be an occupied
+    // encounter hex, and both a blockade halt and an encounter draw would
+    // rewrite the budget this fixture measures.
+    g.board.hexes[b].type = "terrain";
+    g.board.hexes[b].elevation = false; g.board.hexes[b].cover = false;
+    for (const x of Object.values(g.units)) {
+      if (x.owner !== me && x.node === b) {
+        const home = Object.values(g.locations).find((l) => l.controller === x.owner);
+        if (home) x.node = home.hexId;
+      }
+    }
+  }
   const m2 = b ? performAction(g, "move", { unit: u.uid, to: b }) : { ok: false };
-  check("two moves consume the budget", m1.ok && m2.ok && u.moveRemaining === 0);
+  check("two moves consume the budget", m1.ok && m2.ok && u.moveRemaining === roadBonus);
   check("moves cost no Actions", g.players[me].actions.remaining === actionsBefore);
   // After a contest the unit can't move.
   const u2 = Object.values(g.units).find((x) => x.owner === me && x.uid !== u.uid) || u;
@@ -3802,6 +3825,55 @@ line("\n  [Phase 11] text-token resolver");
   tickLoyalty(g, owner17);
   check("pressure: a pacted ally's ZoC does not bleed your towns",
     town.loyalty === loyBefore - 0); // civic hall holds, no pressure, no neglect
+}
+
+
+// Phase 18 — roads & terrain movement (playtest verification pass):
+// road march bonus, roadless mountain halt, road-negates-terrain.
+{
+  line("\n  [Phase 18] roads & terrain movement");
+  const g18 = createGame({ seed: 181 });
+  startTurn(g18);
+  const pid = g18.turnOrder[g18.activeIndex];
+  const walker = Object.values(g18.units).find((u) => u.owner === pid);
+
+  // -- road march: on-road start = base + bonus; off-road start = base.
+  const onRoad = g18.board.hexes[walker.node]?.road === true;
+  const startBudget = walker.moveRemaining;
+  check("road march: starting on a road adds the bonus to this turn's budget",
+    startBudget === walker.movement + (onRoad ? CONFIG.movement.roadStartBonus : 0));
+
+  // -- roadless mountain halts; a road over it does not.
+  const occupied = (h) => Object.values(g18.units).some((x) => x.node === h);
+  const anyHex = Object.values(g18.board.hexes).find(
+    (h) => !g18.locations[h.id] && !occupied(h.id) &&
+      (g18.board.adjacency[h.id] || []).some((n) => !g18.locations[n] && !occupied(n)));
+  const mtHex = anyHex.id;
+  const from18 = (g18.board.adjacency[mtHex] || []).find((n) => !g18.locations[n] && !occupied(n));
+  const stage = (road) => {
+    const h = g18.board.hexes[mtHex];
+    h.elevation = true; h.cover = false; h.road = road;
+    g18.board.hexes[from18].elevation = false; g18.board.hexes[from18].cover = false;
+    walker.node = from18; walker.moveRemaining = 3;
+    return unitReach(g18, walker);
+  };
+  const noRoad = stage(false);
+  check("mountain (no road): enterable but terminal (0 movement remains)",
+    noRoad[mtHex] === 0);
+  const roaded = stage(true);
+  check("road over a mountain: costs 1 and does not halt",
+    roaded[mtHex] === 2);
+  // -- forest cost vs road-negated forest.
+  const hf = g18.board.hexes[mtHex];
+  hf.elevation = false; hf.cover = true; hf.road = false;
+  walker.moveRemaining = 3;
+  const forest = unitReach(g18, walker);
+  check("forest (no road): costs forestCost to enter",
+    forest[mtHex] === 3 - CONFIG.movement.forestCost);
+  hf.road = true;
+  walker.moveRemaining = 3;
+  const forestRoad = unitReach(g18, walker);
+  check("road through a forest: costs 1", forestRoad[mtHex] === 2);
 }
 
 line(`\n  v0.2 verification: ${v2pass} passed, ${v2fail} failed`);
