@@ -316,3 +316,39 @@ Also in this pass:
 Post-tuning: harness 377 green across seeds; AI-vs-AI winners spread
 across all four majors (was Goldgrass-skewed); VP race — conqueror
 9.6–10.1, diplomat 10.1, hybrid 8.1, turtle never.
+
+## 7. ZoC legibility, graduated trespass, just war, precursor warnings — ✅ DONE
+
+Second playtest feedback round:
+
+- **ZoC borders.** Zone of Control now renders as a DASHED border ring in
+  the dominating faction's color (dashed = influence, solid rims =
+  ownership) over a much fainter area tint. When one of YOUR units stands
+  on foreign ground the ring burns hotter and denser — the "you are
+  trespassing" cue. (`Hex.jsx` SVG overlay; adapter exposes
+  `zocForeign`/`zocTrespassing`.)
+- **Graduated trespass (Civ-style).** On Neutral-or-better ground,
+  consecutive rounds of presence walk `trespass.escalation` = [warning,
+  −1, −2/round]; leaving for a round resets the ladder. A presence sweep
+  at startTurn keeps the streak alive for parked units. Distrustful hosts
+  (below Neutral) still cite at the full rate (+Menace) immediately — and
+  a pair the ladder itself drove below Neutral loses the courtesy, by
+  design. Warnings and citations herald to the human.
+- **Just war.** A war is JUSTIFIED for a side that formally denounced the
+  target within `justWar.denounceWindowRounds`, or was wronged by them
+  (broken pact/promise, surprise attack) within
+  `justWar.grievanceWindowRounds`; rebellion is always justified for the
+  rebel. Fighting a justified war generates NO Menace. Denounce → declare
+  is now the clean path to war; the declare-war verb hint shows
+  JUSTIFIED vs UNPROVOKED with the reason.
+- **Precursor warnings.** Once per `warnings.cooldownRounds`, an AI whose
+  regard for the human sinks to Wary sends word (`diplomatic_warning`,
+  heralded with temperament flavor — a warlord threatens, a pacifist
+  pleads, an opportunist hints); the board "murmurs" when the human's
+  threat score reaches `warnings.coalitionFraction` of the coalition
+  threshold, before any coalition forms.
+
+Harness Phases 20–21 cover the ladder, the sweep, justification +
+expiry, the Menace exemption, and both warning kinds — 389 checks green.
+Possible polish later: surface the trespass warning inside the
+move-confirm overlay itself (pre-move), not just the herald.

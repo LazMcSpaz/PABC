@@ -313,9 +313,29 @@ export const CONFIG = {
     // but moving through their ZoC WITHOUT an open-borders agreement is
     // trespassing and costs relations (softened when already on good terms).
     trespass: {
-      standingPenalty: 2, // relationship hit (owner → mover) per incursion — the larger hit
-      reputationPenalty: 1, // global Menace bump on the mover — the smaller hit
-      goodTermsReduction: 1, // both softened by this when on Friendly+ terms (floored)
+      standingPenalty: 2, // relationship hit (owner → mover) — full rate, distrustful hosts
+      reputationPenalty: 1, // global Menace bump on the mover — distrustful hosts only
+      goodTermsReduction: 1, // legacy softening dial (Friendly+ terms)
+      // Civ-style escalation on Neutral-or-better ground: consecutive rounds
+      // of presence walk this ladder — a warning first (0), then −1, then −2
+      // per round. Leaving for a round resets the streak. Distrustful hosts
+      // (below Neutral) skip the ladder and cite at the full rate at once.
+      escalation: [0, 1, 2],
+    },
+    // Just war — a formal grievance makes a war RIGHTEOUS: fighting it costs
+    // no Menace. You earn one by denouncing the target first (a declared
+    // intent the board has heard) or by being wronged by them (broken pact
+    // or promise, surprise attack) within the window.
+    justWar: {
+      denounceWindowRounds: 6, // your denouncement of them counts this long
+      grievanceWindowRounds: 8, // their betrayal of you counts this long
+    },
+    // Precursor warnings — the AI telegraphs trouble to the HUMAN before it
+    // lands: a faction whose regard sinks to Wary sends word; the board
+    // murmurs when the human's threat score nears the coalition threshold.
+    warnings: {
+      cooldownRounds: 4, // the same warning won't repeat for this long
+      coalitionFraction: 0.7, // murmur when threat ≥ threshold × this
     },
     pact: { // §1.9, §1.10 — toggle costs
       toggleVisionStandingHit: 1,

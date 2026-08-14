@@ -12,7 +12,7 @@ import { sweepDeferred } from "./deferred.js";
 import { evaluateTriggers } from "./triggers.js";
 import { evaluateConditionalBeats } from "./quests.js";
 import { applyOutputAndBuilds, chargeChipUpkeep, enforceLoyaltySlotCap } from "./economy.js";
-import { runDiplomacyRound, vassalsOf, arePacted, adjustMenace } from "./diplomacy.js";
+import { runDiplomacyRound, vassalsOf, arePacted, adjustMenace, sweepTrespass } from "./diplomacy.js";
 import { adjustStanding } from "./standing.js";
 import { zocOwner } from "./influence.js";
 import { hasTechNode } from "./tech.js";
@@ -298,6 +298,10 @@ export function startTurn(state) {
   if (state.players[pid]?.eliminated) return endTurn(state);
   state.phase = "Upkeep";
   emit(state, "turn_started", { player: pid });
+
+  // Trespass presence sweep — units still parked in foreign ZoC keep the
+  // citation streak alive (warning → −1 → −2), even without moving.
+  sweepTrespass(state, pid);
 
   const p = state.players[pid];
   p.actions.remaining = p.actions.max; // wildcard pool (base 0)

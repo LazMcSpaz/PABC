@@ -221,21 +221,51 @@ export default function Hex({ hex, units, selected, reachable, selectedUnitId, d
       {/* §16.2 road — a worn corridor across the hex (movement modifier).
           Drawn over the fill, under the ZoC tint and tokens. */}
       {!isUnexplored && hex.road && <RoadBand />}
-      {/* §18.3 ZoC overlay — a faint inner tint + glow in the dominating
-          faction's color, layered over the fill but under the tokens. */}
+      {/* §18.3 ZoC overlay — a DASHED border ring in the dominating
+          faction's color (dashed = influence, solid rims = ownership), over
+          a much fainter area tint. When one of YOUR units stands on foreign
+          ground the ring burns hotter — the "you are trespassing" cue. */}
       {zocColor && (
-        <div
-          className="pc-hex"
-          title={`Zone of Control — ${FACTIONS[hex.zocOwner]?.name || hex.zocOwner}`}
-          style={{
-            position: "absolute",
-            inset: selected ? 4 : 3,
-            background: `radial-gradient(circle at 50% 45%, ${zocColor}33 0%, ${zocColor}14 55%, transparent 78%)`,
-            boxShadow: `inset 0 0 14px ${zocColor}55`,
-            pointerEvents: "none",
-            zIndex: 2,
-          }}
-        />
+        <>
+          <div
+            className="pc-hex"
+            title={`Zone of Control — ${FACTIONS[hex.zocOwner]?.name || hex.zocOwner}`}
+            style={{
+              position: "absolute",
+              inset: selected ? 4 : 3,
+              background: `radial-gradient(circle at 50% 45%, ${zocColor}1e 0%, ${zocColor}0c 55%, transparent 78%)`,
+              pointerEvents: "none",
+              zIndex: 2,
+            }}
+          />
+          <svg
+            viewBox="0 0 100 100"
+            preserveAspectRatio="none"
+            style={{
+              position: "absolute",
+              inset: 0,
+              width: "100%",
+              height: "100%",
+              pointerEvents: "none",
+              zIndex: 2,
+              filter: hex.zocTrespassing
+                ? `drop-shadow(0 0 5px ${zocColor})`
+                : `drop-shadow(0 0 3px ${zocColor}aa)`,
+            }}
+          >
+            {/* points sit ~4% inside the cell — the ring rides just inside
+                the beveled rim, clear of the neighbouring hexes. */}
+            <polygon
+              points="50,4.2 95.8,27 95.8,73 50,95.8 4.2,73 4.2,27"
+              fill="none"
+              stroke={zocColor}
+              strokeWidth={hex.zocTrespassing ? 3.5 : 2.25}
+              strokeDasharray={hex.zocTrespassing ? "5 3" : "7 5"}
+              vectorEffect="non-scaling-stroke"
+              opacity={hex.zocTrespassing ? 1 : 0.85}
+            />
+          </svg>
+        </>
       )}
       {(units || []).map((u, i) => (
         <UnitToken

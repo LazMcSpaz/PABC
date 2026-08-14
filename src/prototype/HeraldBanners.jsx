@@ -86,6 +86,34 @@ export function heraldFromLog(entries, youId) {
       case "tribute_demanded":
         if (p.target === youId) push("💰", `${name(p.demander)} demands tribute from you`, "warn", p.demander);
         break;
+      case "territory_trespassed": {
+        // Only the human's own incursions banner (the map ring is the cue
+        // for everyone else's). Warning first, citations as they escalate.
+        if (p.mover !== youId) break;
+        if (p.warning) {
+          push("⚠", `${name(p.owner)} warns you: withdraw from their territory`, "warn", p.owner);
+        } else if (p.repHit > 0) {
+          push("🚫", `${name(p.owner)} treats your incursion as a hostile probe`, "war", p.owner);
+        } else {
+          push("🚫", `${name(p.owner)} cites your trespass — standing suffers`, "warn", p.owner);
+        }
+        break;
+      }
+      case "diplomatic_warning": {
+        if (p.to !== youId) break;
+        if (p.kind === "coalition") {
+          push("🛡", "The powers whisper against your rise — tread carefully", "warn");
+          break;
+        }
+        const flavor = {
+          warlord: `${name(p.from)} sends word: change course, or we march`,
+          honorable: `${name(p.from)} formally protests your conduct`,
+          pacifist: `${name(p.from)} pleads: mend our relations before this darkens`,
+          opportunist: `${name(p.from)} hints that your position grows… expensive`,
+        }[p.temperament] || `${name(p.from)} warns you: their patience wears thin`;
+        push("✉", flavor, "warn", p.from);
+        break;
+      }
       case "standing_changed": {
         // Tier crossings TOWARD the human only — "how they see you" shifts.
         if (p.player !== youId || p.faction === youId || p.delta == null) break;

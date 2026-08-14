@@ -61,6 +61,8 @@ export const EVENT_NAMES = new Set([
   "territory_trespassed",
   // Diplomacy robustness pass — earned drift baselines + summit VP.
   "standing_baseline_changed", "recognition_summit",
+  // Precursor warnings — AI telegraphs trouble to the human before acting.
+  "diplomatic_warning",
 ]);
 
 // Resolve a chip / card instance uid to its content def. Covers Market

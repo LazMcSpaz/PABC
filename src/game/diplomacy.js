@@ -83,34 +83,68 @@ function installDiplomacyListeners(state) {
 // take a hit, softened when you're already on good terms. Open borders (a
 // pact default or a standalone agreement) waives it; an active war makes it
 // moot (you're already enemies).
+// Does this unit trespass in `owner`'s territory at all? (Shared by the
+// move hook and the per-turn presence sweep.)
+function unitTrespasses(state, unit, owner) {
+  const mover = unit.owner;
+  if (!owner || owner === mover) return false;     // neutral ground or your own land
+  if (atWar(state, mover, owner)) return false;    // already at war — penalty is moot
+  if (hasOpenBorders(state, mover, owner)) return false; // permission granted
+  // Safe Conduct (chip `safeConduct`): forged papers — no citation.
+  if (unit.chips.some((c) => !state.chips[c]?.disabled && CHIPS[state.chips[c]?.chipId]?.safeConduct)) return false;
+  return true;
+}
+
+// One citation per (mover, owner) pair per round, walking a Civ-style
+// escalation ladder on Neutral-or-better ground: consecutive rounds of
+// presence go warning → −1 → −2/round (leaving for a round resets the
+// streak). Distrustful hosts (below Neutral) skip the courtesy and cite
+// at the full rate (+Menace) immediately.
+function citeTrespass(state, mover, owner, hex) {
+  const rec = state.diplomacy.trespassRecord = state.diplomacy.trespassRecord || {};
+  const key = `${mover}|${owner}`;
+  const r = rec[key];
+  if (r && r.lastRound === state.round) return; // already cited this round
+  const streak = r && r.lastRound === state.round - 1 ? r.streak + 1 : 1;
+  rec[key] = { streak, lastRound: state.round };
+  const tr = D().trespass;
+  const rel = getStanding(state, owner, mover);
+  let standingHit, repHit;
+  if (rel >= D().tiers.neutral) {
+    const ladder = tr.escalation;
+    standingHit = ladder[Math.min(streak - 1, ladder.length - 1)];
+    repHit = 0;
+  } else {
+    standingHit = tr.standingPenalty;
+    repHit = tr.reputationPenalty;
+  }
+  if (standingHit) adjustStanding(state, owner, mover, -standingHit, "trespass");
+  if (repHit) adjustMenace(state, mover, repHit, "trespass");
+  emit(state, "territory_trespassed", {
+    mover, owner, hex, standingHit, repHit, streak, warning: standingHit === 0 && repHit === 0,
+  });
+}
+
 function onTrespass(state, payload) {
   const unit = state.units[payload.unit];
   if (!unit) return;
-  // Safe Conduct (chip `safeConduct`): forged papers — this unit's
-  // trespass draws no Standing hit and no Menace.
-  if (unit.chips.some((c) => !state.chips[c]?.disabled && CHIPS[state.chips[c]?.chipId]?.safeConduct)) return;
-  const mover = unit.owner;
   const owner = state.world?.zoc?.[payload.to];
-  if (!owner || owner === mover) return;          // neutral ground or your own land
-  if (atWar(state, mover, owner)) return;          // already at war — penalty is moot
-  if (hasOpenBorders(state, mover, owner)) return; // permission granted — free passage
-  // One citation per (mover, owner) pair per round — the playtest log shows
-  // 46 trespass dings in 8 rounds; exploring must not shred relations.
-  const stamps = state.diplomacy.trespassStamps = state.diplomacy.trespassStamps || {};
-  const key = `${mover}|${owner}`;
-  if (stamps[key] === state.round) return;
-  stamps[key] = state.round;
-  const tr = D().trespass;
-  const rel = getStanding(state, owner, mover);
-  // Neutral-or-better hosts issue a warning (−1, no Menace); only factions
-  // that already distrust you treat passage as a hostile probe (−2, +Menace).
-  const standingHit = rel >= D().tiers.neutral
-    ? Math.max(1, tr.standingPenalty - tr.goodTermsReduction)
-    : tr.standingPenalty;
-  const repHit = rel >= D().tiers.neutral ? 0 : tr.reputationPenalty;
-  adjustStanding(state, owner, mover, -standingHit, "trespass");
-  if (repHit) adjustMenace(state, mover, repHit, "trespass");
-  emit(state, "territory_trespassed", { mover, owner, hex: payload.to, standingHit, repHit });
+  if (!unitTrespasses(state, unit, owner)) return;
+  citeTrespass(state, unit.owner, owner, payload.to);
+}
+
+// Presence sweep — "the effects get worse if you continue to stay". Called
+// from startTurn: any of `pid`'s units still parked in foreign ZoC keeps
+// the citation streak alive even though no unit_moved fired this turn.
+export function sweepTrespass(state, pid) {
+  if (!state.diplomacy) return;
+  const zoc = state.world?.zoc || {};
+  for (const unit of Object.values(state.units)) {
+    if (unit.owner !== pid) continue;
+    const owner = zoc[unit.node];
+    if (!unitTrespasses(state, unit, owner)) continue;
+    citeTrespass(state, pid, owner, unit.node);
+  }
 }
 
 // §6.2 — the active war record between two factions, or null.
@@ -197,6 +231,35 @@ export function passesRepGates(state, observerFid, subjectPid) {
     && honorOf(state, subjectPid) >= trustFloor(state, observerFid);
 }
 
+// --- just war (grievances + formal denouncement) ---------------------
+// Declaring war "the proper way" must not brand you a villain. A war of
+// `a` on `b` is JUSTIFIED when a formally denounced b beforehand (declared
+// intent the whole board heard) or b wronged a (broken pact/promise,
+// surprise attack) inside the grievance window. Fighting a justified war
+// generates no Menace for the justified side.
+function recordGrievance(state, victim, offender, kind) {
+  if (!victim || !offender || victim === offender) return;
+  const gr = state.diplomacy.grievances = state.diplomacy.grievances || {};
+  gr[victim] = gr[victim] || {};
+  gr[victim][offender] = { kind, round: state.round };
+}
+
+export function warJustification(state, a, b) {
+  const jw = D().justWar;
+  const den = state.diplomacy?.denouncements?.[a]?.[b];
+  if (den != null && state.round - den <= jw.denounceWindowRounds) return "denounced";
+  const gr = state.diplomacy?.grievances?.[a]?.[b];
+  if (gr && state.round - gr.round <= jw.grievanceWindowRounds) return gr.kind;
+  return null;
+}
+
+// Is `pid`'s side of its war with `other` justified? (Reads the war record,
+// so justification is judged at declaration time, not retroactively.)
+export function warIsJustified(state, pid, other) {
+  const war = findWar(state, pid, other);
+  return !!war?.justified?.includes(pid);
+}
+
 // --- Menace / Honor (§18.5) -----------------------------------------
 export function adjustMenace(state, pid, amount, cause) {
   const p = state.players[pid];
@@ -219,6 +282,8 @@ export function adjustHonor(state, pid, amount, cause) {
 // lowers it. Called on contest resolution (contest.js).
 export function menaceFromAttack(state, attackerPid, targetFid) {
   if (!state.players[attackerPid]) return;
+  // A justified war is fought clean: no Menace for the righteous side.
+  if (warIsJustified(state, attackerPid, targetFid)) return;
   const tDef = factionDef(targetFid) || { aggression: 0.5 };
   // Checking a warlord soothes your reputation a LITTLE — clamped at −1 so
   // attacking aggressive factions can't launder a bully's Menace away (the
@@ -416,8 +481,14 @@ export function declareWar(state, a, b, cause = "declared") {
   if (atWar(state, a, b)) return;
   // declaring war on a pacted faction breaks the pact (Honor ding).
   if (arePacted(state, a, b)) breakPact(state, a, b, "war-on-ally");
+  // Just-war check at declaration time. A rebellion is always justified
+  // for the rebel; otherwise a prior denouncement or a fresh grievance
+  // makes the declarer's side righteous (no Menace from fighting it).
+  const justified = [];
+  if (cause === "rebellion" || warJustification(state, a, b)) justified.push(a);
+  if (warJustification(state, b, a)) justified.push(b);
   // §6.2 — war record tracks losses for the §1.5 exhaustion model.
-  state.diplomacy.wars.push({ a, b, since: state.round, unitsLost: {}, locationsLost: {}, contestsWon: {} });
+  state.diplomacy.wars.push({ a, b, since: state.round, justified, unitsLost: {}, locationsLost: {}, contestsWon: {} });
   setStanding(state, a, b, D().tiers.hostile, cause);
   setStanding(state, b, a, D().tiers.hostile, cause);
   // Voluntary coalition membership: taking up arms against a faction the
@@ -425,7 +496,7 @@ export function declareWar(state, a, b, cause = "declared") {
   // road in — coalitions never conscript them).
   const coal = coalitionAgainst(state, b);
   if (coal && a !== coal.target && !coal.members.includes(a)) coal.members.push(a);
-  emit(state, "war_declared", { a, b, cause });
+  emit(state, "war_declared", { a, b, cause, justified });
 }
 
 export function makePeace(state, a, b, cause = "peace") {
@@ -482,6 +553,7 @@ export function breakPact(state, a, b, cause = "broken") {
     if (state.players[a]) adjustHonor(state, a, -D().honor.breakLoss, "pact-broken");
     adjustStanding(state, b, a, -6, cause);
     adjustBaseline(state, b, a, -D().baseline.pactBrokenLoss, "pact-broken"); // the victim remembers
+    recordGrievance(state, b, a, "pact-broken"); // …and may rightfully answer in kind
     emit(state, "pact_broken", { a, b, cause });
   }
 }
@@ -556,6 +628,42 @@ function queueHumanPactCalls(state) {
       from: caller, target, since: state.round, expiresOnRound: state.round + pc.callExpiryRounds,
     });
     emit(state, "pact_call_requested", { caller, ally: human, target });
+  }
+}
+
+// Precursor warnings — the AI telegraphs trouble to the human BEFORE it
+// acts, Civ-style, so there's room to maneuver out of the threat:
+//  · a faction whose regard for the human has sunk to Wary sends word
+//    (the herald flavors it by temperament — a warlord threatens, a
+//    pacifist pleads);
+//  · the board murmurs when the human's threat score nears the coalition
+//    threshold.
+// Each warning repeats only after `warnings.cooldownRounds`, and only
+// while the condition still holds.
+function queueHumanWarnings(state) {
+  const human = state.humanFactionId;
+  if (!human) return;
+  const w = D().warnings;
+  const warned = state.diplomacy.warned = state.diplomacy.warned || {};
+  const due = (key) => warned[key] == null || state.round - warned[key] >= w.cooldownRounds;
+  for (const f of factionIds(state)) {
+    if (f === human || atWar(state, f, human) || arePacted(state, f, human)) continue;
+    const s = getStanding(state, f, human);
+    if (s <= D().tiers.wary && s > D().tiers.hostile && due(`war|${f}`)) {
+      warned[`war|${f}`] = state.round;
+      emit(state, "diplomatic_warning", {
+        from: f, to: human, kind: "war", standing: s,
+        temperament: factionDef(f)?.temperament || null,
+      });
+    }
+  }
+  const t = threatScore(state, human);
+  if (t >= D().coalition.threshold * w.coalitionFraction
+    && !coalitionAgainst(state, human) && due("coalition")) {
+    warned.coalition = state.round;
+    emit(state, "diplomatic_warning", {
+      from: null, to: human, kind: "coalition", threat: Math.round(t * 10) / 10,
+    });
   }
 }
 
@@ -748,7 +856,12 @@ export function resolvePactCall(state, caller, ally, target, honored) {
 }
 
 // §18.7 Denounce — shift faction↔faction Standing around the denounced.
+// Also the formal FIRST STEP of a just war: a denouncement on record
+// justifies a later declaration inside the window (no Menace from it).
 export function denounce(state, denouncer, target) {
+  const dn = state.diplomacy.denouncements = state.diplomacy.denouncements || {};
+  dn[denouncer] = dn[denouncer] || {};
+  dn[denouncer][target] = state.round;
   adjustStanding(state, denouncer, target, -3, "denounce");
   for (const f of factionIds(state)) {
     if (f === denouncer || f === target) continue;
@@ -832,6 +945,7 @@ function breakPromiseIfAny(state, a, b, kinds) {
     if (state.players[a]) adjustHonor(state, a, -D().honor.breakLoss, "promise-broken");
     adjustStanding(state, b, a, -6, "promise-broken");
     adjustBaseline(state, b, a, -D().baseline.pactBrokenLoss, "promise-broken");
+    recordGrievance(state, b, a, "promise-broken");
   }
   return broke;
 }
@@ -856,6 +970,7 @@ export function onAttack(state, attackerPid, targetFid) {
       attacker: attackerPid, target: targetFid, amount: D().honor.surpriseAttackLoss,
     });
     adjustBaseline(state, targetFid, attackerPid, -D().baseline.surpriseAttackLoss, "surprise-attack");
+    recordGrievance(state, targetFid, attackerPid, "surprise-attack");
   }
   if (arePacted(state, attackerPid, targetFid)) breakPact(state, attackerPid, targetFid, "attacked-ally");
   breakPromiseIfAny(state, attackerPid, targetFid, ["nonAggression", "peace"]);
@@ -1135,6 +1250,7 @@ export function runDiplomacyRound(state) {
   runAIPolitics(state);
   vassalTick(state);
   recomputeCoalitions(state);
+  queueHumanWarnings(state); // after politics/coalitions — warn on settled state
   checkRecognitionVictory(state);
 }
 
