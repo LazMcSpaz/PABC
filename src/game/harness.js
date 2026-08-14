@@ -25,7 +25,7 @@ import {
   getBaseline, adjustBaseline, aiAcceptsVassalage, breakPact,
   resolvePactCall, checkRecognitionVictory,
   // diplomacy tuning pass — cooldowns + citations
-  mediate,
+  mediate, sweepTrespass, warJustification, threatScore,
 } from "./diplomacy.js";
 import { setStanding } from "./standing.js";
 import { factionDef, MINOR_FACTIONS } from "./content.js";
@@ -3044,7 +3044,8 @@ line("\n  [Open borders] territory trespass penalty");
     !lastTrespassEvent(g));
 }
 {
-  // On Friendly+ terms the hit is softened.
+  // On Friendly+ terms the first incursion is a courtesy WARNING (the
+  // escalation ladder starts at 0 — see Phase 20 for the full ladder).
   const g = createGame({ seed }); startTurn(g); ensureDiplomacy(g);
   const mover = g.turnOrder[0], owner = g.turnOrder[1];
   setStanding(g, owner, mover, CONFIG.diplomacy.tiers.friendly); // good terms
@@ -3053,11 +3054,9 @@ line("\n  [Open borders] territory trespass penalty");
   g.world.zoc = g.world.zoc || {}; g.world.zoc[dest] = owner;
   u.moveRemaining = 2; recomputeStats(g);
   performAction(g, "move", { unit: u.uid, to: dest });
-  const tr = CONFIG.diplomacy.trespass;
   const ev = lastTrespassEvent(g);
-  check("the trespass hit is softened on good terms (relationship −1, reputation waived)",
-    !!ev && ev.payload.standingHit === Math.max(1, tr.standingPenalty - tr.goodTermsReduction) &&
-    ev.payload.repHit === Math.max(0, tr.reputationPenalty - tr.goodTermsReduction));
+  check("on good terms the first incursion is a warning, not a hit",
+    !!ev && ev.payload.warning === true && ev.payload.standingHit === 0 && ev.payload.repHit === 0);
 }
 
 // §6.2 — war-record listeners (combat feeds the war record)
@@ -4010,7 +4009,7 @@ line("\n  [Phase 11] text-token resolver");
   check("attacking a warlord soothes Menace by at most 1 (no laundering)",
     g.players.versari.menace === 4);
 
-  // --- trespass: one citation per pair per round; Neutral = warning ---
+  // --- trespass: Civ-style escalation ladder on Neutral ground ---
   const g2 = createGame({ seed: 202, humanFactionId: "versari" });
   ensureDiplomacy(g2);
   const u20 = Object.values(g2.units).find((u) => u.owner === "versari");
@@ -4020,16 +4019,33 @@ line("\n  [Phase 11] text-token resolver");
   setStanding(g2, "goldgrass", "versari", 0, "test");
   const menBefore = g2.players.versari.menace || 0;
   emit(g2, "unit_moved", { unit: u20.uid, from: u20.node, to: hex20 });
-  check("trespass at Neutral relations is a warning: −1 Standing, no Menace",
-    getStanding(g2, "goldgrass", "versari") === -1
-    && (g2.players.versari.menace || 0) === menBefore);
+  check("first incursion on Neutral ground is a WARNING — no Standing hit, no Menace",
+    getStanding(g2, "goldgrass", "versari") === 0
+    && (g2.players.versari.menace || 0) === menBefore
+    && g2.log.some((e) => e.name === "territory_trespassed" && e.payload.warning));
   emit(g2, "unit_moved", { unit: u20.uid, from: u20.node, to: hex20 });
   check("only one trespass citation per faction pair per round",
+    getStanding(g2, "goldgrass", "versari") === 0);
+  u20.node = hex20; // stay parked — the presence sweep keeps the streak alive
+  g2.round += 1;
+  sweepTrespass(g2, "versari");
+  check("staying a second round escalates to −1 Standing",
     getStanding(g2, "goldgrass", "versari") === -1);
-  setStanding(g2, "goldgrass", "versari", -4, "test"); // Wary — now it's a probe
-  g2.round += 1; // fresh round, fresh citation
+  g2.round += 1;
+  sweepTrespass(g2, "versari");
+  check("a third consecutive round bites at −2/round",
+    getStanding(g2, "goldgrass", "versari") === -3);
+  // reset test — mend relations back to Neutral first (a pair the ladder
+  // itself drove below Neutral loses the courtesy, by design)
+  setStanding(g2, "goldgrass", "versari", 0, "test");
+  g2.round += 2; // absent for a round → the ladder resets
+  sweepTrespass(g2, "versari");
+  check("leaving for a round resets the ladder to a warning",
+    getStanding(g2, "goldgrass", "versari") === 0);
+  setStanding(g2, "goldgrass", "versari", -4, "test"); // Wary — no courtesy
+  g2.round += 1;
   emit(g2, "unit_moved", { unit: u20.uid, from: u20.node, to: hex20 });
-  check("trespass on distrustful ground still bites: −2 Standing + Menace",
+  check("distrustful hosts skip the courtesy: −2 Standing + Menace at once",
     getStanding(g2, "goldgrass", "versari") === -6
     && (g2.players.versari.menace || 0) === menBefore + 1);
 
@@ -4092,6 +4108,81 @@ line("\n  [Phase 11] text-token resolver");
   takeAITurn(g7);
   check("a pacifist at Neutral standing does not blind-attack the human",
     !atWar(g7, pacifist, "versari"));
+}
+
+// Phase 21 — just war + precursor warnings: a formal grievance makes war
+// righteous (no Menace from fighting it); the AI telegraphs trouble to
+// the human before acting on it.
+{
+  line("\n  [Phase 21] just war + precursor warnings");
+  const jw = CONFIG.diplomacy.justWar;
+
+  // --- denounce → declare = justified: fighting costs no Menace ---
+  const g = createGame({ seed: 211, humanFactionId: "versari" });
+  ensureDiplomacy(g);
+  performDiplomacy(g, "versari", "denounce", { faction: "lakers" });
+  check("a denouncement on record justifies a later declaration",
+    warJustification(g, "versari", "lakers") === "denounced");
+  performDiplomacy(g, "versari", "declare-war", { faction: "lakers" });
+  const war21 = findWar(g, "versari", "lakers");
+  check("the declared war carries the justification",
+    !!war21 && war21.justified.includes("versari") && !war21.justified.includes("lakers"));
+  g.players.versari.menace = 5;
+  menaceFromAttack(g, "versari", "lakers");
+  check("fighting a justified war generates no Menace",
+    g.players.versari.menace === 5);
+
+  // --- being wronged also justifies, and grievances expire ---
+  const g2 = createGame({ seed: 212, humanFactionId: "versari" });
+  ensureDiplomacy(g2);
+  formPact(g2, "goldgrass", "versari", "test");
+  breakPact(g2, "goldgrass", "versari", "test"); // they broke it — you hold the grievance
+  check("a broken pact leaves a grievance that justifies war",
+    warJustification(g2, "versari", "goldgrass") === "pact-broken");
+  g2.round += jw.grievanceWindowRounds + 1;
+  check("grievances expire — old wounds don't justify forever",
+    warJustification(g2, "versari", "goldgrass") == null);
+
+  // --- unprovoked war still stains ---
+  const g3 = createGame({ seed: 213, humanFactionId: "versari" });
+  ensureDiplomacy(g3);
+  performDiplomacy(g3, "versari", "declare-war", { faction: "goldgrass" });
+  g3.players.versari.menace = 0;
+  menaceFromAttack(g3, "versari", "goldgrass"); // pacifist target → +2
+  check("an unprovoked war still stains: attacking a pacifist raises Menace",
+    g3.players.versari.menace === 2);
+
+  // --- precursor warnings: a Wary faction sends word ---
+  const g4 = createGame({ seed: 214, humanFactionId: "versari" });
+  ensureDiplomacy(g4);
+  setStanding(g4, "lakers", "versari", CONFIG.diplomacy.tiers.wary - 1, "test");
+  const logFrom4 = g4.log.length;
+  runDiplomacyRound(g4);
+  const warn4 = g4.log.slice(logFrom4).find(
+    (e) => e.name === "diplomatic_warning" && e.payload.from === "lakers");
+  check("a faction sunk to Wary warns the human before acting",
+    !!warn4 && warn4.payload.kind === "war" && warn4.payload.temperament === factionDef("lakers").temperament);
+  setStanding(g4, "lakers", "versari", CONFIG.diplomacy.tiers.wary - 1, "test");
+  const logFrom4b = g4.log.length;
+  runDiplomacyRound(g4);
+  check("the warning respects its cooldown — no nagging",
+    !g4.log.slice(logFrom4b).some((e) => e.name === "diplomatic_warning" && e.payload.from === "lakers"));
+
+  // --- precursor warnings: the board murmurs before a coalition ---
+  const g5 = createGame({ seed: 215, humanFactionId: "versari" });
+  ensureDiplomacy(g5);
+  // pin threat into the murmur band [threshold·fraction, threshold): base
+  // threat is board-dependent, so top it up with Menace to just past the line
+  const DC = CONFIG.diplomacy;
+  const base5 = threatScore(g5, "versari");
+  // +decayPerRound: Menace decays at the top of the round, before warnings
+  g5.players.versari.menace = Math.max(0,
+    Math.ceil(DC.coalition.threshold * DC.warnings.coalitionFraction - base5) + DC.menace.decayPerRound);
+  const logFrom5 = g5.log.length;
+  runDiplomacyRound(g5);
+  check("the board murmurs before a coalition actually forms",
+    g5.log.slice(logFrom5).some((e) => e.name === "diplomatic_warning" && e.payload.kind === "coalition")
+    && !g5.diplomacy.coalitions.find((c) => c.target === "versari"));
 }
 
 line(`\n  v0.2 verification: ${v2pass} passed, ${v2fail} failed`);

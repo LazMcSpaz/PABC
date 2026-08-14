@@ -23,7 +23,7 @@ import {
   recognitionScore, threatScore, tolerance, trustFloor, standingTier, getStanding,
   arePacted, atWar, vassalLord, coalitionAgainst, factionIds,
   aiAcceptsPact, aiAcceptsVassalage, wouldAccept, passesRepGates,
-  evaluatePactCall, canDemandTribute, hasOpenBorders,
+  evaluatePactCall, canDemandTribute, hasOpenBorders, warJustification,
 } from "../game/diplomacy.js";
 import { hasTechNode } from "../game/tech.js";
 import {
@@ -292,8 +292,14 @@ export function adaptState(state) {
       cover: fog === "unexplored" ? false : !!h.cover,
       // §16.2 road modifier (movement only) — shown once the hex is explored.
       road: fog === "unexplored" ? false : !!h.road,
-      // §18.3 ZoC tint — only where the viewer has live sight (it's live info).
+      // §18.3 ZoC — only where the viewer has live sight (it's live info).
+      // `zocForeign` marks another faction's ground; `zocTrespassing` means
+      // one of the VIEWER's units is standing on it right now (the border
+      // renders hotter as the "you are trespassing" cue).
       zocOwner: live ? zoc[h.id] || null : null,
+      zocForeign: live && !!zoc[h.id] && zoc[h.id] !== viewer,
+      zocTrespassing: live && !!zoc[h.id] && zoc[h.id] !== viewer
+        && (unitIdsAt[h.id] || []).some((uid) => state.units[uid]?.owner === viewer),
     };
     // Live unit tokens only on visible hexes.
     if (live && unitAt[h.id]) hex.unitId = unitAt[h.id];
@@ -816,8 +822,16 @@ function availableVerbsAgainst(state, viewer, fid) {
   if (!war && !myLord && !myVassal) {
     if (pacted) {
       out.push({ verb: "declare-war", state: "disabled", reason: "Break the pact first." });
+    } else if (warJustification(state, viewer, fid)) {
+      out.push({
+        verb: "declare-war", state: "enabled",
+        outcome: "JUSTIFIED — your grievance is on record. Fighting this war costs no Menace.",
+      });
     } else {
-      out.push({ verb: "declare-war", state: "enabled", outcome: "Opens hostilities. Menace rises; their allies may join in." });
+      out.push({
+        verb: "declare-war", state: "enabled",
+        outcome: "UNPROVOKED — fighting them will raise your Menace. Denounce them first to declare a just war.",
+      });
     }
   }
 
