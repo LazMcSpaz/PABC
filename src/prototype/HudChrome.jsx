@@ -4,7 +4,7 @@
 // the static look-pass (HudShowcase.jsx).
 import { useEffect, useState } from "react";
 import { CONFIG } from "../game/config.js";
-import { motion } from "framer-motion";
+import { motion, useDragControls } from "framer-motion";
 import ControlMeter from "./ControlMeter.jsx";
 import { useIsPhone, useViewportSize } from "./useViewport.js";
 
@@ -443,21 +443,54 @@ export function CornerBrackets({ color = C.holo, len = 16, inset = 7, w = 2 }) {
 // Pure-holographic floating window — translucent teal-lit plate, glowing edge,
 // corner brackets, scanlines and a spring entrance. Optional title/icon header
 // and footer slot. Replaces the old painted-frame image.
-export function FrameWindow({ children, onClose, footer, width = 470, title, icon }) {
+// `floating` turns the window from a modal into a movable panel: no scrim, no
+// blur, and the board underneath stays live — you can pan, zoom and click hexes
+// with a city open. Desktop only, and by choice: on a phone the window is most
+// of the screen anyway, so a scrim is the honest thing and there is nowhere to
+// drag it to.
+export function FrameWindow({ children, onClose, footer, width = 470, title, icon, floating = false }) {
   useEscClose(onClose);
+  const dragControls = useDragControls();
   return (
-    <motion.div onClick={onClose}
+    <motion.div onClick={floating ? undefined : onClose}
       initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, transition: { duration: 0.2 } }} transition={{ duration: 0.16 }}
-      style={{ position: "fixed", inset: 0, zIndex: 58, background: "radial-gradient(ellipse at center, rgba(8,14,14,0.82), rgba(2,5,5,0.93))", backdropFilter: "blur(3px)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+      style={{ position: "fixed", inset: 0, zIndex: 58, display: "flex", alignItems: "center",
+        // Floating: hug the right edge and let every event fall through to the
+        // board. Modal: centred over a scrim that eats them.
+        justifyContent: floating ? "flex-end" : "center",
+        padding: floating ? "0 22px" : 0,
+        pointerEvents: floating ? "none" : "auto",
+        background: floating ? "none" : "radial-gradient(ellipse at center, rgba(8,14,14,0.82), rgba(2,5,5,0.93))",
+        backdropFilter: floating ? undefined : "blur(3px)" }}>
       <motion.div onClick={(e) => e.stopPropagation()} className="hud-scratch"
+        drag={floating} dragControls={dragControls} dragListener={false} dragMomentum={false}
+        // Keep it reachable: it may be dragged well off-centre but never
+        // entirely off the window.
+        dragConstraints={{ left: -window.innerWidth + 120, right: 60, top: -window.innerHeight + 140, bottom: window.innerHeight - 140 }}
         initial={{ opacity: 0, scale: 0.95, y: 10 }} animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.96, y: 8, transition: { duration: 0.18, ease: "easeIn" } }}
         transition={{ type: "spring", stiffness: 300, damping: 26 }}
         style={{ position: "relative", width, maxWidth: "94vw", maxHeight: "88vh", display: "flex", flexDirection: "column",
+          pointerEvents: "auto",
           background: "linear-gradient(158deg, rgba(18,31,32,0.97) 0%, rgba(9,17,18,0.98) 58%, rgba(6,11,12,0.99) 100%)",
           border: `1px solid ${C.holo}`, borderRadius: 8,
           boxShadow: `inset 0 0 34px rgba(86,211,198,0.07), 0 0 0 1px rgba(86,211,198,0.12), 0 0 36px rgba(86,211,198,0.22), 0 26px 70px rgba(0,0,0,0.72)` }}>
         <div style={{ position: "absolute", top: 0, left: 20, right: 20, height: 2, background: `linear-gradient(90deg, transparent, ${C.holoHi}, transparent)`, opacity: 0.7, pointerEvents: "none" }} />
+        {/* Grab strip. A dedicated handle rather than dragging the whole panel:
+            the body holds buttons, a slider and a scroll area, all of which a
+            panel-wide drag would fight. */}
+        {floating && (
+          <div
+            onPointerDown={(e) => dragControls.start(e)}
+            title="Drag to move"
+            style={{ position: "relative", height: 18, flexShrink: 0, cursor: "grab", display: "flex",
+              alignItems: "center", justifyContent: "center", gap: 3, touchAction: "none" }}
+          >
+            {[0, 1, 2].map((i) => (
+              <span key={i} style={{ width: 16, height: 2, borderRadius: 1, background: C.holo, opacity: 0.4 }} />
+            ))}
+          </div>
+        )}
         <CornerBrackets />
         <div className="hud-scanlines" style={{ position: "absolute", inset: 0, borderRadius: 8 }} />
         {title != null && (
@@ -494,11 +527,16 @@ function Stat({ icon, value, label }) {
 // Single-window Location view. `view` is a plain object built by the host.
 export function LocationWindow({ view, onClose, onActivate, onContest, onRecruit, onBuild, onUpgrade, onRush, onSetSlider }) {
   const v = view;
+  // On desktop a city is a panel you consult while still working the map, not a
+  // modal that takes the screen hostage. On a phone it fills the screen either
+  // way, so it stays a modal there.
+  const floating = !useIsPhone();
   const hair = "1px solid rgba(86,211,198,0.22)";
   const holoBtn = { fontFamily: C.font, fontSize: 12, fontWeight: 700, letterSpacing: 1.4, textTransform: "uppercase", color: "#08100f", padding: "9px 16px", borderRadius: 7, border: `1px solid ${C.holo}`, background: `linear-gradient(180deg, ${C.holoHi}, ${C.holo})`, boxShadow: `0 0 14px ${C.holo}55` };
   return (
     <FrameWindow
       onClose={onClose}
+      floating={floating}
       footer={
         <>
           <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>

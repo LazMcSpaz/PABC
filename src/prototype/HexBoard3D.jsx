@@ -7,9 +7,9 @@
 //
 //   tiles    the art, one HexTile per hex, z-ordered by y
 //   routes   the road / rail network, over the tiles
-//   tokens   units and ghosts, over the routes
+//   hits     one invisible polygon per hex, taking clicks on bare ground
+//   tokens   units and ghosts, over the hit layer so they take their own clicks
 //   meters   the Loyalty radials, floating above everything
-//   hits     one invisible polygon per hex, taking all the clicks
 //
 // The hit layer exists because tiles overlap heavily now: rectangular tile
 // boxes would steal each other's clicks, and a tall mountain's bounding box
@@ -136,10 +136,15 @@ export default function HexBoard3D({
         })}
       </div>
 
+      {/* Hit layer. It sits BELOW the tokens (8500), not on top: an SVG
+          polygon with `fill="transparent"` is still painted as far as
+          hit-testing is concerned, so a hit layer above the tokens silently
+          swallowed every unit click. Above the routes so the whole hex stays
+          clickable, below anything a player is meant to click directly. */}
       <svg
         width={geom.width}
         height={geom.height}
-        style={{ position: "absolute", inset: 0, zIndex: 9500 }}
+        style={{ position: "absolute", inset: 0, zIndex: 8200 }}
       >
         {order.map((hexId) => {
           const c = geom.centers[hexId];
