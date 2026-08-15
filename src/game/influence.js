@@ -17,9 +17,10 @@
 // Fog builds the separate Vision set later; keep them distinct — nothing
 // here writes or reads a vision set.
 import { CONFIG } from "./config.js";
-import { CHIPS, CAPITAL } from "./content.js";
+import { CHIPS, CAPITAL, ABILITIES } from "./content.js";
 import { emit } from "./events.js";
 import { bfsDistances } from "./board.js";
+import { holderOf } from "./control.js";
 
 // Influence-chip schema (§18.11 — chips are authored later, in the
 // content pass). recomputeInfluence reads these optional fields off any
@@ -60,6 +61,13 @@ function locationRange(state, loc) {
     const def = chipDef(state, c);
     if (def) r += def.influenceRange || 0;
   }
+  // Beacon Hill (ability passive INFLUENCE_RANGE): some hills just carry
+  // a signal farther — the Location projects beyond the base range.
+  if (loc.abilityId) {
+    for (const pv of ABILITIES[loc.abilityId]?.passives || []) {
+      if (pv.type === "INFLUENCE_RANGE") r += pv.amount || 0;
+    }
+  }
   return r;
 }
 
@@ -72,9 +80,14 @@ export function recomputeInfluence(state) {
   const field = {}; // fid -> { hexId: number }
 
   for (const loc of Object.values(state.locations)) {
-    const fid = loc.controller;
-    if (!fid) continue; // only fully-controlled Locations project
-    const src = locationSource(state, loc);
+    // A Location projects for whoever HOLDS it — outright, or by majority
+    // at reduced strength. (Before: only 3-of-3 projected, so one flipped
+    // section silenced a city and handed its own hex to a neighbour.)
+    const fid = loc.controller || holderOf(loc);
+    if (!fid) continue;
+    const partial = fid !== loc.controller;
+    let src = locationSource(state, loc);
+    if (partial) src *= cfg.partialHolderScale;
     if (src <= 0) continue;
     const r = locationRange(state, loc);
     const dist = bfsDistances(adjacency, loc.hexId);
@@ -89,6 +102,18 @@ export function recomputeInfluence(state) {
   state.world.influence = field;
   deriveZoC(state, field);
   return field;
+}
+
+// A Location's OWN hex belongs to whoever holds it, full stop — nobody
+// out-influences the people standing in the city. Without this anchor a
+// besieged city's hex could fall into a neighbour's ZoC, which then cited
+// the rightful holder's own garrison for trespassing at home (playtest
+// 2026-08-15) and made borders thrash round to round.
+function anchorHeldLocations(state, next) {
+  for (const loc of Object.values(state.locations)) {
+    const fid = loc.controller || holderOf(loc);
+    if (fid) next[loc.hexId] = fid;
+  }
 }
 
 // Derive the ZoC owner map from a freshly computed field and emit
@@ -112,6 +137,7 @@ function deriveZoC(state, field) {
     // Clears threshold AND no tie for the lead → owned; else neutral.
     next[hex] = best >= cfg.dominanceThreshold && best > second ? bestFid : null;
   }
+  anchorHeldLocations(state, next);
 
   state.world.zoc = next;
 
@@ -128,6 +154,29 @@ function deriveZoC(state, field) {
 // The faction whose ZoC contains `hex`, or null (contested / neutral).
 export function zocOwner(state, hex) {
   return state.world?.zoc?.[hex] || null;
+}
+
+// Who is squeezing `loc` out from under `pid`? The soft-power siege reads
+// the raw Influence FIELD, not the ZoC map: a Location anchors its own hex
+// in the ZoC map (so its garrison is never a trespasser at home), but a
+// rival projecting more Influence there is still hollowing the place out.
+// Returns the strongest such rival, or null.
+export function pressureSource(state, loc, pid) {
+  const field = state.world?.influence;
+  if (!field) return null;
+  const mine = field[pid]?.[loc.hexId] || 0;
+  let bestFid = null, best = mine;
+  for (const fid in field) {
+    if (fid === pid) continue;
+    const v = field[fid][loc.hexId] || 0;
+    if (v > best) { best = v; bestFid = fid; }
+  }
+  // Same bar the ZoC map applies: a squeeze only counts as DOMINANCE once
+  // it clears the threshold. (Without this, any rival with a hair more
+  // Influence pinned every city's Loyalty down and the Dominion VP faucet
+  // dried up across the board.)
+  if (best < CONFIG.influence.dominanceThreshold) return null;
+  return bestFid;
 }
 
 // Encounter-reveal `condition` hook: "recipient's ZoC contains this hex".

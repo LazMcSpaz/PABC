@@ -100,7 +100,7 @@ const TIER_COLOR = {
 // Verbs the drawer renders. Order = how they appear in the actions
 // menu. Each carries label / description / destructive flag.
 const VERB_META = {
-  "gift":                  { label: "Gift", body: "Send scrap. Raises their Standing toward you." },
+  "gift":                  { label: "Gift", body: "Send scrap. Raises their Standing toward you.", isPane: "gift" },
   "propose-deal":          { label: "Custom Deal", body: "Build a give/get offer. Opens the deal builder.", isPane: "deal" },
   "demand-tribute":        { label: "Demand Tribute", body: "Take, don't ask. Stains Honor if refused.", isPane: "tribute", destructive: true },
   "sue-for-peace":         { label: "Sue for Peace", body: "Offer terms alongside the peace promise.", isPane: "peace" },
@@ -123,7 +123,7 @@ const VERB_META = {
 const DESTRUCTIVE_PROMPT = {
   "declare-war":            "Declare war? You'll lose Standing and gain Menace immediately. Their allies may join in.",
   "denounce":               "Denounce publicly? Standing falls on both sides and your Honor takes a hit.",
-  "vassalize":              "Force vassalage? They'll resist unless they have no choice.",
+  "vassalize":              "Take them under your banner? The cornered submit; a friendly minor may welcome a protector.",
   "free-vassal":            "Release this vassal? Your Honor rises, their tribute stops.",
   "demand-tribute":         "Demand tribute? Refusal will damage your Honor and could trigger war.",
   "dissolve-trading-pact":  "Close the trading pact? The per-round scrap flow stops; the permanent Research floor stays.",
@@ -418,6 +418,11 @@ function LandingView({ dip, onSelectFaction, onAction, onClose }) {
           </div>
         </Card>
 
+        {/* Path to Recognition — the per-faction backing checklist. Coarse
+            status is common knowledge; exact numbers ride with the Spy Ring. */}
+        <RecognitionCard rec={rec} />
+
+
         {dip.coalitionAgainstYou && (
           <Card accent="#d2453f">
             <SectionLabel color="#ffb4ae">Coalition against you</SectionLabel>
@@ -477,6 +482,74 @@ function LandingView({ dip, onSelectFaction, onAction, onClose }) {
         ))}
       </div>
     </div>
+  );
+}
+
+// Path to Recognition — one row per faction with a coarse backing status
+// (public), and the exact gate numbers when the Spy Ring is researched.
+const BACKING_COLOR = {
+  backs: "#5fc27a", warming: "#c9b24e", cold: "rgba(143,246,234,0.45)",
+  blocked: "#d2913c", coalition: "#d2453f",
+};
+const BACKING_LABEL = {
+  backs: "BACKS YOU", warming: "WARMING", cold: "COLD",
+  blocked: "DISTRUSTS", coalition: "COALITION",
+};
+function RecognitionCard({ rec }) {
+  const backing = rec.backing || [];
+  if (!backing.length) return null;
+  const hasSpy = backing.some((b) => b.detail);
+  return (
+    <Card>
+      <SectionLabel>Path to Recognition</SectionLabel>
+      <div className="pc-prose" style={{ fontSize: 11, lineHeight: 1.5, color: "rgba(143,246,234,0.6)", marginBottom: 8 }}>
+        Reach <b style={{ color: C.holoHi }}>{rec.threshold}</b> backing to win outright.
+        A vassal counts double an ally. The first time each power backs you,
+        you bank <b style={{ color: "#e8c95a" }}>+{rec.summitVp} VP</b>.
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+        {backing.map((b) => (
+          <div key={b.id} style={{
+            display: "flex", flexDirection: "column", gap: 2,
+            padding: "6px 8px", borderRadius: 5,
+            background: "rgba(0,0,0,0.22)",
+            border: `1px solid ${BACKING_COLOR[b.status]}44`,
+          }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ fontFamily: C.font, fontSize: 11.5, fontWeight: 700, flex: 1, color: "#f4efe2" }}>
+                {b.name}
+                {rec.summits?.includes(b.id) && (
+                  <span title="Summit VP banked" style={{ color: "#e8c95a", marginLeft: 6 }}>★</span>
+                )}
+              </span>
+              {b.weight > 0 && (
+                <span style={{ fontFamily: C.font, fontSize: 10.5, fontWeight: 700, color: "#5fc27a" }}>+{b.weight}</span>
+              )}
+              <span style={{
+                fontFamily: C.font, fontSize: 8.5, fontWeight: 700, letterSpacing: 1,
+                color: BACKING_COLOR[b.status],
+              }}>{BACKING_LABEL[b.status]}</span>
+            </div>
+            <div style={{ fontFamily: C.font, fontSize: 9.5, letterSpacing: 0.3, color: "rgba(143,246,234,0.55)", lineHeight: 1.4 }}>
+              {b.hint}
+            </div>
+            {b.detail && (
+              <div style={{ fontFamily: C.font, fontSize: 9, letterSpacing: 0.4, color: "#8fd8ce", lineHeight: 1.5 }}>
+                Their regard {b.detail.standing >= 0 ? "+" : ""}{b.detail.standing} (Allied at +{b.detail.needStanding})
+                {" · "}your Menace {b.detail.yourMenace} vs tolerance {b.detail.theirTolerance}
+                {" · "}your Honor {b.detail.yourHonor} vs floor {b.detail.theirFloor}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+      {!hasSpy && (
+        <div style={{
+          fontFamily: C.font, fontSize: 8.5, letterSpacing: 0.8, textTransform: "uppercase",
+          color: "rgba(210,145,60,0.8)", marginTop: 8,
+        }}>Exact figures: Espionage required · Intelligence B1 Spy Ring</div>
+      )}
+    </Card>
   );
 }
 
@@ -551,6 +624,14 @@ function FactionRow({ f, onClick }) {
         {warn.map((w, i) => (
           <span key={i} title={w.title} style={{ fontSize: 13, color: "#d2913c" }}>{w.glyph}</span>
         ))}
+        {f.vp != null && (
+          <span title="Victory Points" style={{
+            fontFamily: C.font, fontSize: 11, fontWeight: 800, letterSpacing: 0.8,
+            color: "#e8c95a", border: "1px solid rgba(232,201,90,0.45)",
+            borderRadius: 4, padding: "1px 7px", background: "rgba(232,201,90,0.08)",
+            flexShrink: 0,
+          }}>★ {f.vp}</span>
+        )}
       </div>
       <div style={{
         display: "flex", alignItems: "center", gap: 8,
@@ -720,6 +801,7 @@ function StatusPill({ color, children }) {
 function StatusRow({ f, tierColor }) {
   const pills = [];
   pills.push({ color: tierColor, label: TIER_LABEL[f.standingTier] || f.standingTier });
+  if (f.vp != null) pills.push({ color: "#e8c95a", label: `★ ${f.vp} VP` });
   if (f.temperament) pills.push({ color: C.holo, label: f.temperament });
   if (f.atWar)        pills.push({ color: "#d2453f", label: "◤ At War" });
   if (f.pacted)       pills.push({ color: "#5fc27a", label: "◆ Pacted" });
@@ -1224,6 +1306,7 @@ function DealPane({ f, dip, kind = "custom", onBack, onSubmit }) {
   const [openBorders, setOpenBorders] = useState(false);
   const isPeace = kind === "peace";
   const isTribute = kind === "tribute";
+  const isGift = kind === "gift";
 
   const deal = useMemo(() => {
     const give = [];
@@ -1236,8 +1319,10 @@ function DealPane({ f, dip, kind = "custom", onBack, onSubmit }) {
     return { proposer: dip.youId, recipient: f.id, give, get };
   }, [scrapGive, scrapGet, pactOffer, openBorders, dip.youId, f.id, isPeace, isTribute]);
 
-  const title = isPeace ? "Sue for peace" : isTribute ? "Demand tribute" : "Custom deal";
-  const subtitle = isPeace
+  const title = isGift ? "Send a gift" : isPeace ? "Sue for peace" : isTribute ? "Demand tribute" : "Custom deal";
+  const subtitle = isGift
+    ? "No strings attached — scrap for goodwill. Standing rises with the size of the gift."
+    : isPeace
     ? "The peace promise is fixed; everything else is yours to shape."
     : isTribute
     ? "Make them an offer they can refuse. Then live with the cost."
@@ -1261,10 +1346,12 @@ function DealPane({ f, dip, kind = "custom", onBack, onSubmit }) {
             <Card style={{ flex: 1 }}>
               <SectionLabel>You give</SectionLabel>
               <NumberRow label="Scrap" value={scrapGive} onChange={setScrapGive} max={50} disabled={isTribute} />
-              {!isPeace && (
+              {!isPeace && !isGift && (
                 <Toggle label="Offer pact" value={pactOffer} onChange={setPactOffer} />
               )}
-              <Toggle label="Open borders" value={openBorders} onChange={setOpenBorders} />
+              {!isGift && (
+                <Toggle label="Open borders" value={openBorders} onChange={setOpenBorders} />
+              )}
               {isPeace && (
                 <div style={{
                   fontFamily: C.font, fontSize: 10, letterSpacing: 1.2,
@@ -1275,19 +1362,22 @@ function DealPane({ f, dip, kind = "custom", onBack, onSubmit }) {
               )}
             </Card>
           )}
-          <Card style={{ flex: 1 }}>
-            <SectionLabel>You get</SectionLabel>
-            <NumberRow label="Scrap" value={scrapGet} onChange={setScrapGet} max={50} />
-          </Card>
+          {!isGift && (
+            <Card style={{ flex: 1 }}>
+              <SectionLabel>You get</SectionLabel>
+              <NumberRow label="Scrap" value={scrapGet} onChange={setScrapGet} max={50} />
+            </Card>
+          )}
         </div>
 
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
           <button onClick={onBack} className="hud-int" style={btnGhostStyle()}>Back</button>
           <button
             onClick={() => onSubmit(deal, kind)}
+            disabled={isGift && scrapGive <= 0}
             className="hud-int"
-            style={btnHoloStyle()}
-          >{isTribute ? "Demand" : isPeace ? "Sue for peace" : "Propose"}</button>
+            style={{ ...btnHoloStyle(), opacity: isGift && scrapGive <= 0 ? 0.5 : 1 }}
+          >{isGift ? "Send gift" : isTribute ? "Demand" : isPeace ? "Sue for peace" : "Propose"}</button>
         </div>
       </div>
     </div>
@@ -1722,6 +1812,18 @@ export default function DiplomacyDrawer({
                   onSubmit={(deal) => runFromPane("propose-deal", {
                     faction: selectedFaction.id,
                     give: deal.give, get: deal.get,
+                  })}
+                />
+              )}
+              {pane === "gift" && (
+                <DealPane
+                  kind="gift"
+                  f={selectedFaction}
+                  dip={dip}
+                  onBack={() => setPane(null)}
+                  onSubmit={(deal) => runFromPane("gift", {
+                    faction: selectedFaction.id,
+                    amount: deal.give.find((g) => g.resource)?.resource.amount || 0,
                   })}
                 />
               )}

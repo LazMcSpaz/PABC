@@ -2,7 +2,7 @@
 // Upkeep work (action reset, modifier expiry, Loyalty tick, scrap
 // production) and Cleanup.
 import { emit } from "./events.js";
-import { recomputeStats, recomputeResearch } from "./stats.js";
+import { recomputeStats, recomputeResearch, effectiveVeteran } from "./stats.js";
 import { recomputeInfluence } from "./influence.js";
 import { recomputeVisibility } from "./visibility.js";
 import { reinforcementRoute } from "./board.js";
@@ -12,9 +12,25 @@ import { sweepDeferred } from "./deferred.js";
 import { evaluateTriggers } from "./triggers.js";
 import { evaluateConditionalBeats } from "./quests.js";
 import { applyOutputAndBuilds, chargeChipUpkeep, enforceLoyaltySlotCap } from "./economy.js";
-import { runDiplomacyRound } from "./diplomacy.js";
+import { runDiplomacyRound, vassalsOf, arePacted, adjustMenace, sweepTrespass } from "./diplomacy.js";
+import { holdsLocation } from "./control.js";
+import { adjustStanding } from "./standing.js";
+import { pressureSource } from "./influence.js";
 import { hasTechNode } from "./tech.js";
 import { chargePostUpkeep } from "./posts.js";
+import { CHIPS, LOCATIONS, ABILITIES, factionDef } from "./content.js";
+
+// Sum a numeric chip field across a Location's installed, non-dormant
+// chips — the shared reader for the per-Location behavior chips
+// (loyaltyRise, healBonus, actionBonus, …).
+function locChipSum(state, loc, field) {
+  let n = 0;
+  for (const c of loc.chips) {
+    if (state.chips[c]?.disabled) continue;
+    n += CHIPS[state.chips[c]?.chipId]?.[field] || 0;
+  }
+  return n;
+}
 
 function expireModifiers(state, pid) {
   const own = new Set(
@@ -47,19 +63,55 @@ export function tickLoyalty(state, pid) {
       (u) => u.owner === pid && u.node === loc.hexId,
     );
 
+    // Influence pressure (§18.3 / docs/vp-and-actions-design.md §1): a
+    // rival whose ZoC DOMINATES this Location's own hex hollows it out —
+    // Loyalty bleeds each Upkeep, garrison or not. The pressure is felt as
+    // soft hostility: the presser loses Standing with the owner and gains
+    // Menace every Upkeep it squeezes. Allies (pact or vassalage either
+    // way) never pressure each other.
+    const pcfg = CONFIG.influence.pressure;
+    // Read the Influence FIELD, not the ZoC map: a held Location anchors
+    // its own hex in that map, but a rival out-projecting it there is
+    // still squeezing — the soft-power siege must survive the anchor.
+    const presser = pressureSource(state, loc, pid);
+    const pressured = !!(pcfg && presser && presser !== pid &&
+      state.players[presser] && !arePacted(state, pid, presser) &&
+      !vassalsOf(state, pid).includes(presser) && !vassalsOf(state, presser).includes(pid));
+    const bleed = pressured ? pcfg.bleed : 0;
+    if (pressured) {
+      adjustStanding(state, pid, presser, -pcfg.standingHit, "influence-pressure");
+      adjustMenace(state, presser, pcfg.menaceHit, "influence-pressure");
+      emit(state, "influence_pressure", { hex: loc.hexId, owner: pid, presser, bleed });
+    }
+
     if (garrisoned) {
-      // Integrating — Loyalty rises to the fixed ceiling. A returning unit
-      // also halts any in-progress peel simply by not reaching the peel path.
-      if ((loc.loyalty ?? 0) < cfg.ceiling) {
-        loc.loyalty = Math.min((loc.loyalty ?? 0) + cfg.risePerUpkeep, cfg.ceiling);
+      // Integrating — Loyalty rises to the fixed ceiling (a returning unit
+      // also halts any in-progress peel simply by not reaching the peel
+      // path); Civic Hall accelerates the climb; enemy influence pressure
+      // drags against both — a plain garrison under pressure stalls flat.
+      const delta = cfg.risePerUpkeep + locChipSum(state, loc, "loyaltyRise") - bleed;
+      if (delta !== 0 && (delta < 0 || (loc.loyalty ?? 0) < cfg.ceiling)) {
+        loc.loyalty = Math.max(0, Math.min((loc.loyalty ?? 0) + delta, cfg.ceiling));
         emit(state, "loyalty_changed", { hex: loc.hexId, owner: pid, loyalty: loc.loyalty });
       }
       continue;
     }
 
-    // Neglected and still loyal — bleed toward 0, never peeling Control yet.
+    // A Civic Hall chip holds Loyalty where it stands while neglected — no
+    // passive bleed — but FOREIGN pressure still tells: the chip cancels
+    // neglect, not a rival's dominance.
+    if (loc.chips.some((c) => !state.chips[c]?.disabled && CHIPS[state.chips[c]?.chipId]?.noLoyaltyDecay)) {
+      if (bleed > 0 && (loc.loyalty ?? 0) > 0) {
+        loc.loyalty = Math.max((loc.loyalty ?? 0) - bleed, 0);
+        emit(state, "loyalty_changed", { hex: loc.hexId, owner: pid, loyalty: loc.loyalty });
+      }
+      continue;
+    }
+
+    // Neglected and still loyal — bleed toward 0 (plus any pressure),
+    // never peeling Control yet.
     if ((loc.loyalty ?? 0) > 0) {
-      loc.loyalty = Math.max((loc.loyalty ?? 0) - cfg.decayPerUpkeep, 0);
+      loc.loyalty = Math.max((loc.loyalty ?? 0) - cfg.decayPerUpkeep - bleed, 0);
       emit(state, "loyalty_changed", { hex: loc.hexId, owner: pid, loyalty: loc.loyalty });
       // Surface danger BEFORE any Control peels (§18.2 UI warning) — the
       // alert lands at least one Upkeep before the first section is lost.
@@ -103,6 +155,89 @@ export function tickLoyalty(state, pid) {
   recomputeVisibility(state, pid, { emitEvents: false });
 }
 
+// docs/vp-and-actions-design.md §1 — the repeatable VP faucets, awarded at
+// the player's Upkeep (after the Loyalty tick so a city that just reached
+// the rung counts this turn).
+function dominionQualifies(state, loc, beneficiary) {
+  const def = LOCATIONS[loc.locationId];
+  if (!def) return false;
+  if (def.strategicValue !== "high" && def.strategicValue !== "veryHigh") return false;
+  if (def.affiliation === beneficiary) return false; // your homeland never ticks
+  const loy = loc.loyalty == null ? CONFIG.loyalty.ceiling : loc.loyalty;
+  return loy >= CONFIG.victory.dominionLoyaltyMin;
+}
+
+function awardVp(state, pid, amount, source) {
+  if (amount <= 0) return;
+  const p = state.players[pid];
+  p.vp += amount;
+  emit(state, "resource_gained", { player: pid, resource: "VP", amount, source });
+  // Only MAJOR factions race the victory threshold — a seeded minor can
+  // bank VP (captures etc.) but never wins the game.
+  if (p.vp >= CONFIG.vpThreshold && !state.winnerId && factionDef(pid)?.tier === "major") {
+    state.winnerId = pid;
+  }
+}
+
+function tickVictoryFaucets(state, pid) {
+  // The victory faucets are the MAJORS' race — seeded minors hold their
+  // ground but don't tick dominion or collect the alliance trickle
+  // (playtest log: Croppers/Dambarans were quietly accruing dominion VP).
+  if (factionDef(pid)?.tier !== "major") return;
+  // Foreign dominion — cities you hold yourself. "Hold" means outright OR
+  // by majority: a besieged city whose people are still loyal to you is
+  // still yours to draw prestige from (and without this, a city stuck in
+  // majority-limbo silently switched the faucet off).
+  let dominion = 0;
+  for (const loc of Object.values(state.locations)) {
+    if (holdsLocation(loc, pid) && dominionQualifies(state, loc, pid)) dominion += 1;
+  }
+  awardVp(state, pid, dominion * CONFIG.victory.dominionPerCity, "dominion");
+  // Vassal dominion — qualifying cities your vassals hold tick for YOU
+  // (still never your own affiliated cities, even in a vassal's hands).
+  let vassalCities = 0;
+  for (const vid of vassalsOf(state, pid)) {
+    for (const loc of Object.values(state.locations)) {
+      if (holdsLocation(loc, vid) && dominionQualifies(state, loc, pid)) vassalCities += 1;
+    }
+  }
+  awardVp(state, pid, vassalCities * CONFIG.victory.dominionPerCity, "vassal-dominion");
+  // Alliance trickle — you must be pacted with a MAJORITY of the other
+  // surviving MAJORS to draw anything (seeded minors don't move the
+  // denominator), and past that bar every allied major pays. The flat
+  // version was diplomacy's structural weakness: Dominion scales with each
+  // city you take, but a second, third, fourth ally added nothing, so the
+  // peaceful route had a hard ceiling the conquest route did not.
+  const others = state.turnOrder.filter(
+    (f) => f !== pid && !state.players[f]?.eliminated && factionDef(f)?.tier === "major",
+  );
+  if (others.length > 0) {
+    const pacts = others.filter((f) => arePacted(state, pid, f)).length;
+    if (pacts > others.length / 2) {
+      awardVp(state, pid, pacts * CONFIG.victory.allianceTrickle, "alliance");
+    }
+  }
+}
+
+// Elimination (docs/vp-and-actions-design.md §1): a faction with no
+// Locations and no units is out — flagged, skipped by the turn loop, and
+// excluded from the trickle majority. Last faction standing wins outright.
+function sweepEliminations(state) {
+  for (const pid of state.turnOrder) {
+    const p = state.players[pid];
+    if (!p || p.eliminated) continue;
+    const holdsAnything =
+      Object.values(state.locations).some((l) => l.controller === pid) ||
+      Object.values(state.units).some((u) => u.owner === pid);
+    if (!holdsAnything) {
+      p.eliminated = true;
+      emit(state, "faction_eliminated", { player: pid });
+    }
+  }
+  const survivors = state.turnOrder.filter((f) => !state.players[f]?.eliminated);
+  if (survivors.length === 1 && !state.winnerId) state.winnerId = survivors[0];
+}
+
 // v0.2 §16.2 — refresh each owned unit's move budget from its effective
 // Movement, and roll the §16.6 fortify flag (a unit that didn't move on
 // its previous turn is "dug in"). Must run after recomputeStats so
@@ -111,6 +246,12 @@ function refreshMoveBudget(state, pid) {
   for (const u of Object.values(state.units)) {
     if (u.owner !== pid) continue;
     u.moveRemaining = u.movement;
+    // §16.2 road march — starting the turn on the highway network is
+    // worth +1 Movement this turn (roads as fast lanes, not only
+    // terrain-negators).
+    if (state.board.hexes[u.node]?.road) {
+      u.moveRemaining += CONFIG.movement.roadStartBonus || 0;
+    }
     u.fortified = !u.movedSinceUpkeep;
     u.movedSinceUpkeep = false;
   }
@@ -123,13 +264,33 @@ function passiveHeal(state, pid) {
   for (const u of Object.values(state.units)) {
     if (u.owner !== pid) continue;
     const loc = state.locations[u.node];
-    if (!loc || loc.controller !== pid) continue;
-    const cap = u.veteran ? CONFIG.unit.veteranStrengthCap : CONFIG.unit.baseStrengthCap;
+    const onHeldLoc = !!loc && loc.controller === pid;
+    // Field Medics (chip `healAnywhere`): the unit mends in the field, held
+    // Location or not — at the chip's own rate (no tech/infirmary stacking).
+    let fieldMedics = 0;
+    for (const c of u.chips) {
+      if (state.chips[c]?.disabled) continue;
+      fieldMedics += CHIPS[state.chips[c]?.chipId]?.healAnywhere || 0;
+    }
+    // The Springs (ability passive HEAL_HERE): the oasis mends WHOEVER
+    // stands on it — any owner, held or not.
+    let springs = 0;
+    if (loc?.abilityId) {
+      for (const pv of ABILITIES[loc.abilityId]?.passives || []) {
+        if (pv.type === "HEAL_HERE") springs += pv.amount || 0;
+      }
+    }
+    if (!onHeldLoc && fieldMedics <= 0 && springs <= 0) continue;
+    const cap = effectiveVeteran(state, u) ? CONFIG.unit.veteranStrengthCap : CONFIG.unit.baseStrengthCap;
     if (u.baseStrength >= cap) continue;
     const before = u.baseStrength;
     // §17.5 Logistics B1 (Field Hospital): +1 more heal/Upkeep — ADDS to the
-    // §16.5 base, so a holder mends 2/Upkeep on held Locations.
-    const healAmt = CONFIG.heal.passivePerTurn + (hasTechNode(state, pid, "log-b1") ? 1 : 0);
+    // §16.5 base, so a holder mends 2/Upkeep on held Locations. An Infirmary
+    // chip on this Location (healBonus) adds on top of both.
+    const healAmt = (onHeldLoc
+      ? CONFIG.heal.passivePerTurn + (hasTechNode(state, pid, "log-b1") ? 1 : 0) +
+        locChipSum(state, loc, "healBonus") + fieldMedics
+      : fieldMedics) + springs;
     u.baseStrength = Math.min(cap, u.baseStrength + healAmt);
     recomputeStats(state);
     emit(state, "unit_reinforced", { unit: u.uid, amount: u.baseStrength - before });
@@ -140,11 +301,30 @@ function passiveHeal(state, pid) {
 export function startTurn(state) {
   if (state.winnerId) return state;
   const pid = activePlayerId(state);
+  sweepEliminations(state);
+  if (state.winnerId) return state;
+  // An eliminated faction's turn is skipped entirely (endTurn advances and
+  // re-enters startTurn for the next seat; recursion is bounded by the
+  // seat count and the last-standing check above).
+  if (state.players[pid]?.eliminated) return endTurn(state);
   state.phase = "Upkeep";
   emit(state, "turn_started", { player: pid });
 
+  // Trespass presence sweep — units still parked in foreign ZoC keep the
+  // citation streak alive (warning → −1 → −2), even without moving.
+  sweepTrespass(state, pid);
+
   const p = state.players[pid];
-  p.actions.remaining = p.actions.max;
+  p.actions.remaining = p.actions.max; // wildcard pool (base 0)
+  // Per-entity actions: every owned unit and held Location refreshes to 1.
+  // Logistics Hub (chip `actionBonus`) makes its own Location act twice.
+  for (const u of Object.values(state.units)) {
+    if (u.owner === pid) u.actionsRemaining = 1;
+  }
+  for (const loc of Object.values(state.locations)) {
+    if (loc.controller !== pid) continue;
+    loc.actionsRemaining = 1 + locChipSum(state, loc, "actionBonus");
+  }
   state.pendingActionGrants = state.pendingActionGrants.filter((g) => {
     if (g.player === pid) {
       p.actions.remaining += g.amount;
@@ -153,10 +333,47 @@ export function startTurn(state) {
     return true;
   });
 
+  // Blacksite suppression expires once the suppressor's window has passed
+  // (suppressedUntil is a turn ordinal; see DISABLE_CHIP).
+  {
+    const ordinal = state.round * state.turnOrder.length + state.activeIndex;
+    let lifted = false;
+    for (const inst of Object.values(state.chips)) {
+      if (inst.suppressedUntil != null && ordinal > inst.suppressedUntil) {
+        delete inst.suppressedUntil;
+        if (inst.disabled) {
+          inst.disabled = false;
+          lifted = true;
+          emit(state, "chip_reactivated", { chip: inst.uid, chipId: inst.chipId });
+        }
+      }
+    }
+    if (lifted) { recomputeStats(state); recomputeResearch(state); recomputeInfluence(state); }
+  }
+
   expireModifiers(state, pid);
+  // Waystation (chip `turnStartMovement`): a friendly unit opening its turn
+  // on the chip's Location gets +1 Movement for this turn only — expressed
+  // as an until_your_next_turn modifier so the existing stat/expiry
+  // machinery does all the bookkeeping (expireModifiers above just cleared
+  // last turn's grants).
+  for (const u of Object.values(state.units)) {
+    if (u.owner !== pid) continue;
+    const loc = state.locations[u.node];
+    if (!loc || loc.controller !== pid) continue;
+    const bonus = locChipSum(state, loc, "turnStartMovement");
+    if (bonus > 0) {
+      state.modifiers.push({
+        target: u.uid, stat: "Movement", amount: bonus, duration: "until_your_next_turn",
+      });
+    }
+  }
   recomputeStats(state);
   refreshMoveBudget(state, pid);
   tickLoyalty(state, pid);
+  // Repeatable VP faucets — after the Loyalty tick so integration counts
+  // the turn it lands (docs/vp-and-actions-design.md §1).
+  tickVictoryFaucets(state, pid);
   // §20.8 — a Loyalty drop below the bonus-slot rung ejects the chip in that
   // extra slot (newest-first). Runs right after the Loyalty tick, before the
   // economy step reads slot capacity.

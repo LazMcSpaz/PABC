@@ -3,7 +3,32 @@
 
 export const CONFIG = {
   vpThreshold: 12,
-  baseActions: 2,
+  // Per-entity actions (docs/vp-and-actions-design.md §2/§4): every unit
+  // and Location gets 1 action per turn; the old global pool survives as a
+  // WILDCARD pool (base 0) that effect-granted actions (Staging Ground,
+  // reactive cards) feed — any entity may spend a wildcard when its own
+  // action is gone.
+  baseActions: 0,
+
+  // Repeatable VP faucets (docs/vp-and-actions-design.md §1). Dominion:
+  // +vpPerCity per Upkeep for each high/veryHigh Location the player (or a
+  // vassal of theirs) fully holds at Loyalty >= loyaltyMin that is NOT one
+  // of the player's own affiliated cities — dominion is rule over others'
+  // land, so a homeland never ticks. Alliance trickle: +allianceTrickle
+  // per Upkeep while pacted with a majority of the other surviving majors.
+  victory: {
+    // 4 (was 6): the rung was calibrated for the old all-or-nothing control
+    // model, where a city you held was quiet. Under graduated control a
+    // contested city hovers around Loyalty 1–4 for most of a war, so the
+    // Dominion faucet ran bone dry — sim leaders plateaued at 9–11 VP with
+    // nothing left to earn. 4 keeps it a real bar (a neglected city still
+    // misses) while rewarding the "hold and settle it" play.
+    dominionLoyaltyMin: 4,
+    dominionPerCity: 1,
+    // Paid PER allied major, once you're pacted with a majority of them —
+    // so breadth of alliance scales the way breadth of conquest does.
+    allianceTrickle: 1,
+  },
 
   // §18.2 Loyalty — the 8-slice centre pie that replaces foothold/decay.
   // The ceiling is fixed; the rest are TBD-in-spec tunables, set here for
@@ -39,6 +64,11 @@ export const CONFIG = {
   movement: {
     forestCost: 2,     // entering a cover/forest hex costs this (vs 1) — "−1 speed"
     mountainHalts: true, // entering an elevation/mountain hex ends the move
+    // A unit beginning its turn ON a road hex marches +this Movement that
+    // turn — the highway network is a fast lane for armies, not only a
+    // terrain-negator (playtest: roads otherwise only differ from open
+    // ground on the map's few forest/mountain hexes).
+    roadStartBonus: 1,
   },
 
   // v0.2 §16.4 attrition
@@ -78,7 +108,10 @@ export const CONFIG = {
   // Derived per the spec — garrison Strength and base chip slots by a
   // location's strategic value.
   garrisonByValue: { low: 4, medium: 6, high: 8, veryHigh: 10 },
-  chipSlotsByValue: { low: 0, medium: 1, high: 2, veryHigh: 3 },
+  // Playtest: one slot per medium city meant a single build ended a town's
+  // development (and scrap piled up with nothing to sink into). Raised one
+  // across the board; the Loyalty-6 bonus slot still adds one more.
+  chipSlotsByValue: { low: 1, medium: 2, high: 3, veryHigh: 4 },
 
   // The v0.1 test board.
   testMap: [3, 4, 5, 6, 5, 4, 3], // 30 hexes
@@ -96,18 +129,39 @@ export const CONFIG = {
     loyaltyScale: 1, // local influence = loyaltyScale × the Location's Loyalty
     falloff: 0.5, // per-hop multiplier — contribution at d hops = source × falloff^d
     dominanceThreshold: 3, // a hex needs at least this Influence to join any ZoC
+    // Influence pressure (docs/vp-and-actions-design.md §1): a Location
+    // whose OWN hex sits in a rival's dominant ZoC bleeds Loyalty each
+    // Upkeep — the soft-power siege. Garrisoning cancels it (rise 1 −
+    // bleed 1 = stalemate); Civic Hall's rise beats it; out-projecting
+    // ends it. Over-exertion is soft hostility: each bleeding Upkeep
+    // costs the presser Standing with the owner and raises their Menace.
+    pressure: { bleed: 1, standingHit: 1, menaceHit: 1 },
+    // A Location held by a MAJORITY (2 of 3 sections) but not outright
+    // still projects — at reduced strength. Before this, one flipped
+    // section silenced a city's influence entirely, handing its own hex
+    // to a neighbour's ZoC (playtest 2026-08-15).
+    partialHolderScale: 0.5,
   },
   // §20 Economy & City Development — chips are the output of the economy,
   // built off each Location's Output via the guns/butter slider (Market retired).
   economy: {
+    // A besieged city (majority held, not full) still pays its holder —
+    // at this fraction of Output, rounded down. Losing one section is a
+    // squeeze, not an eviction (playtest 2026-08-15).
+    partialOutputScale: 0.5,
     // §20.6 Tech-Level build gate: chip techLevel T needs player Tech Level >= gate[T].
     buildTechGate: { 1: 1, 2: 3, 3: 5 },
     // §20.6 Loyalty rung granting the +1 chip slot (drop below → eject newest, §20.8).
     bonusSlotLoyalty: 6,
     // §20.3 default guns/butter split f∈[0,1]: scrapBank += (1−f)·Output, build += f·Output.
-    defaultSlider: 0,
-    // §20.7 rush rate — banked scrap per build-point.
-    rushScrapPerPoint: 1,
+    // 0.5 (was 0): half of Output feeds the active build by default, so
+    // organic building happens without slider micromanagement — and banked
+    // scrap is no longer a free 100% by default (docs/chip-set-v0.1.md).
+    defaultSlider: 0.5,
+    // §20.7 rush rate — banked scrap per build-point. 2 (was 1): Rush now
+    // carries a real premium over organic building, so it's an emergency
+    // lever, not a strictly-dominant default (docs/chip-economy-handoff.md).
+    rushScrapPerPoint: 2,
   },
 
   // §19 Exploration, Vision & Fog of War. Per-faction sight; LoS over
@@ -122,7 +176,12 @@ export const CONFIG = {
                       // even point-blank; Detection comes from scout/recon/
                       // watchtower chips + the Intelligence vision path (§19.7).
     locationVisionBase: 1, // §19.3 a controlled Location's base sight
-    locationVisionPerLoyalty: 0.25, // + floor(loyalty × this): a loyal core sees farther
+    // + floor(loyalty × this): a loyal core sees farther — capped in
+    // practice at radius 2 (loyalty 8 → +1). At the old 0.25 a capital saw
+    // radius 3 = virtually the whole 30-hex board from turn one (the
+    // "why can I see everything" playtest report). Settlements now top out
+    // at 2; Watchtower/vision chips are the way to see farther.
+    locationVisionPerLoyalty: 0.125,
     zocVision: 0, // §19.3 ZoC-owned hexes contribute sight at this radius (0 = the hex itself)
     elevationVisionBonus: 1, // §19.4 a source on elevation sees +this (and over ridges)
     coverSightCost: 1, // §19.4 extra sight cost to see INTO a cover hex
@@ -130,7 +189,10 @@ export const CONFIG = {
     ghostMaxAge: null, // §19.11 ghost aging (TBD) — null = ghosts never expire
     intelVisionBonus: 1, // §19.8 Intelligence vision-branch faction-wide sight bonus
     intelDetection: 1, // §19.8 Intelligence vision-branch detection
-    terrainSeedDensity: { elevation: 0.18, cover: 0.22 }, // §19.4 share of terrain hexes
+    // §19.4 share of terrain (wasteland) hexes carrying features. Raised
+    // from 0.18/0.22 — at those rates a 30-hex map carried ~3 feature
+    // hexes total and terrain almost never touched movement or combat.
+    terrainSeedDensity: { elevation: 0.35, cover: 0.4 },
   },
 
   // §17.7 Listening Post (Intelligence A2) — a unit-built, concealed Vision
@@ -151,9 +213,21 @@ export const CONFIG = {
     standingMin: -10, standingMax: 12,
     tiers: { hostile: -6, wary: -3, neutral: -1, friendly: 5, allied: 8 }, // value >= → tier (0 = Neutral)
     pactStandingReq: 6, // §18.7 Standing needed to form a pact (Friendly+)
-    driftPerRound: 1, // §18.5 Standing drifts toward Neutral when unreinforced…
+    driftPerRound: 1, // §18.5 Standing drifts toward its BASELINE when unreinforced…
     grudgeDriftScale: 1, // …modulated by the faction's grudge (high grudge → slower fade)
     seedJitter: 3, // §18.4.1 per-seed jitter on seeded faction↔faction standing
+
+    // Standing baselines — history leaves a mark. Drift pulls Standing toward
+    // an EARNED per-pair baseline (not zero): honored calls raise it, betrayal
+    // lowers it, long alliances warm it. Capped so no pair is permanent.
+    baseline: {
+      cap: 4, // baselines live in [-cap, +cap]
+      pactHonoredGain: 2, // caller's baseline toward an ally who answered the call
+      pactBrokenLoss: 2, // victim's baseline toward the breaker
+      surpriseAttackLoss: 2, // victim's baseline toward a treacherous attacker
+      tenureRounds: 4, // every N full rounds of unbroken pact…
+      tenureGain: 1, // …warms both parties' baselines by this
+    },
 
     // §18.5 Menace — reputation for UNJUSTIFIED aggression, scored vs target.
     menace: {
@@ -178,13 +252,25 @@ export const CONFIG = {
 
     // §18.8 Coalition — threat(player)=wM·Menace + wP·powerLead. Forms past
     // `threshold`, dissolves below `dissolve` (hysteresis).
-    coalition: { wM: 1, wP: 2, threshold: 16, dissolve: 11, vpWeight: 1.5, territoryWeight: 1, standingHit: 4 },
+    // `minRounds` / `reformCooldownRounds` keep a coalition a WEIGHTY event
+    // rather than a flicker: it can't dissolve the moment threat dips, and
+    // the board can't immediately re-raise the same one (playtest
+    // 2026-08-15: 19 coalitions formed across 8 games, and their war
+    // declarations were the last source of peace→war churn).
+    coalition: {
+      wM: 1, wP: 2, threshold: 16, dissolve: 11,
+      vpWeight: 1.5, territoryWeight: 1, standingHit: 4,
+      minRounds: 4, reformCooldownRounds: 5,
+    },
 
     // §18.10 Recognition victory — Allied=1, Vassal=2; win at threshold while
     // Menace < each contributor's Tolerance and Honor > its floor. Threshold
     // ≈ a majority of the field's worth of acknowledgement (e.g. 3 vassals,
     // or 2 vassals + 2 allies) so the peaceful win is earned, not trivial.
-    recognition: { alliedWeight: 1, vassalWeight: 2, threshold: 6 },
+    // `summitVp`: the first time each faction EVER backs you, you bank VP —
+    // diplomacy pays into the same race conquest does, not only the long-shot
+    // instant win. Once per backer per game, majors only (minors don't win).
+    recognition: { alliedWeight: 1, vassalWeight: 2, threshold: 6, summitVp: 1 },
 
     // §18.9 Vassalage.
     vassal: {
@@ -193,6 +279,7 @@ export const CONFIG = {
       resentmentPerRound: 1, // base autonomy/resentment growth
       rebellionThreshold: 10, // resentment past this → rebel
       lordWeaknessScale: 2, // a weak lord raises resentment faster
+      rebellionCooldownRounds: 4, // a rebel won't re-submit to the SAME lord this long
     },
 
     // §18.8 AI valuation / cadence dials.
@@ -203,11 +290,21 @@ export const CONFIG = {
       giftStandingPerScrap: 0.5, // Standing bought per scrap gifted
       warGrudgeThreshold: -5, // AI declares war when Standing falls to/below this (+ aggression)
       vassalPowerRatio: 0.4, // offer/accept vassalage when weak side power < ratio·strong side
+      mediateCooldownRounds: 3, // a mediated pair can't be re-mediated (no Honor pump)
+      // Casus belli — the AI's blind combat loop only opens hostilities with a
+      // reason: an existing war, contempt (Wary-), or a warlike temperament.
+      // Raised past the mid-range so ordinary opportunists (0.55) no longer
+      // treat "I am standing next to it" as sufficient reason for a war.
+      blindAttackAggressionMin: 0.7,
     },
 
     // --- diplomacy-spec.md §6.3 — the verb/AI/agreement layer on top of §18.
     // Playtest starting numbers (all TBD-tunable).
-    gift: { windowRounds: 3 }, // §1.2 — gift diminishing-returns window
+    gift: {
+      windowRounds: 3, // §1.2 — gift diminishing-returns window
+      maxScrapPerGift: 8, // scrap counted per gift — one giant gift can't buy a pact
+      baselineWarmth: 1, // a gift that lands (≥2 Standing) also warms the baseline
+    },
     tradingPact: { // §1.3
       scrapPerUpkeep: 2,
       permanentResearchOnFormation: 1, // Research FLOOR granted each party; removed on dissolve
@@ -244,9 +341,48 @@ export const CONFIG = {
     // but moving through their ZoC WITHOUT an open-borders agreement is
     // trespassing and costs relations (softened when already on good terms).
     trespass: {
-      standingPenalty: 2, // relationship hit (owner → mover) per incursion — the larger hit
-      reputationPenalty: 1, // global Menace bump on the mover — the smaller hit
-      goodTermsReduction: 1, // both softened by this when on Friendly+ terms (floored)
+      standingPenalty: 2, // relationship hit (owner → mover) — full rate, distrustful hosts
+      reputationPenalty: 1, // global Menace bump on the mover — distrustful hosts only
+      goodTermsReduction: 1, // legacy softening dial (Friendly+ terms)
+      // Civ-style escalation on Neutral-or-better ground: consecutive rounds
+      // of presence walk this ladder — a warning first (0), then −1, then −2
+      // per round. Leaving for a round resets the streak. Distrustful hosts
+      // (below Neutral) skip the ladder and cite at the full rate at once.
+      escalation: [0, 1, 2],
+    },
+    // Truce — peace is a PROMISE, not a pause. Making peace lifts both
+    // sides' Standing to a floor above contempt and opens a window during
+    // which neither will re-open hostilities (playtest 2026-08-15: peace
+    // left Standing at exactly the Wary line, so the AI's combat loop
+    // re-attacked and auto-declared war the very next turn — war and peace
+    // churned every round with no legible reason).
+    // `rounds` is short and `standingFloor` deliberately stops at Wary: a
+    // truce must END the same-turn churn without pacifying the map. Lifting
+    // to Neutral instead left former enemies permanently unable to fight
+    // (the AI only presses at Wary-or-worse), and 8 of 24 sim games
+    // deadlocked with leaders stranded at 9–11 VP.
+    truce: {
+      rounds: 2, // hostilities stay shut for this long after peace
+      standingFloor: -3, // peace lifts both sides to Wary — cooled, not friends
+      breakHonorLoss: 6, // attacking through a truce is treachery
+      breakMenace: 3,
+    },
+    // Just war — a formal grievance makes a war RIGHTEOUS: fighting it costs
+    // no Menace. You earn one by denouncing the target first (a declared
+    // intent the board has heard) or by being wronged by them (broken pact
+    // or promise, surprise attack) within the window.
+    justWar: {
+      denounceWindowRounds: 6, // your denouncement of them counts this long
+      grievanceWindowRounds: 8, // their betrayal of you counts this long
+    },
+    // Precursor warnings — the AI telegraphs trouble to the HUMAN before it
+    // lands: a faction whose regard sinks to Wary sends word; the board
+    // murmurs when the human's threat score nears the coalition threshold.
+    warnings: {
+      cooldownRounds: 4, // the same warning won't repeat for this long
+      coalitionFraction: 0.7, // murmur when threat ≥ threshold × this
+      defyStandingHit: 2, // telling an envoy where to put it
+      placateScrap: 5, // the offered tribute on the "placate" answer
     },
     pact: { // §1.9, §1.10 — toggle costs
       toggleVisionStandingHit: 1,

@@ -22,9 +22,20 @@ import { factionDef } from "./content.js";
 import {
   factionIds, powerOf, arePacted, atWar, vassalLord, mayEngage,
   getStanding, passesRepGates, formPact, vassalize, applyDeal, checkRecognitionVictory,
+  aiAcceptsVassalage, truceBetween,
 } from "./diplomacy.js";
 
-const SAFETY_CAP = 10; // hard stop if priority loop ever spins
+const SAFETY_CAP = 16; // hard stop if priority loop ever spins
+
+// Per-entity actions: the AI keeps acting while ANY of its assets (or a
+// wildcard) can still pay for something. Interim until the AI overhaul
+// turns this into per-asset policies.
+function hasActionBudget(state, pid) {
+  if (state.players[pid].actions.remaining > 0) return true;
+  if (Object.values(state.units).some((u) => u.owner === pid && (u.actionsRemaining ?? 0) > 0)) return true;
+  return Object.values(state.locations).some(
+    (l) => l.controller === pid && (l.actionsRemaining ?? 0) > 0);
+}
 
 export function takeAITurn(state) {
   if (state.winnerId) return;
@@ -33,11 +44,7 @@ export function takeAITurn(state) {
   // live this turn.
   maybeAssignTech(state, pid);
   let guard = SAFETY_CAP;
-  while (
-    state.players[pid].actions.remaining > 0 &&
-    guard-- > 0 &&
-    !state.winnerId
-  ) {
+  while (hasActionBudget(state, pid) && guard-- > 0 && !state.winnerId) {
     if (!tryOneAction(state, pid)) break;
   }
   // §20 — the AI runs its economy every turn regardless of the Action budget:
@@ -84,6 +91,23 @@ function acceptableOdds(state, pid, atkTotal, defTotal, defenderRollsDie) {
   return winProbability(atkTotal, defTotal, defenderRollsDie) >= threshold;
 }
 
+// Casus belli — the blind combat loop only opens hostilities with a
+// reason: an existing war, contempt (Wary-or-worse standing), or a
+// warlike temperament. Pacted factions are never blind-attacked, and a
+// pacifist no longer torpedoes its own courtships by wandering into a
+// neutral neighbour's town and contesting it (the playtest log shows a
+// 0.1-aggression diplomat faction declaring four wars this way).
+function wouldFight(state, pid, ownerFid) {
+  if (!ownerFid || ownerFid === pid) return true; // neutral garrisons are fair game
+  if (arePacted(state, pid, ownerFid)) return false; // never blind-strike an ally
+  if (atWar(state, pid, ownerFid)) return true;
+  // A truce is a promise the AI keeps — this is what stopped the
+  // peace-then-war-again churn every round (playtest 2026-08-15).
+  if (truceBetween(state, pid, ownerFid)) return false;
+  if (getStanding(state, pid, ownerFid) <= CONFIG.diplomacy.tiers.wary) return true;
+  return (factionDef(pid)?.aggression ?? 0.5) >= CONFIG.diplomacy.ai.blindAttackAggressionMin;
+}
+
 // Returns true if the AI spent at least one Action (whether the action
 // succeeded or not — failed actions don't decrement remaining, so the
 // loop must give up if no priority matches a runnable action).
@@ -92,7 +116,8 @@ function tryOneAction(state, pid) {
   for (const unit of ownUnits(state, pid)) {
     if (isImmobilized(state, unit)) continue;
     const loc = state.locations[unit.node];
-    if (loc && !loc.sections.every((s) => s === pid)) {
+    if (loc && !loc.sections.every((s) => s === pid)
+      && wouldFight(state, pid, loc.controller)) {
       const atk = previewAttackerStrength(state, unit.node, pid).total;
       const def = previewLocationContest(state, unit.node);
       if (def && acceptableOdds(state, pid, atk, def.value, def.defenderRollsDie)) {
@@ -107,7 +132,8 @@ function tryOneAction(state, pid) {
     const enemyHere = Object.values(state.units).find(
       (u) => u.node === unit.node && u.owner !== pid && isUnitVisibleTo(state, pid, u),
     );
-    if (enemyHere && (!loc || !loc.sections.includes("neutral"))) {
+    if (enemyHere && (!loc || !loc.sections.includes("neutral"))
+      && wouldFight(state, pid, enemyHere.owner)) {
       const atk = previewAttackerStrength(state, unit.node, pid).total;
       const def = previewAttackerStrength(state, unit.node, enemyHere.owner).total;
       if (acceptableOdds(state, pid, atk, def, true)) {
@@ -320,6 +346,10 @@ function knownGoalHexes(state, pid) {
   for (const loc of Object.values(state.locations)) {
     const hex = loc.hexId;
     if (loc.controller === pid) continue;
+    // Don't march on a town you wouldn't actually fight for — a pacifist
+    // heading to a friendly city just to stall at the gates wastes turns
+    // and racks up trespass citations on the way.
+    if (loc.controller && !wouldFight(state, pid, loc.controller)) continue;
     if (local && !nearOwnTerritory(state, pid, hex)) continue;
     if (!vis) { goals.push(hex); continue; }
     if (vis.visible.has(hex)) goals.push(hex); // live truth
@@ -348,18 +378,16 @@ function manageDiplomacy(state, pid) {
   const human = state.humanFactionId;
   const others = factionIds(state).filter((f) => f !== pid);
   const tiers = CONFIG.diplomacy.tiers;
-  const ai = CONFIG.diplomacy.ai;
 
   // 1) Vassalize a much-weaker, cornered, engageable faction (recognition
   //    runs through converting weak factions, §18.9). Lords only.
   if (!vassalLord(state, pid) && (me.victoryLean === "diplomacy" || (me.aggression ?? 0) >= 0.7)) {
     for (const f of others) {
-      if (f === human || vassalLord(state, f) || !mayEngage(state, pid, f)) continue;
-      const ratio = powerOf(state, f) / Math.max(1, powerOf(state, pid));
-      // Subjugation follows a beating: only vassalize a faction you are at
-      // war with (cornered), and only when it is much weaker (§18.9).
-      const cornered = atWar(state, pid, f);
-      if (ratio <= ai.vassalPowerRatio && cornered) {
+      if (f === human || vassalLord(state, f)) continue;
+      // aiAcceptsVassalage carries the full rulebook: power gate, cornered
+      // submission, peaceful PATRONAGE for friendly minors, and the
+      // post-rebellion cooldown (no more same-round re-vassalizing).
+      if (aiAcceptsVassalage(state, f, pid)) {
         vassalize(state, pid, f, "ai-vassalize");
         checkRecognitionVictory(state);
         return;

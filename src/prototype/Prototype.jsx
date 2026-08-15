@@ -22,7 +22,7 @@ import { takeAITurn } from "../game/ai.js";
 import { activePlayerId } from "../game/targeting.js";
 import { bfsDistances } from "../game/board.js";
 import { unitReach, unitMovePath } from "../game/movement.js";
-import { CHIPS as ENGINE_CHIPS, LOCATIONS as ENGINE_LOCATIONS } from "../game/content.js";
+import { CHIPS as ENGINE_CHIPS, LOCATIONS as ENGINE_LOCATIONS, ABILITIES as ENGINE_ABILITIES, chipDisplayName } from "../game/content.js";
 import { CONFIG } from "../game/config.js";
 import { downloadGameLog } from "./gameLogExport.js";
 import { NEUTRAL } from "./data.js";
@@ -53,6 +53,10 @@ import EventFeed from "./EventFeed.jsx";
 import UnitPanel from "./UnitPanel.jsx";
 import ContestOverlay from "./ContestOverlay.jsx";
 import SalvageModal from "./SalvageModal.jsx";
+import { ConfirmModal, CoalitionModal, isPromptDismissed } from "./ConfirmModal.jsx";
+import { HeraldLayer, heraldFromLog } from "./HeraldBanners.jsx";
+import EnvoyModal from "./EnvoyModal.jsx";
+import { atWar } from "../game/diplomacy.js";
 import { useAIReplay } from "./aiReplay/useAIReplay.js";
 import ReplayLayer from "./aiReplay/ReplayLayer.jsx";
 import { buildHexGeometry } from "./aiReplay/CameraController.js";
@@ -159,11 +163,10 @@ function buildLocView(state, hex, isYourTurn) {
     const e = hex.economy;
     const chipDefs = (control.chipUids || []).map((uid, i) => {
       const engineId = state.engineState.chips[uid]?.chipId;
-      const def = ENGINE_CHIPS[engineId];
       return {
         uid,
         chipId: engineId,
-        name: def?.name || engineId,
+        name: chipDisplayName(engineId, ctrl),
         disabled: !!state.engineState.chips[uid]?.disabled,
         upgrade: e.upgrades[uid] || null,
       };
@@ -202,7 +205,11 @@ function buildLocView(state, hex, isYourTurn) {
             name: control.ability.name,
             text: control.ability.text,
             usedThisTurn: control.abilityUsedThisTurn,
-            canActivate: youControlHere && isYourTurn && !control.abilityUsedThisTurn,
+            // Passive-only abilities (Fortified Ruins, Toll Gate, …) have
+            // nothing to activate — the window hides the button entirely.
+            passiveOnly: (ENGINE_ABILITIES[hex.abilityId]?.activated?.length ?? 0) === 0,
+            canActivate: youControlHere && isYourTurn && !control.abilityUsedThisTurn &&
+              (ENGINE_ABILITIES[hex.abilityId]?.activated?.length ?? 0) > 0,
           }
         : null,
     recruit:
@@ -251,9 +258,12 @@ export default function Prototype({ config, onNewGame }) {
   const gameRef = useRef(null);
   if (!gameRef.current) {
     gameRef.current = bootGame(config?.seed ?? 42, config?.humanFactionId ?? "versari");
+    // Dev handle — lets the screenshot harness / console stage scenarios.
+    if (typeof window !== "undefined") window.__ashland = gameRef.current;
   }
   const [tick, setTick] = useState(0);
   const bumpTick = useCallback(() => setTick((t) => t + 1), []);
+  if (typeof window !== "undefined") window.__ashlandBump = bumpTick; // dev handle
   const isPhone = useIsPhone();
   const hudOffset = isPhone ? COMPACT_HUD_H : 60;
 
@@ -271,6 +281,8 @@ export default function Prototype({ config, onNewGame }) {
   const [pendingMove, setPendingMove] = useState(null);          // { unitUid, origin, dest } awaiting confirm
   const [skipMoveConfirm, setSkipMoveConfirm] = useState(readSkipMoveConfirm);
   const [contestViz, setContestViz] = useState(null); // contest replay overlay
+  const [confirmPrompt, setConfirmPrompt] = useState(null); // generic confirm dialog
+  const [coalitionPrompt, setCoalitionPrompt] = useState(null); // commit-forces picker
   const [salvagePrompt, setSalvagePrompt] = useState(null); // interactive salvage
 
   // Wiki — a clickable [[term]] anywhere in flavor text opens this modal.
@@ -334,6 +346,25 @@ export default function Prototype({ config, onNewGame }) {
     const t = setTimeout(() => setDiploResult(null), 4500);
     return () => clearTimeout(t);
   }, [diploResult]);
+
+  // Herald — scan log entries appended since the last tick and surface the
+  // political moves as transient banners. The cursor starts at the current
+  // log length so setup noise never banners; each batch self-expires.
+  const [heralds, setHeralds] = useState([]);
+  const heraldCursor = useRef(gameRef.current?.log?.length ?? 0);
+  const dismissHerald = useCallback((id) => setHeralds((q) => q.filter((b) => b.id !== id)), []);
+  useEffect(() => {
+    const log = gameRef.current?.log || [];
+    if (heraldCursor.current > log.length) heraldCursor.current = 0; // log replaced (new game)
+    if (heraldCursor.current === log.length) return;
+    const fresh = log.slice(heraldCursor.current);
+    heraldCursor.current = log.length;
+    const msgs = heraldFromLog(fresh, state.youId);
+    if (!msgs.length) return;
+    setHeralds((q) => [...q, ...msgs].slice(-4));
+    const ids = new Set(msgs.map((m) => m.id));
+    setTimeout(() => setHeralds((q) => q.filter((b) => !ids.has(b.id))), 7000);
+  }, [tick, state.youId]);
 
   // Manage the selection's lifetime. Enemy units stay selectable so the
   // player can inspect their stats and owner read-only — control actions
@@ -534,7 +565,74 @@ export default function Prototype({ config, onNewGame }) {
     setSelectedUnitId(unitUid);
   }
 
+  // Contest flow: the coalition picker (2+ friendly units on the hex) or a
+  // long-odds / peace-breaking confirm for a lone attacker, then resolve.
   function onContest(params) {
+    const game = gameRef.current;
+    const attacker = game.units[params.unit];
+    if (!attacker) return runAction("contest", params);
+
+    const allies = Object.values(game.units).filter(
+      (u) => u.owner === attacker.owner && u.node === attacker.node && u.uid !== attacker.uid,
+    );
+    const targetLoc = params.target ? null : game.locations[attacker.node];
+    const defOwner = params.target
+      ? game.units[params.target]?.owner
+      : targetLoc?.controller;
+    const warnPeace = defOwner && !atWar(game, attacker.owner, defOwner)
+      ? UI_FACTIONS[defOwner]?.name || defOwner
+      : null;
+    const defPreview = params.target
+      ? { name: game.units[params.target]?.name || "enemy unit",
+          value: game.units[params.target]?.strength ?? 0, rollsDie: true }
+      : (() => {
+          const pv = previewLocationContest(game, attacker.node);
+          return { name: ENGINE_LOCATIONS[targetLoc?.locationId]?.name || "garrison",
+            value: pv ? pv.value : targetLoc?.garrison ?? 0,
+            rollsDie: pv ? pv.defenderRollsDie : true };
+        })();
+
+    const unitRow = (u) => ({
+      uid: u.uid, name: u.name, strength: u.strength,
+      acted: (u.actionsRemaining ?? 0) < 1,
+    });
+
+    if (allies.length > 0) {
+      // The split-or-pool decision belongs to the player whenever a stack
+      // could fight together. Every row is toggleable — the engine's
+      // initiator is picked at confirm time from the checked units, so an
+      // already-acted unit never blocks the fresh ones.
+      setCoalitionPrompt({
+        units: [unitRow(attacker), ...allies.map(unitRow)],
+        defender: defPreview,
+        wildcards: game.players[attacker.owner]?.actions.remaining ?? 0,
+        warnPeace,
+        params,
+      });
+      return { ok: true, pending: true };
+    }
+
+    const longOdds = attacker.strength < defPreview.value;
+    const needsPeaceWarn = warnPeace && !isPromptDismissed("attack-at-peace");
+    const needsOddsWarn = longOdds && !isPromptDismissed("contest-long-odds");
+    if (needsPeaceWarn || needsOddsWarn) {
+      setConfirmPrompt({
+        title: needsPeaceWarn ? "Break the peace?" : "Attack at long odds?",
+        body: [
+          needsPeaceWarn ? `You are not at war with ${warnPeace} — attacking will cost Standing and raise your Menace. ` : "",
+          longOdds ? `${attacker.name} brings ${attacker.strength} against ${defPreview.value}${defPreview.rollsDie ? " (both roll 1d6, defender wins ties)" : ""}.` : "",
+        ].join(""),
+        confirmLabel: "Attack",
+        danger: true,
+        dontShowKey: needsPeaceWarn ? "attack-at-peace" : "contest-long-odds",
+        onConfirm: () => resolveContest({ ...params, coalition: [] }),
+      });
+      return { ok: true, pending: true };
+    }
+    return resolveContest({ ...params, coalition: [] });
+  }
+
+  function resolveContest(params) {
     const game = gameRef.current;
     const attacker = game.units[params.unit];
     if (!attacker) return runAction("contest", params);
@@ -657,6 +755,24 @@ export default function Prototype({ config, onNewGame }) {
     return runAction("upgrade", { at: hexId, chip: chipUid }, null, "Upgrade queued.");
   }
   function onRush(hexId) {
+    const game = gameRef.current;
+    const loc = game.locations[hexId];
+    const you = game.players[game.turnOrder[game.activeIndex]];
+    const rate = CONFIG.economy.rushScrapPerPoint;
+    const need = loc?.activeBuild
+      ? Math.max(0, loc.activeBuild.cost - (loc.buildProgress || 0)) : 0;
+    const affordable = you ? Math.floor(you.resource / rate) : 0;
+    if (need > 0 && affordable < need && !isPromptDismissed("rush-partial")) {
+      const points = Math.max(0, affordable);
+      setConfirmPrompt({
+        title: "Rush won't finish the build",
+        body: `Rushing now spends ${points * rate} scrap for ${points} build point${points === 1 ? "" : "s"} — the build still needs ${need - points} more after that. Proceed anyway?`,
+        confirmLabel: "Rush anyway",
+        dontShowKey: "rush-partial",
+        onConfirm: () => runAction("rush", { at: hexId }, null, "Build rushed."),
+      });
+      return { ok: true, pending: true };
+    }
     return runAction("rush", { at: hexId }, null, "Build rushed.");
   }
   function onSetSlider(hexId, value) {
@@ -665,6 +781,29 @@ export default function Prototype({ config, onNewGame }) {
 
   function onEndTurn() {
     if (!isYourTurn || replay.isReplaying) return;
+    const game = gameRef.current;
+    const pid = game.turnOrder[game.activeIndex];
+    const idleUnits = Object.values(game.units).filter(
+      (u) => u.owner === pid && (u.actionsRemaining ?? 0) > 0).length;
+    const idleLocs = Object.values(game.locations).filter(
+      (l) => l.controller === pid && (l.actionsRemaining ?? 0) > 0).length;
+    if ((idleUnits > 0 || idleLocs > 0) && !isPromptDismissed("end-turn-idle")) {
+      const parts = [];
+      if (idleUnits) parts.push(`${idleUnits} unit${idleUnits === 1 ? "" : "s"}`);
+      if (idleLocs) parts.push(`${idleLocs} location${idleLocs === 1 ? "" : "s"}`);
+      setConfirmPrompt({
+        title: "End turn with actions left?",
+        body: `${parts.join(" and ")} still ${idleUnits + idleLocs === 1 ? "has" : "have"} an action this turn.`,
+        confirmLabel: "End turn",
+        dontShowKey: "end-turn-idle",
+        onConfirm: doEndTurn,
+      });
+      return;
+    }
+    doEndTurn();
+  }
+
+  function doEndTurn() {
     setSelectedUnitId(null);
     setSelectedHexId(null);
     endTurn(gameRef.current);
@@ -690,6 +829,29 @@ export default function Prototype({ config, onNewGame }) {
   // §18.7 — issue a diplomatic verb (free of the Action budget). All 18
   // verbs dispatch through performDiplomacy now; the prototype layer just
   // routes params + surfaces the accept/decline result.
+  // Answer an envoy's audience (hear / placate / defy). The engine dequeues
+  // the warning, so the modal closes to whatever is next in line.
+  function onEnvoyRespond(warning, answer) {
+    const game = gameRef.current;
+    const r = performDiplomacy(game, state.youId, "respond-warning", {
+      warningId: warning.id,
+      answer,
+      amount: answer === "placate" ? warning.placateScrap : undefined,
+    });
+    if (r.ok) {
+      const who = warning.fromName || "them";
+      setToast({
+        kind: "info",
+        text: answer === "placate" ? `You send ${r.amount} scrap to ${who}.`
+          : answer === "defy" ? `You defy ${who}.`
+          : "The envoy is heard and sent on their way.",
+      });
+    } else if (r.reason) {
+      setToast({ kind: "error", text: r.reason });
+    }
+    bumpTick();
+  }
+
   function onDiplomacy(action, params) {
     const game = gameRef.current;
     const youId = state.youId;
@@ -955,6 +1117,15 @@ export default function Prototype({ config, onNewGame }) {
       )}
       </AnimatePresence>
 
+      {/* Envoy audience — an AI's warning, answered rather than just read.
+          Shown one at a time; only on your own turn so it never interrupts
+          an AI replay. */}
+      {isYourTurn && !showDiplomacy && (
+        <EnvoyModal warning={state.diplomacy?.pendingWarnings?.[0]} onRespond={onEnvoyRespond} />
+      )}
+
+      <HeraldLayer banners={heralds} onDismiss={dismissHerald} topOffset={hudOffset + 14} />
+
       {toast && (
         <div
           style={{
@@ -1043,6 +1214,35 @@ export default function Prototype({ config, onNewGame }) {
 
       {salvagePrompt && (
         <SalvageModal prompt={salvagePrompt} onConfirm={onSalvageConfirm} />
+      )}
+
+      {confirmPrompt && (
+        <ConfirmModal
+          prompt={confirmPrompt}
+          onConfirm={() => { const go = confirmPrompt.onConfirm; setConfirmPrompt(null); go?.(); }}
+          onCancel={() => setConfirmPrompt(null)}
+        />
+      )}
+      {coalitionPrompt && (
+        <CoalitionModal
+          prompt={coalitionPrompt}
+          onConfirm={(selectedUids) => {
+            // Root the contest on a checked unit that still has its own
+            // action (the initiator takes the loser's attrition, so prefer
+            // one that pays for itself); the rest join as the coalition.
+            const game = gameRef.current;
+            const lead = selectedUids.find((u) => (game.units[u]?.actionsRemaining ?? 0) > 0)
+              ?? selectedUids[0];
+            const params = {
+              ...coalitionPrompt.params,
+              unit: lead,
+              coalition: selectedUids.filter((u) => u !== lead),
+            };
+            setCoalitionPrompt(null);
+            resolveContest(params);
+          }}
+          onCancel={() => setCoalitionPrompt(null)}
+        />
       )}
 
       <AnimatePresence>

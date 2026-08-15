@@ -1,31 +1,40 @@
-Chip ID,Name,Kind,Tech Level,Cost,Effect,Market Copies,Flavor
-new-recruits,New Recruits,Unit,Common,2,+1 Strength,4,Numbers aren't everything. They're not nothing either.
-sharpened-blades,Sharpened Blades,Unit,Common,3,+2 Strength,3,"Old-world steel, maintained by people who know what they're doing."
-cannons,Cannons,Unit,Rare,5,+3 Strength,2,Too loud for subtlety. Nobody using these is interested in subtlety.
-navigator,Navigator,Unit,Common,3,+1 Movement,3,"Knows the corridors, the crossings, the shortcuts nobody mapped."
-landship,Landship,Unit,Rare,6,+2 Movement,2,Only the Versari were supposed to have these. Supposed to.
-captain,Captain,Unit,Common,4,"+1 Strength, +1 Movement",3,Someone has to know where they're going and why.
-heavy-armor,Heavy Armor,Unit,Common,3,"+2 Strength, -1 Movement",3,Harder to kill. Easier to outmaneuver. Pick your problem.
-veteran-crew,Veteran Crew,Unit,Rare,6,"+2 Strength, +1 Movement",2,They've done this before. That's the whole advantage.
-field-medics,Field Medics,Unit,Common,3,After a failed contest this unit is not forced to retreat.,3,Losing ground isn't the same as losing the unit.
-scout-runners,Scout Runners,Unit,Common,4,+1 Movement. This unit may pass through enemy-held locations without triggering a contest.,2,The fastest way through is usually invisible.
-iron-discipline,Iron Discipline,Unit,Common,3,This unit ignores the first failed contest result each round.,3,The difference between a rout and a delay.
-saboteurs,Saboteurs,Unit,Rare,5,Dual-slot. On a successful contest disable one chip installed at the contested location.,2,They don't win fights. They make sure the other side can't either.
-war-banner,War Banner,Unit,Rare,5,Dual-slot. +2 Strength. Friendly units contesting the same location gain +1 Strength.,2,It doesn't make them braver. It reminds them they're not alone.
-outriders,Outriders,Unit,Rare,6,"+2 Movement, +1 Strength. Dual-slot.",2,They're already there by the time you finish the order.
-recyclers,Recyclers,Location,Common,3,+1 Scrap production,4,Nothing leaves. Everything becomes something else.
-factory,Factory,Location,Rare,6,+2 Scrap production,2,The old machines still work if you know how to ask them.
-defense-turrets,Defense Turrets,Location,Common,4,+2 garrison Strength,3,Installed overnight. Effective immediately.
-training-grounds,Training Grounds,Location,Common,4,"+1 to your unit cap. Enables recruiting units at this location.",8,A militia becomes an army one bad season at a time.
-town-hall,Town Hall,Location,Common,3,+1 to this location's foothold cap.,3,Legitimacy is a resource too.
-recon-team,Recon Team,Location,Common,3,When you draw an encounter you may discard it and draw again.,3,They go first. You decide after.
-logistics-hub,Logistics Hub,Location,Rare,7,+1 Action each of your turns while you hold this location.,2,Movement is power. Everything else is waiting.
-labs,Labs,Location,Common,4,+1 Tech score.,10,Someone was doing research here. Whether it was good research is still being determined.
-watchtower,Watchtower,Location,Common,3,Passive: You are informed when any enemy unit moves adjacent to this location.,3,The first warning is worth more than the best response.
-barricades,Barricades,Location,Common,4,Enemy units must spend 1 additional Scrap to initiate a contest here.,3,Not impossible to breach. Just expensive.
-supply-depot,Supply Depot,Location,Common,4,Friendly units at this location may spend 1 Scrap to gain +2 Strength for one contest.,3,The unglamorous work that decides unglamorous battles.
-salvage-yard,Salvage Yard,Location,Common,3,Gain 1 Scrap when any contest at this location concludes regardless of outcome.,4,Win or lose something useful comes out of a fight.
-broadcast-tower,Broadcast Tower,Location,Common,4,You may reroll a single dice roll during one of your contests within 2 hexes of this location. Once per turn.,3,Presence isn't just physical.
-relay-station,Relay Station,Location,Rare,5,"Activated (free, once per turn): Discard one reactive card, then draw one reactive card.",2,Information moves faster than armies. Barely.
-fortified-gate,Fortified Gate,Location,Rare,7,Dual-slot. +3 garrison Strength. Enemy units that fail a contest here retreat two hexes.,2,Some doors say everything before anyone speaks.
-munitions-cache,Munitions Cache,Location,Rare,5,"Activated (5 Scrap): Destroy one chip at an enemy held location within 3 hexes.",2,Sometimes the cleanest move is scorched earth.
+# GENERATED from src/game/content.js — do not hand-edit; run scripts/export-chips.mjs
+Chip ID,Name,Kind,Stat Type,Slots,Tech Level,Cost,Upkeep,Loyalty Req,Upgrades To,Faction,Effect,Versari Name,Goldgrass Name,Lakers Name,Plainers Name
+drilled-troops,Drilled Troops,unit,strength,1,1,3,,0,sharpened-blades,,+1 Strength,Engineered Blades,Scythe Levy,Stamped Plate,Bushwhackers
+sharpened-blades,Sharpened Blades,unit,strength,1,2,6,,3,,,+2 Strength,Set Piece,Threshers,Drop Hammer,Buffalo Gun
+bombard,Bombard,unit,strength,2,3,12,1,6,,,"+3 Strength; ignores a defending Location's static defenses (fortify, high ground, turret walls)",,,,
+navigator,Navigator,unit,movement,1,1,3,,0,troop-carrier,,+1 Movement,Sunrunner,Trace Horses,Droit Iron,Mustangers
+troop-carrier,Troop Carrier,unit,movement,1,2,6,,3,,,+2 Movement — the whole squad rides,Sunhauler,Stage Line,Chrome Hauler,Remuda
+landship,Landship,unit,movement,2,3,12,2,6,,,"+3 Movement; ignores terrain (forest costs 1, mountains do not halt)",,,,
+field-glass,Field Glass,unit,vision,1,1,3,,0,spotter-net,,+1 Vision range,Long Optics,Field Talk,Highbeams,Outriders
+spotter-net,Spotter Net,unit,vision,1,2,6,,3,,,+1 Vision and +1 Detection — finds what hides,Signal Intercept,Neighbors,Searchlight,Cutting Sign
+recyclers,Recyclers,location,,1,1,3,,0,factory,,+1 scrap Output,Panel Field,Gleaning Yards,Breaker Yard,Salvage Camp
+factory,Factory,location,,1,2,6,,3,,,+2 scrap Output,Sunworks,Gristmill,Stamping Plant,Tradehouse
+works,Works,location,,1,1,4,,0,,,+1 build progress each turn toward this location's active build,Fabricator,Barn Raising,Assembly Line,Roustabouts
+labs,Labs,location,,1,1,3,,0,advanced-lab,,+1 Research while controlled,Lyceum,Almanac Society,Trade School,Assay Office
+advanced-lab,Advanced Lab,location,,1,2,6,1,3,,,+2 Research while controlled (upkeep 1),The Institute,Seed Vault,Proving Grounds,Surveyors' Guild
+defense-turrets,Defense Turrets,location,,1,1,4,,0,stronghold,,+2 garrison Strength,Rampart,Hedgerows,Slag Wall,Stockade
+stronghold,Stronghold,location,,1,2,7,1,3,,,+4 garrison Strength (upkeep 1),Bastion,Granary Keep,Blast Wall,Hillfort
+training-grounds,Training Grounds,location,,1,1,4,,0,,,Enables recruiting units; +1 unit cap,The Academy,Militia Green,Union Hall,Bunkhouse
+infirmary,Infirmary,location,,1,2,5,,3,,,Units here heal +1 more per Upkeep; instant reinforce here costs 1 scrap per Strength,Clean Ward,Apothecary,Company Clinic,Sawbones
+watchtower,Watchtower,location,,1,1,3,,0,,,"This location: +1 Vision, +1 Detection",Heliograph,Steeple Watch,Water Tower,Fence Riders
+beacon,Beacon,location,,1,1,4,,0,broadcast,,+2 Influence projected by this location,Wire Service,Market Fair,Radio Tower,Circuit Riders
+broadcast,Broadcast,location,,1,2,7,,3,,,+2 Influence and +1 Influence range,Signal Authority,County Fair,Clear Channel,Camp Meeting
+civic-hall,Civic Hall,location,,1,2,5,,3,,,Loyalty rises +1 extra while garrisoned and never decays while neglected,The Ministry,Grange Hall,Company Store,Watering Hole
+recon-team,Recon Team,location,,1,1,3,,0,,,Discard a drawn encounter and draw again,Field Agents,Town Criers,Block Captains,Trail Scouts
+logistics-hub,Logistics Hub,location,,2,3,12,1,6,,,"+1 Action each turn (rare, 2-slot; upkeep 1)",,,,
+field-medics,Field Medics,unit,,1,2,4,,3,,,"Heals +1 at Upkeep anywhere, not only on a held Location",,,,
+pathfinders,Pathfinders,unit,,1,2,5,,3,,,Forest costs 1 to enter; mountains don't halt the move,,,,
+rearguard,Rearguard,unit,,1,2,4,,3,,,"On losing a contest, may retreat 2 hexes; never takes rout spill damage",,,,
+trailwise,Trailwise,unit,,1,1,3,,0,,,Discard an encounter this unit triggers and draw again,,,,
+entrenching-tools,Entrenching Tools,unit,,1,1,3,,0,,,+1 to this unit's fortify bonus,,,,
+cold-camp,Cold Camp,unit,,1,1,0,,0,,,Pay 2 scrap: unseen until the start of your next turn,,,,
+night-march,Night March,unit,,1,1,0,,0,,,Passes through enemy units without being halted (Locations still halt),,,,
+war-banner,War Banner,unit,,1,1,0,,0,,,Counts as an extra unit for concentration and raises its stack's concentration cap by 1,,,,
+old-hands,Old Hands,unit,,1,1,0,,0,,,This unit counts as a veteran while the chip is installed,,,,
+safe-conduct,Safe Conduct,unit,,1,1,0,,0,,,No Standing or Menace penalty for entering another faction's territory,,,,
+relay-kit,Relay Kit,unit,,1,1,0,,0,,,This unit can build Listening Posts without the Intelligence tech (normal costs),,,,
+burning-glass,Burning Glass,location,,1,2,6,,3,,versari,+2 garrison Strength; attackers suffer 1 Strength erosion before the contest,,,,
+guest-house,Guest House,location,,1,2,5,,3,,goldgrass,"Each round, Standing toward you rises with every faction you are not at war with",,,,
+motor-pool,Motor Pool,location,,1,2,5,,3,,lakers,Recruiting here costs 2 less scrap; +1 unit cap,,,,
+waystation,Waystation,location,,1,2,5,,3,,plainers,Friendly units starting their turn here gain +1 Movement that turn,,,,
