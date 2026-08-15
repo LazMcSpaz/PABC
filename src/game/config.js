@@ -25,6 +25,8 @@ export const CONFIG = {
     // misses) while rewarding the "hold and settle it" play.
     dominionLoyaltyMin: 4,
     dominionPerCity: 1,
+    // Paid PER allied major, once you're pacted with a majority of them —
+    // so breadth of alliance scales the way breadth of conquest does.
     allianceTrickle: 1,
   },
 

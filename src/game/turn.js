@@ -202,15 +202,19 @@ function tickVictoryFaucets(state, pid) {
     }
   }
   awardVp(state, pid, vassalCities * CONFIG.victory.dominionPerCity, "vassal-dominion");
-  // Alliance trickle — pacted with a majority of the other surviving
-  // MAJORS (seeded minors in the turn order don't move the denominator).
+  // Alliance trickle — you must be pacted with a MAJORITY of the other
+  // surviving MAJORS to draw anything (seeded minors don't move the
+  // denominator), and past that bar every allied major pays. The flat
+  // version was diplomacy's structural weakness: Dominion scales with each
+  // city you take, but a second, third, fourth ally added nothing, so the
+  // peaceful route had a hard ceiling the conquest route did not.
   const others = state.turnOrder.filter(
     (f) => f !== pid && !state.players[f]?.eliminated && factionDef(f)?.tier === "major",
   );
   if (others.length > 0) {
     const pacts = others.filter((f) => arePacted(state, pid, f)).length;
     if (pacts > others.length / 2) {
-      awardVp(state, pid, CONFIG.victory.allianceTrickle, "alliance");
+      awardVp(state, pid, pacts * CONFIG.victory.allianceTrickle, "alliance");
     }
   }
 }

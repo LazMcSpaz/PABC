@@ -3561,22 +3561,36 @@ line("\n  [Phase 11] text-token resolver");
   check("vassal dominion: a vassal's qualifying city ticks +1 for the overlord",
     gV.players[lord].vp === lordVp + 1);
 
-  // -- alliance trickle: pacted with a majority of the other majors.
+  // -- alliance trickle: a majority of the other MAJORS unlocks it, and
+  // past that bar it pays PER allied major (breadth scales, as Dominion
+  // does for cities — the fix for diplomacy's flat ceiling).
   const gT = createGame({ seed: 143 });
   startTurn(gT);
   const dip = gT.turnOrder[gT.activeIndex];
-  const others14 = gT.turnOrder.filter((f) => f !== dip);
-  formPact(gT, dip, others14[0]);
-  formPact(gT, dip, others14[1]); // 2 of 3 = majority
-  // pre-mark summit dividends so this check measures ONLY the trickle.
-  gT.diplomacy.recognizedEver = {
-    [dip]: [others14[0], others14[1]],
-    [others14[0]]: [dip], [others14[1]]: [dip],
-  };
-  const dipVp = gT.players[dip].vp;
+  const majors14 = gT.turnOrder.filter((f) => f !== dip && factionDef(f)?.tier === "major");
+  // pre-mark summit dividends so these checks measure ONLY the trickle.
+  gT.diplomacy.recognizedEver = { [dip]: [...majors14] };
+  for (const m of majors14) gT.diplomacy.recognizedEver[m] = [dip];
+  // One ally out of three others is NOT a majority — nothing pays.
+  formPact(gT, dip, majors14[0]);
+  const vpMinority = gT.players[dip].vp;
   cycleTo(gT, dip);
-  check("alliance trickle: majority of pacts pays +1 VP per Upkeep",
-    gT.players[dip].vp === dipVp + 1);
+  check("alliance trickle: a single ally is below the majority bar — pays nothing",
+    majors14.length < 2 || gT.players[dip].vp === vpMinority);
+  // A second ally clears the bar and pays for BOTH.
+  formPact(gT, dip, majors14[1]);
+  const vpTwo = gT.players[dip].vp;
+  cycleTo(gT, dip);
+  check("alliance trickle: past the majority bar it pays per allied major",
+    gT.players[dip].vp === vpTwo + 2 * CONFIG.victory.allianceTrickle);
+  // A third ally scales it again.
+  if (majors14[2]) {
+    formPact(gT, dip, majors14[2]);
+    const vpThree = gT.players[dip].vp;
+    cycleTo(gT, dip);
+    check("alliance trickle: each further ally adds another step",
+      gT.players[dip].vp === vpThree + 3 * CONFIG.victory.allianceTrickle);
+  }
 
   // -- elimination: a stripped faction is flagged, skipped, and excluded;
   // last faction standing wins outright.
