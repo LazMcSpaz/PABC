@@ -13,14 +13,14 @@
   "exportScale": 0.7,
   "tiles": [
     {
-      "id": "plain_pan_01",
+      "id": "plains_hills",
       "tags": [
         "flat"
       ],
       "peakAbove": 264,
       "layers": {
         "base": {
-          "file": "plain_pan_01_base.webp",
+          "file": "plains_hills_base.webp",
           "dx": -480,
           "dy": 6,
           "w": 965,
@@ -28,7 +28,7 @@
           "bytes": 9514
         },
         "holo": {
-          "file": "plain_pan_01_holo.webp",
+          "file": "plains_hills_holo.webp",
           "dx": -500,
           "dy": -266,
           "w": 986,
@@ -36,7 +36,7 @@
           "bytes": 126878
         },
         "core": {
-          "file": "plain_pan_01_core.webp",
+          "file": "plains_hills_core.webp",
           "dx": -487,
           "dy": -249,
           "w": 962,
@@ -46,81 +46,14 @@
       }
     },
     {
-      "id": "plain_rolling_01",
-      "tags": [
-        "flat"
-      ],
-      "peakAbove": 276,
-      "layers": {
-        "base": {
-          "file": "plain_rolling_01_base.webp",
-          "dx": -481,
-          "dy": 10,
-          "w": 966,
-          "h": 306,
-          "bytes": 9690
-        },
-        "holo": {
-          "file": "plain_rolling_01_holo.webp",
-          "dx": -487,
-          "dy": -281,
-          "w": 974,
-          "h": 503,
-          "bytes": 123190
-        },
-        "core": {
-          "file": "plain_rolling_01_core.webp",
-          "dx": -479,
-          "dy": -271,
-          "w": 955,
-          "h": 449,
-          "bytes": 26658
-        }
-      }
-    },
-    {
-      "id": "ridge_badlands_01",
-      "tags": [
-        "flat",
-        "mountain"
-      ],
-      "peakAbove": 258,
-      "layers": {
-        "base": {
-          "file": "ridge_badlands_01_base.webp",
-          "dx": -482,
-          "dy": 5,
-          "w": 967,
-          "h": 311,
-          "bytes": 9074
-        },
-        "holo": {
-          "file": "ridge_badlands_01_holo.webp",
-          "dx": -500,
-          "dy": -261,
-          "w": 986,
-          "h": 483,
-          "bytes": 129064
-        },
-        "core": {
-          "file": "ridge_badlands_01_core.webp",
-          "dx": -486,
-          "dy": -253,
-          "w": 958,
-          "h": 431,
-          "bytes": 30188
-        }
-      }
-    },
-    {
-      "id": "forest_dense_01",
+      "id": "flat_forest",
       "tags": [
         "forest"
       ],
       "peakAbove": 289,
       "layers": {
         "base": {
-          "file": "forest_dense_01_base.webp",
+          "file": "flat_forest_base.webp",
           "dx": -481,
           "dy": 11,
           "w": 966,
@@ -128,7 +61,7 @@
           "bytes": 9812
         },
         "holo": {
-          "file": "forest_dense_01_holo.webp",
+          "file": "flat_forest_holo.webp",
           "dx": -486,
           "dy": -296,
           "w": 972,
@@ -136,7 +69,7 @@
           "bytes": 157538
         },
         "core": {
-          "file": "forest_dense_01_core.webp",
+          "file": "flat_forest_core.webp",
           "dx": -471,
           "dy": -289,
           "w": 945,
@@ -146,7 +79,7 @@
       }
     },
     {
-      "id": "forest_highland_01",
+      "id": "mountains_forest",
       "tags": [
         "forest",
         "mountain"
@@ -154,7 +87,7 @@
       "peakAbove": 332,
       "layers": {
         "base": {
-          "file": "forest_highland_01_base.webp",
+          "file": "mountains_forest_base.webp",
           "dx": -482,
           "dy": 9,
           "w": 968,
@@ -162,7 +95,7 @@
           "bytes": 9230
         },
         "holo": {
-          "file": "forest_highland_01_holo.webp",
+          "file": "mountains_forest_holo.webp",
           "dx": -485,
           "dy": -338,
           "w": 971,
@@ -170,7 +103,7 @@
           "bytes": 156460
         },
         "core": {
-          "file": "forest_highland_01_core.webp",
+          "file": "mountains_forest_core.webp",
           "dx": -471,
           "dy": -334,
           "w": 944,
@@ -180,14 +113,14 @@
       }
     },
     {
-      "id": "mountain_peaks_01",
+      "id": "mountain",
       "tags": [
         "mountain"
       ],
       "peakAbove": 285,
       "layers": {
         "base": {
-          "file": "mountain_peaks_01_base.webp",
+          "file": "mountain_base.webp",
           "dx": -484,
           "dy": 6,
           "w": 969,
@@ -195,7 +128,7 @@
           "bytes": 8572
         },
         "holo": {
-          "file": "mountain_peaks_01_holo.webp",
+          "file": "mountain_holo.webp",
           "dx": -485,
           "dy": -288,
           "w": 972,
@@ -203,7 +136,7 @@
           "bytes": 129008
         },
         "core": {
-          "file": "mountain_peaks_01_core.webp",
+          "file": "mountain_core.webp",
           "dx": -471,
           "dy": -284,
           "w": 944,
@@ -213,14 +146,14 @@
       }
     },
     {
-      "id": "mountain_range_01",
+      "id": "mountain_2",
       "tags": [
         "mountain"
       ],
       "peakAbove": 286,
       "layers": {
         "base": {
-          "file": "mountain_range_01_base.webp",
+          "file": "mountain_2_base.webp",
           "dx": -484,
           "dy": 6,
           "w": 970,
@@ -228,7 +161,7 @@
           "bytes": 9224
         },
         "holo": {
-          "file": "mountain_range_01_holo.webp",
+          "file": "mountain_2_holo.webp",
           "dx": -499,
           "dy": -290,
           "w": 985,
@@ -236,7 +169,7 @@
           "bytes": 125748
         },
         "core": {
-          "file": "mountain_range_01_core.webp",
+          "file": "mountain_2_core.webp",
           "dx": -487,
           "dy": -285,
           "w": 959,
@@ -246,14 +179,14 @@
       }
     },
     {
-      "id": "mountain_mesa_01",
+      "id": "mountain_plateau",
       "tags": [
         "mountain"
       ],
       "peakAbove": 285,
       "layers": {
         "base": {
-          "file": "mountain_mesa_01_base.webp",
+          "file": "mountain_plateau_base.webp",
           "dx": -482,
           "dy": 6,
           "w": 968,
@@ -261,7 +194,7 @@
           "bytes": 8790
         },
         "holo": {
-          "file": "mountain_mesa_01_holo.webp",
+          "file": "mountain_plateau_holo.webp",
           "dx": -485,
           "dy": -290,
           "w": 971,
@@ -269,7 +202,7 @@
           "bytes": 131406
         },
         "core": {
-          "file": "mountain_mesa_01_core.webp",
+          "file": "mountain_plateau_core.webp",
           "dx": -471,
           "dy": -283,
           "w": 944,
@@ -279,40 +212,7 @@
       }
     },
     {
-      "id": "mesa_plateau_01",
-      "tags": [
-        "mountain"
-      ],
-      "peakAbove": 270,
-      "layers": {
-        "base": {
-          "file": "mesa_plateau_01_base.webp",
-          "dx": -480,
-          "dy": 14,
-          "w": 964,
-          "h": 302,
-          "bytes": 9786
-        },
-        "holo": {
-          "file": "mesa_plateau_01_holo.webp",
-          "dx": -487,
-          "dy": -274,
-          "w": 974,
-          "h": 496,
-          "bytes": 128142
-        },
-        "core": {
-          "file": "mesa_plateau_01_core.webp",
-          "dx": -478,
-          "dy": -267,
-          "w": 954,
-          "h": 476,
-          "bytes": 26338
-        }
-      }
-    },
-    {
-      "id": "town_plain_01",
+      "id": "plains_settlement",
       "tags": [
         "town",
         "flat"
@@ -320,7 +220,7 @@
       "peakAbove": 258,
       "layers": {
         "base": {
-          "file": "town_plain_01_base.webp",
+          "file": "plains_settlement_base.webp",
           "dx": -478,
           "dy": 14,
           "w": 962,
@@ -328,7 +228,7 @@
           "bytes": 9610
         },
         "holo": {
-          "file": "town_plain_01_holo.webp",
+          "file": "plains_settlement_holo.webp",
           "dx": -487,
           "dy": -258,
           "w": 974,
@@ -336,7 +236,7 @@
           "bytes": 128446
         },
         "core": {
-          "file": "town_plain_01_core.webp",
+          "file": "plains_settlement_core.webp",
           "dx": -479,
           "dy": -256,
           "w": 956,
@@ -346,41 +246,7 @@
       }
     },
     {
-      "id": "town_mesa_01",
-      "tags": [
-        "town",
-        "mountain"
-      ],
-      "peakAbove": 285,
-      "layers": {
-        "base": {
-          "file": "town_mesa_01_base.webp",
-          "dx": -482,
-          "dy": 6,
-          "w": 967,
-          "h": 310,
-          "bytes": 9338
-        },
-        "holo": {
-          "file": "town_mesa_01_holo.webp",
-          "dx": -487,
-          "dy": -291,
-          "w": 973,
-          "h": 513,
-          "bytes": 136396
-        },
-        "core": {
-          "file": "town_mesa_01_core.webp",
-          "dx": -476,
-          "dy": -278,
-          "w": 953,
-          "h": 454,
-          "bytes": 39204
-        }
-      }
-    },
-    {
-      "id": "town_bowl_01",
+      "id": "mountain_settlement",
       "tags": [
         "town",
         "mountain"
@@ -388,7 +254,7 @@
       "peakAbove": 265,
       "layers": {
         "base": {
-          "file": "town_bowl_01_base.webp",
+          "file": "mountain_settlement_base.webp",
           "dx": -480,
           "dy": 16,
           "w": 963,
@@ -396,7 +262,7 @@
           "bytes": 10140
         },
         "holo": {
-          "file": "town_bowl_01_holo.webp",
+          "file": "mountain_settlement_holo.webp",
           "dx": -492,
           "dy": -277,
           "w": 981,
@@ -404,7 +270,7 @@
           "bytes": 125080
         },
         "core": {
-          "file": "town_bowl_01_core.webp",
+          "file": "mountain_settlement_core.webp",
           "dx": -478,
           "dy": -254,
           "w": 956,
@@ -414,7 +280,41 @@
       }
     },
     {
-      "id": "city_plain_01",
+      "id": "mountain_plateau_settlement",
+      "tags": [
+        "town",
+        "mountain"
+      ],
+      "peakAbove": 285,
+      "layers": {
+        "base": {
+          "file": "mountain_plateau_settlement_base.webp",
+          "dx": -482,
+          "dy": 6,
+          "w": 967,
+          "h": 310,
+          "bytes": 9338
+        },
+        "holo": {
+          "file": "mountain_plateau_settlement_holo.webp",
+          "dx": -487,
+          "dy": -291,
+          "w": 973,
+          "h": 513,
+          "bytes": 136396
+        },
+        "core": {
+          "file": "mountain_plateau_settlement_core.webp",
+          "dx": -476,
+          "dy": -278,
+          "w": 953,
+          "h": 454,
+          "bytes": 39204
+        }
+      }
+    },
+    {
+      "id": "plains_city",
       "tags": [
         "city",
         "flat"
@@ -422,7 +322,7 @@
       "peakAbove": 306,
       "layers": {
         "base": {
-          "file": "city_plain_01_base.webp",
+          "file": "plains_city_base.webp",
           "dx": -479,
           "dy": 18,
           "w": 964,
@@ -430,7 +330,7 @@
           "bytes": 9774
         },
         "holo": {
-          "file": "city_plain_01_holo.webp",
+          "file": "plains_city_holo.webp",
           "dx": -488,
           "dy": -308,
           "w": 975,
@@ -438,7 +338,7 @@
           "bytes": 131632
         },
         "core": {
-          "file": "city_plain_01_core.webp",
+          "file": "plains_city_core.webp",
           "dx": -478,
           "dy": -305,
           "w": 958,
@@ -448,7 +348,7 @@
       }
     },
     {
-      "id": "city_bowl_01",
+      "id": "mountain_city",
       "tags": [
         "city",
         "mountain"
@@ -456,7 +356,7 @@
       "peakAbove": 259,
       "layers": {
         "base": {
-          "file": "city_bowl_01_base.webp",
+          "file": "mountain_city_base.webp",
           "dx": -479,
           "dy": 14,
           "w": 963,
@@ -464,7 +364,7 @@
           "bytes": 9874
         },
         "holo": {
-          "file": "city_bowl_01_holo.webp",
+          "file": "mountain_city_holo.webp",
           "dx": -486,
           "dy": -264,
           "w": 973,
@@ -472,12 +372,179 @@
           "bytes": 125832
         },
         "core": {
-          "file": "city_bowl_01_core.webp",
+          "file": "mountain_city_core.webp",
           "dx": -471,
           "dy": -251,
           "w": 944,
           "h": 429,
           "bytes": 37270
+        }
+      }
+    },
+    {
+      "id": "coastline_easttowest",
+      "tags": [
+        "coast"
+      ],
+      "peakAbove": 276,
+      "layers": {
+        "base": {
+          "file": "coastline_easttowest_base.webp",
+          "dx": -481,
+          "dy": 10,
+          "w": 966,
+          "h": 306,
+          "bytes": 9690
+        },
+        "holo": {
+          "file": "coastline_easttowest_holo.webp",
+          "dx": -487,
+          "dy": -281,
+          "w": 974,
+          "h": 503,
+          "bytes": 123190
+        },
+        "core": {
+          "file": "coastline_easttowest_core.webp",
+          "dx": -479,
+          "dy": -271,
+          "w": 955,
+          "h": 449,
+          "bytes": 26658
+        }
+      }
+    },
+    {
+      "id": "coastline_NEdiagonal",
+      "tags": [
+        "coast"
+      ],
+      "peakAbove": 258,
+      "layers": {
+        "base": {
+          "file": "coastline_NEdiagonal_base.webp",
+          "dx": -482,
+          "dy": 5,
+          "w": 967,
+          "h": 311,
+          "bytes": 9074
+        },
+        "holo": {
+          "file": "coastline_NEdiagonal_holo.webp",
+          "dx": -500,
+          "dy": -261,
+          "w": 986,
+          "h": 483,
+          "bytes": 129064
+        },
+        "core": {
+          "file": "coastline_NEdiagonal_core.webp",
+          "dx": -486,
+          "dy": -253,
+          "w": 958,
+          "h": 431,
+          "bytes": 30188
+        }
+      }
+    },
+    {
+      "id": "coastline_NWdiagonal",
+      "tags": [
+        "coast"
+      ],
+      "peakAbove": 270,
+      "layers": {
+        "base": {
+          "file": "coastline_NWdiagonal_base.webp",
+          "dx": -480,
+          "dy": 14,
+          "w": 964,
+          "h": 302,
+          "bytes": 9786
+        },
+        "holo": {
+          "file": "coastline_NWdiagonal_holo.webp",
+          "dx": -487,
+          "dy": -274,
+          "w": 974,
+          "h": 496,
+          "bytes": 128142
+        },
+        "core": {
+          "file": "coastline_NWdiagonal_core.webp",
+          "dx": -478,
+          "dy": -267,
+          "w": 954,
+          "h": 476,
+          "bytes": 26338
+        }
+      }
+    },
+    {
+      "id": "coastline_settlement",
+      "tags": [
+        "coast",
+        "town"
+      ],
+      "peakAbove": 261,
+      "layers": {
+        "base": {
+          "file": "coastline_settlement_base.webp",
+          "dx": -482,
+          "dy": 10,
+          "w": 967,
+          "h": 306,
+          "bytes": 9464
+        },
+        "holo": {
+          "file": "coastline_settlement_holo.webp",
+          "dx": -499,
+          "dy": -265,
+          "w": 985,
+          "h": 487,
+          "bytes": 130456
+        },
+        "core": {
+          "file": "coastline_settlement_core.webp",
+          "dx": -486,
+          "dy": -254,
+          "w": 960,
+          "h": 431,
+          "bytes": 32624
+        }
+      }
+    },
+    {
+      "id": "coastline_city",
+      "tags": [
+        "coast",
+        "city"
+      ],
+      "peakAbove": 268,
+      "layers": {
+        "base": {
+          "file": "coastline_city_base.webp",
+          "dx": -482,
+          "dy": 15,
+          "w": 966,
+          "h": 301,
+          "bytes": 10486
+        },
+        "holo": {
+          "file": "coastline_city_holo.webp",
+          "dx": -488,
+          "dy": -274,
+          "w": 974,
+          "h": 496,
+          "bytes": 131800
+        },
+        "core": {
+          "file": "coastline_city_core.webp",
+          "dx": -475,
+          "dy": -264,
+          "w": 950,
+          "h": 472,
+          "bytes": 31460
         }
       }
     }

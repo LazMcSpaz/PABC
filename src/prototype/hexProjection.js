@@ -33,11 +33,13 @@ export const UNIT = HEX_W / FRAME.hexW;
 export const HEX_H = FRAME.hexH * UNIT;      // projected height of the top face
 export const SKIRT_H = FRAME.skirt * UNIT;   // plinth depth below the near edge
 
-// Tiles float rather than packing flush. Packed, the plinths fuse into one
-// slab and a tall tile buries the one behind it (the art reaches up to ~332
-// source units above the centreline against a 352-unit vertical pitch); the
-// gap buys that clearance back and lets every plinth keep a silhouette.
-export const GAP = 1.22;
+// Tiles pack flush: the plinths meet and the board reads as one continuous
+// map table rather than a scatter of floating dioramas. The cost is
+// occlusion — the art reaches up to ~332 source units above the centreline
+// against a 352-unit vertical pitch, so a tall tile hides most of the tile
+// behind it — and that is an accepted trade, not an oversight. Raising this
+// above 1 floats the tiles apart again and buys the clearance back.
+export const GAP = 1.0;
 export const COL_STEP = 0.75 * HEX_W * GAP;  // engine row  -> screen x
 export const ROW_STEP = HEX_H * GAP;         // engine hex.x -> screen y
 
@@ -114,26 +116,71 @@ function stableIndex(key, count) {
   return Math.abs(h) % count;
 }
 
-const byTag = (tag) => TILES.filter((t) => t.tags.includes(tag));
+// Coast tiles are ORIENTED — the sea is painted on the tile's east side — so
+// they are the one pool that can't go anywhere. They belong on the map's
+// eastern rim and nowhere else; conversely a rim hex should prefer one, or
+// the coastline comes out full of holes. Every other pool is inland-only.
+const hasTag = (t, tag) => t.tags.includes(tag);
+const pick = (tag, coast) =>
+  TILES.filter((t) => hasTag(t, tag) && hasTag(t, "coast") === coast);
+
+// Open shoreline: coast tiles carrying no settlement.
+const COAST_OPEN = TILES.filter(
+  (t) => hasTag(t, "coast") && !hasTag(t, "town") && !hasTag(t, "city"),
+);
+
 const POOLS = {
-  flat: byTag("flat"),
-  forest: byTag("forest"),
-  mountain: byTag("mountain"),
-  town: byTag("town"),
-  city: byTag("city"),
+  inland: {
+    flat: pick("flat", false),
+    forest: pick("forest", false),
+    mountain: pick("mountain", false),
+    town: pick("town", false),
+    city: pick("city", false),
+  },
+  coast: {
+    // On the rim a hex's elevation/cover stops driving the art: what it is,
+    // is shoreline. All three terrain buckets resolve to the same pool.
+    flat: COAST_OPEN,
+    forest: COAST_OPEN,
+    mountain: COAST_OPEN,
+    town: pick("town", true),
+    city: pick("city", true),
+  },
 };
 
 // Settlement size comes from the Location's permanent strategicValue, not from
 // who currently holds it — capturing a city does not rebuild it smaller.
 const VALUE_TO_POOL = { low: "town", medium: "town", high: "town", veryHigh: "city" };
 
-export function tileFor(hex, locationValue) {
+// Which hexes have no neighbour further east. Derived the same way the engine
+// derives adjacency (`x = col - (width-1)/2`, neighbours in the next row sit
+// at x ± 0.5), so the rim tracks the real map shape instead of assuming the
+// last row is the whole edge.
+export function eastRimHexes(rows) {
+  const rim = new Set();
+  const xsOf = (r) => {
+    const row = rows[r];
+    if (!row) return null;
+    return new Set(row.map((_, c) => c - (row.length - 1) / 2));
+  };
+  rows.forEach((row, r) => {
+    const next = xsOf(r + 1);
+    row.forEach((id, c) => {
+      const x = c - (row.length - 1) / 2;
+      if (!next || (!next.has(x - 0.5) && !next.has(x + 0.5))) rim.add(id);
+    });
+  });
+  return rim;
+}
+
+export function tileFor(hex, locationValue, onCoast = false) {
+  const set = onCoast ? POOLS.coast : POOLS.inland;
   let pool;
-  if (hex.type === "location") pool = POOLS[VALUE_TO_POOL[locationValue] || "town"];
-  else if (hex.elevation) pool = POOLS.mountain;
-  else if (hex.cover) pool = POOLS.forest;
-  else pool = POOLS.flat;
-  if (!pool || !pool.length) pool = TILES;
+  if (hex.type === "location") pool = set[VALUE_TO_POOL[locationValue] || "town"];
+  else if (hex.elevation) pool = set.mountain;
+  else if (hex.cover) pool = set.forest;
+  else pool = set.flat;
+  if (!pool || !pool.length) pool = POOLS.inland.flat.length ? POOLS.inland.flat : TILES;
   return pool[stableIndex(hex.id, pool.length)];
 }
 

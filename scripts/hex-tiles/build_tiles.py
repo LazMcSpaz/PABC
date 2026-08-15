@@ -63,26 +63,34 @@ FRAME = {
 # at max zoom -- nothing else has to change.
 EXPORT_SCALE = 0.7
 
-# --- master -> semantic id + terrain tags --------------------------------
-# `tags` is what the resolver matches hexes against:
+# --- tile tags -----------------------------------------------------------
+# Filenames are the author's labels; `tags` is what the resolver matches
+# hexes against:
 #   flat / mountain / forest    terrain buckets (hex.elevation, hex.cover)
 #   town / city                 settlement tiers for Location hexes
-# A tile may carry several (a city in a mountain bowl is both).
+#   coast                       water on the tile. These are ORIENTED — the
+#                               sea is on the tile's east side — so they are
+#                               only ever placed on the map's eastern rim,
+#                               never inland. See eastRimHexes() in
+#                               hexProjection.js.
+# A tile may carry several (a city on a coastline is both).
 TILES = [
-    ("tmp6lgh1kly", "plain_pan_01",       ["flat"]),
-    ("tmpv5gzcw7o", "plain_rolling_01",   ["flat"]),
-    ("tmp8rg5twx5", "ridge_badlands_01",  ["flat", "mountain"]),
-    ("tmp3gyp6o9t", "forest_dense_01",    ["forest"]),
-    ("tmpvipu7pum", "forest_highland_01", ["forest", "mountain"]),
-    ("tmpb59oo67q", "mountain_peaks_01",  ["mountain"]),
-    ("tmpqrtid6_6", "mountain_range_01",  ["mountain"]),
-    ("tmpwi485qxz", "mountain_mesa_01",   ["mountain"]),
-    ("tmpbtxq8nan", "mesa_plateau_01",    ["mountain"]),
-    ("tmpwhb_wwl1", "town_plain_01",      ["town", "flat"]),
-    ("tmpz3wewa2c", "town_mesa_01",       ["town", "mountain"]),
-    ("tmp9j8nxu1m", "town_bowl_01",       ["town", "mountain"]),
-    ("tmpqwl8yv1g", "city_plain_01",      ["city", "flat"]),
-    ("tmpyopf2i9o", "city_bowl_01",       ["city", "mountain"]),
+    ("plains_hills",                ["flat"]),
+    ("flat_forest",                 ["forest"]),
+    ("mountains_forest",            ["forest", "mountain"]),
+    ("mountain",                    ["mountain"]),
+    ("mountain_2",                  ["mountain"]),
+    ("mountain_plateau",            ["mountain"]),
+    ("plains_settlement",           ["town", "flat"]),
+    ("mountain_settlement",         ["town", "mountain"]),
+    ("mountain_plateau_settlement", ["town", "mountain"]),
+    ("plains_city",                 ["city", "flat"]),
+    ("mountain_city",               ["city", "mountain"]),
+    ("coastline_easttowest",        ["coast"]),
+    ("coastline_NEdiagonal",        ["coast"]),
+    ("coastline_NWdiagonal",        ["coast"]),
+    ("coastline_settlement",        ["coast", "town"]),
+    ("coastline_city",              ["coast", "city"]),
 ]
 
 
@@ -115,8 +123,8 @@ def layer_entry(img, x, y, path, name):
     }
 
 
-def build(master_stem, tile_id, tags):
-    src = os.path.join(MASTERS, master_stem + ".jpeg")
+def build(tile_id, tags):
+    src = os.path.join(MASTERS, tile_id + ".jpeg")
     if not os.path.exists(src):
         raise SystemExit(f"missing master: {src}")
     a = np.asarray(Image.open(src).convert("RGB")).astype(np.float32)
@@ -179,7 +187,7 @@ def main():
     total = sum(l["bytes"] for t in tiles for l in t["layers"].values())
     for t in tiles:
         per = sum(l["bytes"] for l in t["layers"].values())
-        print(f'{t["id"]:20s} {",".join(t["tags"]):16s} peak+{t["peakAbove"]:4d}  {per/1024:6.1f} KiB')
+        print(f'{t["id"]:30s} {",".join(t["tags"]):16s} peak+{t["peakAbove"]:4d}  {per/1024:6.1f} KiB')
     print(f'\n{len(tiles)} tiles, {total/1024/1024:.2f} MiB total')
 
 

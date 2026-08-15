@@ -67,6 +67,7 @@ export default function HexTile({
   selectedUnitId,
   dimmedUnitUid,
   factionHighlight,
+  onCoast = false,
   onUnitClick,
 }) {
   const fog = hex.fog || "visible";
@@ -74,7 +75,7 @@ export default function HexTile({
   const isLocation = hex.type === "location" && !isUnexplored;
   const loc = isLocation ? LOCATIONS[hex.locationId] : null;
 
-  const tile = tileFor(hex, loc?.value);
+  const tile = tileFor(hex, loc?.value, onCoast);
   const tint = holoTint(hex);
   const strength = tintStrength(hex, tint);
 

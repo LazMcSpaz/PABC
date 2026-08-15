@@ -17,7 +17,7 @@
 import { LOCATIONS, fullController } from "./data.js";
 import HexTile from "./HexTile.jsx";
 import FloatingControlMeter from "./FloatingControlMeter.jsx";
-import { buildHexGeometry, paintOrder, topFacePolygon } from "./hexProjection.js";
+import { buildHexGeometry, eastRimHexes, paintOrder, topFacePolygon } from "./hexProjection.js";
 
 function isHeldBy(hex, fid) {
   if (!hex || hex.type !== "location" || !hex.control) return false;
@@ -36,6 +36,9 @@ export default function HexBoard3D({
 }) {
   const geom = buildHexGeometry(state.rows);
   const order = paintOrder(geom.centers);
+  // The sea is off the map's east edge, so only rim hexes may draw the
+  // (oriented) coast tiles.
+  const coast = eastRimHexes(state.rows);
 
   return (
     <div
@@ -57,6 +60,7 @@ export default function HexBoard3D({
               selectedUnitId={selectedUnitId}
               dimmedUnitUid={dimmedUnitUid}
               factionHighlight={highlightedFactionId && isHeldBy(hex, highlightedFactionId)}
+              onCoast={coast.has(hexId)}
               onUnitClick={onUnitClick}
             />
           </div>
