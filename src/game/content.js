@@ -9,27 +9,32 @@
 // expansion appetite). These are the §18.4.2 starter-roster dials, inline
 // here in the engine registry (NEVER content/) and tunable. `aggression`
 // 0..1 is the numeric spine of Menace scoring and Tolerance.
+// `capital` is the Location a faction starts holding — set explicitly per
+// faction rather than derived, so it is a design decision rather than a
+// side effect of strategicValue ordering. All four capitals are deliberately
+// the same tier (see LOCATIONS below), so nobody opens ahead on garrison,
+// chip slots, production or VP.
 export const FACTIONS = {
   versari: {
-    id: "versari", name: "Versari Korad", color: "#3a7d44", affiliatedLocations: ["korad", "dambar"],
+    id: "versari", name: "Versari Korad", color: "#3a7d44", affiliatedLocations: ["korad", "dambar"], capital: "korad",
     tier: "major", scope: "global", playable: true,
     temperament: "schemer", aggression: 0.4, trust: 0.55, grudge: 0.4, sociability: 0.8,
     victoryLean: "diplomacy", expansion: 0.5,
   },
   goldgrass: {
-    id: "goldgrass", name: "Goldgrass Coalition", color: "#d8a72b", affiliatedLocations: ["kansit", "omara"],
+    id: "goldgrass", name: "Goldgrass Coalition", color: "#d8a72b", affiliatedLocations: ["kansit", "omara"], capital: "kansit",
     tier: "major", scope: "global", playable: true,
     temperament: "pacifist", aggression: 0.1, trust: 0.9, grudge: 0.25, sociability: 0.95,
     victoryLean: "diplomacy", expansion: 0.3,
   },
   lakers: {
-    id: "lakers", name: "Grand Lakers", color: "#21406e", affiliatedLocations: ["chigan", "droit"],
+    id: "lakers", name: "Grand Lakers", color: "#21406e", affiliatedLocations: ["chigan", "droit"], capital: "droit",
     tier: "major", scope: "global", playable: true,
     temperament: "warlord", aggression: 0.9, trust: 0.6, grudge: 0.7, sociability: 0.2,
     victoryLean: "conquest", expansion: 0.9,
   },
   plainers: {
-    id: "plainers", name: "Free Plainers", color: "#c43b35", affiliatedLocations: ["the-shelf", "tin-town"],
+    id: "plainers", name: "Free Plainers", color: "#c43b35", affiliatedLocations: ["the-shelf", "tin-town"], capital: "tin-town",
     tier: "major", scope: "global", playable: true,
     temperament: "opportunist", aggression: 0.5, trust: 0.3, grudge: 0.3, sociability: 0.65,
     victoryLean: "opportunist", expansion: 0.6,
@@ -86,17 +91,24 @@ export function factionDef(fid) {
 // production: [min, max] scrap/turn — PROVISIONAL ranges by value.
 // vpReward: VP banked by the player on FIRST capture of this Location.
 // One-shot — recaptures don't grant it again (loc.vpAwarded gates it).
-// Total board VP = 4·1 (med) + 4·2 (high) + 2·3 (veryHigh) = 18, so
-// the win threshold of 12 needs roughly two-thirds of the map.
+// Total board VP = 3·1 (med) + 5·2 (high) + 2·3 (veryHigh) = 19, so
+// the win threshold of 12 needs a little under two-thirds of the map.
+// (Was 18 before Tin Town was promoted to high as the Plainers capital.)
 export const LOCATIONS = {
-  korad: { id: "korad", name: "Korad", strategicValue: "high", affiliation: "versari", production: [3, 4], vpReward: 2 },
+  korad: { id: "korad", name: "Korad", strategicValue: "high", affiliation: "versari", production: [3, 3], vpReward: 2 },
   dambar: { id: "dambar", name: "Dambar", strategicValue: "veryHigh", affiliation: "versari", production: [4, 5], vpReward: 3 },
-  kansit: { id: "kansit", name: "Kansit", strategicValue: "high", affiliation: "goldgrass", production: [3, 4], vpReward: 2 },
+  kansit: { id: "kansit", name: "Kansit", strategicValue: "high", affiliation: "goldgrass", production: [3, 3], vpReward: 2 },
   omara: { id: "omara", name: "Omara", strategicValue: "medium", affiliation: "goldgrass", production: [2, 3], vpReward: 1 },
   chigan: { id: "chigan", name: "Chigan", strategicValue: "veryHigh", affiliation: "lakers", production: [4, 5], vpReward: 3 },
-  droit: { id: "droit", name: "Droit", strategicValue: "high", affiliation: "lakers", production: [3, 4], vpReward: 2 },
+  droit: { id: "droit", name: "Droit", strategicValue: "high", affiliation: "lakers", production: [3, 3], vpReward: 2 },
   "the-shelf": { id: "the-shelf", name: "The Shelf", strategicValue: "high", affiliation: "plainers", production: [3, 4], vpReward: 2 },
-  "tin-town": { id: "tin-town", name: "Tin Town", strategicValue: "medium", affiliation: "plainers", production: [2, 3], vpReward: 1 },
+  // The four capitals -- korad, kansit, droit, tin-town -- are deliberately
+  // identical: all `high` (same garrison, chip slots and VP) and all with a
+  // FIXED production of 3 rather than a [3,4] roll, so every faction's opening
+  // is the same rather than merely the same in expectation. Tin Town was
+  // raised medium -> high to join them. Non-capital Locations keep their
+  // ranges.
+  "tin-town": { id: "tin-town", name: "Tin Town", strategicValue: "high", affiliation: "plainers", production: [3, 3], vpReward: 2 },
   concordan: { id: "concordan", name: "Concordan", strategicValue: "medium", affiliation: null, production: [2, 3], vpReward: 1 },
   erport: { id: "erport", name: "Erport", strategicValue: "medium", affiliation: null, production: [2, 3], vpReward: 1 },
 };

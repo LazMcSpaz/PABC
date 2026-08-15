@@ -29,21 +29,15 @@ export const NEUTRAL = "#717171";
 
 // Player factions. `capital` is the Location each one begins holding.
 //
-// This is display-fallback data only — the live capital comes from the engine
-// via `adaptDiplomacy`'s `capital` / `youCapital`, because a Capital moves when
-// its Location is captured. Keep it correct anyway: three of these four were
-// wrong (Lakers listed Dambar, Goldgrass listed Chigan, Plainers listed Erport)
-// and the errors reached the map.
-//
-// The rule the engine actually applies (`generateLayout` in src/game/board.js):
-// a faction starts on the LOWER-value of its two affiliated Locations, and the
-// affiliations live in src/game/content.js — Versari korad+dambar, Goldgrass
-// kansit+omara, Lakers chigan+droit, Plainers the-shelf+tin-town. Erport and
-// Concordan are unaffiliated and can never be anyone's capital.
+// Display fallback only — the live value comes from the engine via
+// `adaptDiplomacy`'s `capital` / `youCapital`, since a Capital moves when its
+// Location is captured. Truth is `FACTIONS[].capital` in src/game/content.js;
+// keep these in step with it. (They were wrong for three of the four factions
+// once already, and the error reached the map.)
 export const FACTIONS = {
   versari: { id: "versari", name: "Versari Korad", short: "Versari", color: "#d2453f", capital: "korad" },
   lakers: { id: "lakers", name: "Grand Lakers", short: "Lakers", color: "#3f84c4", capital: "droit" },
-  goldgrass: { id: "goldgrass", name: "Goldgrass Coalition", short: "Goldgrass", color: "#85ab3e", capital: "omara" },
+  goldgrass: { id: "goldgrass", name: "Goldgrass Coalition", short: "Goldgrass", color: "#85ab3e", capital: "kansit" },
   plainers: { id: "plainers", name: "Free Plainers", short: "Plainers", color: "#9d70c4", capital: "tinTown" },
   // §18.4.1 minor factions — now real on-board actors (seated near their
   // major), so the UI must resolve their name/short/colour like any faction.
@@ -73,7 +67,7 @@ export const LOCATIONS = {
   droit: { id: "droit", name: "Droit", value: "high", vp: 3, garrison: 6, chipSlots: 3, production: 3, ability: null },
   erport: { id: "erport", name: "Erport", value: "medium", vp: 2, garrison: 4, chipSlots: 2, production: 2, ability: "Airfield — once per turn, redeploy a unit you control to any location you fully hold." },
   concordan: { id: "concordan", name: "Concordan", value: "medium", vp: 2, garrison: 5, chipSlots: 2, production: 2, ability: null },
-  tinTown: { id: "tinTown", name: "Tin Town", value: "medium", vp: 2, garrison: 4, chipSlots: 2, production: 2, ability: null },
+  tinTown: { id: "tinTown", name: "Tin Town", value: "high", vp: 3, garrison: 6, chipSlots: 3, production: 3, ability: null },
 };
 
 // Chip family tints — orange = unit upgrade, teal = location upgrade.

@@ -19,27 +19,38 @@ good news:
 | Property | Value | Spread across the 14 |
 |---|---|---|
 | Canvas | 1024 × 1024 JPEG | — |
-| Hex width (vertex→vertex) | **972 px** | ±4 px (0.4%) |
-| Hex centre x | **509 px** | ±0.5 px |
-| Left/right vertex row (y) | **522 px** | **0 px — pixel-identical** |
-| Top/bottom flat edge | **556 px** | ±3 px |
-| Projected top-face height | **469 px** | fitted, see below |
-| Near-edge slope \|dx/dy\| | **0.887** | 0.851–0.914 |
-| Plinth skirt height (at centre) | **81 px** | ±4 px |
+| Hex width (vertex→vertex) | **952 px** | ±9 px |
+| Hex centre | **(508, 479)** | ±3 px |
+| Near edge (flat run) | **558 px** at y **693** | ±3 px |
+| Projected top-face height | **428 px** | = 2 × (693 − 479) |
+| Plinth skirt height (at centre) | **144 px** | bottom edge at y 837 |
 | Tallest geometry above centreline | 258–335 px | varies by tile (as expected) |
 
 **The camera is locked.** Every tile was rendered from the same rig, so tile
 geometry is a set of constants rather than something to detect per-image. That
 is what makes the whole plan cheap.
 
-The height figure is *fitted*, not read off directly, and an earlier pass got
-it badly wrong. Measuring where the hologram's far rim sits gives 352 — but the
-far half of the top face is hidden behind the terrain, so the rim is not the
-hexagon's edge. The honest fit comes from two things that are unobstructed on
-every master: the bottom face's flat edge (556 px) and the slope of the near
-edges (0.887), which pin the height through `(hexW − hexFlat) / hexH = slope`.
-Using 352 packed tiles at 75% of their true vertical pitch, which is what made
-the board look flattened and clipped tiles into their neighbours.
+Getting these right took three attempts, and the two failures are worth
+recording because both came from measuring something that is not the hexagon:
+
+- **The hologram's far rim** gave a height of 352. But the far half of the top
+  face is hidden behind the terrain, and the rim rides up over it, so the rim
+  is not the hexagon's edge. Tiles packed at 75% of their true pitch and
+  overlapped.
+- **The widest silhouette row** gave a centre of y = 522, which is meaningless:
+  a prism has constant width all the way down its vertical edges, so "widest
+  row" is degenerate and `argmax` just lands somewhere in that band. The height
+  fitted from it came out 469 — too large — and tiles gapped.
+
+What works is measuring only features the terrain cannot move, on the tiles
+where they are unobstructed: the **side vertices** (extreme x of the bright
+rim → centre y = 479, width 952) and the **near edge** (the flat run at the
+bottom of the rim → 558 px at y = 693). Height follows as 2 × (693 − 479) =
+428, and the plinth's bottom edge at y = 837 gives a 144 px skirt. The implied
+near-edge slope is 0.92 against 0.887 measured independently — consistent.
+
+Verified, rather than assumed, by tiling one master at the derived pitch and
+checking that the hexagons share edges exactly.
 
 Three facts that *don't* match the existing pipeline doc and drive most of the
 work below:
@@ -47,10 +58,9 @@ work below:
 1. **The hexes are flat-top** (vertices left and right, flat edges top and
    bottom). `docs/blender-hex-tile-pipeline.md` specifies pointy-top, and the
    live board renders pointy-top.
-2. **Camera elevation is ~34°** (vertical squash 0.557), not the 45–55° the
-   pipeline doc specifies.
+2. **Camera elevation is ~31°**, not the 45–55° the pipeline doc specifies.
 2b. **The tiles are not REGULAR hexagons.** A regular flat-top hexagon has a
-   flat edge of exactly half its vertex-to-vertex width; these measure 0.572 of
+   flat edge of exactly half its vertex-to-vertex width; these measure 0.586 of
    it. They still tile the plane exactly — opposite sides are parallel and
    equal, which is all a hexagon needs — but the pitch has to be derived from
    the measured flat edge, not from the textbook `0.75 × W`.
@@ -383,8 +393,9 @@ Either the engine grows a real rail network (a second pass like `assignRoads`,
 plus whatever rail is supposed to *do*), or say the word and I'll generate a
 display-only one at setup.
 
-**Q11 — Should Dambar still be a Versari home Location?** The capital bug is
-fixed (see below), but one question survives it: `src/game/content.js` lists
+**Q11 — Should Dambar still be a Versari home Location?** Capitals are now
+declared explicitly (Versari korad, Goldgrass kansit, Lakers droit, Plainers
+tin-town) and all four are balanced identically, but one question survives: `src/game/content.js` lists
 **dambar** among Versari's two affiliated Locations, while the fiction has
 Dambar as the Denver analogue and the Dambarans plainly from there. Moving it
 would leave Versari with one home Location, and `generateLayout` assumes every

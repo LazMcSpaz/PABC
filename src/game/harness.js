@@ -3557,9 +3557,24 @@ line("\n  [Phase 11] text-token resolver");
   const vGuard = Object.values(gV.units).find((u) => u.owner === vassal);
   vGuard.node = fief.hexId;
   const lordVp = gV.players[lord].vp;
+  // Count what the vassal actually holds that qualifies FOR THE LORD rather
+  // than asserting a bare +1: the vassal's own capital is a high city and is
+  // not the lord's homeland, so it legitimately ticks too. Hardcoding 1 made
+  // this fixture depend on the content table (it broke the day a capital was
+  // promoted from medium to high), when what it means to test is that vassal
+  // holdings pay the overlord per qualifying city.
+  const RUNG_V = CONFIG.victory.dominionLoyaltyMin;
+  const qualifyingForLord = Object.values(gV.locations).filter((l) => {
+    const d = LOCATIONS[l.locationId];
+    if (!d || holderOf(l) !== vassal) return false;
+    if (d.strategicValue !== "high" && d.strategicValue !== "veryHigh") return false;
+    if (d.affiliation === lord) return false; // the lord's homeland never ticks
+    return (l.loyalty == null ? CONFIG.loyalty.ceiling : l.loyalty) >= RUNG_V;
+  }).length;
   cycleTo(gV, lord);
-  check("vassal dominion: a vassal's qualifying city ticks +1 for the overlord",
-    gV.players[lord].vp === lordVp + 1);
+  check("vassal dominion: a vassal's qualifying cities tick for the overlord",
+    qualifyingForLord >= 1 &&
+    gV.players[lord].vp === lordVp + qualifyingForLord * CONFIG.victory.dominionPerCity);
 
   // -- alliance trickle: a majority of the other MAJORS unlocks it, and
   // past that bar it pays PER allied major (breadth scales, as Dominion

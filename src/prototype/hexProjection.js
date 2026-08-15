@@ -4,11 +4,13 @@
 // different camera).
 //
 // The art is FLAT-TOP (vertices left and right, flat edges top and bottom),
-// viewed from ~34° above the horizon, which squashes it vertically. It is also
-// not a REGULAR hexagon — the flat edges measure 0.572 of the vertex-to-vertex
+// viewed from ~31° above the horizon, which squashes it vertically. It is also
+// not a REGULAR hexagon — the flat edges measure 0.586 of the vertex-to-vertex
 // width rather than 0.5 — so the tiling pitch is derived from the measured
 // shape (see COL_STEP) instead of the usual 0.75 * W. It still tiles exactly:
-// opposite sides are parallel and equal, which is all a hexagon needs.
+// opposite sides are parallel and equal, which is all a hexagon needs. The
+// numbers live in the manifest; scripts/hex-tiles/build_tiles.py documents how
+// each was measured and which two earlier attempts got them wrong.
 //
 // The live board used to be pointy-top, so the renderer transposes: an engine
 // ROW becomes a screen COLUMN.
@@ -51,16 +53,17 @@ export const SKIRT_H = FRAME.skirt * UNIT_Y;  // plinth depth below the near edg
 
 // Tiles pack flush: the plinths meet and the board reads as one continuous map
 // table rather than a scatter of floating dioramas. The cost is occlusion —
-// the art reaches up to ~332 source units above the centreline against a
-// 469-unit vertical pitch, so a tall tile hides part of the tile behind it —
+// the art reaches up to ~290 source units above the centreline against a
+// 428-unit vertical pitch, so a tall tile hides part of the tile behind it —
 // and that is an accepted trade. Raising this above 1 floats the tiles apart
 // again and buys the clearance back.
 export const GAP = 1.0;
 // Tiling vectors for a hexagon with opposite sides parallel and equal. The
 // familiar 0.75 * W only holds for a REGULAR hexagon (flat edge = W/2); these
-// tiles measure a flat edge of 0.572 * W, so the horizontal pitch has to come
+// tiles measure a flat edge of 0.586 * W, so the horizontal pitch has to come
 // from (W + flat) / 2 or every column overlaps its neighbour and the rims
-// visibly cut into each other.
+// visibly cut into each other. Verified by tiling a single master at this
+// pitch and checking the hexagons share edges exactly.
 export const COL_STEP = ((HEX_W + HEX_FLAT) / 2) * GAP;  // engine row  -> screen x
 export const ROW_STEP = HEX_H * GAP;                     // engine hex.x -> screen y
 

@@ -39,32 +39,38 @@ OUT = os.path.join(ROOT, "public", "assets", "ui", "board", "tiles")
 MANIFEST = os.path.join(ROOT, "src", "prototype", "hexTiles.json")
 
 # --- locked camera rig, in source-image pixels ---------------------------
-# cx/cy is the centre of the hexagon's top face; the left/right vertices sit on
-# row cy. hexW is vertex-to-vertex; hexFlat is the length of the top and bottom
-# flat edges; hexH is the full projected height. skirt is how far the plinth
-# extrudes below the top face at the centre column.
+# cx/cy is the hexagon's centre; the left/right vertices sit on row cy. hexW is
+# vertex-to-vertex, hexFlat is the length of the near and far edges, hexH the
+# full projected height. skirt is how far the plinth extrudes below the near
+# edge at the centre column.
 #
-# These are FITTED, not eyeballed, and the fit is self-consistent: the bottom
-# face's flat edge measures 556 wide and the near edges have slope
-# |dx/dy| = 0.887 on every master, and (hexW - hexFlat) / hexH reproduces that
-# slope exactly. An earlier pass read hexH off the hologram's far rim and got
-# 352, which is 25% short -- the far half of the top face is hidden behind the
-# terrain, so the rim is not the hexagon's edge. That error packed tiles at 75%
-# of their true vertical pitch, which is what made the board look squashed and
-# clipped its neighbours.
+# All four are read off features the terrain cannot move, on the tiles where
+# they are unobstructed, and they cross-check:
+#   * side vertices (extreme x of the bright rim)     -> cy = 479, W = 952
+#   * near edge (flat run at the bottom of the rim)   -> y = 693, F = 558
+#   * therefore hexH = 2 * (693 - 479)                -> H = 428
+#   * plinth bottom edge measured at y = 837          -> skirt = 837 - 693 = 144
+#   * implied near-edge slope (W-F)/2 / (H/2) = 0.92, against 0.887 measured
 #
-# NOTE the tiles are NOT squashed REGULAR hexagons: a regular one would have
-# hexFlat == hexW / 2 == 486, and these measure 556. They are still perfectly
-# tileable -- any hexagon with opposite sides parallel and equal tiles the
-# plane -- but the pitch has to come from hexFlat, not from 0.75 * hexW.
+# Two earlier passes got this wrong in opposite directions, both by measuring
+# something that is not the hexagon: the hologram's far rim (which rides up
+# over terrain) gave H = 352, too small, and tiles overlapped; the widest
+# SILHOUETTE row gave cy = 522, which is meaningless because a prism has
+# constant width all the way down its vertical edges, and the H fitted from it
+# gave 469, too large, and tiles gapped.
+#
+# NOTE the tiles are NOT regular hexagons: a regular one would have
+# hexFlat == hexW / 2 == 476, and these measure 558. That is fine -- any
+# hexagon with opposite sides parallel and equal tiles the plane -- but the
+# pitch must come from hexFlat, not from the textbook 0.75 * hexW.
 FRAME = {
     "src": 1024,
-    "cx": 509,
-    "cy": 522,
-    "hexW": 972,
-    "hexFlat": 556,
-    "hexH": 469,
-    "skirt": 81,
+    "cx": 508,
+    "cy": 479,
+    "hexW": 952,
+    "hexFlat": 558,
+    "hexH": 428,
+    "skirt": 144,
     "orientation": "flat-top",
 }
 

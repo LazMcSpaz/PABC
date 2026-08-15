@@ -279,10 +279,22 @@ export function generateLayout(rng, grid, factions, locations) {
 
   rng.shuffle(Object.keys(factions)).forEach((fid, i) => {
     const anchor = anchors[i];
-    // sort the faction's pair by strategic value — the weaker is the start
-    const pair = [...factions[fid].affiliatedLocations].sort(
-      (p, q) => VALUE_RANK[locations[p].strategicValue] - VALUE_RANK[locations[q].strategicValue],
-    );
+    // The faction's declared capital is the start; the other affiliated
+    // Location is its nearby second objective. This used to be inferred by
+    // sorting the pair on strategicValue and starting on the weaker one, which
+    // made the capital a side effect of the value table — promote a Location
+    // and a faction would silently start somewhere else. It is content now
+    // (`FACTIONS[fid].capital`), with the old ordering kept as a fallback so a
+    // faction that declares no capital still gets a sensible one.
+    const affiliated = factions[fid].affiliatedLocations;
+    const declared = factions[fid].capital;
+    const start = affiliated.includes(declared)
+      ? declared
+      : [...affiliated].sort(
+          (p, q) => VALUE_RANK[locations[p].strategicValue] - VALUE_RANK[locations[q].strategicValue],
+        )[0];
+    const other = affiliated.find((l) => l !== start);
+    const pair = [start, other];
     placement[anchor] = pair[0];
     factionStart[fid] = anchor;
     used.add(anchor);
