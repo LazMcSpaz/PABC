@@ -1,13 +1,13 @@
 # Holographic Hex Board — Integration Plan
 
-Turning the 14 hologram hex renders in `public/assets/ui/board/terrain/` into the
+Turning the 14 hologram hex renders (now `art/hex-tiles/masters/`) into the
 live game board, with the hologram recoloured per controlling faction, and the
 Loyalty radial lifted off the tile to float above it.
 
-Status: **plan + de-risking spike**. Nothing in `src/` has been changed yet.
-Two of the three risky assumptions have been proven with working code (see
-[What's already proven](#whats-already-proven)); the open decisions are in
-[Decisions I need from you](#decisions-i-need-from-you).
+Status: **built and running.** Phases 0–7 below are implemented; the board is
+live behind `?board=holo` (the default) with `?board=flat` still rendering the
+old one for comparison on the same save. Phase 8 (LOD + perf) and the long tail
+in §5 are not done. Open questions are in [Decisions](#6-decisions).
 
 ---
 
@@ -60,8 +60,8 @@ Split each source JPEG, offline, into three layers:
 | Layer | Contents | How it's used |
 |---|---|---|
 | `<tile>_base.webp` | Plinth skirt only, background keyed out | plain `<img>`, never recoloured |
-| `<tile>_holo.png` | Hologram intensity in the **alpha** channel | CSS `mask-image` over a solid faction-colour div, `mix-blend-mode: plus-lighter` |
-| `<tile>_core.png` | Only the white-hot rim lines | `<img>`, `plus-lighter`, ~0.6 opacity — keeps the glow reading as *hot*, not as flat paint |
+| `<tile>_holo.webp` | Hologram intensity in the **alpha** channel | CSS `mask-image` over a solid faction-colour div, `mix-blend-mode: plus-lighter` |
+| `<tile>_core.webp` | Only the white-hot rim lines | `<img>`, `plus-lighter`, ~0.6 opacity — keeps the glow reading as *hot*, not as flat paint |
 
 Separation is deterministic — no ML, no manual masking:
 
@@ -70,8 +70,8 @@ Separation is deterministic — no ML, no manual masking:
 - Hologram vs plinth is a two-line classifier: the hologram is cool and
   emissive (`B − R > 4`, luminance > 50), the plinth is warm and only ever lit.
 
-`scripts/hex-tiles/split-spike.py` is the working version of this. It runs on
-all 14 tiles today.
+Built by `scripts/hex-tiles/build_tiles.py`; the original proof is kept as
+`split-spike.py`.
 
 ### 2.2 A dedicated "holo palette", not the raw UI colours
 
@@ -87,19 +87,15 @@ image below — same tile, same pipeline, only the palette differs.
 | Plainers | `#9d70c4` | `#c08cff` |
 | Neutral / unheld | — | `#9fd8ff` (close to as-generated) |
 
-These live next to `FACTIONS` in `data.js` as a `holoColor` field so the two
+These live next to `FACTIONS` in `data.js` behind `holoColor(id)` so the two
 palettes stay visibly related but independently tunable.
 
 ### 2.3 Board geometry: one projection module
 
-Replace `hexDims.js` with `src/prototype/hexProjection.js` holding the measured
-constants and every screen-space derivation:
-
-```
-hexScreenPos(hex, {gap})   -> {x, y}   // centre of the tile's top face
-topFacePolygon(scale)      -> points   // for hit-testing + the ZoC ring
-boardBounds(hexes, {gap})  -> {w, h}
-```
+`src/prototype/hexProjection.js` holds the measured constants and every
+screen-space derivation: `buildHexGeometry(rows)`, `paintOrder(centers)`,
+`topFacePolygon(inset, cx, cy)` and `tileFor(hex, value)`. `hexDims.js` stays
+for the flat board, which keeps its own pointy-top geometry.
 
 Because the art is flat-top, **engine rows render as screen columns**. Crucially
 this needs no new math: `buildHexGrid` already stamps every hex with
@@ -193,27 +189,38 @@ lot. **I recommend B.**
 Also visible in the mock, and worth looking at closely: tile repetition. 14
 tiles over 30 hexes puts duplicates side by side in places.
 
+### …and here it is running
+
+![The live board](images/holo-board-live.png)
+
+The real thing, turn 1 of a 30-hex `testMap`, with fog. Unexplored hexes keep
+an unlit plinth so the board's extent still reads; territory is Versari red,
+Goldgrass green, Croppers yellow, Plainers purple, unheld ground cyan. The
+Loyalty radials hang above their Locations on a dashed tether.
+
+![Zoomed in](images/holo-board-live-zoom.png)
+
 ---
 
 ## 4. Implementation phases
 
 Each phase is independently shippable and leaves the game working.
 
-| # | Phase | Touches | Notes |
+| # | Phase | State | Where it landed |
 |---|---|---|---|
-| 0 | **Asset pipeline** | `scripts/hex-tiles/`, `public/assets/ui/board/tiles/` | Promote the spike to a real build script. Semantic filenames, a `tiles.json` manifest (geometry + tags), layers cropped to their own bbox with the offset in the manifest, WebP out. Move the JPEG masters out of `public/` so they stop shipping. |
-| 1 | **Projection module** | new `hexProjection.js`, `hexDims.js` (deleted), `aiReplay/CameraController.js` | Pure geometry, unit-testable headless. Camera controller must be updated in lockstep or replay panning breaks. |
-| 2 | **`HexTile` component** | new `HexTile.jsx` | The three-layer stack + tint + fog states. Renders standalone before the board uses it. |
-| 3 | **Board rewrite** | `HexBoard.jsx`, hit-test layer | Absolute positioning, y-sorted z-index, SVG polygon hit layer. |
-| 4 | **Re-site the overlays** | `Hex.jsx` (dismantled into `HexTile` + overlays) | Unit tokens, ghosts, ZoC ring, road band, terrain badge, loot marker all move onto the projected top face. This is the biggest single chunk of work — see P5. |
-| 5 | **Floating radial** | `ControlMeter.jsx`, overlay layer | Tether + ground ellipse + billboard sizing. |
-| 6 | **Tint source of truth** | new `holoTint.js`, `data.js` | `holoColor(hex)` resolution order, contested handling, CSS colour transition on control flips. |
-| 7 | **Fog treatment** | `HexTile.jsx` | §2.7. |
-| 8 | **Perf + LOD pass** | `HexTile.jsx`, `BoardViewport.jsx` | Below ~0.6 scale, swap the three-layer stack for a single flat tinted polygon. Re-tune `MIN_SCALE`/`MAX_SCALE`. Capture before/after with `npm run shots`. |
+| 0 | Asset pipeline | done | `scripts/hex-tiles/build_tiles.py` → 42 layers + `src/prototype/hexTiles.json`. Masters moved out of `public/` to `art/hex-tiles/masters/` so they stop shipping; output is 2.44 MiB of WebP for all 14 tiles. |
+| 1 | Projection module | done | `hexProjection.js`. `CameraController.buildHexGeometry` takes a `{holo}` flag and delegates, so the replay camera pans to the right hex on either board. |
+| 2 | `HexTile` component | done | `HexTile.jsx` — three-layer stack, tint, fog, tokens, rings, road, loot. |
+| 3 | Board rewrite | done | `HexBoard3D.jsx` — absolute placement, y-sorted z-index, SVG hit layer. |
+| 4 | Re-site the overlays | mostly | Unit tokens, ghosts, ZoC ring, road, encounter mark and loot are all on the projected top face. The terrain elevation/cover badge was dropped: the art now says it. |
+| 5 | Floating radial | done | `FloatingControlMeter.jsx` — tether, contact ellipse, unsquashed billboard. |
+| 6 | Tint source of truth | done | `holoTint.js` + `holoColor` in `data.js`; 0.45s colour transition on control flips, contested pulses. |
+| 7 | Fog treatment | done | Unexplored = plinth with an unlit top face; explored = projection at 0.34. |
+| 8 | **Perf + LOD pass** | **not done** | No LOD swap below ~0.6 scale, `MIN_SCALE`/`MAX_SCALE` not re-tuned. Fine at 30 hexes; do this before a larger map. |
 
-Suggested sequencing guard: build phases 1–5 behind a `boardV2` flag so the
-current board stays available for comparison until the new one is clearly
-better.
+The flag is `?board=holo` / `?board=flat` (remembered in localStorage under
+`pc.board`, default holo), so both boards run against the same save until the
+new one is unambiguously better.
 
 ---
 
@@ -296,20 +303,25 @@ projection, an unresolved wireframe) or they'll look pasted on.
 
 ---
 
-## 6. Decisions I need from you
+## 6. Decisions
 
-Ordered by how much they block. Q1–Q3 gate the phase-0/1 work; the rest can be
-answered as we go.
+### Settled
 
-**Q1 — Orientation.** Transpose the board to flat-top (no re-render, engine rows
-become screen columns), or re-render the art pointy-top to match the existing
-board and pipeline doc? *My recommendation: transpose.* The art is good, the
-transpose is cheap, and `testMap` is near-symmetric so the board barely changes
-shape.
+- **Q1 Orientation — transpose.** Engine rows render as screen columns; the art
+  stays flat-top and is not re-rendered for orientation.
+- **Q2 Spacing — floating, gap ~1.2.**
+- **Q5 Tint source — split.** Location hexes tint by `controller`, terrain and
+  encounter hexes by `zocOwner`, contested stays neutral with a slow pulse.
 
-**Q2 — Packed or floating.** Mock A vs mock B above. *My recommendation:
-floating (gap ~1.2)* — it matches how the source art presents itself, it makes
-each plinth read, and it's far more forgiving.
+### Open
+
+- **Q3 Camera elevation — deferred, pending the cost of regenerating (Q4).**
+  Not a blocker: the pipeline and the renderer both read their geometry from
+  `tiles.json`, so a re-rendered set at a different elevation is a manifest
+  change plus a rebuild, not a code change. Phases 0–3 proceed either way.
+- **Q4, Q6–Q9** below.
+
+### Still needed from you
 
 **Q3 — Re-render at a higher camera?** Keeping 24.8° means living with P2's
 occlusion. Re-rendering at ~40° would cut it a lot and make settlements more
@@ -320,12 +332,6 @@ missing tile types (P9).
 **Q4 — Can you regenerate, and with what?** Do you still have the generation
 workflow and prompt for these? Knowing whether more tiles are cheap or expensive
 changes the answer to Q3 and P8 completely.
-
-**Q5 — What drives the tint?** There are two different ownership signals in the
-engine. *My recommendation:* Location hexes tint by `controller` (hard
-ownership), terrain hexes tint by `zocOwner` (soft influence, already computed
-in `influence.js`), contested hexes stay neutral with a slow pulse. Confirm, and
-tell me what a contested hex should look like.
 
 **Q6 — Does the plinth change per faction too,** or does it stay uniform wood
 everywhere? Uniform reads as "one shared map table", per-faction reads as

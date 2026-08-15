@@ -126,6 +126,30 @@ export function ownerColor(ownerId) {
   return FACTIONS[ownerId]?.color || NEUTRAL;
 }
 
+// Board hologram tints. A separate palette from the UI colours above, and it
+// has to be: the tile hologram is recoloured by ADDING a flat colour over a
+// white-hot glow, and the mid-tone UI colours come out of that muddy and
+// nearly indistinguishable from each other. Same hues, pushed to emissive
+// luminance and saturation. Keep the two palettes in step when either moves —
+// a faction whose chip is red and whose territory glows orange reads as two
+// different factions.
+export const HOLO_NEUTRAL = "#9fd8ff"; // unheld ground, ~the as-generated cyan
+const HOLO = {
+  versari: "#ff5f52",
+  lakers: "#58b6ff",
+  goldgrass: "#b8e04e",
+  plainers: "#c08cff",
+  tempest: "#6f9de0",
+  croppers: "#ecd162",
+  steeltraders: "#f0796c",
+  dambarans: "#7fd88f",
+};
+
+export function holoColor(ownerId) {
+  if (!ownerId || ownerId === "neutral") return HOLO_NEUTRAL;
+  return HOLO[ownerId] || HOLO_NEUTRAL;
+}
+
 // A location is fully controlled only when one player owns all 3 sections.
 export function fullController(sections) {
   if (!sections) return null;

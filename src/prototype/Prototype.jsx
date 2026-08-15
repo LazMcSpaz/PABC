@@ -7,6 +7,7 @@ import "./prototype.css";
 import { FACTIONS as UI_FACTIONS, LOCATIONS as UI_LOCATIONS, valueOf, fullController, theme } from "./data.js";
 import { Btn } from "./kit.jsx";
 import HexBoard from "./HexBoard.jsx";
+import HexBoard3D from "./HexBoard3D.jsx";
 import BoardViewport from "./BoardViewport.jsx";
 import Inspector from "./Inspector.jsx";
 import UnitCard from "./UnitCard.jsx";
@@ -47,6 +48,24 @@ const SKIP_MOVE_CONFIRM_KEY = "pabc.skipMoveConfirm";
 function readSkipMoveConfirm() {
   try { return typeof localStorage !== "undefined" && localStorage.getItem(SKIP_MOVE_CONFIRM_KEY) === "1"; }
   catch { return false; }
+}
+
+// Board renderer selection. The holographic tile board is the default; the old
+// flat board is still reachable for side-by-side comparison on the same save.
+// `?board=flat` / `?board=holo` wins for the session and is remembered, so a
+// screenshot run or a bug report can pin one without touching code.
+const BOARD_KEY = "pc.board";
+function useHoloBoard() {
+  try {
+    const q = typeof location !== "undefined" && new URLSearchParams(location.search).get("board");
+    if (q === "flat" || q === "holo") {
+      localStorage.setItem(BOARD_KEY, q);
+      return q === "holo";
+    }
+    return localStorage.getItem(BOARD_KEY) !== "flat";
+  } catch {
+    return true;
+  }
 }
 import TechWheel from "./TechWheel.jsx";
 import EventFeed from "./EventFeed.jsx";
@@ -269,9 +288,21 @@ export default function Prototype({ config, onNewGame }) {
 
   const state = useMemo(() => adaptState(gameRef.current), [tick]);
 
+  // Which board renders. The holographic tile board is the direction of
+  // travel; the flat board stays reachable (`?board=flat`, or localStorage
+  // `pc.board`) so the two can be compared on the same save while the art and
+  // the overlays are still being tuned.
+  const holoBoard = useHoloBoard();
+  const Board = holoBoard ? HexBoard3D : HexBoard;
+
   // §AI replay — hex → content-space centre geometry (for camera + pawns).
+  // The two boards project hexes differently, so the camera has to be told
+  // which one it is flying over.
   const geomRef = useRef(null);
-  geomRef.current = useMemo(() => buildHexGeometry(state.rows), [state.rows]);
+  geomRef.current = useMemo(
+    () => buildHexGeometry(state.rows, { holo: holoBoard }),
+    [state.rows, holoBoard],
+  );
   const replay = useAIReplay({ gameRef, geomRef, bumpTick });
 
   const [selectedHexId, setSelectedHexId] = useState(null);
@@ -910,7 +941,7 @@ export default function Prototype({ config, onNewGame }) {
             <Bracket corner="tr" />
             <Bracket corner="bl" />
             <Bracket corner="br" />
-            <HexBoard
+            <Board
               state={boardState}
               selectedHexId={selectedHexId}
               selectedUnitId={selectedUnitId}
