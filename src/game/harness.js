@@ -38,7 +38,8 @@ import { resolveSalvage } from "./contest.js";
 import { readRivalIntel } from "./intel.js";
 import { postAt, isPostVisibleTo, chargePostUpkeep } from "./posts.js";
 import {
-  blockadeAt, activeBlockadeAt, advanceBlockades, roadSupplyPath,
+  blockadeAt, activeBlockadeAt, creditCap, roadSupplyPath,
+  blockadeDefense, blockadeVision, blockadeIncome, destroyBlockade,
 } from "./blockades.js";
 import { loadFieldEncounters, findUnsupportedTypes, choiceIsRunnable, WORLD_ENCOUNTERS } from "./content-loader.js";
 import { pickHexByFilter, encounterRedrawBudget } from "./encounters.js";
@@ -1844,8 +1845,16 @@ line("\n  [Rail doc §3] Blockade structures");
     const u = Object.values(g.units).find((x) => x.owner === me);
     u.node = hex; recomputeStats(g);
     g.players[me].resource = 10; g.players[me].actions.remaining = 5;
+    // Rail doc §3.4 — construction is paid out of the funding settlement's
+    // build output, so pin that down: a generous Output, all of it on the guns
+    // side, and no chip of its own competing unless a case asks for one.
+    home.production = 8; home.buildSlider = 1; home.activeBuild = null;
+    home.buildProgress = 0;
     return { g, me, hex, u, home };
   };
+
+  // One Upkeep's worth of economy for `me` — this is what funds blockades now.
+  const upkeep = (g, me) => applyOutputAndBuilds(g, me);
 
   // Build gating: road hex, a unit to pin, scrap, and a live supply line.
   {
@@ -1880,11 +1889,13 @@ line("\n  [Rail doc §3] Blockade structures");
   {
     const { g, me, hex } = stage();
     performAction(g, "build-blockade", { hex });
-    advanceBlockades(g, me, supplyCutter(g, me));
+    upkeep(g, me);
     const midway = blockadeAt(g, hex);
-    check("Blockade: one Upkeep of supply is not enough (2-turn floor)",
-      midway.done === false && midway.progress === CONFIG.blockades.buildRate);
-    advanceBlockades(g, me, supplyCutter(g, me));
+    // The settlement produces 8 with the slider fully on build, far more than
+    // the site's whole 4-point cost — the floor is what stops it landing now.
+    check("Blockade: a rich settlement still cannot raise one in a single Upkeep",
+      midway.done === false && midway.progress === creditCap(midway));
+    upkeep(g, me);
     const done = blockadeAt(g, hex);
     check("Blockade: a second Upkeep completes it and releases the builder",
       done.done === true && done.builder === null && !!activeBlockadeAt(g, hex));
@@ -1895,7 +1906,7 @@ line("\n  [Rail doc §3] Blockade structures");
     const { g, me, hex, u } = stage();
     performAction(g, "build-blockade", { hex });
     u.node = g.board.adjacency[hex][0]; recomputeStats(g);
-    advanceBlockades(g, me, supplyCutter(g, me));
+    upkeep(g, me);
     check("Blockade: losing the pinned builder fails construction outright",
       !blockadeAt(g, hex));
   }
@@ -1910,7 +1921,7 @@ line("\n  [Rail doc §3] Blockade structures");
     const cutAt = path[1];
     const fu = Object.values(g.units).find((x) => x.owner === foe);
     fu.node = cutAt; recomputeStats(g);
-    advanceBlockades(g, me, supplyCutter(g, me));
+    upkeep(g, me);
     const stalled = blockadeAt(g, hex);
     check("Blockade: an enemy on the supply road stalls construction, not fails it",
       !!stalled && stalled.done === false && stalled.progress === 0 &&
@@ -1922,9 +1933,47 @@ line("\n  [Rail doc §3] Blockade structures");
       if (x.owner !== me && path.includes(x.node)) x.node = offPath;
     }
     recomputeStats(g);
-    advanceBlockades(g, me, supplyCutter(g, me));
+    upkeep(g, me);
     check("Blockade: clearing the road resumes construction",
-      blockadeAt(g, hex).progress === CONFIG.blockades.buildRate);
+      blockadeAt(g, hex).progress === creditCap(blockadeAt(g, hex)));
+  }
+
+  // §3.4 — the blockade outranks the settlement's own chip by default, but only
+  // takes what the floor lets it; the remainder still reaches the chip.
+  {
+    const { g, me, hex, home } = stage();
+    performAction(g, "build-blockade", { hex });
+    home.activeBuild = { kind: "build", chipId: "scrapworks", cost: 99 };
+    home.buildProgress = 0;
+    const site = blockadeAt(g, hex);
+    const cap = creditCap(site);
+    const output = locationOutput(g, home);
+    upkeep(g, me);
+    check("Blockade: outranks the settlement's own chip by default",
+      blockadeAt(g, hex).progress === cap);
+    check("Blockade: takes only its per-turn cap — the rest still reaches the chip",
+      home.buildProgress === output - cap && output > cap);
+  }
+
+  // §3.4 — the toggle flips it, and flips it hard: while a chip is building,
+  // it takes everything and the blockade waits.
+  {
+    const { g, me, hex, home } = stage();
+    performAction(g, "build-blockade", { hex });
+    const set = performAction(g, "set-build-priority", { at: home.hexId, value: "chips" });
+    home.activeBuild = { kind: "build", chipId: "scrapworks", cost: 99 };
+    home.buildProgress = 0;
+    const output = locationOutput(g, home);
+    upkeep(g, me);
+    check("Blockade: the chips-first toggle starves the site while a chip builds",
+      set.ok && blockadeAt(g, hex).progress === 0 && home.buildProgress === output);
+    // Finish the chip and the site resumes — it was waiting, not cancelled.
+    home.activeBuild = null;
+    upkeep(g, me);
+    check("Blockade: with the chip done, a chips-first settlement funds it again",
+      blockadeAt(g, hex).progress === creditCap(blockadeAt(g, hex)));
+    const bad = performAction(g, "set-build-priority", { at: home.hexId, value: "wombat" });
+    check("Blockade: build priority only accepts blockade / chips", !bad.ok);
   }
 
   // §3 — once complete it halts enemy movement and sees for its owner.
@@ -1932,8 +1981,8 @@ line("\n  [Rail doc §3] Blockade structures");
     const { g, me, hex } = stage();
     const foe = g.turnOrder[1];
     performAction(g, "build-blockade", { hex });
-    advanceBlockades(g, me, supplyCutter(g, me));
-    advanceBlockades(g, me, supplyCutter(g, me));
+    upkeep(g, me);
+    upkeep(g, me);
     check("Blockade: a completed blockade halts enemy movement",
       movementBlockers(g, foe).has(hex) && !movementBlockers(g, me).has(hex));
     // Isolate it as me's only Vision source.
@@ -1945,13 +1994,76 @@ line("\n  [Rail doc §3] Blockade structures");
       isHexVisible(g, me, hex));
   }
 
+  // §3.2 — upgrade chips: queued free, paid by the same settlement draw,
+  // and each one actually changes the thing it says it changes.
+  {
+    const { g, me, hex, home } = stage();
+    performAction(g, "build-blockade", { hex });
+    upkeep(g, me); upkeep(g, me);
+    const b = blockadeAt(g, hex);
+    g.players[me].techLevel = 5;
+
+    // A site still under construction takes no chips — check on a fresh one.
+    const other = stage();
+    other.g.players[other.me].techLevel = 5;
+    performAction(other.g, "build-blockade", { hex: other.hex });
+    const tooSoon = performAction(other.g, "upgrade-blockade",
+      { hex: other.hex, chipId: "palisade" });
+
+    const notBlockadeChip = performAction(g, "upgrade-blockade", { hex, chipId: "works" });
+    const baseDef = blockadeDefense(g, b);
+    const baseVis = blockadeVision(g, b);
+    const queued = performAction(g, "upgrade-blockade", { hex, chipId: "palisade" });
+    check("Blockade chip: queues free onto a FINISHED blockade, and only real ones",
+      !tooSoon.ok && !notBlockadeChip.ok && queued.ok &&
+      b.build.chipId === "palisade" && b.build.progress === 0);
+    const busy = performAction(g, "upgrade-blockade", { hex, chipId: "signal-mast" });
+    check("Blockade chip: one at a time", !busy.ok);
+
+    upkeep(g, me);
+    check("Blockade chip: the funding settlement pays for it, then it installs",
+      b.build === null && b.chips.length === 1 &&
+      blockadeDefense(g, b) === baseDef + CHIPS.palisade.blockadeDefense);
+
+    performAction(g, "upgrade-blockade", { hex, chipId: "signal-mast" });
+    upkeep(g, me);
+    check("Blockade chip: Signal Mast widens its Vision",
+      b.chips.length === 2 && blockadeVision(g, b) === baseVis + CHIPS["signal-mast"].blockadeVision);
+
+    const full = performAction(g, "upgrade-blockade", { hex, chipId: "toll-booth" });
+    check("Blockade chip: slots are finite", !full.ok && CONFIG.blockades.chipSlots === 2);
+
+    // Destroying the structure takes its chips out of play with it.
+    const installed = [...b.chips];
+    destroyBlockade(g, hex, g.turnOrder[1]);
+    check("Blockade chip: destroying the blockade removes its chips from play",
+      installed.every((c) => g.removed.includes(c)) && !blockadeAt(g, hex));
+  }
+
+  // §3.2 Toll Booth — a blockade's own income, independent of its settlement.
+  {
+    const { g, me, hex } = stage();
+    performAction(g, "build-blockade", { hex });
+    upkeep(g, me); upkeep(g, me);
+    const b = blockadeAt(g, hex);
+    g.players[me].techLevel = 5;
+    performAction(g, "upgrade-blockade", { hex, chipId: "toll-booth" });
+    upkeep(g, me);
+    check("Blockade chip: Toll Booth installs and pays its own scrap",
+      b.chips.length === 1 && blockadeIncome(g, me) === CHIPS["toll-booth"].output);
+    const before = g.players[me].resource;
+    upkeep(g, me);
+    check("Blockade chip: the toll lands in the bank each Upkeep",
+      g.players[me].resource >= before + CHIPS["toll-booth"].output);
+  }
+
   // §3.2/§3.3 — static defense, defender-stacking, and destroy-only.
   {
     const { g, me, hex } = stage();
     const foe = g.turnOrder[1];
     performAction(g, "build-blockade", { hex });
-    advanceBlockades(g, me, supplyCutter(g, me));
-    advanceBlockades(g, me, supplyCutter(g, me));
+    upkeep(g, me);
+    upkeep(g, me);
     // The builder stays put, so the blockade defends at base + its Strength.
     while (activePlayerId(g) !== foe) endTurn(g);
     const fu = Object.values(g.units).find((x) => x.owner === foe);

@@ -364,6 +364,7 @@ function captureLocation(state, loc, victor) {
   loc.activeBuild = null;
   loc.buildProgress = 0;
   loc.buildSlider = CONFIG.economy.defaultSlider;
+  loc.buildPriority = "blockade"; // rail doc §3.4 — a captor inherits the default
   emit(state, "location_captured", { hex: loc.hexId, controller: victor, from });
 
   // §16.5 severed supply — any in-transit reinforcement whose origin was

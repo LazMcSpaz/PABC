@@ -17,23 +17,55 @@ aren't.
 | 2.3 Rail access | built (endpoints-only) | `movement.js unitRailEdges` |
 | 2.4 Rail generation | built (capital spanning tree) | `board.js assignRails` |
 | 3.1 Blockade construction | built | `blockades.js`, `actions.js build-blockade` |
-| 3.2 Once complete | built, minus upgrade chips | `blockades.js`, `contest.js`, `visibility.js` |
+| 3.2 Once complete | built, chips included | `blockades.js`, `contest.js`, `visibility.js` |
 | 3.3 Combat and destruction | built | `contest.js` |
-| 3.4 Blockade funding | **deferred** | shares a mechanism with 2.2 |
+| 3.4 Blockade funding | built | `economy.js`, `blockades.js` |
 
-Two things about the blockade as built are worth knowing before reading §3:
-
-- **Construction accrues at a flat rate** (`CONFIG.blockades.buildRate`), not
-  from the connected settlement's surplus. §3.4 is the deferred half. The road
-  connection it describes *is* enforced — cutting it stalls construction — so
-  only the rate is standing in, and it is one line in `advanceBlockades`.
-- **No upgrade chips are authored yet.** `CONFIG.blockades.chipDefense` and
-  `chipVision` are the hooks, keyed chipId → bonus so the module never branches
-  on a chip id. The Toll Booth in particular waits on §3.4, since its whole
-  point is reducing a blockade's dependence on that funding.
+Rail's production pooling (2.2) is the one piece of the "route output to a
+connected recipient" idea still outstanding. §3.4 landed first and its
+allocator (`processLocationEconomy`) is where 2.2 should join it.
 
 "Cut" has one definition across all three systems, in `movement.js
 supplyCutter`, and that is the single place Part 1 would change.
+
+### §3.4 as built — who gets a city's build output
+
+Construction is paid out of the funding settlement's build output on the turn
+it is spent, not from a constant. Three rules resolve the contention:
+
+- **The blockade outranks the city's own chip by default.** A blockade answers
+  something happening on the map now; a chip is an investment that keeps.
+- **A site can only absorb `ceil(cost / minTurns)` per turn.** That is what
+  enforces §3.1's two-turn floor now the rate is variable — a rich city cannot
+  raise one in a single Upkeep — and it doubles as the reason the city is never
+  starved: whatever the site cannot take flows straight on to its own build.
+- **`buildPriority: "chips"` flips it, and flips it hard.** While a chip is
+  under construction it takes everything and the blockade waits until it is
+  done. A player who sets that toggle has decided the building matters more,
+  and a half-measure would only make both slow. Set per Location with the
+  `set-build-priority` action; free, like the guns/butter slider.
+
+Upgrade chips (§3.2) draw on the same line once the structure stands, and are
+NOT floor-capped — an upgrade is ordinary construction, and a rich settlement
+may finish one in a turn exactly as it can at home.
+
+### §3.2 as built — the upgrade chips
+
+Three, in `content.js` as `kind: "blockade"` (so they never appear in a
+Location's build menu), installed into two slots:
+
+| Chip | Effect |
+|---|---|
+| Palisade | +3 blockade defense |
+| Signal Mast | +1 Vision from the blockade |
+| Toll Booth | +1 scrap each Upkeep, independent of the funding settlement |
+
+Bonuses are read off the chip def (`blockadeDefense` / `blockadeVision` /
+`output`), so `blockades.js` never branches on a chip id. Queuing one is free
+and needs no unit present — the builder was released when the structure landed
+— but it does need the supply road open, or the queue would sit at zero
+progress with nothing saying why. Destroying a blockade removes its chips from
+play; there is no salvage.
 
 ## Why this started
 

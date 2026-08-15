@@ -169,6 +169,13 @@ export const CHIPS = {
   // --- location chips: utility ---
   "recon-team": { id: "recon-team", name: "Recon Team", kind: "location", slots: 1, techLevel: 1, cost: 3, buildCost: 3, loyaltyReq: 0, encounterRedraws: 1, desc: "Discard a drawn encounter and draw again" },
   "logistics-hub": { id: "logistics-hub", name: "Logistics Hub", kind: "location", slots: 2, techLevel: 3, cost: 12, buildCost: 12, loyaltyReq: 6, upkeep: 1, actionBonus: 1, desc: "+1 Action each turn (rare, 2-slot; upkeep 1)" },
+  // --- blockade chips (docs/rail-road-blockade-design.md §3.2) ---
+  // kind "blockade" installs into a COMPLETED blockade, never a Location or a
+  // unit, and is funded by the same settlement draw that raised the structure
+  // (§3.4). Excluded from the Location build menu by that kind.
+  palisade: { id: "palisade", name: "Palisade", kind: "blockade", slots: 1, techLevel: 1, cost: 4, blockadeDefense: 3, buildCost: 4, loyaltyReq: 0, desc: "+3 blockade defense" },
+  "signal-mast": { id: "signal-mast", name: "Signal Mast", kind: "blockade", slots: 1, techLevel: 1, cost: 3, blockadeVision: 1, buildCost: 3, loyaltyReq: 0, desc: "+1 Vision from this blockade" },
+  "toll-booth": { id: "toll-booth", name: "Toll Booth", kind: "blockade", slots: 1, techLevel: 2, cost: 5, output: 1, buildCost: 5, loyaltyReq: 0, desc: "+1 scrap each Upkeep — a fortified chokepoint taxing what passes" },
   // --- special unit chips: buildable (docs/chip-set-v0.1.md) ---
   // No statType — specials compete for bay slots but not stat families.
   "field-medics": { id: "field-medics", name: "Field Medics", kind: "unit", slots: 1, techLevel: 2, cost: 4, buildCost: 4, loyaltyReq: 3, healAnywhere: 1, desc: "Heals +1 at Upkeep anywhere, not only on a held Location" },

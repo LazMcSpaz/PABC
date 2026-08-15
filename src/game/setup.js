@@ -179,6 +179,10 @@ export function createGame({
       buildSlider: CONFIG.economy.defaultSlider,
       buildProgress: 0,
       activeBuild: null,
+      // Rail doc §3.4 — who gets this city's build output when it is building a
+      // chip AND funding a blockade. "blockade" (the default) answers the map;
+      // "chips" says the building matters more and makes the blockade wait.
+      buildPriority: "blockade",
     };
   }
 

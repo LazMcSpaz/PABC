@@ -21,6 +21,7 @@
 //   done: true    a real structure. The builder is free to leave; the blockade
 //                 defends itself, sees for its owner, and halts enemy movement.
 import { CONFIG } from "./config.js";
+import { CHIPS } from "./content.js";
 import { emit } from "./events.js";
 
 // The blockade on `hex`, or null. A hex carries at most one (§3.1).
@@ -42,28 +43,46 @@ export function ownedBlockades(state, pid) {
   return out;
 }
 
-// §3.2 — static defense, plus whatever installed chips add. No chip carries a
-// `blockadeDefense` bonus yet; the hook is here for the content batch, the same
-// way chipGarrison's is in contest.js.
-export function blockadeDefense(state, b) {
-  let v = CONFIG.blockades.defense;
+// Sum a numeric field across a blockade's installed, non-dormant chips —
+// the shared reader for every §3.2 upgrade, mirroring locChipSum in turn.js.
+function chipSum(state, b, field) {
+  let n = 0;
   for (const c of b.chips || []) {
-    if (state.chips[c]?.disabled) continue;
-    v += CONFIG.blockades.chipDefense?.[state.chips[c]?.chipId] || 0;
+    if (state.chips[c]?.disabled) continue; // §20.9 dormant — passives suppressed
+    n += CHIPS[state.chips[c]?.chipId]?.[field] || 0;
   }
-  return v;
+  return n;
 }
 
-// §3.2 — its own sight footprint. Part 1's vision-gating is not built yet, so
-// today this is only what the blockade contributes to its owner's fog; when
-// gating lands it is also the range at which the blockade may halt a mover.
+// §3.2 — static defense, plus whatever installed chips add (Palisade).
+export function blockadeDefense(state, b) {
+  return CONFIG.blockades.defense + chipSum(state, b, "blockadeDefense");
+}
+
+// §3.2 — its own sight footprint, plus chips (Signal Mast). Part 1's
+// vision-gating is not built yet, so today this is only what the blockade
+// contributes to its owner's fog; when gating lands it is also the range at
+// which the blockade may halt a mover.
 export function blockadeVision(state, b) {
-  let r = CONFIG.blockades.vision;
-  for (const c of b.chips || []) {
-    if (state.chips[c]?.disabled) continue;
-    r += CONFIG.blockades.chipVision?.[state.chips[c]?.chipId] || 0;
+  return CONFIG.blockades.vision + chipSum(state, b, "blockadeVision");
+}
+
+// §3.2 Toll Booth — a mature blockade's own scrap income, independent of the
+// settlement that raised it. Summed per faction at Upkeep.
+export function blockadeIncome(state, pid) {
+  let n = 0;
+  for (const b of ownedBlockades(state, pid)) {
+    if (!b.done) continue;
+    n += chipSum(state, b, "output");
   }
-  return r;
+  return n;
+}
+
+// Slots a blockade's installed chips occupy, against CONFIG.blockades.chipSlots.
+export function blockadeSlotsUsed(state, b) {
+  let n = 0;
+  for (const c of b.chips || []) n += CHIPS[state.chips[c]?.chipId]?.slots ?? 1;
+  return n;
 }
 
 // --- supply --------------------------------------------------------------
@@ -141,9 +160,10 @@ export function startBlockade(state, owner, hex, builderUid) {
   return b;
 }
 
-// §3.1 — one Upkeep's worth of construction for every site `pid` owns.
-//
-// Three things can happen to a site, and they are deliberately different:
+// §3.1/§3.4 — which of `pid`'s construction sites may draw on a settlement this
+// Upkeep, and from WHICH settlement. Run once per Upkeep, before the economy
+// step spends anything, because it also resolves the two ways a site can stop
+// being fundable — and those are deliberately different:
 //
 //   * the builder is gone (dead, or it walked off)  → construction FAILS
 //     outright. No partial refund; §3.1 is explicit that the pinned unit is the
@@ -151,23 +171,26 @@ export function startBlockade(state, owner, hex, builderUid) {
 //   * the supply line is cut                        → no progress this turn.
 //     Construction stretches past the 2-turn floor rather than failing, and
 //     emits so the player can see why nothing moved.
-//   * otherwise                                     → progress accrues.
 //
-// `isCut` is threaded in by the caller (turn.js), which knows about diplomacy.
-//
-// The rate is flat for now. docs/rail-road-blockade-design.md §3.4 makes it the
-// connected settlement's surplus output, sharing one mechanism with rail's
-// production pooling (§2.2); that work is deferred, and this is the single line
-// it replaces.
-export function advanceBlockades(state, pid, isCut) {
+// Returns [{ blockade, settlement }] — `settlement` is the hexId of the nearest
+// Location `pid` holds by road, which is the one that pays (§3.4). `isCut` is
+// threaded in by the caller, which knows about diplomacy.
+export function resolveBlockadeSites(state, pid, isCut) {
+  const sites = [];
   for (const b of ownedBlockades(state, pid)) {
-    if (b.done) continue;
+    // A finished blockade only wants funding while a chip is queued on it; an
+    // idle one draws nothing, so its settlement keeps its whole output.
+    if (b.done && !b.build) continue;
 
-    const builder = state.units[b.builder];
-    if (!builder || builder.node !== b.hex || builder.owner !== pid) {
-      delete state.world.blockades[b.hex];
-      emit(state, "blockade_failed", { owner: pid, hex: b.hex, reason: "builder left" });
-      continue;
+    // Only CONSTRUCTION pins a unit (§3.1). Once the structure stands, the
+    // builder is long gone and an upgrade needs only the supply line.
+    if (!b.done) {
+      const builder = state.units[b.builder];
+      if (!builder || builder.node !== b.hex || builder.owner !== pid) {
+        delete state.world.blockades[b.hex];
+        emit(state, "blockade_failed", { owner: pid, hex: b.hex, reason: "builder left" });
+        continue;
+      }
     }
 
     const supply = supplyStatus(state, pid, b.hex, isCut);
@@ -180,18 +203,74 @@ export function advanceBlockades(state, pid, isCut) {
       continue;
     }
 
-    b.progress += CONFIG.blockades.buildRate;
-    if (b.progress >= b.cost) {
-      b.done = true;
-      b.progress = b.cost;
-      b.builder = null; // §3.2 — the builder is free to leave the moment it lands
-      emit(state, "blockade_completed", { owner: pid, hex: b.hex });
-    } else {
-      emit(state, "blockade_progressed", {
-        owner: pid, hex: b.hex, progress: b.progress, cost: b.cost,
-      });
-    }
+    sites.push({ blockade: b, settlement: supply.path[supply.path.length - 1] });
   }
+  // Deterministic, and nearest-first so a settlement funding two sites finishes
+  // the closer one first rather than dribbling into both.
+  sites.sort((x, y) => (x.blockade.hex < y.blockade.hex ? -1 : 1));
+  return sites;
+}
+
+// §3.1 — the most construction one site may absorb in a single Upkeep.
+//
+// This is what enforces §3.1's two-turn floor now that the rate comes from a
+// settlement's output rather than a constant: a rich city cannot raise a
+// blockade in one turn however much it produces. It also stops a blockade
+// swallowing a whole city's build capacity — whatever it cannot take flows on
+// to the city's own chip.
+export function creditCap(b) {
+  return Math.ceil(b.cost / Math.max(1, CONFIG.blockades.minTurns));
+}
+
+// §3.4 — put `amount` of a settlement's build output into a site. Returns what
+// it could NOT take, so the caller can pass the remainder along.
+//
+// Routes to whichever of the two things a blockade can be building: the
+// structure itself, or a §3.2 upgrade chip on a finished one. Only the
+// structure is floor-capped — an upgrade is ordinary construction and a rich
+// settlement may finish one in a turn, exactly as it can at a Location.
+export function creditBlockade(state, b, amount) {
+  if (b.done) return creditUpgrade(state, b, amount);
+
+  const want = Math.min(amount, creditCap(b), b.cost - b.progress);
+  if (want <= 0) return amount;
+
+  b.progress += want;
+  if (b.progress >= b.cost) {
+    b.done = true;
+    b.progress = b.cost;
+    b.builder = null; // §3.2 — the builder is free to leave the moment it lands
+    emit(state, "blockade_completed", { owner: b.owner, hex: b.hex });
+  } else {
+    emit(state, "blockade_progressed", {
+      owner: b.owner, hex: b.hex, progress: b.progress, cost: b.cost,
+    });
+  }
+  return amount - want;
+}
+
+// §3.2 — advance a queued upgrade chip, installing it once paid for.
+function creditUpgrade(state, b, amount) {
+  const build = b.build;
+  if (!build) return amount;
+  const want = Math.min(amount, build.cost - build.progress);
+  if (want <= 0) return amount;
+
+  build.progress += want;
+  if (build.progress < build.cost) {
+    emit(state, "blockade_progressed", {
+      owner: b.owner, hex: b.hex, chipId: build.chipId,
+      progress: build.progress, cost: build.cost,
+    });
+    return amount - want;
+  }
+
+  const uid = state.nextId("chip");
+  state.chips[uid] = { uid, chipId: build.chipId };
+  b.chips.push(uid);
+  b.build = null;
+  emit(state, "build_completed", { hex: b.hex, chip: uid, chipId: build.chipId });
+  return amount - want;
 }
 
 // §3.3 — destroy-only. Unlike a Location a blockade has no VP or economic
@@ -201,6 +280,9 @@ export function destroyBlockade(state, hex, by) {
   const b = state.world?.blockades?.[hex];
   if (!b) return null;
   delete state.world.blockades[hex];
+  // Its chips go with it — a destroyed structure leaves no salvage, matching
+  // the demolished-in-place rule for Location chips.
+  for (const c of b.chips || []) state.removed.push(c);
   emit(state, "blockade_destroyed", {
     owner: b.owner, hex, by: by || null, wasComplete: !!b.done,
   });

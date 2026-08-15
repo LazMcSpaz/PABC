@@ -249,17 +249,18 @@ export const CONFIG = {
   blockades: {
     buildCost: 4,  // §3.1 — 1 Action + scrap to break ground
     cost: 4,       // §3.1 — total construction progress needed
-    // §3.1 sets a 2-turn floor. cost/buildRate IS that floor, so these two move
-    // together. When §3.4 lands, buildRate becomes the connected settlement's
-    // surplus output and a thin supply line stretches the timeline naturally.
-    buildRate: 2,
+    // §3.1's floor. Construction is funded from the connected settlement's build
+    // output (§3.4), so without this a rich city could raise one in a single
+    // Upkeep; a site takes at most ceil(cost/minTurns) per turn and the rest
+    // flows on to whatever else that city is building.
+    minTurns: 2,
     defense: 6,    // §3.2 — Location-style static baseline, before stacking
     vision: 1,     // §3.2 — its own sight footprint
-    // §3.2 proposes +defense / +vision / Toll Booth upgrade chips. None are
-    // authored yet; these maps are the hook the content batch fills in, keyed
-    // chipId -> bonus, so blockades.js never branches on a chip id.
-    chipDefense: {},
-    chipVision: {},
+    // §3.2 upgrade slots. Deliberately fewer than a settlement's: a blockade is
+    // a chokepoint, not a second city. Palisade / Signal Mast / Toll Booth are
+    // in content.js as kind "blockade"; their bonuses are read off the chip def
+    // (blockadeDefense / blockadeVision / output), never branched on by id.
+    chipSlots: 2,
   },
 
   posts: {
