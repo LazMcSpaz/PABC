@@ -1,6 +1,6 @@
 # Holographic Hex Board — Integration Plan
 
-Turning the 14 hologram hex renders (now `art/hex-tiles/masters/`) into the
+Turning the 16 hologram hex renders (now `art/hex-tiles/masters/`) into the
 live game board, with the hologram recoloured per controlling faction, and the
 Loyalty radial lifted off the tile to float above it.
 
@@ -13,7 +13,7 @@ in §5 are not done. Open questions are in [Decisions](#6-decisions).
 
 ## 1. What the art actually is (measured, not eyeballed)
 
-`scripts/hex-tiles/measure-spike.py` measured all 14 renders. The headline is
+`scripts/hex-tiles/measure-spike.py` measured the renders. The headline is
 good news:
 
 | Property | Value | Spread across the 14 |
@@ -41,9 +41,11 @@ work below:
 3. **Opaque JPEG, no alpha.** The doc asks for WebP + alpha. The dark misty
    background has to be keyed out.
 
-Content inventory of the 14: 4 flat/rolling plains, 5 mountain/mesa/badlands,
-2 forest, 3 with settlements (2 small towns, 2 cities — one of each also sits in
-a mountain bowl). **No coastline tile in the set**, despite the brief.
+Inventory, using the author's labels (16 masters, after two coastline
+additions): 1 plains, 2 forest, 3 mountain/plateau, 3 inland settlements,
+2 inland cities, 3 open coastlines, 1 coastal settlement, 1 coastal city.
+Three tiles I had first read as cracked plains, badlands and mesa turned out to
+be **coastlines** — the labels caught that, guessing did not.
 
 ---
 
@@ -159,6 +161,29 @@ The hologram fiction maps onto `hex.fog` almost for free:
 
 This is a genuine upgrade over the current black/50%-dim treatment.
 
+### 2.8 Roads and rails ride over the tiles
+
+`hex.road` is a per-hex boolean, not an edge list, so `RouteNetwork.jsx`
+recovers a drawable network by linking each road hex to its road neighbours —
+re-deriving adjacency with the engine's own rule rather than from screen
+distance, so it survives any projection change.
+
+Two things decide how they're drawn. The background is never the same colour
+twice (a route crosses hexes glowing in whatever colour their owner is), so
+every route gets a **dark casing** under a bright core — the standard
+cartographic trick — and is legible over any tint. And the two types are
+distinguished by more than hue: roads are one solid amber line, rails carry
+cross-ties, which survives both a recolour and colour-vision deficiency.
+
+Routes stop short of a Location's centre, trimmed against an ellipse that
+matches the board's vertical squash so the clearance reads as circular on the
+projected ground.
+
+Layer order is tiles → routes → tokens → radials → hit layer. Getting tokens
+above the routes is why they moved out of `HexTile` into `BoardTokens.jsx`: a
+tile is its own stacking context, so nothing inside one can rise above a
+sibling tile.
+
 ---
 
 ## 3. What's already proven
@@ -193,10 +218,11 @@ tiles over 30 hexes puts duplicates side by side in places.
 
 ![The live board](images/holo-board-live.png)
 
-The real thing, turn 1 of a 30-hex `testMap`, with fog. Unexplored hexes keep
-an unlit plinth so the board's extent still reads; territory is Versari red,
-Goldgrass green, Croppers yellow, Plainers purple, unheld ground cyan. The
-Loyalty radials hang above their Locations on a dashed tether.
+The real thing, turn 1 of a 30-hex `testMap`, with fog, packed at `GAP = 1.0`.
+Unexplored hexes keep an unlit plinth so the board's extent still reads;
+territory is Versari red, Goldgrass green, Croppers yellow, Plainers purple,
+unheld ground cyan. The Loyalty radials hang above their Locations on a dashed
+tether, and the road network runs over the tiles and under the unit tokens.
 
 ![Zoomed in](images/holo-board-live-zoom.png)
 
@@ -267,12 +293,12 @@ visibly. A horizontal flip would double the pool to 28 cheaply — the lighting 
 these renders looks close to frontal, so flipping is *probably* safe, but it
 needs an eyeball check before relying on it.
 
-**P9 — Missing tile types.** No coastline (asked for in the brief, absent from
-the set). No rubble/wetland, though `docs/content-schema-v0.1.md` anticipates
-them and `hex.terrain` already exists in the engine (currently always `null`).
-No edge-socket variants, so **roads cannot be drawn as connected art** — the
-existing flat `RoadBand` will look wrong lying across a 3D tile and needs its
-own answer.
+**P9 — Missing tile types.** Coastlines have landed (5 of them). Still no
+rubble/wetland, though `docs/content-schema-v0.1.md` anticipates them and
+`hex.terrain` already exists in the engine (currently always `null`). Roads and
+rails are drawn as a **vector network over** the tiles rather than as
+edge-socket art (§2.8), so they need no new tile variants — but they also do
+not blend into the terrain they cross.
 
 **P10 — Stale prep work.** `src/prototype/hexArt.js` is built on the assumption
 of *per-faction* art sets chosen by a static region BFS. Generic art plus a
@@ -309,9 +335,13 @@ projection, an unresolved wireframe) or they'll look pasted on.
 
 - **Q1 Orientation — transpose.** Engine rows render as screen columns; the art
   stays flat-top and is not re-rendered for orientation.
-- **Q2 Spacing — floating, gap ~1.2.**
+- **Q2 Spacing — packed, `GAP = 1.0`.** Plinths meet and the board reads as one
+  continuous map table. Tile-on-tile occlusion is accepted (Q3).
+- **Q3 Camera — keep 24.8°.** Not re-rendering for the angle; a tile in front
+  hiding part of the one behind it is fine.
 - **Q5 Tint source — split.** Location hexes tint by `controller`, terrain and
   encounter hexes by `zocOwner`, contested stays neutral with a slow pulse.
+- **Q6 Plinth — uniform.** Never recoloured, no per-faction material.
 
 ### Open
 
@@ -323,19 +353,35 @@ projection, an unresolved wireframe) or they'll look pasted on.
 
 ### Still needed from you
 
-**Q3 — Re-render at a higher camera?** Keeping 24.8° means living with P2's
-occlusion. Re-rendering at ~40° would cut it a lot and make settlements more
-readable, at the cost of some drama — and if you're re-rendering anyway, that's
-the moment to also fix orientation (Q1), get PNG/alpha masters (P3), and add the
-missing tile types (P9).
+**Q4 — More flat inland masters.** The single biggest visual gap now. After
+tagging, the pools are: inland flat **1**, forest 2, mountain 4, town 3, city 2,
+open coast 3, coast town 1, coast city 1. Flat is the pool that matters most —
+`CONFIG.hexSplit` gives the map 13 encounter hexes, none of which ever carry
+`elevation` or `cover`, so they all resolve flat, and every one of them draws
+the same `plains_hills`. Two or three more plain/rolling inland masters would
+fix roughly half the board.
 
-**Q4 — Can you regenerate, and with what?** Do you still have the generation
-workflow and prompt for these? Knowing whether more tiles are cheap or expensive
-changes the answer to Q3 and P8 completely.
+**Q10 — Where does rail come from?** `RouteNetwork.jsx` draws rails today, but
+`hex.rail` does not exist: no field, no generator, no movement rule (P9). The
+renderer reads the field, so rails appear the moment the board stamps them.
+Either the engine grows a real rail network (a second pass like `assignRoads`,
+plus whatever rail is supposed to *do*), or say the word and I'll generate a
+display-only one at setup.
 
-**Q6 — Does the plinth change per faction too,** or does it stay uniform wood
-everywhere? Uniform reads as "one shared map table", per-faction reads as
-"territory". I lean uniform, since the hologram already carries the colour.
+**Q11 — Which Locations are canonically coastal?** Worth settling before the
+map generator is taught to honour it, because the two data sources disagree.
+The engine (`src/game/content.js`) gives Lakers **chigan + droit** and puts
+**dambar** under Versari; the look-pass table (`src/prototype/data.js`) says
+Lakers' capital *is* dambar and gives it a "Deepwater Port" ability. Coast
+placement is positional today (east rim), so nothing is blocked — but "Grand
+Laker settlements are on the coast" resolves to different hexes depending on
+which table is right.
+
+**Q12 — Should the generator force the coastal factions east?** Coast art is
+positional, so Lakers/Tempest currently start wherever `generateLayout`'s
+farthest-point sampling puts them, which is often inland. Pinning their anchor
+to the eastern rim is a contained change to `generateLayout`, but it is a real
+map-generation change (it re-rolls every existing seed), so I have not made it.
 
 **Q7 — Approve the holo palette** in §2.2, or adjust the four colours.
 

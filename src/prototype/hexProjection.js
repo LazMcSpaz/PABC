@@ -106,6 +106,69 @@ export function paintOrder(centers) {
   return Object.keys(centers).sort((a, b) => centers[a].y - centers[b].y);
 }
 
+// --- route networks (roads, rails) ---------------------------------------
+// `hex.road` is a per-hex boolean, not an edge list, so a drawable network has
+// to be recovered by linking road hexes to their road neighbours. Adjacency is
+// re-derived here with the SAME rule the engine uses (src/game/board.js: same
+// row and one column apart, or neighbouring rows half a hex apart) rather than
+// from screen distance, which would be fragile under any projection change.
+export function neighborMap(rows) {
+  const index = rows.map((row) => {
+    const m = new Map();
+    row.forEach((id, c) => m.set(c - (row.length - 1) / 2, id));
+    return m;
+  });
+  const nb = {};
+  rows.forEach((row, r) => {
+    row.forEach((id, c) => {
+      const x = c - (row.length - 1) / 2;
+      const out = [];
+      for (const dx of [-1, 1]) {
+        const hit = index[r].get(x + dx);
+        if (hit) out.push(hit);
+      }
+      for (const dr of [-1, 1]) {
+        const m = index[r + dr];
+        if (!m) continue;
+        for (const dx of [-0.5, 0.5]) {
+          const hit = m.get(x + dx);
+          if (hit) out.push(hit);
+        }
+      }
+      nb[id] = out;
+    });
+  });
+  return nb;
+}
+
+// Every unordered pair of adjacent hexes that both carry the route.
+export function routeSegments(rows, hexes, carries) {
+  const nb = neighborMap(rows);
+  const segs = [];
+  for (const id of Object.keys(nb)) {
+    if (!carries(hexes[id])) continue;
+    for (const other of nb[id]) {
+      if (id < other && carries(hexes[other])) segs.push([id, other]);
+    }
+  }
+  return segs;
+}
+
+// Pull the `to` end of a segment back to the edge of an ellipse centred on it,
+// so a route arriving at a Location stops just outside the settlement instead
+// of running through its middle. The ellipse matches the board's vertical
+// squash, so the clearance looks circular on the projected ground plane.
+export function trimToEllipse(from, to, rx) {
+  const ry = rx * (HEX_H / HEX_W);
+  const k = rx / ry;
+  const dx = from.x - to.x;
+  const dy = (from.y - to.y) * k;
+  const len = Math.hypot(dx, dy);
+  if (len <= rx) return null; // wholly inside the keep-out — draw nothing
+  const t = rx / len;
+  return { x: to.x + dx * t, y: to.y + (dy * t) / k };
+}
+
 // --- which tile art goes on which hex ------------------------------------
 // Deterministic, and deliberately NOT the engine's seeded rng: this is a pure
 // display choice, and it must resolve the same way on every render forever or
@@ -121,30 +184,36 @@ function stableIndex(key, count) {
 // eastern rim and nowhere else; conversely a rim hex should prefer one, or
 // the coastline comes out full of holes. Every other pool is inland-only.
 const hasTag = (t, tag) => t.tags.includes(tag);
-const pick = (tag, coast) =>
-  TILES.filter((t) => hasTag(t, tag) && hasTag(t, "coast") === coast);
+// A settlement tile is tagged with its terrain too (mountain_city is both
+// `city` and `mountain`) so a Location on high ground can draw a settlement
+// that sits on high ground. That cross-tagging must NOT leak the other way:
+// an empty terrain hex drawing `mountain_city` would put an unnamed
+// metropolis on the board.
+const settled = (t) => hasTag(t, "town") || hasTag(t, "city");
 
-// Open shoreline: coast tiles carrying no settlement.
-const COAST_OPEN = TILES.filter(
-  (t) => hasTag(t, "coast") && !hasTag(t, "town") && !hasTag(t, "city"),
-);
+const terrainPool = (tag, coast) =>
+  TILES.filter((t) => hasTag(t, tag) && !settled(t) && hasTag(t, "coast") === coast);
+const settlementPool = (tier, coast) =>
+  TILES.filter((t) => hasTag(t, tier) && hasTag(t, "coast") === coast);
+
+// Open shoreline — every coast tile without a settlement on it. On the rim a
+// hex's elevation/cover stops driving the art: what it is, is shoreline.
+const COAST_OPEN = TILES.filter((t) => hasTag(t, "coast") && !settled(t));
 
 const POOLS = {
   inland: {
-    flat: pick("flat", false),
-    forest: pick("forest", false),
-    mountain: pick("mountain", false),
-    town: pick("town", false),
-    city: pick("city", false),
+    flat: terrainPool("flat", false),
+    forest: terrainPool("forest", false),
+    mountain: terrainPool("mountain", false),
+    town: settlementPool("town", false),
+    city: settlementPool("city", false),
   },
   coast: {
-    // On the rim a hex's elevation/cover stops driving the art: what it is,
-    // is shoreline. All three terrain buckets resolve to the same pool.
     flat: COAST_OPEN,
     forest: COAST_OPEN,
     mountain: COAST_OPEN,
-    town: pick("town", true),
-    city: pick("city", true),
+    town: settlementPool("town", true),
+    city: settlementPool("city", true),
   },
 };
 
@@ -176,8 +245,14 @@ export function eastRimHexes(rows) {
 export function tileFor(hex, locationValue, onCoast = false) {
   const set = onCoast ? POOLS.coast : POOLS.inland;
   let pool;
-  if (hex.type === "location") pool = set[VALUE_TO_POOL[locationValue] || "town"];
-  else if (hex.elevation) pool = set.mountain;
+  if (hex.type === "location") {
+    pool = set[VALUE_TO_POOL[locationValue] || "town"];
+    // Prefer a settlement whose ground matches the hex's own terrain, so a
+    // Location on high ground doesn't render as a town on a flat plain.
+    const want = hex.elevation ? "mountain" : "flat";
+    const matched = (pool || []).filter((t) => hasTag(t, want));
+    if (matched.length) pool = matched;
+  } else if (hex.elevation) pool = set.mountain;
   else if (hex.cover) pool = set.forest;
   else pool = set.flat;
   if (!pool || !pool.length) pool = POOLS.inland.flat.length ? POOLS.inland.flat : TILES;

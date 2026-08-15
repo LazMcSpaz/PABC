@@ -6,7 +6,9 @@
 // Three stacked layers, in paint order:
 //
 //   tiles    the art, one HexTile per hex, z-ordered by y
-//   overlay  the Loyalty radials, floating above every tile
+//   routes   the road / rail network, over the tiles
+//   tokens   units and ghosts, over the routes
+//   meters   the Loyalty radials, floating above everything
 //   hits     one invisible polygon per hex, taking all the clicks
 //
 // The hit layer exists because tiles overlap heavily now: rectangular tile
@@ -17,6 +19,8 @@
 import { LOCATIONS, fullController } from "./data.js";
 import HexTile from "./HexTile.jsx";
 import FloatingControlMeter from "./FloatingControlMeter.jsx";
+import RouteNetwork from "./RouteNetwork.jsx";
+import BoardTokens from "./BoardTokens.jsx";
 import { buildHexGeometry, eastRimHexes, paintOrder, topFacePolygon } from "./hexProjection.js";
 
 function isHeldBy(hex, fid) {
@@ -49,23 +53,36 @@ export default function HexBoard3D({
         const hex = state.hexes[hexId];
         if (!hex) return null;
         const c = geom.centers[hexId];
-        const units = (hex.unitIds || []).map((id) => state.units[id]).filter(Boolean);
         return (
           <div key={hexId} style={{ position: "absolute", left: c.x, top: c.y, zIndex: i + 1 }}>
             <HexTile
               hex={hex}
-              units={units}
               selected={hexId === selectedHexId}
               reachable={reachable?.has(hexId) || false}
-              selectedUnitId={selectedUnitId}
-              dimmedUnitUid={dimmedUnitUid}
               factionHighlight={highlightedFactionId && isHeldBy(hex, highlightedFactionId)}
               onCoast={coast.has(hexId)}
-              onUnitClick={onUnitClick}
             />
           </div>
         );
       })}
+
+      <RouteNetwork
+        rows={state.rows}
+        hexes={state.hexes}
+        centers={geom.centers}
+        width={geom.width}
+        height={geom.height}
+      />
+
+      <BoardTokens
+        order={order}
+        hexes={state.hexes}
+        units={state.units}
+        centers={geom.centers}
+        selectedUnitId={selectedUnitId}
+        dimmedUnitUid={dimmedUnitUid}
+        onUnitClick={onUnitClick}
+      />
 
       {/* Radials float in their own layer above every tile. That means a
           nearer tile never occludes a farther tile's meter — a deliberate

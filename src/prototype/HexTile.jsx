@@ -13,31 +13,11 @@
 //
 // Everything is positioned in source-image units off the hex centre and scaled
 // by UNIT, so the layout survives a re-export at a different resolution.
-import { LOCATIONS, FACTIONS, ownerColor, theme } from "./data.js";
+import { LOCATIONS, ownerColor, theme } from "./data.js";
 import { holoTint, tintStrength } from "./holoTint.js";
 import {
   FRAME, HEX_W, HEX_H, SKIRT_H, UNIT, layerUrl, tileFor, topFacePolygon,
 } from "./hexProjection.js";
-
-// Unit tokens sit on the near apron of the top face, not out on the terrain.
-// Baked art carries no depth information, so there is no way to know how tall
-// the ground is under an arbitrary point — a token placed over a summit would
-// float or sink. The apron is the one region whose height is the ground plane
-// on every tile in the set.
-// Slots are laid out symmetrically about the centre for however many tokens
-// are actually here, so a lone unit stands in the middle of its tile instead
-// of clinging to the left edge. `y` bows outward with `x` to follow the
-// apron's near boundary.
-const MAX_SLOTS = 5;
-const SLOT_SPACING = 0.155;
-
-function slotPos(i, count) {
-  const n = Math.min(count || 1, MAX_SLOTS);
-  const idx = Math.min(i, n - 1);
-  const x = (idx - (n - 1) / 2) * SLOT_SPACING;
-  const y = 0.44 - Math.abs(x) * 0.45;
-  return { left: x * HEX_W, top: y * HEX_H };
-}
 
 function Layer({ layer, style, className }) {
   return (
@@ -61,14 +41,10 @@ function Layer({ layer, style, className }) {
 
 export default function HexTile({
   hex,
-  units,
   selected,
   reachable,
-  selectedUnitId,
-  dimmedUnitUid,
   factionHighlight,
   onCoast = false,
-  onUnitClick,
 }) {
   const fog = hex.fog || "visible";
   const isUnexplored = fog === "unexplored";
@@ -163,13 +139,6 @@ export default function HexTile({
         viewBox={`${-svgW / 2} ${-svgH / 2} ${svgW} ${svgH}`}
         style={{ position: "absolute", left: -svgW / 2, top: -svgH / 2, overflow: "visible", pointerEvents: "none" }}
       >
-        {!isUnexplored && hex.road && (
-          <line
-            x1={-HEX_W * 0.44} y1={HEX_H * 0.06} x2={HEX_W * 0.44} y2={HEX_H * 0.06}
-            stroke="#b9a47e" strokeWidth={HEX_H * 0.07} strokeLinecap="round"
-            opacity={0.5} strokeDasharray="9 7"
-          />
-        )}
         {isUnexplored && (
           // A cold, unlit top face so an unsurveyed tile still has a
           // silhouette. Without it the board's extent vanishes into the
@@ -204,20 +173,6 @@ export default function HexTile({
         )}
       </svg>
 
-      {!isUnexplored && (units || []).map((u, i) => (
-        <UnitToken
-          key={u.uid}
-          unit={u}
-          slot={i}
-          count={units.length}
-          selected={u.uid === selectedUnitId}
-          dim={u.uid === dimmedUnitUid}
-          onClick={onUnitClick}
-        />
-      ))}
-      {(hex.ghosts || []).map((g, i, all) => (
-        <GhostToken key={`ghost-${i}`} ghost={g} slot={i} count={all.length} />
-      ))}
 
       {hex.type === "encounter" && !isUnexplored && <EncounterMark />}
       {hex.loot > 0 && !isUnexplored && <LootMarker count={hex.loot} />}
@@ -225,97 +180,7 @@ export default function HexTile({
   );
 }
 
-// A token standing on the plinth's near apron, with a contact ellipse so it
-// reads as resting on the tile rather than hovering over it.
-function UnitToken({ unit, selected, slot = 0, count = 1, onClick, dim = false }) {
-  const faction = FACTIONS[unit.owner] || { name: unit.owner || "Unknown", color: "#888" };
-  const pos = slotPos(slot, count);
-  const size = selected ? 30 : 27;
-  return (
-    <div
-      data-unit-uid={unit.uid}
-      title={`${unit.name} — ${faction.name}`}
-      onClick={(e) => {
-        if (!onClick) return;
-        e.stopPropagation();
-        onClick(unit);
-      }}
-      style={{
-        position: "absolute",
-        left: pos.left,
-        top: pos.top,
-        transform: "translate(-50%, -100%)",
-        pointerEvents: "auto",
-        cursor: onClick ? "pointer" : undefined,
-        opacity: dim ? 0.3 : 1,
-        filter: dim ? "saturate(0.6) brightness(0.85)" : undefined,
-        transition: "opacity .18s ease, filter .18s ease",
-        zIndex: selected ? 4 : 3,
-      }}
-    >
-      <div
-        style={{
-          width: size,
-          height: size,
-          borderRadius: "50%",
-          background: `radial-gradient(circle at 36% 30%, ${faction.color}, #14110c 145%)`,
-          border: selected ? `2px solid ${theme.accent}` : "2px solid #100d09",
-          boxShadow: selected
-            ? `0 3px 6px rgba(0,0,0,0.6), 0 0 16px ${theme.accent}`
-            : `0 3px 6px rgba(0,0,0,0.6), 0 0 9px ${faction.color}99`,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-        }}
-      >
-        <span style={{ fontFamily: theme.fontDisplay, fontSize: 12, fontWeight: 700, color: "#fff" }}>
-          {unit.name[0]}
-        </span>
-      </div>
-      <div
-        style={{
-          position: "absolute",
-          left: "50%",
-          bottom: -3,
-          transform: "translateX(-50%)",
-          width: size * 0.9,
-          height: size * 0.9 * (HEX_H / HEX_W),
-          borderRadius: "50%",
-          background: `radial-gradient(ellipse, ${faction.color}55, transparent 70%)`,
-        }}
-      />
-    </div>
-  );
-}
 
-function GhostToken({ ghost, slot = 0, count = 1 }) {
-  const color = ownerColor(ghost.owner);
-  const pos = slotPos(slot, count);
-  return (
-    <div
-      title={`Last seen: ${FACTIONS[ghost.owner]?.name || ghost.owner} (Str ${ghost.strength}, round ${ghost.round})${ghost.false ? " — unverified" : " — may have moved"}`}
-      style={{
-        position: "absolute",
-        left: pos.left,
-        top: pos.top,
-        transform: "translate(-50%, -100%)",
-        width: 24,
-        height: 24,
-        borderRadius: "50%",
-        background: `radial-gradient(circle at 36% 30%, ${color}66, #14110c 150%)`,
-        border: `2px dashed ${color}aa`,
-        opacity: 0.55,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        filter: "grayscale(0.3)",
-        zIndex: 3,
-      }}
-    >
-      <span style={{ fontFamily: theme.fontDisplay, fontSize: 11, fontWeight: 700, color: "#e8e2d4" }}>?</span>
-    </div>
-  );
-}
 
 // An unresolved projection — the hologram equivalent of the old flat "?" tile.
 function EncounterMark() {
