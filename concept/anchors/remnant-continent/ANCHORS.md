@@ -23,9 +23,11 @@ for reference sheets and hard edges, `.jpg` for landscape and atmospheric work.
 qualities into a generation, including the wrong ones; recording what an anchor
 is bad at is what stops it being attached to a shot it will drag off-target.
 
-> **Four anchors carry English lettering, in violation of §13.** They are
-> marked **TEXT** below. Lettering in an anchor teaches the model that lettering
-> belongs on the subject, which is the exact failure §13 exists to prevent.
+> **Anchors marked TEXT carry English lettering, in violation of §13.** They
+> are a third of the registry. Lettering in an anchor teaches the model that
+> lettering belongs on the subject, which is the exact failure §13 exists to
+> prevent. Note §13 does permit short numerals, and Laker cast marks are
+> supposed to have them — it is the accompanying words that break canon.
 > Attach them only for construction and material, always alongside §13's
 > negative block, and never as the sole anchor on a shot with a labelable
 > surface. Clean replacements are worth generating.
@@ -77,6 +79,18 @@ Use for: §4's accretion logic proven on a body — a sound leather coat with th
 Do not use for: matched or symmetrical kit of any kind — every element here is deliberately unpaired; also not for the Versari and Goldgrass palettes, since this figure is almost entirely browns
 Added: 2026-08-11
 
+## laker-laborer-01.jpg
+URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/laker-laborer-01.jpg
+Use for: §4's "armor is for the fearful" read — bare chest under an open filthy coat, foundry-labourer bulk, and §5.8's selective finish at its clearest: one lacquered shoulder cap kept bright against a figure that is otherwise grease, soot and canvas stain throughout
+Do not use for: **TEXT** — garbled callouts ("DEEPIR LEATHER BELT", "SAUST, CAST HEAD"); also not for the Versari or Goldgrass silhouettes, which are covered and layered where this is deliberately exposed
+Added: 2026-08-11
+
+## laker-laborer-sheet-01.jpg
+URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/laker-laborer-sheet-01.jpg
+Use for: the harness worn on a body at full length, scorched shoulder pad and bronze buckle wear called out in detail crops, and the barbed steel harpoon as a Laker polearm
+Do not use for: **TEXT** — the heaviest lettering in the set, including a detail crop whose entire subject is a lettered badge, plus corrupted headings ("Laborer–Sold:", "Heavy-bladd knife"). Anchor the figure or the harness instead and take the harpoon from here only by description
+Added: 2026-08-11
+
 ## goldgrass-commander-01.jpg
 URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/goldgrass-commander-01.jpg
 Use for: §4's "their metal is somebody else's" rule at its clearest — an angular faceted cut-plate pauldron and a rounded cast hip plate worn on the same body, mismatched by origin and rope-lashed on rather than strapped or bolted; patchwork quilting in ochre, cream and madder as blocks of differing cloth; rank read through accumulated salvage rather than through insignia; an older, weathered face
@@ -110,6 +124,36 @@ Added: 2026-08-11
 ---
 
 ## Objects
+
+## laker-drop-hammer-01.jpg
+URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/laker-drop-hammer-01.jpg
+Use for: the Drop Hammer, and §10's heavy cannon — soot-blackened cast barrel with the casting seam left unground, polished steel recoil cylinders, an interrupted-screw breech, riveted cast carriage on rubber tires, chipped dark green lacquer with rust weeping from the fasteners, and cylindrical shells with copper driving bands. §7's Age-of-Sail trap avoided on every count
+Do not use for: **TEXT** — faint raised lettering on the barrel alongside the numerals. Also not for §5.1's one-subject rule, since crew share the frame, and note the crew are cropped, so this is not a scale reference
+Added: 2026-08-11
+
+## laker-shoulder-cap-01.jpg
+URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/laker-shoulder-cap-01.jpg
+Use for: cast-and-poured logic on a small object — a swollen compound curve with no facet anywhere, deep oxblood lacquer rubbed through to bright metal along the rolled edge, and an interior left raw with casting pits and a sprue scar, which is §4's rule that the back and underside stay unground. Outside and inside on one sheet
+Do not use for: **TEXT** — the cast mark reads "MAKER 5072" where §13 permits the numerals only, and the sheet carries a title label. Also not for Versari work, which it will round off
+Added: 2026-08-11
+
+## laker-work-harness-01.jpg
+URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/laker-work-harness-01.jpg
+Use for: §10's work harness in isolation — heavy oil-tanned leather shoulder yoke over a bare torso, crossing straps, deep belt, rounded cast bronze hardware, coiled tarred rope; the neutral mannequin makes it readable as a kit part rather than as a character
+Do not use for: **TEXT** — the chest badge reads "FOUNDRY 14 MAKER 02". Also **FRAMING** — this is a clean 3D render with studio lighting and an untextured grey figure, so it will pull output toward CG surfacing and away from the painted sheets
+Added: 2026-08-11
+
+## laker-droit-iron-01.jpg
+URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/laker-droit-iron-01.jpg
+Use for: the Droit Iron, and §4's vehicle rule — the body is the heirloom and everything else is field-replaced. Preserved deep oxblood lacquer on the panels the owner cares about, roof and doors cut away, crude welded roll bar and riveted plate patching where the lacquer is gone, lifted suspension on knobby tires and plain steel wheels. Chrome kept bright at the bumper while the rear quarters go to mud and rust
+Do not use for: figure scale. One of the few anchors in the set with no lettering at all, so it is safe to pair with the text-bearing Laker sheets
+Added: 2026-08-11
+
+## laker-chrome-hauler-01.jpg
+URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/laker-chrome-hauler-01.jpg
+Use for: the Chrome Hauler — a heirloom cab in hand-rubbed green lacquer married to a rough-welded fabricated steel bed, the same selective-care logic as the Droit Iron at working-truck scale; integrated front winch, racked cans and toolboxes, canvas tilt on bent stanchions
+Do not use for: **TEXT** — a full callout layer, and worse, a real-world manufacturer's name rendered on the grille badge. That name has to go before this is used for anything, and it should not be named in a prompt. Also not for §5.1's one-subject rule, given the detail crops
+Added: 2026-08-11
 
 ## plainer-crossbow-01.jpg
 URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/plainer-crossbow-01.jpg

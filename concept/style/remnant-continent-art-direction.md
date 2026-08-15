@@ -187,6 +187,8 @@ what finish it carries]
 | Output covered in English callout labels and a title block | Asked for an "annotated reference sheet" or "design sheet" — the words summon the whole diagram convention, labels included | Ask for orthographic views only, never for annotation. Labels belong in `ANCHORS.md`, not in the image |
 | Output contains the prompt's own placeholder text, e.g. "ref. &lt;Image 1&gt;" | Referred to an attached anchor inside the prompt body, so the model drew the reference token as a caption | Never name the attachments in the prompt. Describe what to take from them, or say nothing — §5.3 already spends words on everything *except* the referenced parts |
 | Gauge faces and palette swatches come back with misspelled English | Any labelable flat surface invites lettering, and a misspelling is still a §13 violation | Keep §13's negative block on every prompt, and prefer numerals-only gauges. A garbled word is not "close enough" — it is canon-breaking |
+| Laker cast marks come back reading "FOUNDRY 14 MAKER 02" | Asking for a foundry mark or maker's mark gets the *words* along with the numbers, since that is what the real convention looks like | Ask for **raised cast numerals only**, one to four digits, and say no maker word. The numerals are wanted (§13); only the words break canon |
+| A real-world manufacturer's badge appears on a vehicle | Naming a real make or model in the prompt, or anchoring on a photo-derived image of one | Specify the vehicle by era, body form and fabrication, never by make. Check grilles, hubs and tailgates in the output — the badge is small and easy to miss |
 
 ---
 
