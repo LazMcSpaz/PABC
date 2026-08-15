@@ -113,6 +113,16 @@ export const CONFIG = {
   // across the board; the Loyalty-6 bonus slot still adds one more.
   chipSlotsByValue: { low: 1, medium: 2, high: 3, veryHigh: 4 },
 
+  // §16.2 roads. Every settlement is road-linked to its nearest neighbour;
+  // bigger ones also reach their second-nearest, which is what turns a chain
+  // of towns into a network with alternate routes worth cutting. Raising the
+  // high/veryHigh numbers thickens the network (and makes blockades less
+  // decisive, since traffic can route around); lowering them to 1 across the
+  // board yields a bare spanning chain.
+  roads: {
+    linksByValue: { low: 1, medium: 1, high: 2, veryHigh: 2 },
+  },
+
   // The v0.1 test board.
   testMap: [3, 4, 5, 6, 5, 4, 3], // 30 hexes
   hexSplit: { location: 10, encounter: 13, terrain: 7 },

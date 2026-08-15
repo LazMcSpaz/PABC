@@ -220,33 +220,76 @@ export function shortestPathHexes(adjacency, a, b) {
   return path;
 }
 
-// §16.2 roads — lay a deterministic road network: a minimum spanning tree
-// (Prim's, by hop distance) over the given `hubHexes` — the faction capitals —
-// with each tree edge's shortest path stamped `road`. The result is a few main
-// corridors between the powers (negating terrain movement cost along them), so
-// the wilderness off-road still matters and the roads become contested lanes.
-// Operates on the live `hexes` map (sets hexes[id].road = true).
-export function assignRoads(adjacency, hexes, hubHexes) {
-  const hubs = [...new Set(hubHexes)].filter((h) => hexes[h]);
-  if (hubs.length < 2) return;
+// §16.2 roads — roads connect SETTLEMENTS, because that is what makes them
+// mean something. A road that merely links the four capitals is a handful of
+// corridors through empty country; a road network that ties every Location to
+// its neighbours is the thing a blockade can actually cut
+// (docs/rail-road-blockade-design.md §3 funds a blockade through "an
+// uninterrupted road connection to the nearest owned settlement" — that
+// sentence only has teeth if such a connection generally exists).
+//
+// The rule:
+//   * every settlement gets a road to its NEAREST other settlement;
+//   * a settlement big enough (CONFIG.roads.linksByValue) also gets one to its
+//     SECOND nearest, which is what turns a chain into a network;
+//   * finally, if that still leaves separate clusters, the cheapest links
+//     between them are added until the network is connected — a road system
+//     with unreachable islands would silently break supply and blockade.
+//
+// Links are undirected and deduplicated, so A→B and B→A lay one road. Every
+// link stamps `road` along a shortest hex path, so roads remain a per-hex
+// terrain property exactly as before; only which hexes get stamped changes.
+export function assignRoads(adjacency, hexes, settlementHexes, valueOfHex = () => "medium") {
+  const nodes = [...new Set(settlementHexes)].filter((h) => hexes[h]);
+  if (nodes.length < 2) return [];
   const distCache = {};
   const distFrom = (h) => (distCache[h] ||= bfsDistances(adjacency, h));
-  const inTree = new Set([hubs[0]]);
-  while (inTree.size < hubs.length) {
+
+  const links = new Map(); // "a|b" (sorted) -> [a, b]
+  const addLink = (a, b) => {
+    if (a === b) return;
+    const key = a < b ? `${a}|${b}` : `${b}|${a}`;
+    if (!links.has(key)) links.set(key, a < b ? [a, b] : [b, a]);
+  };
+
+  // nearest / second-nearest, ties broken by hexId so the map is deterministic
+  for (const a of nodes) {
+    const da = distFrom(a);
+    const ranked = nodes
+      .filter((b) => b !== a && da[b] !== undefined)
+      .sort((p, q) => (da[p] - da[q]) || (p < q ? -1 : 1));
+    const want = CONFIG.roads.linksByValue[valueOfHex(a)] ?? 1;
+    for (let i = 0; i < Math.min(want, ranked.length); i++) addLink(a, ranked[i]);
+  }
+
+  // union-find over the links so far, then bridge any remaining clusters
+  const parent = {};
+  const find = (x) => (parent[x] === undefined || parent[x] === x ? (parent[x] = x)
+    : (parent[x] = find(parent[x])));
+  const union = (x, y) => { parent[find(x)] = find(y); };
+  for (const [a, b] of links.values()) union(a, b);
+  for (;;) {
+    const roots = new Set(nodes.map(find));
+    if (roots.size <= 1) break;
     let best = null;
-    for (const a of inTree) {
+    for (const a of nodes) {
       const da = distFrom(a);
-      for (const b of hubs) {
-        if (inTree.has(b)) continue;
-        const d = da[b];
-        if (d === undefined) continue;
-        if (!best || d < best.d || (d === best.d && b < best.b)) best = { a, b, d };
+      for (const b of nodes) {
+        if (find(a) === find(b) || da[b] === undefined) continue;
+        if (!best || da[b] < best.d || (da[b] === best.d && `${a}|${b}` < `${best.a}|${best.b}`)) {
+          best = { a, b, d: da[b] };
+        }
       }
     }
-    if (!best) break;
-    inTree.add(best.b);
-    for (const hex of shortestPathHexes(adjacency, best.a, best.b)) hexes[hex].road = true;
+    if (!best) break; // genuinely unreachable on this graph — nothing to add
+    addLink(best.a, best.b);
+    union(best.a, best.b);
   }
+
+  for (const [a, b] of links.values()) {
+    for (const hex of shortestPathHexes(adjacency, a, b)) hexes[hex].road = true;
+  }
+  return [...links.values()];
 }
 
 // Constrained-random layout: place the 10 Locations, then fill the rest

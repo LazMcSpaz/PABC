@@ -183,6 +183,14 @@ This is a genuine upgrade over the current black/50%-dim treatment.
 
 ### 2.8 Roads and rails ride over the tiles
 
+Roads connect **settlements**, not just capitals: every Location is road-linked
+to its nearest neighbour, and `high`/`veryHigh` ones also to their second
+nearest, with cluster-bridging links added afterwards so the network is always
+connected (`assignRoads`, `CONFIG.roads.linksByValue`). That takes the network
+from ~11 road hexes of 30 to ~17, and it is what gives the blockade design its
+teeth — "an uninterrupted road connection to the nearest owned settlement"
+(rail/blockade doc §3) only means something if such a connection exists.
+
 `hex.road` is a per-hex boolean, not an edge list, so `RouteNetwork.jsx`
 recovers a drawable network by linking each road hex to its road neighbours —
 re-deriving adjacency with the engine's own rule rather than from screen
@@ -380,12 +388,13 @@ open coast 3, coast town 1, coast city 1. Flat is the pool that matters most —
 the same `plains_hills`. Two or three more plain/rolling inland masters would
 fix roughly half the board.
 
-**Q10 — Where does rail come from?** `RouteNetwork.jsx` draws rails today, but
-`hex.rail` does not exist: no field, no generator, no movement rule (P9). The
-renderer reads the field, so rails appear the moment the board stamps them.
-Either the engine grows a real rail network (a second pass like `assignRoads`,
-plus whatever rail is supposed to *do*), or say the word and I'll generate a
-display-only one at setup.
+**Q10 — Rail.** The design is settled in
+`docs/rail-road-blockade-design.md` (I missed that doc first time round and
+wrongly reported rail as undesigned — it is undesigned only in *code*). What is
+missing is the implementation. `RouteNetwork.jsx` already draws rails off a
+`hex.rail` field, so they appear the moment the engine stamps one. Open items
+are that doc's own list, plus one contradiction: rail there is **player-built**,
+which conflicts with routes being static "rendered at start time".
 
 **Q11 — Should Dambar still be a Versari home Location?** Capitals are now
 declared explicitly (Versari korad, Goldgrass kansit, Lakers droit, Plainers

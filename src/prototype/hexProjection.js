@@ -50,13 +50,12 @@ export const HEX_H = FRAME.hexH * UNIT_Y;     // projected height of the top fac
 export const HEX_FLAT = FRAME.hexFlat * UNIT; // length of the top/bottom edges
 export const SKIRT_H = FRAME.skirt * UNIT_Y;  // plinth depth below the near edge
 
-// Tiles pack flush: the plinths meet and the board reads as one continuous map
-// table rather than a scatter of floating dioramas. The cost is occlusion —
-// the art reaches up to ~290 source units above the centreline against a
-// 428-unit vertical pitch, so a tall tile hides part of the tile behind it —
-// and that is an accepted trade. Raising this above 1 floats the tiles apart
-// again and buys the clearance back.
-export const GAP = 1.0;
+// Tiles sit just clear of each other. 1.0 is flush — mathematically correct,
+// but the plinths then touch and the board reads as one poured slab with no
+// seam to tell tiles apart. A few percent of air restores the sense of
+// separate pieces on a table without opening real gaps in the hex grid.
+// Raise it further to float the tiles properly apart.
+export const GAP = 1.05;
 // Tiling vectors for a hexagon with opposite sides parallel and equal. The
 // familiar 0.75 * W only holds for a REGULAR hexagon (flat edge = W/2); these
 // rectified tiles are regular, so this reduces to the textbook 0.75 * W — but

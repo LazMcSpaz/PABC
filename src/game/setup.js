@@ -73,7 +73,12 @@ export function createGame({
   // §16.2 — lay road corridors between the faction capitals (deterministic
   // MST over the start hexes). Roads negate terrain movement cost along the
   // lane (a fast, contestable highway); cover/visibility are unaffected.
-  assignRoads(grid.adjacency, hexes, Object.values(layout.factionStart));
+  // Roads tie settlements together, not just capitals — see assignRoads. The
+  // value lookup drives how many links each one gets, so a city is a hub and a
+  // town is a stop on the way.
+  const settlementHexes = Object.keys(layout.placement);
+  assignRoads(grid.adjacency, hexes, settlementHexes,
+    (hexId) => LOCATIONS[layout.placement[hexId]]?.strategicValue || "medium");
 
   // --- players ---
   const players = {};
