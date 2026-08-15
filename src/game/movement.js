@@ -39,7 +39,40 @@ export function movementBlockers(state, ownerId, { ignoreUnits } = {}) {
       blocked.add(loc.hexId);
     }
   }
+  // Rail doc §3 — a COMPLETED enemy blockade halts a mover the same way a unit
+  // does. This is the point of the structure: it holds a road without pinning a
+  // unit there forever. A construction site is not a blockade yet and blocks
+  // nothing; the unit standing on it does that, above, as an ordinary unit.
+  //
+  // Night March (`ignoreUnits`) is about picket lines, not fortifications, so a
+  // blockade still stops it — the same reasoning that keeps enemy Locations
+  // blocking above.
+  for (const b of Object.values(state.world?.blockades || {})) {
+    if (!b.done || b.owner === ownerId) continue;
+    if (!passesFreely(state, ownerId, b.owner)) blocked.add(b.hex);
+  }
   return blocked;
+}
+
+// Does something hostile to `ownerId` sit on this hex, cutting a road or rail
+// line that runs through it? The rail doc uses one definition of "cut" in three
+// places — rail's line-cut check (§2.1), blockade construction supply (§3.1)
+// and blockade funding (§3.4) — so it is defined once, here.
+//
+// Ground truth today, matching movementBlockers above. Part 1 of the rail doc
+// would additionally require the blocker to have DETECTED the faction whose
+// line it is cutting; that is not built, and this is the single place it would
+// need to change.
+export function supplyCutter(state, ownerId) {
+  return (hexId) => {
+    for (const u of Object.values(state.units)) {
+      if (u.node !== hexId || u.owner === ownerId) continue;
+      if (!passesFreely(state, ownerId, u.owner)) return true;
+    }
+    const b = state.world?.blockades?.[hexId];
+    if (b?.done && b.owner !== ownerId && !passesFreely(state, ownerId, b.owner)) return true;
+    return false;
+  };
 }
 
 // Terrain-, road- and blockade-aware reachability for `unit` this turn →

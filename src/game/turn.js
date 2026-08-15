@@ -18,6 +18,8 @@ import { adjustStanding } from "./standing.js";
 import { pressureSource } from "./influence.js";
 import { hasTechNode } from "./tech.js";
 import { chargePostUpkeep } from "./posts.js";
+import { advanceBlockades } from "./blockades.js";
+import { supplyCutter } from "./movement.js";
 import { CHIPS, LOCATIONS, ABILITIES, factionDef } from "./content.js";
 
 // Sum a numeric chip field across a Location's installed, non-dormant
@@ -388,6 +390,12 @@ export function startTurn(state) {
   // post goes dormant (no Vision) until repaid. Refresh fog so a post that
   // just went dormant stops contributing sight this turn.
   chargePostUpkeep(state, pid);
+  // Rail doc §3.1 — advance any blockade under construction. After the economy
+  // step, because when §3.4 lands the progress comes out of the connected
+  // settlement's surplus and that has to be computed first.
+  advanceBlockades(state, pid, supplyCutter(state, pid));
+  // Refresh fog last: a post that just went dormant stops contributing sight
+  // this turn, and a blockade that just completed starts.
   recomputeVisibility(state, pid, { emitEvents: false });
 
   // Preparation (the optional stat-buy step) is folded in once Layer 3

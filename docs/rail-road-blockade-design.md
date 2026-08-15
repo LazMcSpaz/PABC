@@ -1,11 +1,39 @@
 # Rail, Blockade, and the Vision-Gating Rework — Design Doc
 
-Design conversation, not yet implemented. Captures three intertwined systems
-that came out of one thread: closing a real gap in how blockade works today,
-a new Rail network as road's genuinely-differentiated counterpart, and a new
-buildable Blockade structure that both depends on and motivates the vision
-rework. Numbers throughout are placeholders pending a balance pass — the
-mechanics are the settled part, the constants aren't.
+Captures three intertwined systems that came out of one thread: closing a real
+gap in how blockade works today, a new Rail network as road's genuinely-
+differentiated counterpart, and a new buildable Blockade structure that both
+depends on and motivates the vision rework. Numbers throughout are placeholders
+pending a balance pass — the mechanics are the settled part, the constants
+aren't.
+
+## Build status
+
+| Part | | Where |
+|---|---|---|
+| 1 — Blockade vision-gating | **deferred, decision pending** | `movementBlockers` is still ground truth |
+| 2.1 Rail transport | built | `board.js assignRails`, `movement.js unitRailEdges` |
+| 2.2 Rail production pooling | **deferred** | shares a mechanism with 3.4 — build once |
+| 2.3 Rail access | built (endpoints-only) | `movement.js unitRailEdges` |
+| 2.4 Rail generation | built (capital spanning tree) | `board.js assignRails` |
+| 3.1 Blockade construction | built | `blockades.js`, `actions.js build-blockade` |
+| 3.2 Once complete | built, minus upgrade chips | `blockades.js`, `contest.js`, `visibility.js` |
+| 3.3 Combat and destruction | built | `contest.js` |
+| 3.4 Blockade funding | **deferred** | shares a mechanism with 2.2 |
+
+Two things about the blockade as built are worth knowing before reading §3:
+
+- **Construction accrues at a flat rate** (`CONFIG.blockades.buildRate`), not
+  from the connected settlement's surplus. §3.4 is the deferred half. The road
+  connection it describes *is* enforced — cutting it stalls construction — so
+  only the rate is standing in, and it is one line in `advanceBlockades`.
+- **No upgrade chips are authored yet.** `CONFIG.blockades.chipDefense` and
+  `chipVision` are the hooks, keyed chipId → bonus so the module never branches
+  on a chip id. The Toll Booth in particular waits on §3.4, since its whole
+  point is reducing a blockade's dependence on that funding.
+
+"Cut" has one definition across all three systems, in `movement.js
+supplyCutter`, and that is the single place Part 1 would change.
 
 ## Why this started
 

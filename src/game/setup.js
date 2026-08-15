@@ -316,6 +316,9 @@ export function createGame({
       zoc: {},
       // §17.7 Listening Posts — hexId -> { owner, hex, strength, paid, revealedTo }.
       listeningPosts: {},
+      // Blockades (rail doc §3) — hexId -> { owner, hex, done, progress, cost,
+      // builder, chips }. Under construction while `done` is false.
+      blockades: {},
     },
     factionStanding: Object.fromEntries(
       playing.map((fid) => [fid, Object.fromEntries(playing.map((pid) => [pid, 0]))]),

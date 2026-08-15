@@ -5,7 +5,7 @@
 import { emit } from "./events.js";
 import { activePlayerId } from "./targeting.js";
 import { bfsDistances, reinforcementRoute } from "./board.js";
-import { unitReach } from "./movement.js";
+import { unitReach, supplyCutter } from "./movement.js";
 import { CONFIG } from "./config.js";
 import { FACTIONS, CHIPS, ABILITIES, chipDefOf, factionDef } from "./content.js";
 import { validateContest, runContest } from "./contest.js";
@@ -17,6 +17,7 @@ import { drawFieldEncounter, resolveMarkerOnHex } from "./encounters.js";
 import { makeUnit } from "./setup.js";
 import { hasTechNode } from "./tech.js";
 import { postAt, buildPost, revealPost } from "./posts.js";
+import { blockadeAt, startBlockade, supplyStatus } from "./blockades.js";
 import {
   meetsTech, meetsLoyalty, slotCapacity, slotsUsed, stationedUnitWithBay,
   techLevelReqFor, upgradeOption, completeBuildIfDone, effectiveBuildCost,
@@ -498,6 +499,46 @@ function runBuildPost(state, { pid, player, params }) {
   return { hex: post.hex };
 }
 
+// --- Build Blockade (rail doc §3.1) ----------------------------------
+// A road-only fortification, funded down the road it sits on. Validates a road
+// hex with no Location and no existing blockade, a friendly unit to pin there,
+// an uninterrupted road connection to the nearest settlement this player fully
+// holds, and the scrap. Costs 1 Action + scrap up front; the structure itself
+// then accrues over at least two Upkeeps (turn.js).
+function buildBlockadePayer(state, { pid, params }) {
+  const crew = Object.values(state.units).find((u) => u.owner === pid && u.node === params.hex);
+  return crew ? { units: [crew.uid] } : null;
+}
+
+function validateBuildBlockade(state, { pid, player, params }) {
+  const hex = params.hex;
+  const cell = state.board.hexes[hex];
+  if (!cell) return fail("no such hex");
+  if (!cell.road) return fail("a blockade can only be built on a road hex");
+  if (state.locations[hex]) return fail("cannot build a blockade on a Location hex");
+  if (blockadeAt(state, hex)) return fail("a blockade already occupies that hex");
+  if (postAt(state, hex)) return fail("a listening post already occupies that hex");
+  const crew = Object.values(state.units).filter((u) => u.owner === pid && u.node === hex);
+  if (!crew.length) return fail("needs a friendly unit on the target hex");
+  const supply = supplyStatus(state, pid, hex, supplyCutter(state, pid));
+  if (!supply.path) return fail("no road connection to a settlement you hold");
+  if (!supply.ok) return fail("that road connection is cut");
+  if (player.resource < CONFIG.blockades.buildCost) return fail("not enough scrap");
+  return { ok: true, crew };
+}
+
+function runBuildBlockade(state, { pid, player, params }) {
+  player.resource -= CONFIG.blockades.buildCost;
+  emit(state, "resource_spent", {
+    player: pid, resource: "Resource", amount: -CONFIG.blockades.buildCost, source: "build-blockade",
+  });
+  // The pinned builder is the unit that paid the Action, so the player's own
+  // choice of crew is honoured rather than re-picked here.
+  const crew = Object.values(state.units).find((u) => u.owner === pid && u.node === params.hex);
+  const b = startBlockade(state, pid, params.hex, crew.uid);
+  return { hex: b.hex, unit: crew.uid, cost: b.cost };
+}
+
 // --- Remove chip (design ruling: chips are removable/replaceable) ------
 // Refit happens at a friendly Location. A removed UNIT chip drops as hex
 // loot (old gear hits the ground — anyone may claim it); a removed
@@ -627,6 +668,7 @@ const ACTIONS = {
   activate: { payer: payLoc("location"), validate: validateActivate, run: runActivate },
   // §17.7 / §17.5 Intelligence A2 + B2 — deploy a Listening Post, run a Saboteur.
   "build-post": { payer: buildPostPayer, validate: validateBuildPost, run: runBuildPost },
+  "build-blockade": { payer: buildBlockadePayer, validate: validateBuildBlockade, run: runBuildBlockade },
   sabotage: { validate: validateSabotage, run: runSabotage }, // once/round stamp is its cost
 };
 

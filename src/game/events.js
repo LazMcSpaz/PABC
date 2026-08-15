@@ -44,6 +44,9 @@ export const EVENT_NAMES = new Set([
   "hex_explored", "unit_spotted", "unit_lost_sight", "ambush_triggered",
   // §17.7 Listening Post (Intelligence A2) lifecycle (APPEND-ONLY).
   "post_built", "post_destroyed", "post_dormant", "post_paid", "post_revealed",
+  // Blockade structures — rail doc §3 lifecycle (APPEND-ONLY).
+  "blockade_started", "blockade_progressed", "blockade_stalled",
+  "blockade_completed", "blockade_failed", "blockade_destroyed",
   // §18.4–§18.13 Diplomacy (APPEND-ONLY — distinct keys).
   "menace_changed", "honor_changed", "deal_struck", "deal_proposed",
   "war_declared", "peace_made",

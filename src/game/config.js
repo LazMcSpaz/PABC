@@ -243,6 +243,25 @@ export const CONFIG = {
   // §17.7 Listening Post (Intelligence A2) — a unit-built, concealed Vision
   // source that survives by stealth, not toughness. Costs scrap to build and
   // a trickle of scrap per Upkeep to keep paid (else it goes dormant).
+  // Blockade structures (docs/rail-road-blockade-design.md §3). Numbers are
+  // the doc's placeholders pending a balance pass — the mechanics are settled,
+  // these are not.
+  blockades: {
+    buildCost: 4,  // §3.1 — 1 Action + scrap to break ground
+    cost: 4,       // §3.1 — total construction progress needed
+    // §3.1 sets a 2-turn floor. cost/buildRate IS that floor, so these two move
+    // together. When §3.4 lands, buildRate becomes the connected settlement's
+    // surplus output and a thin supply line stretches the timeline naturally.
+    buildRate: 2,
+    defense: 6,    // §3.2 — Location-style static baseline, before stacking
+    vision: 1,     // §3.2 — its own sight footprint
+    // §3.2 proposes +defense / +vision / Toll Booth upgrade chips. None are
+    // authored yet; these maps are the hook the content batch fills in, keyed
+    // chipId -> bonus, so blockades.js never branches on a chip id.
+    chipDefense: {},
+    chipVision: {},
+  },
+
   posts: {
     buildCost: 3, // §17.7 — 1 Action + 3 scrap to deploy
     upkeep: 1,    // §17.7 — 1 scrap per Upkeep; unpaid → dormant
