@@ -4,13 +4,12 @@
 // different camera).
 //
 // The art is FLAT-TOP (vertices left and right, flat edges top and bottom),
-// viewed from ~31° above the horizon, which squashes it vertically. It is also
-// not a REGULAR hexagon — the flat edges measure 0.586 of the vertex-to-vertex
-// width rather than 0.5 — so the tiling pitch is derived from the measured
-// shape (see COL_STEP) instead of the usual 0.75 * W. It still tiles exactly:
-// opposite sides are parallel and equal, which is all a hexagon needs. The
-// numbers live in the manifest; scripts/hex-tiles/build_tiles.py documents how
-// each was measured and which two earlier attempts got them wrong.
+// squashed vertically by the camera tilt. The masters are rendered in
+// PERSPECTIVE, which makes their far edge ~25% shorter than their near edge and
+// means the raw shapes cannot tile at any pitch; build_tiles.py rectifies that
+// out, so by the time the renderer sees a tile it is a true regular hexagon.
+// The manifest carries the rectified geometry, and build_tiles.py documents the
+// measurement (and the two traps that produced confident wrong answers).
 //
 // The live board used to be pointy-top, so the renderer transposes: an engine
 // ROW becomes a screen COLUMN.
@@ -60,10 +59,10 @@ export const SKIRT_H = FRAME.skirt * UNIT_Y;  // plinth depth below the near edg
 export const GAP = 1.0;
 // Tiling vectors for a hexagon with opposite sides parallel and equal. The
 // familiar 0.75 * W only holds for a REGULAR hexagon (flat edge = W/2); these
-// tiles measure a flat edge of 0.586 * W, so the horizontal pitch has to come
-// from (W + flat) / 2 or every column overlaps its neighbour and the rims
-// visibly cut into each other. Verified by tiling a single master at this
-// pitch and checking the hexagons share edges exactly.
+// rectified tiles are regular, so this reduces to the textbook 0.75 * W — but
+// it is written from the manifest's own hexFlat so a future art batch with a
+// different footprint still tiles. Verified by tiling a master at this pitch
+// and checking the hexagons share edges exactly.
 export const COL_STEP = ((HEX_W + HEX_FLAT) / 2) * GAP;  // engine row  -> screen x
 export const ROW_STEP = HEX_H * GAP;                     // engine hex.x -> screen y
 

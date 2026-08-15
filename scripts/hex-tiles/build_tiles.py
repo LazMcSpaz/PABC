@@ -11,10 +11,14 @@ per faction at runtime while the plinth stays warm wood:
 plus `src/prototype/hexTiles.json`, the manifest the renderer reads for geometry,
 per-layer crop offsets, and the tags that decide which hex gets which tile.
 
-The camera is locked across every master (verified in measure-spike.py: hex
-width 970px +/-4, vertex row pixel-identical), so the plinth silhouette is
-analytic rather than detected, and hologram-vs-plinth is a warm/cool luminance
-test. No matting model, no hand-masking, fully deterministic.
+Each master is first RECTIFIED -- the renders use a perspective camera, so a
+tile's far edge is ~25% shorter than its near edge and the raw shapes cannot
+tile no matter how they are spaced. See SRC_QUAD below.
+
+The camera is locked across every master, so after rectification the plinth
+silhouette is analytic rather than detected, and hologram-vs-plinth is a
+warm/cool luminance test. No matting model, no hand-masking, fully
+deterministic.
 
     pip install pillow numpy scipy
     python3 scripts/hex-tiles/build_tiles.py
@@ -38,41 +42,64 @@ OUT = os.path.join(ROOT, "public", "assets", "ui", "board", "tiles")
 # import from public/); only the images are served as static assets.
 MANIFEST = os.path.join(ROOT, "src", "prototype", "hexTiles.json")
 
-# --- locked camera rig, in source-image pixels ---------------------------
-# cx/cy is the hexagon's centre; the left/right vertices sit on row cy. hexW is
-# vertex-to-vertex, hexFlat is the length of the near and far edges, hexH the
-# full projected height. skirt is how far the plinth extrudes below the near
-# edge at the centre column.
+# --- perspective rectification -------------------------------------------
+# The masters are rendered with a PERSPECTIVE camera, not an orthographic one:
+# a tile's far edge measures ~410px against a ~544px near edge, a 25% taper.
+# That is why the tiles would not interlock at any pitch -- the far edge of one
+# tile is simply shorter than the near edge of the tile behind it, so the flat
+# edges leave a wedge-shaped gap and the slanted edges collide at the points.
+# No choice of spacing or vertical stretch can fix a shape that is not
+# centrally symmetric.
 #
-# All four are read off features the terrain cannot move, on the tiles where
-# they are unobstructed, and they cross-check:
-#   * side vertices (extreme x of the bright rim)     -> cy = 479, W = 952
-#   * near edge (flat run at the bottom of the rim)   -> y = 693, F = 558
-#   * therefore hexH = 2 * (693 - 479)                -> H = 428
-#   * plinth bottom edge measured at y = 837          -> skirt = 837 - 693 = 144
-#   * implied near-edge slope (W-F)/2 / (H/2) = 0.92, against 0.887 measured
+# The world hexagon IS regular, though: the mean of the far and near edges
+# (477) matches half the measured vertex-to-vertex width (483) to within 1%.
+# So the fix is to undo the camera. The ground hexagon's four non-side vertices
+# form a rectangle in world space, which makes a homography from the measured
+# trapezoid onto a rectangle an exact inverse-perspective for the ground plane.
+# Geometry above the ground (terrain, the plinth) is sheared rather than
+# correctly reprojected -- unavoidable without depth, and visually fine at this
+# tilt.
 #
-# Two earlier passes got this wrong in opposite directions, both by measuring
-# something that is not the hexagon: the hologram's far rim (which rides up
-# over terrain) gave H = 352, too small, and tiles overlapped; the widest
-# SILHOUETTE row gave cy = 522, which is meaningless because a prism has
-# constant width all the way down its vertical edges, and the H fitted from it
-# gave 469, too large, and tiles gapped.
-#
-# NOTE the tiles are NOT regular hexagons: a regular one would have
-# hexFlat == hexW / 2 == 476, and these measure 558. That is fine -- any
-# hexagon with opposite sides parallel and equal tiles the plane -- but the
-# pitch must come from hexFlat, not from the textbook 0.75 * hexW.
+# SRC_QUAD is measured by fitting the four flank edges of the bright rim and
+# intersecting them, on the tiles where the flanks are unobstructed; taking the
+# plateau of the rim's top boundary directly does not work, because terrain
+# rides above the far edge and eats its ends.
+SRC_QUAD = [                       # far-left, far-right, near-right, near-left
+    (508.0 - 205.0, 316.0),
+    (508.0 + 205.0, 316.0),
+    (508.0 + 272.0, 692.0),
+    (508.0 - 272.0, 692.0),
+]
+
+# --- rectified frame, in output pixels -----------------------------------
+# After rectification the tile is a true regular flat-top hexagon: the flat
+# edges are exactly half the vertex-to-vertex width, opposite sides are
+# parallel and equal, and it tiles the plane with pitch
+# ((hexW + hexFlat) / 2, hexH). hexH is now a free choice -- it is the
+# apparent camera elevation -- rather than something to measure.
 FRAME = {
-    "src": 1024,
-    "cx": 508,
-    "cy": 479,
-    "hexW": 952,
-    "hexFlat": 558,
-    "hexH": 428,
-    "skirt": 144,
+    "src": 1400,
+    "srcH": 1500,
+    "cx": 700,
+    "cy": 780,
+    "hexW": 966,
+    "hexFlat": 483,
+    "hexH": 376,
+    "skirt": 100,   # measured on the rectified frame, consistent to +/-1px
     "orientation": "flat-top",
+    "rectified": True,
 }
+
+def _rectify_coeffs():
+    """Homography mapping OUTPUT pixels back to the master (PIL's convention)."""
+    cx, cy, w, f, h = FRAME["cx"], FRAME["cy"], FRAME["hexW"], FRAME["hexFlat"], FRAME["hexH"]
+    dst = [(cx - f / 2, cy - h / 2), (cx + f / 2, cy - h / 2),
+           (cx + f / 2, cy + h / 2), (cx - f / 2, cy + h / 2)]
+    A, B = [], []
+    for (x, y), (u, v) in zip(dst, SRC_QUAD):
+        A.append([x, y, 1, 0, 0, 0, -u * x, -u * y]); B.append(u)
+        A.append([0, 0, 0, x, y, 1, -v * x, -v * y]); B.append(v)
+    return tuple(np.linalg.solve(np.array(A, float), np.array(B, float)))
 
 # Resolution of the shipped layers relative to the master. The board draws a
 # hex ~216px wide at scale 1 and BoardViewport zooms to 2.4x, so ~520px is the
@@ -141,11 +168,17 @@ def layer_entry(img, x, y, path, name):
     }
 
 
+RECTIFY = _rectify_coeffs()
+
+
 def build(tile_id, tags):
     src = os.path.join(MASTERS, tile_id + ".jpeg")
     if not os.path.exists(src):
         raise SystemExit(f"missing master: {src}")
-    a = np.asarray(Image.open(src).convert("RGB")).astype(np.float32)
+    master = Image.open(src).convert("RGB")
+    flat = master.transform((FRAME["src"], FRAME["srcH"]), Image.PERSPECTIVE,
+                            RECTIFY, Image.BICUBIC)
+    a = np.asarray(flat).astype(np.float32)
     H, W, _ = a.shape
     R, G, B = a[..., 0], a[..., 1], a[..., 2]
     lum = 0.2126 * R + 0.7152 * G + 0.0722 * B

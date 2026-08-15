@@ -13,59 +13,53 @@ in §5 are not done. Open questions are in [Decisions](#6-decisions).
 
 ## 1. What the art actually is (measured, not eyeballed)
 
-`scripts/hex-tiles/measure-spike.py` measured the renders. The headline is
-good news:
+Measured, and re-measured twice after the first two answers turned out to be
+confidently wrong:
 
-| Property | Value | Spread across the 14 |
+| Property | Value | Notes |
 |---|---|---|
-| Canvas | 1024 × 1024 JPEG | — |
-| Hex width (vertex→vertex) | **952 px** | ±9 px |
-| Hex centre | **(508, 479)** | ±3 px |
-| Near edge (flat run) | **558 px** at y **693** | ±3 px |
-| Projected top-face height | **428 px** | = 2 × (693 − 479) |
-| Plinth skirt height (at centre) | **144 px** | bottom edge at y 837 |
-| Tallest geometry above centreline | 258–335 px | varies by tile (as expected) |
+| Canvas | 1024 × 1024 JPEG | opaque, no alpha |
+| Near edge of the ground hexagon | **544 px** at y 692 | fitted from the flanks |
+| Far edge of the ground hexagon | **410 px** at y 316 | **25% shorter than the near edge** |
+| Side vertices | **(25, 472)** and **(992, 472)** | width 966 |
+| Plinth bottom (centre) | y **837** | |
 
-**The camera is locked.** Every tile was rendered from the same rig, so tile
-geometry is a set of constants rather than something to detect per-image. That
-is what makes the whole plan cheap.
+**The renders are perspective, not orthographic.** That single fact caused every
+tiling problem: a tile's far edge is a quarter shorter than its near edge, so
+the far edge of one tile can never meet the near edge of the tile behind it.
+The flat edges stay parallel but leave a wedge-shaped gap, and the slanted
+edges collide at the points. No choice of pitch, spacing or vertical stretch
+can fix a shape that is not centrally symmetric — which is why two earlier
+attempts to re-measure the "hexagon" only traded overlap for gaps.
 
-Getting these right took three attempts, and the two failures are worth
-recording because both came from measuring something that is not the hexagon:
+**The world hexagon is regular, though.** The mean of the far and near edges
+(477) matches half the measured vertex-to-vertex width (483) to within 1%. So
+the shape is right and only the camera is wrong, which means it can be undone.
 
-- **The hologram's far rim** gave a height of 352. But the far half of the top
-  face is hidden behind the terrain, and the rim rides up over it, so the rim
-  is not the hexagon's edge. Tiles packed at 75% of their true pitch and
-  overlapped.
-- **The widest silhouette row** gave a centre of y = 522, which is meaningless:
-  a prism has constant width all the way down its vertical edges, so "widest
-  row" is degenerate and `argmax` just lands somewhere in that band. The height
-  fitted from it came out 469 — too large — and tiles gapped.
+**The fix is rectification.** The ground hexagon's four non-side vertices form
+a rectangle in world space, so a homography from the measured trapezoid onto a
+rectangle is an exact inverse-perspective for the ground plane.
+`build_tiles.py` applies it to every master before splitting layers. Afterwards
+each tile is a true regular flat-top hexagon — flat edges exactly half the
+vertex width, opposite sides parallel and equal — and tiles the plane by
+construction. Geometry above the ground (terrain, the plinth) is sheared rather
+than correctly reprojected, which is unavoidable without depth and looks fine
+at this tilt.
 
-What works is measuring only features the terrain cannot move, on the tiles
-where they are unobstructed: the **side vertices** (extreme x of the bright
-rim → centre y = 479, width 952) and the **near edge** (the flat run at the
-bottom of the rim → 558 px at y = 693). Height follows as 2 × (693 − 479) =
-428, and the plinth's bottom edge at y = 837 gives a 144 px skirt. The implied
-near-edge slope is 0.92 against 0.887 measured independently — consistent.
+Rectified frame: hexW **966**, hexFlat **483**, hexH **376**, skirt **100**,
+centre (700, 780) on a 1400 × 1500 canvas. `hexH` is now a free parameter — it
+*is* the apparent camera elevation — rather than something to measure.
 
-Verified, rather than assumed, by tiling one master at the derived pitch and
-checking that the hexagons share edges exactly.
+Two measurement traps worth recording, since both produced confident wrong
+answers:
 
-Three facts that *don't* match the existing pipeline doc and drive most of the
-work below:
-
-1. **The hexes are flat-top** (vertices left and right, flat edges top and
-   bottom). `docs/blender-hex-tile-pipeline.md` specifies pointy-top, and the
-   live board renders pointy-top.
-2. **Camera elevation is ~31°**, not the 45–55° the pipeline doc specifies.
-2b. **The tiles are not REGULAR hexagons.** A regular flat-top hexagon has a
-   flat edge of exactly half its vertex-to-vertex width; these measure 0.586 of
-   it. They still tile the plane exactly — opposite sides are parallel and
-   equal, which is all a hexagon needs — but the pitch has to be derived from
-   the measured flat edge, not from the textbook `0.75 × W`.
-3. **Opaque JPEG, no alpha.** The doc asks for WebP + alpha. The dark misty
-   background has to be keyed out.
+- **The hologram's far rim is not the hexagon's far edge.** Terrain rides above
+  it, so reading the topmost rim pixel gives a peak, and reading the rim's flat
+  plateau gives an edge whose ends terrain has eaten. Fit the *flanks* and
+  intersect them instead.
+- **The widest silhouette row is not the hexagon's centre.** A prism has
+  constant width all the way down its vertical edges, so "widest row" is
+  degenerate and `argmax` lands arbitrarily inside that band.
 
 Inventory, using the author's labels (16 masters, after two coastline
 additions): 1 plains, 2 forest, 3 mountain/plateau, 3 inland settlements,
@@ -83,7 +77,7 @@ Do **not** hue-rotate the whole image (it drags the wooden plinth with it and
 barely moves near-white pixels), and do **not** regenerate 4 coloured copies per
 tile (56 files, colour drift, no smooth transitions, no contested states).
 
-Split each source JPEG, offline, into three layers:
+Split each rectified master, offline, into three layers:
 
 | Layer | Contents | How it's used |
 |---|---|---|
@@ -93,8 +87,8 @@ Split each source JPEG, offline, into three layers:
 
 Separation is deterministic — no ML, no manual masking:
 
-- The plinth silhouette is **analytic** (locked camera ⇒ the prism is a known
-  flat-top hexagon plus a 139 px extrusion).
+- The plinth silhouette is **analytic** (locked camera + rectification ⇒ the
+  prism is a known regular hexagon plus a 100 px extrusion).
 - Hologram vs plinth is a two-line classifier: the hologram is cool and
   emissive (`B − R > 4`, luminance > 50), the plinth is warm and only ever lit.
 
@@ -130,7 +124,7 @@ this needs no new math: `buildHexGrid` already stamps every hex with
 `x = col - (width-1)/2`, which encodes the half-row interlock. So:
 
 ```js
-screenX = hex.row * (0.75 * HEX_W * gap)
+screenX = hex.row * ((HEX_W + HEX_FLAT) / 2 * gap)
 screenY = hex.x   * (HEX_H * gap)
 ```
 
