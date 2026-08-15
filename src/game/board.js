@@ -295,7 +295,7 @@ export function assignRoads(adjacency, hexes, settlementHexes, valueOfHex = () =
 // Constrained-random layout: place the 10 Locations, then fill the rest
 // with encounter / terrain tiles. Each faction's two affiliated Locations
 // land within 2 hexes of each other; the four start areas are spread.
-export function generateLayout(rng, grid, factions, locations) {
+export function generateLayout(rng, grid, factions, locations, { locationBudget } = {}) {
   const hexIds = Object.keys(grid.hexes);
   const distFrom = {};
   for (const id of hexIds) distFrom[id] = bfsDistances(grid.adjacency, id);
@@ -315,6 +315,21 @@ export function generateLayout(rng, grid, factions, locations) {
     }
     anchors.push(best);
   }
+
+  // Which named Locations are in play at this board size. The order is
+  // deliberate and faction-symmetric: every capital, then the unaffiliated
+  // prizes, then every faction's second home. Truncating anywhere in that
+  // sequence leaves the factions equal to each other, which truncating a
+  // shuffled list would not.
+  const fids = Object.keys(factions);
+  const capitals = fids.map((f) => factions[f].capital).filter(Boolean);
+  const seconds = fids
+    .map((f) => (factions[f].affiliatedLocations || []).find((l) => l !== factions[f].capital))
+    .filter(Boolean);
+  const unaffiliated = Object.values(locations).filter((l) => !l.affiliation).map((l) => l.id);
+  const order = [...capitals, ...unaffiliated, ...seconds];
+  const budget = Math.max(capitals.length, Math.min(locationBudget ?? order.length, order.length));
+  const inPlay = new Set(order.slice(0, budget));
 
   const placement = {}; // hexId -> locationId
   const factionStart = {}; // factionId -> hexId
@@ -337,11 +352,14 @@ export function generateLayout(rng, grid, factions, locations) {
           (p, q) => VALUE_RANK[locations[p].strategicValue] - VALUE_RANK[locations[q].strategicValue],
         )[0];
     const other = affiliated.find((l) => l !== start);
-    const pair = [start, other];
-    placement[anchor] = pair[0];
+    placement[anchor] = start;
     factionStart[fid] = anchor;
     used.add(anchor);
 
+    // The second home Location only exists on boards that budgeted for it. On
+    // a small map a faction holds its capital and nothing else, which is the
+    // point: fewer objectives, more ground between them.
+    if (!other || !inPlay.has(other)) return;
     let candidates = hexIds.filter(
       (id) => !used.has(id) && distFrom[anchor][id] >= 1 && distFrom[anchor][id] <= 2,
     );
@@ -349,13 +367,12 @@ export function generateLayout(rng, grid, factions, locations) {
       candidates = hexIds.filter((id) => !used.has(id) && distFrom[anchor][id] <= 3);
     }
     const partner = rng.pick(candidates);
-    placement[partner] = pair[1];
+    placement[partner] = other;
     used.add(partner);
   });
 
   // unaffiliated Locations — biased toward hexes far from every anchor
-  const unaffiliated = Object.values(locations).filter((l) => !l.affiliation).map((l) => l.id);
-  for (const locId of unaffiliated) {
+  for (const locId of unaffiliated.filter((id) => inPlay.has(id))) {
     const ranked = hexIds
       .filter((id) => !used.has(id))
       .map((id) => ({ id, score: Math.min(...anchors.map((a) => distFrom[a][id])) }))
@@ -369,8 +386,12 @@ export function generateLayout(rng, grid, factions, locations) {
   // everything else splits into encounter / terrain
   const type = {};
   for (const id of hexIds) if (placement[id]) type[id] = "location";
-  rng.shuffle(hexIds.filter((id) => !used.has(id))).forEach((id, i) => {
-    type[id] = i < CONFIG.hexSplit.encounter ? "encounter" : "terrain";
+  // Encounters are a SHARE of what's left, not a fixed count — a fixed count
+  // meant every hex added to a bigger board became plain terrain.
+  const spare = hexIds.filter((id) => !used.has(id));
+  const nEncounter = Math.round(spare.length * CONFIG.hexSplit.encounterShare);
+  rng.shuffle(spare).forEach((id, i) => {
+    type[id] = i < nEncounter ? "encounter" : "terrain";
   });
 
   return { type, placement, factionStart, anchors };

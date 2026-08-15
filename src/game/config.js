@@ -123,9 +123,36 @@ export const CONFIG = {
     linksByValue: { low: 1, medium: 1, high: 2, veryHigh: 2 },
   },
 
-  // The v0.1 test board.
+  // The v0.1 test board — still the default when no map size is given, so
+  // headless games and the harness keep their existing layouts.
   testMap: [3, 4, 5, 6, 5, 4, 3], // 30 hexes
-  hexSplit: { location: 10, encounter: 13, terrain: 7 },
+
+  // Board sizes offered on the setup screen. `rows` is the row-width array
+  // fed to buildHexGrid; the bigger ones are hexagons-of-hexes of radius
+  // 4/5/6, which is what keeps the board round rather than lozenge-shaped.
+  //
+  // `locations` is how many of the named Locations get placed. This is the
+  // real scarcity dial: a small map with all ten settlements has an objective
+  // every other hex and nothing to march across. Placement fills in a fixed
+  // order that keeps factions symmetric — every capital first, then the
+  // unaffiliated prizes, then each faction's second home Location — so a
+  // budget of 6 gives everyone exactly one home and two neutral targets
+  // rather than handing one faction two cities and another none.
+  //
+  // NOTE the ceiling: src/game/content.js defines ten Locations, so `large`
+  // and `huge` are content-capped, not design-capped. Authoring more named
+  // Locations is what makes the big maps denser.
+  mapSizes: {
+    small:  { rows: [3, 4, 5, 6, 5, 4, 3], locations: 6 },   //  30 hexes, diameter 6
+    medium: { rows: [5, 6, 7, 8, 9, 8, 7, 6, 5], locations: 8 },  //  61 hexes, diameter 8
+    large:  { rows: [6, 7, 8, 9, 10, 11, 10, 9, 8, 7, 6], locations: 10 }, // 91, diameter 10
+    huge:   { rows: [7, 8, 9, 10, 11, 12, 13, 12, 11, 10, 9, 8, 7], locations: 10 }, // 127, d 12
+  },
+
+  // Of the hexes left over after Locations are placed, this share become
+  // encounters and the rest plain terrain. Was an absolute count (13), which
+  // silently stopped scaling the moment the board could grow.
+  hexSplit: { encounterShare: 0.65 },
 
   // Capital chip bonuses (content/config.csv).
   capital: { garrisonBonus: 2, productionBonus: 2 },

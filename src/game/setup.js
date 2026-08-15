@@ -39,6 +39,10 @@ export function createGame({
   factionIds,
   humanFactionId = null,
   minors = [], // §18.4.1 — a VARIABLE subset of minor faction ids to seed
+  // "small" | "medium" | "large" | "huge" (CONFIG.mapSizes). Omitted means
+  // the legacy testMap board, so headless callers and the harness keep the
+  // exact layouts they had before board size became selectable.
+  mapSize = null,
 } = {}) {
   const rng = makeRng(seed);
   const uid = createIdGen();
@@ -48,8 +52,10 @@ export function createGame({
   const seededMinors = (minors || []).filter((m) => MINOR_FACTIONS[m]);
   const playing = [...majors, ...seededMinors];
 
-  const grid = buildHexGrid(CONFIG.testMap);
-  const layout = generateLayout(rng, grid, FACTIONS, LOCATIONS);
+  const size = (mapSize && CONFIG.mapSizes[mapSize]) || null;
+  const grid = buildHexGrid(size ? size.rows : CONFIG.testMap);
+  const layout = generateLayout(rng, grid, FACTIONS, LOCATIONS,
+    { locationBudget: size ? size.locations : undefined });
 
   // chip-instance registry — every chip in play has a uid
   const chips = {};

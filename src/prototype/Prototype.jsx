@@ -243,9 +243,9 @@ function buildLocView(state, hex, isYourTurn) {
 // §18.4.1 — field a VARIABLE subset of minors per game so no two casts (and
 // therefore no two political webs) recur. Two distinct minors chosen by seed.
 const MINOR_POOL = ["tempest", "croppers", "steeltraders", "dambarans"];
-function bootGame(seed, humanFactionId) {
+function bootGame(seed, humanFactionId, mapSize) {
   const minors = [MINOR_POOL[seed % 4], MINOR_POOL[(seed + 2) % 4]];
-  const game = createGame({ seed, humanFactionId, minors });
+  const game = createGame({ seed, humanFactionId, minors, mapSize });
   startTurn(game);
   driveAIsThroughHumanTurn(game);
   return game;
@@ -276,7 +276,7 @@ export default function Prototype({ config, onNewGame }) {
   // and bump a tick to trigger a re-adapt + re-render after each mutation.
   const gameRef = useRef(null);
   if (!gameRef.current) {
-    gameRef.current = bootGame(config?.seed ?? 42, config?.humanFactionId ?? "versari");
+    gameRef.current = bootGame(config?.seed ?? 42, config?.humanFactionId ?? "versari", config?.mapSize);
     // Dev handle — lets the screenshot harness / console stage scenarios.
     if (typeof window !== "undefined") window.__ashland = gameRef.current;
   }

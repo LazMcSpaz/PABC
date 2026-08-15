@@ -27,6 +27,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { FACTIONS as UI_FACTIONS } from "./data.js";
 import { C, CornerBrackets } from "./HudChrome.jsx";
 import { useIsPhone } from "./useViewport.js";
+import { CONFIG } from "../game/config.js";
 import "./prototype.css";
 
 // ─── constants ──────────────────────────────────────────────────────────────
@@ -48,13 +49,16 @@ const TAGLINE = {
   plainers:  "Wasteland raiders · opportunistic",
 };
 
-// Placeholder hex counts — ascending, placeholder values for UI display only.
-const MAP_SIZES = [
-  { id: "small",  label: "Small",  hexes: 30  },
-  { id: "medium", label: "Medium", hexes: 54  },
-  { id: "large",  label: "Large",  hexes: 85  },
-  { id: "huge",   label: "Huge",   hexes: 128 },
-];
+// Read straight off the engine's own board table, so the counts shown are the
+// board you actually get. They were placeholders, and worse, `mapSize` never
+// reached createGame at all — every game was the 30-hex board whatever you
+// picked here.
+const MAP_SIZES = ["small", "medium", "large", "huge"].map((id) => ({
+  id,
+  label: id[0].toUpperCase() + id.slice(1),
+  hexes: (CONFIG.mapSizes[id]?.rows || []).reduce((a, b) => a + b, 0),
+  locations: CONFIG.mapSizes[id]?.locations ?? 0,
+}));
 
 const VICTORY_CONDITIONS = [
   {
