@@ -9,7 +9,6 @@ import { Btn } from "./kit.jsx";
 import HexBoard from "./HexBoard.jsx";
 import HexBoard3D from "./HexBoard3D.jsx";
 import BoardViewport from "./BoardViewport.jsx";
-import Inspector from "./Inspector.jsx";
 import UnitCard from "./UnitCard.jsx";
 import ControlMeter from "./ControlMeter.jsx";
 import {
@@ -502,18 +501,12 @@ export default function Prototype({ config, onNewGame }) {
     };
   }
 
-  // Terrain (wasteland) hexes carry no info worth a dialogue, so they
-  // never open the Inspector. Encounter hexes still in their refresh
-  // cooldown (already drawn this run) are skipped too — the player
-  // doesn't need a popup telling them the timer.
+  // Only Locations are worth a window. Terrain carries no info, and an
+  // encounter hex has nothing to say either until you actually move onto it and
+  // draw the card — the board's own `?` mark already tells you it is there, so
+  // a panel that repeats it is a click you have to dismiss for nothing.
   function isInspectableHex(hexId) {
-    const hex = state.hexes[hexId];
-    if (!hex || hex.type === "terrain") return false;
-    if (hex.type === "encounter") {
-      const cd = gameRef.current.world?.encounterHexCooldowns?.[hex.id] || 0;
-      if (gameRef.current.round < cd) return false;
-    }
-    return true;
+    return state.hexes[hexId]?.type === "location";
   }
   function inspectHex(hexId) {
     if (!isInspectableHex(hexId)) {
@@ -981,8 +974,9 @@ export default function Prototype({ config, onNewGame }) {
         <EventFeed engineState={gameRef.current} tick={tick} topOffset={hudOffset + 10} />
       </div>
 
-      {/* HEX DETAIL — locations open the single-window Location view;
-          encounter / terrain hexes keep the tabbed Inspector. */}
+      {/* HEX DETAIL — a Location opens the single-window Location view. It is
+          the only hex kind that opens anything: terrain and encounter hexes
+          have nothing to say that the board is not already showing. */}
       <AnimatePresence>
         {selectedHexId && state.hexes[selectedHexId]?.type === "location" &&
           state.hexes[selectedHexId]?.fog === "visible" && (
@@ -1003,19 +997,6 @@ export default function Prototype({ config, onNewGame }) {
           />
         )}
       </AnimatePresence>
-      {selectedHexId && state.hexes[selectedHexId]?.type !== "location" && (
-        <Inspector
-          state={state}
-          selectedHexId={selectedHexId}
-          selectedUnitId={selectedUnitId}
-          isYourTurn={isYourTurn}
-          onClose={() => setSelectedHexId(null)}
-          onSelectUnit={onSelectUnit}
-          onContest={onContest}
-          onActivate={onActivate}
-          onRecruit={onRecruit}
-        />
-      )}
 
       {/* HUD CHROME — radial / holographic overlays replacing the old
           top bar and bottom dock. */}

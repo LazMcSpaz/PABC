@@ -21,6 +21,7 @@ import { emit } from "./events.js";
 import { isElevation, isCover } from "./board.js";
 import { hasTechNode } from "./tech.js";
 import { revealPost } from "./posts.js";
+import { blockadeVision } from "./blockades.js";
 
 // --- chip schema (§19.7 — scout / watchtower chips are authored later) ---
 // recomputeVisibility reads these OPTIONAL fields off any chip def, so the
@@ -259,6 +260,17 @@ export function recomputeVisibility(state, fid, { emitEvents = true } = {}) {
     if (post.owner !== fid || !post.paid) continue;
     const onElev = isElevation(state.board.hexes[post.hex]);
     for (const h of castVision(state, post.hex, CONFIG.posts.range, onElev)) next.add(h);
+  }
+
+  // Rail doc §3.2 — a completed blockade sees for its owner. A construction
+  // site does not: until it lands there is nothing there but the unit building
+  // it, which is already counted above.
+  const blockades = state.world?.blockades || {};
+  for (const hex in blockades) {
+    const b = blockades[hex];
+    if (b.owner !== fid || !b.done) continue;
+    const onElev = isElevation(state.board.hexes[b.hex]);
+    for (const h of castVision(state, b.hex, blockadeVision(state, b), onElev)) next.add(h);
   }
 
   // §17.7 Detection reveal — any post (not fid's own) whose hex sits within

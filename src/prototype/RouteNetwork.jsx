@@ -16,6 +16,7 @@
 // (src/game/board.js assignRoads) and never move, so this re-renders only when
 // the board itself changes.
 import { routeSegments, trimToEllipse } from "./hexProjection.js";
+import BlockadeMark from "./BlockadeMark.jsx";
 import { HEX_W } from "./hexProjection.js";
 
 // How far short of a Location's centre a route stops. Sized to clear the
@@ -72,12 +73,14 @@ export default function RouteNetwork({ rows, hexes, centers, width, height }) {
   // road network the same way it hides everything else.
   const known = (h) => h && h.fog !== "unexplored";
   const roads = buildPaths(rows, hexes, centers, (h) => known(h) && h.road);
-  // `hex.rail` does not exist in the engine yet — no field, no generator, no
-  // movement rule (see docs/holographic-hex-board-plan.md P9). The renderer is
-  // wired for it, so the day the board stamps rails they appear; until then
-  // this is simply empty rather than inventing a network.
+  // Rail is generated as a capital-to-capital trunk line (board.js
+  // assignRails) and stamped per hex, so this draws whatever that laid down.
   const rails = buildPaths(rows, hexes, centers, (h) => known(h) && h.rail);
-  if (!roads.length && !rails.length) return null;
+  // Blockades sit ON the road network, so they are drawn with it rather than in
+  // the tile layer — which also means they survive the zoom-out unchanged
+  // instead of needing a second implementation at the flat level of detail.
+  const blockades = Object.values(hexes).filter((h) => h.blockade && centers[h.id]);
+  if (!roads.length && !rails.length && !blockades.length) return null;
 
   return (
     <svg
@@ -96,6 +99,15 @@ export default function RouteNetwork({ rows, hexes, centers, width, height }) {
           </g>
         );
       })}
+
+      {blockades.map((h) => (
+        <BlockadeMark
+          key={`blockade-${h.id}`}
+          x={centers[h.id].x}
+          y={centers[h.id].y}
+          blockade={h.blockade}
+        />
+      ))}
     </svg>
   );
 }

@@ -16,6 +16,7 @@ import { onAttack } from "./diplomacy.js";
 import { makeUnit } from "./setup.js";
 import { TECH_NODES, hasTechNode } from "./tech.js";
 import { destroyPost } from "./posts.js";
+import { blockadeAt, blockadeDefense, destroyBlockade } from "./blockades.js";
 
 const fail = (reason) => ({ ok: false, reason });
 
@@ -57,15 +58,20 @@ function chipGarrison(state, loc) {
   return g;
 }
 
-// The strongest unit the controller has standing on a held Location's
-// node, or null — a held Location's defence adds this unit's Strength.
-function defendingUnit(state, loc) {
+// The strongest unit `owner` has standing on `hex`, or null.
+function strongestUnitOn(state, owner, hex) {
   let best = null;
   for (const u of Object.values(state.units)) {
-    if (u.owner !== loc.controller || u.node !== loc.hexId) continue;
+    if (u.owner !== owner || u.node !== hex) continue;
     if (!best || u.strength > best.strength) best = u;
   }
   return best;
+}
+
+// The strongest unit the controller has standing on a held Location's
+// node, or null — a held Location's defence adds this unit's Strength.
+function defendingUnit(state, loc) {
+  return strongestUnitOn(state, loc.controller, loc.hexId);
 }
 
 // Combined effective Strength of every unit `owner` has stacked on `hex`.
@@ -220,6 +226,16 @@ function resolveTarget(state, pid, unit, params) {
     return { ok: true, kind: "post", post };
   }
 
+  // Rail doc §3.3 — attack an enemy blockade on this hex (explicit target).
+  // A construction site is a legal target too: destroying one is exactly how
+  // you stop a blockade from existing, and it is much the easier moment.
+  if (params.target === "blockade") {
+    const b = blockadeAt(state, node);
+    if (!b) return fail("no blockade on this hex");
+    if (b.owner === pid) return fail("cannot contest your own blockade");
+    return { ok: true, kind: "blockade", blockade: b };
+  }
+
   if (params.target && state.units[params.target]) {
     const tu = state.units[params.target];
     if (tu.node !== node) return fail("that unit is not on your unit's hex");
@@ -249,6 +265,18 @@ function defenderValue(state, t) {
   // §17.7 — a listening post defends as a standing garrison: Strength 5, no
   // chip/garrison/unit additions (it has no troops).
   if (t.kind === "post") return t.post.strength;
+  // Rail doc §3.2 — a completed blockade's static defense, plus the Strength of
+  // any friendly unit standing on it. That is the same defender-stacking a
+  // Location gets, and it is deliberate: the structure is a force multiplier for
+  // a garrison, not a replacement for one.
+  //
+  // A site still under construction has no defense of its own — §3.1 is
+  // explicit that a builder attacked mid-build fights as an ordinary unit — so
+  // it contributes only the stack.
+  if (t.kind === "blockade") {
+    const base = t.blockade.done ? blockadeDefense(state, t.blockade) : 0;
+    return base + stackStrength(state, t.blockade.owner, t.blockade.hex);
+  }
   const loc = t.loc;
   // §17.5 Military B2 (Citadel) adds +2 garrison Strength here (derived).
   let v = loc.garrison + chipGarrison(state, loc) + citadelGarrison(state, loc);
@@ -336,6 +364,7 @@ function captureLocation(state, loc, victor) {
   loc.activeBuild = null;
   loc.buildProgress = 0;
   loc.buildSlider = CONFIG.economy.defaultSlider;
+  loc.buildPriority = "blockade"; // rail doc §3.4 — a captor inherits the default
   emit(state, "location_captured", { hex: loc.hexId, controller: victor, from });
 
   // §16.5 severed supply — any in-transit reinforcement whose origin was
@@ -710,9 +739,16 @@ export function runContest(state, { pid, params, ctx = {} }) {
     t.kind === "location" && !t.loc.sections.includes("neutral")
       ? defendingUnit(state, t.loc)
       : null;
-  const defenderUnit = t.kind === "raid" ? t.unit : locDefUnit;
+  // Rail doc §3.2 — a blockade is defended by whoever is standing on it, the
+  // same way a Location is. That unit rolls, takes the casualty on a loss, and
+  // is why holding a blockade with a garrison is worth more than leaving it bare.
+  const blockadeDefUnit = t.kind === "blockade"
+    ? strongestUnitOn(state, t.blockade.owner, t.blockade.hex)
+    : null;
+  const defenderUnit = t.kind === "raid" ? t.unit : (locDefUnit || blockadeDefUnit);
   const defHex = t.kind === "raid" ? t.unit.node
     : t.kind === "post" ? t.post.hex
+    : t.kind === "blockade" ? t.blockade.hex
     : t.loc.hexId;
 
   // §17.5 Military B1 (Turrets): defending a hex you CONTROL grants +1 contest
@@ -721,9 +757,10 @@ export function runContest(state, { pid, params, ctx = {} }) {
   const defLocHere = state.locations[defHex];
   const defenderHexOwner = t.kind === "raid" ? t.unit.owner
     : t.kind === "post" ? t.post.owner
+    : t.kind === "blockade" ? t.blockade.owner
     : t.loc.controller;
   const turrets = !!(defLocHere && defLocHere.controller && defLocHere.controller === defenderHexOwner
-    && t.kind !== "post" && hasTechNode(state, defLocHere.controller, "mil-b1"));
+    && t.kind !== "post" && t.kind !== "blockade" && hasTechNode(state, defLocHere.controller, "mil-b1"));
 
   // Combined stack Strength: every friendly unit on the contesting hex
   // fights together, so their Strengths sum (Concentration is added on top).
@@ -785,13 +822,19 @@ export function runContest(state, { pid, params, ctx = {} }) {
   // §17.5 Military entry (Doctrine): +1 to that player's contest roll,
   // whether they are attacking or defending. The defending player is the
   // raided unit's owner / the Location's controller (even garrison-only). A
-  // listening post (§17.7) has no controlling unit, so no Doctrine bonus.
+  // listening post (§17.7) has no controlling unit, so no Doctrine bonus — and
+  // by the same reasoning an UNDEFENDED blockade gets none either, while one
+  // with a unit standing on it does (that unit is the doctrine).
   const milAmt = TECH_NODES["mil-entry"].effect.amount;
   const defOwner = t.kind === "raid" ? t.unit.owner
     : t.kind === "post" ? t.post.owner
+    : t.kind === "blockade" ? t.blockade.owner
     : t.loc.controller;
+  const defHasTroops = t.kind !== "blockade" ||
+    Object.values(state.units).some((u) => u.owner === t.blockade.owner && u.node === t.blockade.hex);
   const atkMilitary = hasTechNode(state, pid, "mil-entry") ? milAmt : 0;
-  const defMilitary = defOwner && t.kind !== "post" && hasTechNode(state, defOwner, "mil-entry") ? milAmt : 0;
+  const defMilitary = defOwner && t.kind !== "post" && defHasTroops
+    && hasTechNode(state, defOwner, "mil-entry") ? milAmt : 0;
   // §17.5 Military A1 (Vanguard): +1 to the INITIATOR's roll (you attacking) —
   // ADDS to Doctrine (so +2 attacking, +1 defending for a holder of both).
   const atkVanguard = hasTechNode(state, pid, "mil-a1") ? 1 : 0;
@@ -814,7 +857,8 @@ export function runContest(state, { pid, params, ctx = {} }) {
   }
 
   // §17.7 — a listening post defends as a standing garrison and rolls 1d6.
-  const defenderRollsDie = t.kind === "raid" || t.kind === "post" || (t.kind === "location" && !!defenderUnit);
+  const defenderRollsDie = t.kind === "raid" || t.kind === "post" || t.kind === "blockade" ||
+    (t.kind === "location" && !!defenderUnit);
   const initiatorRoll = state.rng.roll(CONFIG.contestDieSides);
   const defenderRoll = defenderRollsDie ? state.rng.roll(CONFIG.contestDieSides) : 0;
   const initiatorTotal = atkStrength + atkConcentration + atkVeteran + atkMilitary + atkVanguard + atkAmbush + initiatorRoll;
@@ -872,6 +916,14 @@ export function runContest(state, { pid, params, ctx = {} }) {
       loseBaseStrength(state, winnerUnit.uid, 1, null, ctx, note);
     }
   } else {
+    // Rail doc §3.3 — destroy-only, no capture/flip: a blockade has no VP or
+    // economic identity worth inheriting. Attrition below then runs normally,
+    // so a unit garrisoning it takes the loser's casualty exactly as it would
+    // defending anything else.
+    if (t.kind === "blockade" && won) {
+      destroyBlockade(state, t.blockade.hex, pid);
+      recomputeVisibilityFor(state, [t.blockade.owner, pid], { emitEvents: false });
+    }
     // 1. Loser −1 (garrison loser has no unit to wound). §17.5 Military A2
     //    (Killing Blow): a winning ATTACKER holding A2 drops the loser by 2.
     const loserLoss = won && hasTechNode(state, pid, "mil-a2") ? 2 : 1;

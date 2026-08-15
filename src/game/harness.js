@@ -9,7 +9,7 @@ import { emit } from "./events.js";
 import { recomputeStats, recomputeResearch, assignTechNode, effectiveVeteran } from "./stats.js";
 import { recomputeInfluence, zocOwner, inZoC } from "./influence.js";
 import { reinforcementRoute, bfsDistances, movementField, movementRoute } from "./board.js";
-import { passesFreely, movementBlockers, unitReach, unitIgnoresTerrain } from "./movement.js";
+import { passesFreely, movementBlockers, unitReach, unitIgnoresTerrain, supplyCutter } from "./movement.js";
 import { recomputeVisibility, isUnitVisibleTo, revealRegion, unitVision, isHexVisible } from "./visibility.js";
 import {
   ensureDiplomacy, menaceFromAttack, onAttack,
@@ -37,6 +37,10 @@ import { FACTIONS, LOCATIONS, ABILITIES, REACTIVES, CHIPS, chipBlocksRail } from
 import { resolveSalvage } from "./contest.js";
 import { readRivalIntel } from "./intel.js";
 import { postAt, isPostVisibleTo, chargePostUpkeep } from "./posts.js";
+import {
+  blockadeAt, activeBlockadeAt, creditCap, roadSupplyPath,
+  blockadeDefense, blockadeVision, blockadeIncome, destroyBlockade,
+} from "./blockades.js";
 import { loadFieldEncounters, findUnsupportedTypes, choiceIsRunnable, WORLD_ENCOUNTERS } from "./content-loader.js";
 import { pickHexByFilter, encounterRedrawBudget } from "./encounters.js";
 import { resolveTokens } from "./textTokens.js";
@@ -1817,6 +1821,383 @@ line("\n  [Tech Wheel §17.7] Listening Post");
     chargePostUpkeep(g, me);
     check("Listening Post: paying upkeep reactivates the post",
       post.paid === true && g.players[me].resource === 4);
+  }
+}
+
+// =====================================================================
+// AMBUSH HALTS — a blocker you could not see stops you, but costs you the
+// ADVANCE rather than the whole turn. A blocker you could see costs both.
+// =====================================================================
+line("\n  [§16.2] Halted by something you could not see");
+{
+  // `me`'s lone unit in open country with one enemy planted `range` hexes
+  // ahead. Every other vision source `me` has is stripped (other units, its
+  // Locations, its ZoC) so the mover's OWN sight is the only thing deciding
+  // whether the blocker is a surprise — which is the whole variable here.
+  const stage = (range) => {
+    const g = createGame({ seed }); startTurn(g);
+    const me = g.turnOrder[0], foe = g.turnOrder[1];
+    const u = Object.values(g.units).find((x) => x.owner === me);
+    const fu = Object.values(g.units).find((x) => x.owner === foe);
+    for (const x of Object.values(g.units)) {
+      if (x.uid !== u.uid && x.uid !== fu.uid) delete g.units[x.uid];
+    }
+    for (const l of Object.values(g.locations)) if (l.controller === me) l.controller = null;
+    g.world.zoc = {};
+
+    // Plain ground only — a mountain or forest would halt or tax the move for
+    // reasons that have nothing to do with the blocker.
+    const plain = (h) => g.board.hexes[h] && !g.locations[h] &&
+      !g.board.hexes[h].elevation && !g.board.hexes[h].cover;
+    const start = Object.keys(g.board.hexes).find(
+      (h) => plain(h) && (g.board.adjacency[h] || []).filter(plain).length >= 2);
+    u.node = start; u.moveRemaining = 6; u.turnStartNode = start; u.checked = false;
+
+    const d = bfsDistances(g.board.adjacency, start);
+    const blockHex = Object.keys(g.board.hexes)
+      .filter((h) => plain(h) && d[h] === range).sort()[0];
+    if (!blockHex) throw new Error(`no plain hex ${range} from ${start} on seed ${seed}`);
+    fu.node = blockHex;
+    recomputeStats(g);
+    g.players[me].actions.remaining = 9;
+    recomputeVisibility(g, me, { emitEvents: false });
+    // A hex one step further out than the blocker — where "pressing on" leads.
+    const beyond = (g.board.adjacency[blockHex] || []).find((h) => plain(h) && d[h] === range + 1);
+    return { g, me, foe, u, fu, start, blockHex, beyond, d };
+  };
+
+  // Unseen (3 hexes out, past the mover's own sight): keeps the remainder.
+  {
+    const { g, me, u, blockHex } = stage(3);
+    const hidden = !isHexVisible(g, me, blockHex);
+    // What the trip WOULD have cost with nothing blocking — the movement the
+    // unit should still be holding once it is stopped by a surprise.
+    const owed = u.moveRemaining - (unitReach(g, u)[blockHex] ?? 0);
+    const before = u.moveRemaining;
+    const mv = performAction(g, "move", { unit: u.uid, to: blockHex });
+    check("Ambush: a halt you could not see keeps the movement you had left",
+      hidden && mv.ok && u.node === blockHex && u.moveRemaining > 0 &&
+      u.moveRemaining === before - owed && u.checked === true);
+  }
+
+  // Seen (adjacent, so the mover's own sight covers it): costs the whole move.
+  {
+    const { g, me, u, blockHex } = stage(1);
+    const seen = isHexVisible(g, me, blockHex);
+    const mv = performAction(g, "move", { unit: u.uid, to: blockHex });
+    check("Ambush: a halt you COULD see still costs the rest of the move",
+      seen && mv.ok && u.node === blockHex && u.moveRemaining === 0 && !u.checked);
+  }
+
+  // Checked units may fall back or sidestep, but not press on. Note the unit
+  // may not have the movement to reach its start hex again — the rule is about
+  // DIRECTION, so the test is too: something strictly closer must be open, and
+  // nothing further out may be.
+  {
+    const { g, me, u, blockHex, beyond, d } = stage(3);
+    performAction(g, "move", { unit: u.uid, to: blockHex });
+    const reach = unitReach(g, u);
+    const closer = Object.keys(reach).filter((h) => (d[h] ?? 99) < d[blockHex]);
+    check("Ambush: a checked unit may fall back toward where it started",
+      u.moveRemaining > 0 && closer.length > 0);
+    check("Ambush: a checked unit may sidestep, but never press on past the blocker",
+      Object.keys(reach).every((h) => (d[h] ?? 99) <= d[blockHex]) &&
+      // `beyond` only exists when the blocker isn't on the board's rim.
+      (!beyond || !(beyond in reach)));
+  }
+
+  // The check lasts the turn, and lifts at the next Upkeep.
+  {
+    const { g, me, u, blockHex, d } = stage(3);
+    performAction(g, "move", { unit: u.uid, to: blockHex });
+    const back = Object.keys(unitReach(g, u))
+      .filter((h) => (d[h] ?? 99) < d[blockHex]).sort()[0];
+    performAction(g, "move", { unit: u.uid, to: back });
+    check("Ambush: the check persists after falling back",
+      u.node === back && u.checked === true);
+    // Round the table back to `me` — its own turn has to END first, or the
+    // loop condition is already satisfied and nothing happens.
+    endTurn(g);
+    while (activePlayerId(g) !== me) endTurn(g);
+    check("Ambush: the next Upkeep clears it",
+      u.checked === false && u.turnStartNode === u.node);
+  }
+}
+
+// =====================================================================
+// BLOCKADE STRUCTURES (docs/rail-road-blockade-design.md §3) — build gating →
+// supply-fed construction → blocking + Vision once complete → destroy-only.
+// =====================================================================
+line("\n  [Rail doc §3] Blockade structures");
+{
+  // A road hex with a friendly unit on it and an intact road link back to a
+  // settlement `me` holds — the standard setup for every case below.
+  const stage = () => {
+    const g = createGame({ seed }); startTurn(g);
+    const me = g.turnOrder[0];
+    const home = Object.values(g.locations).find((l) => l.controller === me);
+    // Nearest road hex to home that isn't a Location, so supply is short and
+    // its path is easy to cut in the tests that want to cut it.
+    const d = bfsDistances(g.board.adjacency, home.hexId);
+    const hex = Object.keys(g.board.hexes)
+      .filter((h) => g.board.hexes[h].road && !g.locations[h])
+      .sort((a, b) => (d[a] ?? 99) - (d[b] ?? 99))[0];
+    const u = Object.values(g.units).find((x) => x.owner === me);
+    u.node = hex; recomputeStats(g);
+    g.players[me].resource = 10; g.players[me].actions.remaining = 5;
+    // Rail doc §3.4 — construction is paid out of the funding settlement's
+    // build output, so pin that down: a generous Output, all of it on the guns
+    // side, and no chip of its own competing unless a case asks for one.
+    home.production = 8; home.buildSlider = 1; home.activeBuild = null;
+    home.buildProgress = 0;
+    return { g, me, hex, u, home };
+  };
+
+  // One Upkeep's worth of economy for `me` — this is what funds blockades now.
+  const upkeep = (g, me) => applyOutputAndBuilds(g, me);
+
+  // Build gating: road hex, a unit to pin, scrap, and a live supply line.
+  {
+    const { g, me, hex, u } = stage();
+    const offRoad = Object.keys(g.board.hexes).find((h) => !g.board.hexes[h].road && !g.locations[h]);
+    const notRoad = performAction(g, "build-blockade", { hex: offRoad });
+    const onLoc = performAction(g, "build-blockade", {
+      hex: Object.values(g.locations).find((l) => l.controller === me).hexId,
+    });
+    const kept = g.players[me].resource; g.players[me].resource = 1;
+    const poor = performAction(g, "build-blockade", { hex });
+    g.players[me].resource = kept;
+    const built = performAction(g, "build-blockade", { hex });
+    const twice = performAction(g, "build-blockade", { hex });
+    check("Blockade: build needs a road hex, off a Location, with scrap — then succeeds",
+      !notRoad.ok && !onLoc.ok && !poor.ok && built.ok && !twice.ok && !!blockadeAt(g, hex));
+    check("Blockade: costs 4 scrap and starts unfinished, pinning its builder",
+      g.players[me].resource === 6 && blockadeAt(g, hex).done === false &&
+      blockadeAt(g, hex).builder === u.uid);
+    // Step the builder aside to read the SITE's own blocking: with the unit
+    // still on it the hex is blocked either way, and the point of the check is
+    // that a construction site contributes nothing on its own.
+    const parked = u.node;
+    u.node = g.board.adjacency[hex][0]; recomputeStats(g);
+    check("Blockade: an unfinished site is not a blockade and blocks nobody",
+      !activeBlockadeAt(g, hex) && !movementBlockers(g, g.turnOrder[1]).has(hex));
+    u.node = parked; recomputeStats(g);
+  }
+
+  // Construction takes the §3.1 two-turn floor, and completing it frees the
+  // builder while turning the site into a real structure.
+  {
+    const { g, me, hex } = stage();
+    performAction(g, "build-blockade", { hex });
+    upkeep(g, me);
+    const midway = blockadeAt(g, hex);
+    // The settlement produces 8 with the slider fully on build, far more than
+    // the site's whole 4-point cost — the floor is what stops it landing now.
+    check("Blockade: a rich settlement still cannot raise one in a single Upkeep",
+      midway.done === false && midway.progress === creditCap(midway));
+    upkeep(g, me);
+    const done = blockadeAt(g, hex);
+    check("Blockade: a second Upkeep completes it and releases the builder",
+      done.done === true && done.builder === null && !!activeBlockadeAt(g, hex));
+  }
+
+  // §3.1 — the builder is the real cost. Walk it off and construction fails.
+  {
+    const { g, me, hex, u } = stage();
+    performAction(g, "build-blockade", { hex });
+    u.node = g.board.adjacency[hex][0]; recomputeStats(g);
+    upkeep(g, me);
+    check("Blockade: losing the pinned builder fails construction outright",
+      !blockadeAt(g, hex));
+  }
+
+  // §3.1 — a cut supply line stalls construction rather than failing it.
+  {
+    const { g, me, hex, home } = stage();
+    const foe = g.turnOrder[1];
+    performAction(g, "build-blockade", { hex });
+    // Park an enemy on the road between the site and home.
+    const path = roadSupplyPath(g, me, hex);
+    const cutAt = path[1];
+    const fu = Object.values(g.units).find((x) => x.owner === foe);
+    fu.node = cutAt; recomputeStats(g);
+    upkeep(g, me);
+    const stalled = blockadeAt(g, hex);
+    check("Blockade: an enemy on the supply road stalls construction, not fails it",
+      !!stalled && stalled.done === false && stalled.progress === 0 &&
+      path[path.length - 1] === home.hexId);
+    // Clear the line — every foreign unit, not just the one we parked — and
+    // construction resumes.
+    const offPath = Object.keys(g.board.hexes).find((h) => !path.includes(h));
+    for (const x of Object.values(g.units)) {
+      if (x.owner !== me && path.includes(x.node)) x.node = offPath;
+    }
+    recomputeStats(g);
+    upkeep(g, me);
+    check("Blockade: clearing the road resumes construction",
+      blockadeAt(g, hex).progress === creditCap(blockadeAt(g, hex)));
+  }
+
+  // §3.4 — the blockade outranks the settlement's own chip by default, but only
+  // takes what the floor lets it; the remainder still reaches the chip.
+  {
+    const { g, me, hex, home } = stage();
+    performAction(g, "build-blockade", { hex });
+    home.activeBuild = { kind: "build", chipId: "scrapworks", cost: 99 };
+    home.buildProgress = 0;
+    const site = blockadeAt(g, hex);
+    const cap = creditCap(site);
+    const output = locationOutput(g, home);
+    upkeep(g, me);
+    check("Blockade: outranks the settlement's own chip by default",
+      blockadeAt(g, hex).progress === cap);
+    check("Blockade: takes only its per-turn cap — the rest still reaches the chip",
+      home.buildProgress === output - cap && output > cap);
+  }
+
+  // §3.4 — the toggle flips it, and flips it hard: while a chip is building,
+  // it takes everything and the blockade waits.
+  {
+    const { g, me, hex, home } = stage();
+    performAction(g, "build-blockade", { hex });
+    const set = performAction(g, "set-build-priority", { at: home.hexId, value: "chips" });
+    home.activeBuild = { kind: "build", chipId: "scrapworks", cost: 99 };
+    home.buildProgress = 0;
+    const output = locationOutput(g, home);
+    upkeep(g, me);
+    check("Blockade: the chips-first toggle starves the site while a chip builds",
+      set.ok && blockadeAt(g, hex).progress === 0 && home.buildProgress === output);
+    // Finish the chip and the site resumes — it was waiting, not cancelled.
+    home.activeBuild = null;
+    upkeep(g, me);
+    check("Blockade: with the chip done, a chips-first settlement funds it again",
+      blockadeAt(g, hex).progress === creditCap(blockadeAt(g, hex)));
+    const bad = performAction(g, "set-build-priority", { at: home.hexId, value: "wombat" });
+    check("Blockade: build priority only accepts blockade / chips", !bad.ok);
+  }
+
+  // §3 — once complete it halts enemy movement and sees for its owner.
+  {
+    const { g, me, hex } = stage();
+    const foe = g.turnOrder[1];
+    performAction(g, "build-blockade", { hex });
+    upkeep(g, me);
+    upkeep(g, me);
+    check("Blockade: a completed blockade halts enemy movement",
+      movementBlockers(g, foe).has(hex) && !movementBlockers(g, me).has(hex));
+    // Isolate it as me's only Vision source.
+    for (const uid of Object.keys(g.units)) if (g.units[uid].owner === me) delete g.units[uid];
+    for (const l of Object.values(g.locations)) if (l.controller === me) l.controller = null;
+    g.world.zoc = {};
+    recomputeVisibility(g, me, { emitEvents: false });
+    check("Blockade: a completed blockade is a Vision source for its owner",
+      isHexVisible(g, me, hex));
+  }
+
+  // §3.2 — upgrade chips: queued free, paid by the same settlement draw,
+  // and each one actually changes the thing it says it changes.
+  {
+    const { g, me, hex, home } = stage();
+    performAction(g, "build-blockade", { hex });
+    upkeep(g, me); upkeep(g, me);
+    const b = blockadeAt(g, hex);
+    g.players[me].techLevel = 5;
+
+    // A site still under construction takes no chips — check on a fresh one.
+    const other = stage();
+    other.g.players[other.me].techLevel = 5;
+    performAction(other.g, "build-blockade", { hex: other.hex });
+    const tooSoon = performAction(other.g, "upgrade-blockade",
+      { hex: other.hex, chipId: "palisade" });
+
+    const notBlockadeChip = performAction(g, "upgrade-blockade", { hex, chipId: "works" });
+    const baseDef = blockadeDefense(g, b);
+    const baseVis = blockadeVision(g, b);
+    const queued = performAction(g, "upgrade-blockade", { hex, chipId: "palisade" });
+    check("Blockade chip: queues free onto a FINISHED blockade, and only real ones",
+      !tooSoon.ok && !notBlockadeChip.ok && queued.ok &&
+      b.build.chipId === "palisade" && b.build.progress === 0);
+    const busy = performAction(g, "upgrade-blockade", { hex, chipId: "signal-mast" });
+    check("Blockade chip: one at a time", !busy.ok);
+
+    upkeep(g, me);
+    check("Blockade chip: the funding settlement pays for it, then it installs",
+      b.build === null && b.chips.length === 1 &&
+      blockadeDefense(g, b) === baseDef + CHIPS.palisade.blockadeDefense);
+
+    performAction(g, "upgrade-blockade", { hex, chipId: "signal-mast" });
+    upkeep(g, me);
+    check("Blockade chip: Signal Mast widens its Vision",
+      b.chips.length === 2 && blockadeVision(g, b) === baseVis + CHIPS["signal-mast"].blockadeVision);
+
+    const full = performAction(g, "upgrade-blockade", { hex, chipId: "toll-booth" });
+    check("Blockade chip: slots are finite", !full.ok && CONFIG.blockades.chipSlots === 2);
+
+    // Destroying the structure takes its chips out of play with it.
+    const installed = [...b.chips];
+    destroyBlockade(g, hex, g.turnOrder[1]);
+    check("Blockade chip: destroying the blockade removes its chips from play",
+      installed.every((c) => g.removed.includes(c)) && !blockadeAt(g, hex));
+  }
+
+  // §3.2 Toll Booth — a blockade's own income, independent of its settlement.
+  {
+    const { g, me, hex } = stage();
+    performAction(g, "build-blockade", { hex });
+    upkeep(g, me); upkeep(g, me);
+    const b = blockadeAt(g, hex);
+    g.players[me].techLevel = 5;
+    performAction(g, "upgrade-blockade", { hex, chipId: "toll-booth" });
+    upkeep(g, me);
+    check("Blockade chip: Toll Booth installs and pays its own scrap",
+      b.chips.length === 1 && blockadeIncome(g, me) === CHIPS["toll-booth"].output);
+    const before = g.players[me].resource;
+    upkeep(g, me);
+    check("Blockade chip: the toll lands in the bank each Upkeep",
+      g.players[me].resource >= before + CHIPS["toll-booth"].output);
+  }
+
+  // §3.2/§3.3 — static defense, defender-stacking, and destroy-only.
+  {
+    const { g, me, hex } = stage();
+    const foe = g.turnOrder[1];
+    performAction(g, "build-blockade", { hex });
+    upkeep(g, me);
+    upkeep(g, me);
+    // The builder stays put, so the blockade defends at base + its Strength.
+    while (activePlayerId(g) !== foe) endTurn(g);
+    const fu = Object.values(g.units).find((x) => x.owner === foe);
+    fu.node = hex; fu.baseStrength = 30; fu.moveRemaining = fu.movement; recomputeStats(g);
+    // Snapshot the garrison's Strength BEFORE the contest — losing costs it 1,
+    // so reading it afterwards would compare against the wounded value.
+    const garrisonStrength = Object.values(g.units)
+      .filter((x) => x.owner === me && x.node === hex)
+      .reduce((n, x) => n + x.strength, 0);
+    g.players[foe].actions.remaining = 5; g.rng.roll = () => 6;
+    const r = performAction(g, "contest", { unit: fu.uid, target: "blockade" });
+    check("Blockade: defends at its static value PLUS the stack standing on it",
+      r.kind === "blockade" &&
+      r.defenderValue === CONFIG.blockades.defense + garrisonStrength);
+    check("Blockade: a lost contest destroys it outright — no capture, no flip",
+      r.won && !blockadeAt(g, hex));
+  }
+
+  // §3.1 — a site under construction has no defense of its own; the builder
+  // fights as an ordinary unit.
+  {
+    const { g, me, hex } = stage();
+    const foe = g.turnOrder[1];
+    performAction(g, "build-blockade", { hex });
+    while (activePlayerId(g) !== foe) endTurn(g);
+    const fu = Object.values(g.units).find((x) => x.owner === foe);
+    fu.node = hex; fu.baseStrength = 30; fu.moveRemaining = fu.movement; recomputeStats(g);
+    const builderStrength = Object.values(g.units)
+      .filter((x) => x.owner === me && x.node === hex)
+      .reduce((n, x) => n + x.strength, 0);
+    g.players[foe].actions.remaining = 5; g.rng.roll = () => 6;
+    const r = performAction(g, "contest", { unit: fu.uid, target: "blockade" });
+    check("Blockade: an unfinished site adds no defense — only its builder does",
+      r.defenderValue === builderStrength && r.won && !blockadeAt(g, hex));
   }
 }
 

@@ -329,6 +329,20 @@ export function adaptState(state) {
         owner: g.owner, strength: g.strength, round: g.round, stale: true, false: !!g.false,
       }));
     }
+    // Blockades (rail doc §3). Live sight only — a fortification is not
+    // concealed the way a listening post is, but it can still be built or torn
+    // down behind your back, so a remembered one would be a lie. A site under
+    // construction reports `done: false` so the board can show it as scaffolding
+    // rather than as something that already stops you.
+    const bl = live ? state.world?.blockades?.[h.id] : null;
+    if (bl) {
+      hex.blockade = {
+        owner: bl.owner,
+        done: !!bl.done,
+        progress: bl.progress || 0,
+        cost: bl.cost,
+      };
+    }
     const loot = state.hexLoot?.[h.id];
     if (live && loot?.length) {
       hex.loot = loot.length;

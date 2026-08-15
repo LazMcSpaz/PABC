@@ -254,6 +254,10 @@ function refreshMoveBudget(state, pid) {
     }
     u.fortified = !u.movedSinceUpkeep;
     u.movedSinceUpkeep = false;
+    // Where this unit's turn began, and whether an unseen blocker has since
+    // checked its advance. Both drive the retreat/lateral rule in unitReach.
+    u.turnStartNode = u.node;
+    u.checked = false;
   }
 }
 
@@ -388,6 +392,9 @@ export function startTurn(state) {
   // post goes dormant (no Vision) until repaid. Refresh fog so a post that
   // just went dormant stops contributing sight this turn.
   chargePostUpkeep(state, pid);
+  // Refresh fog last: a post that just went dormant stops contributing sight
+  // this turn, and a blockade that completed during the economy step (rail doc
+  // §3.4 funds construction out of Output) starts.
   recomputeVisibility(state, pid, { emitEvents: false });
 
   // Preparation (the optional stat-buy step) is folded in once Layer 3

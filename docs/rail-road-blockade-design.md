@@ -1,11 +1,100 @@
 # Rail, Blockade, and the Vision-Gating Rework — Design Doc
 
-Design conversation, not yet implemented. Captures three intertwined systems
-that came out of one thread: closing a real gap in how blockade works today,
-a new Rail network as road's genuinely-differentiated counterpart, and a new
-buildable Blockade structure that both depends on and motivates the vision
-rework. Numbers throughout are placeholders pending a balance pass — the
-mechanics are the settled part, the constants aren't.
+Captures three intertwined systems that came out of one thread: closing a real
+gap in how blockade works today, a new Rail network as road's genuinely-
+differentiated counterpart, and a new buildable Blockade structure that both
+depends on and motivates the vision rework. Numbers throughout are placeholders
+pending a balance pass — the mechanics are the settled part, the constants
+aren't.
+
+## Build status
+
+| Part | | Where |
+|---|---|---|
+| 1 — Blockade vision-gating | **deferred, decision pending** | `movementBlockers` is still ground truth (but see *Ambush halts* below) |
+| 2.1 Rail transport | built | `board.js assignRails`, `movement.js unitRailEdges` |
+| 2.2 Rail production pooling | **deferred** | shares a mechanism with 3.4 — build once |
+| 2.3 Rail access | built (endpoints-only) | `movement.js unitRailEdges` |
+| 2.4 Rail generation | built (capital spanning tree) | `board.js assignRails` |
+| 3.1 Blockade construction | built | `blockades.js`, `actions.js build-blockade` |
+| 3.2 Once complete | built, chips included | `blockades.js`, `contest.js`, `visibility.js` |
+| 3.3 Combat and destruction | built | `contest.js` |
+| 3.4 Blockade funding | built | `economy.js`, `blockades.js` |
+
+Rail's production pooling (2.2) is the one piece of the "route output to a
+connected recipient" idea still outstanding. §3.4 landed first and its
+allocator (`processLocationEconomy`) is where 2.2 should join it.
+
+"Cut" has one definition across all three systems, in `movement.js
+supplyCutter`, and that is the single place Part 1 would change.
+
+### Ambush halts — a partial answer to Part 0's gap
+
+Part 1 (a blocker must DETECT the mover before it may halt it) is still
+deferred, but the *worst* symptom of the gap is fixed: being stopped by
+something you had no way to see no longer costs you your whole turn.
+
+`blockerScan` in `movement.js` now returns two sets from one pass — every hex
+that halts you, and the subset whose blocker you cannot perceive. A halt on the
+second kind is a **surprise**, and:
+
+- the mover keeps the movement it had left, instead of arriving with zero;
+- it is **checked** for the rest of the turn: it may fall back or sidestep, but
+  never move further from where its turn began than it currently stands. Without
+  that second half the refund would gut blocking outright — a mover could walk
+  into an ambush, stop, and carry on for the price of one movement point, which
+  would make advancing blind strictly better than scouting;
+- an `advance_checked` event fires, because a unit that stops early with
+  movement still in hand reads as a bug unless the feed says what stopped it.
+
+A blocker you *could* see still costs the full stop — you chose to walk into it.
+"Could see" is per blocker kind: a unit by `isUnitVisibleTo` (so concealment
+counts), a Location by whether the hex is explored (you don't forget where a
+city is), a blockade by live sight (it can go up behind your back).
+
+This needed splitting two numbers that used to be one, in `board.js`:
+`best[hex]` is what the search may path onward with (a halt is still 0, so
+nothing routes through it), and `arrive[hex]` is what a unit standing there
+actually holds. Conflating them is what made an ambush cost a whole turn.
+
+### §3.4 as built — who gets a city's build output
+
+Construction is paid out of the funding settlement's build output on the turn
+it is spent, not from a constant. Three rules resolve the contention:
+
+- **The blockade outranks the city's own chip by default.** A blockade answers
+  something happening on the map now; a chip is an investment that keeps.
+- **A site can only absorb `ceil(cost / minTurns)` per turn.** That is what
+  enforces §3.1's two-turn floor now the rate is variable — a rich city cannot
+  raise one in a single Upkeep — and it doubles as the reason the city is never
+  starved: whatever the site cannot take flows straight on to its own build.
+- **`buildPriority: "chips"` flips it, and flips it hard.** While a chip is
+  under construction it takes everything and the blockade waits until it is
+  done. A player who sets that toggle has decided the building matters more,
+  and a half-measure would only make both slow. Set per Location with the
+  `set-build-priority` action; free, like the guns/butter slider.
+
+Upgrade chips (§3.2) draw on the same line once the structure stands, and are
+NOT floor-capped — an upgrade is ordinary construction, and a rich settlement
+may finish one in a turn exactly as it can at home.
+
+### §3.2 as built — the upgrade chips
+
+Three, in `content.js` as `kind: "blockade"` (so they never appear in a
+Location's build menu), installed into two slots:
+
+| Chip | Effect |
+|---|---|
+| Palisade | +3 blockade defense |
+| Signal Mast | +1 Vision from the blockade |
+| Toll Booth | +1 scrap each Upkeep, independent of the funding settlement |
+
+Bonuses are read off the chip def (`blockadeDefense` / `blockadeVision` /
+`output`), so `blockades.js` never branches on a chip id. Queuing one is free
+and needs no unit present — the builder was released when the structure landed
+— but it does need the supply road open, or the queue would sit at zero
+progress with nothing saying why. Destroying a blockade removes its chips from
+play; there is no salvage.
 
 ## Why this started
 

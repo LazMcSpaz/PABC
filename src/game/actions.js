@@ -5,7 +5,7 @@
 import { emit } from "./events.js";
 import { activePlayerId } from "./targeting.js";
 import { bfsDistances, reinforcementRoute } from "./board.js";
-import { unitReach } from "./movement.js";
+import { unitReach, supplyCutter, unseenBlockers } from "./movement.js";
 import { CONFIG } from "./config.js";
 import { FACTIONS, CHIPS, ABILITIES, chipDefOf, factionDef } from "./content.js";
 import { validateContest, runContest } from "./contest.js";
@@ -17,6 +17,9 @@ import { drawFieldEncounter, resolveMarkerOnHex } from "./encounters.js";
 import { makeUnit } from "./setup.js";
 import { hasTechNode } from "./tech.js";
 import { postAt, buildPost, revealPost } from "./posts.js";
+import {
+  blockadeAt, startBlockade, supplyStatus, blockadeSlotsUsed,
+} from "./blockades.js";
 import {
   meetsTech, meetsLoyalty, slotCapacity, slotsUsed, stationedUnitWithBay,
   techLevelReqFor, upgradeOption, completeBuildIfDone, effectiveBuildCost,
@@ -57,10 +60,24 @@ function runMove(state, { params, ctx }) {
   const unit = state.units[params.unit];
   const from = unit.node;
   const field = unitReach(state, unit);
+  // Did the mover just walk into something it could not see? Read BEFORE the
+  // move, while the destination is still unexplored/unlit for this faction.
+  const ambushed = unseenBlockers(state, unit.owner).has(params.to);
   unit.node = params.to;
   // The field already accounts for forest/road cost, the mountain halt and any
-  // blockade stop, so the remaining budget at the destination is exact.
+  // blockade stop, so the remaining budget at the destination is exact. An
+  // unseen halt leaves the remainder intact rather than zeroing it.
   unit.moveRemaining = Math.max(0, field[params.to] ?? 0);
+  if (ambushed) {
+    // Checked: it keeps its movement but may only fall back or sidestep for the
+    // rest of the turn (unitReach). Being surprised costs you the advance, not
+    // the whole turn.
+    unit.checked = true;
+    unit.turnStartNode = unit.turnStartNode || from;
+    emit(state, "advance_checked", {
+      unit: unit.uid, player: unit.owner, hex: params.to, moveRemaining: unit.moveRemaining,
+    });
+  }
   unit.movedSinceUpkeep = true; // §16.6 fortify — moving voids "dug in"
   // movement/moveRemaining are snapshotted here (not left for a log
   // consumer to read off the live unit later) because both are mutable —
@@ -400,6 +417,25 @@ function runSetSlider(state, { params }) {
   return { hex: loc.hexId, value: loc.buildSlider };
 }
 
+// Rail doc §3.4 — which claim on this city's build output wins when it is both
+// building a chip and funding a blockade down the road. Persists until changed,
+// like the slider. Costs no Action (it is a standing policy, not a move).
+function validateSetBuildPriority(state, { pid, params }) {
+  const loc = state.locations[params.at];
+  if (!loc) return fail("no such location");
+  if (loc.controller !== pid) return fail("you do not fully control that location");
+  if (params.value !== "blockade" && params.value !== "chips")
+    return fail('build priority must be "blockade" or "chips"');
+  return { ok: true };
+}
+
+function runSetBuildPriority(state, { params }) {
+  const loc = state.locations[params.at];
+  loc.buildPriority = params.value;
+  emit(state, "build_priority_changed", { hex: loc.hexId, value: loc.buildPriority });
+  return { hex: loc.hexId, value: loc.buildPriority };
+}
+
 // --- Activate --------------------------------------------------------
 // Invoke a location ability (§13.2). The dispatcher charges the
 // ability's own `cost.action`; the ability also pays any `cost.resource`
@@ -496,6 +532,80 @@ function runBuildPost(state, { pid, player, params }) {
   const post = buildPost(state, pid, params.hex);
   recomputeVisibility(state, pid, { emitEvents: false }); // §17.7 — a new Vision source
   return { hex: post.hex };
+}
+
+// --- Build Blockade (rail doc §3.1) ----------------------------------
+// A road-only fortification, funded down the road it sits on. Validates a road
+// hex with no Location and no existing blockade, a friendly unit to pin there,
+// an uninterrupted road connection to the nearest settlement this player fully
+// holds, and the scrap. Costs 1 Action + scrap up front; the structure itself
+// then accrues over at least two Upkeeps (turn.js).
+function buildBlockadePayer(state, { pid, params }) {
+  const crew = Object.values(state.units).find((u) => u.owner === pid && u.node === params.hex);
+  return crew ? { units: [crew.uid] } : null;
+}
+
+function validateBuildBlockade(state, { pid, player, params }) {
+  const hex = params.hex;
+  const cell = state.board.hexes[hex];
+  if (!cell) return fail("no such hex");
+  if (!cell.road) return fail("a blockade can only be built on a road hex");
+  if (state.locations[hex]) return fail("cannot build a blockade on a Location hex");
+  if (blockadeAt(state, hex)) return fail("a blockade already occupies that hex");
+  if (postAt(state, hex)) return fail("a listening post already occupies that hex");
+  const crew = Object.values(state.units).filter((u) => u.owner === pid && u.node === hex);
+  if (!crew.length) return fail("needs a friendly unit on the target hex");
+  const supply = supplyStatus(state, pid, hex, supplyCutter(state, pid));
+  if (!supply.path) return fail("no road connection to a settlement you hold");
+  if (!supply.ok) return fail("that road connection is cut");
+  if (player.resource < CONFIG.blockades.buildCost) return fail("not enough scrap");
+  return { ok: true, crew };
+}
+
+function runBuildBlockade(state, { pid, player, params }) {
+  player.resource -= CONFIG.blockades.buildCost;
+  emit(state, "resource_spent", {
+    player: pid, resource: "Resource", amount: -CONFIG.blockades.buildCost, source: "build-blockade",
+  });
+  // The pinned builder is the unit that paid the Action, so the player's own
+  // choice of crew is honoured rather than re-picked here.
+  const crew = Object.values(state.units).find((u) => u.owner === pid && u.node === params.hex);
+  const b = startBlockade(state, pid, params.hex, crew.uid);
+  return { hex: b.hex, unit: crew.uid, cost: b.cost };
+}
+
+// --- Upgrade Blockade (rail doc §3.2) --------------------------------
+// Queue a chip into a COMPLETED blockade. Free to queue, like a Location build:
+// the cost is paid out of the funding settlement's build output over the
+// following Upkeeps (§3.4), not from banked scrap up front. No unit has to be
+// present — the builder was released when the structure landed.
+function validateUpgradeBlockade(state, { pid, player, params }) {
+  const b = blockadeAt(state, params.hex);
+  if (!b) return fail("no blockade on that hex");
+  if (b.owner !== pid) return fail("not your blockade");
+  if (!b.done) return fail("that blockade is still under construction");
+  if (b.build) return fail("that blockade is already building something");
+  const def = CHIPS[params.chipId];
+  if (!def || def.kind !== "blockade") return fail("not a blockade chip");
+  if (!meetsTech(player, def)) return fail(`needs Tech L${techLevelReqFor(def.techLevel || 1)}`);
+  if (blockadeSlotsUsed(state, b) + (def.slots || 1) > CONFIG.blockades.chipSlots)
+    return fail("no free slot on that blockade");
+  if (b.chips.some((c) => state.chips[c]?.chipId === params.chipId))
+    return fail("that chip is already installed here");
+  // The same road that pays for it has to be open, or the queue would sit at
+  // zero progress with nothing saying why.
+  const supply = supplyStatus(state, pid, b.hex, supplyCutter(state, pid));
+  if (!supply.path) return fail("no road connection to a settlement you hold");
+  if (!supply.ok) return fail("that road connection is cut");
+  return { ok: true, def };
+}
+
+function runUpgradeBlockade(state, { pid, params }) {
+  const b = blockadeAt(state, params.hex);
+  const def = CHIPS[params.chipId];
+  b.build = { chipId: def.id, cost: effectiveBuildCost(state, pid, def), progress: 0 };
+  emit(state, "build_started", { hex: b.hex, chipId: def.id, cost: b.build.cost });
+  return { hex: b.hex, chipId: def.id, cost: b.build.cost };
 }
 
 // --- Remove chip (design ruling: chips are removable/replaceable) ------
@@ -624,9 +734,13 @@ const ACTIONS = {
   // Action (and scrap). Queuing a build/upgrade and the slider stay free.
   rush: { payer: payLoc("at"), validate: validateRush, run: runRush },
   "set-slider": { validate: validateSetSlider, run: runSetSlider },
+  "set-build-priority": { validate: validateSetBuildPriority, run: runSetBuildPriority },
   activate: { payer: payLoc("location"), validate: validateActivate, run: runActivate },
   // §17.7 / §17.5 Intelligence A2 + B2 — deploy a Listening Post, run a Saboteur.
   "build-post": { payer: buildPostPayer, validate: validateBuildPost, run: runBuildPost },
+  "build-blockade": { payer: buildBlockadePayer, validate: validateBuildBlockade, run: runBuildBlockade },
+  // Queuing an upgrade is free, exactly as queuing a Location build is.
+  "upgrade-blockade": { validate: validateUpgradeBlockade, run: runUpgradeBlockade },
   sabotage: { validate: validateSabotage, run: runSabotage }, // once/round stamp is its cost
 };
 

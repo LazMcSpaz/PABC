@@ -130,10 +130,24 @@ export function isRoad(hex) {
 //     each a flat 1 MP however far apart the endpoints. Injected as extra
 //     adjacency rather than special-cased, so chaining across a hub falls out
 //     of the same search with no bespoke algorithm (rail doc §2.1).
+//   • `surprise` (a Set of hexIds ⊆ blockedThrough): halts the mover could not
+//     SEE coming. It still stops there, but keeps the movement it had left
+//     rather than losing the rest of its turn to something it had no way to
+//     know about — see below.
+//
+// Two different numbers come out of this, which used to be one:
+//
+//   best[hex]    what the search may continue with. A halting hex is 0, which
+//                is exactly how nothing paths onward through it.
+//   arrive[hex]  what a unit standing there actually has left. Identical to
+//                `best` everywhere except a SURPRISE halt, where the unit keeps
+//                its remainder. Conflating the two is what made an ambush cost
+//                a whole turn instead of an advance.
+//
 // Best-first expansion (maximise movement left = minimise cost), tracking a
 // predecessor for each hex so the exact ROUTE can be reconstructed. Returns
-// { best: {hex: remaining}, prev: {hex: cameFrom} } including `start`.
-function expandMovement(state, start, budget, blocked, ignoreTerrain, extraCost, railEdges) {
+// { best, arrive, prev } including `start`.
+function expandMovement(state, start, budget, blocked, ignoreTerrain, extraCost, railEdges, surprise) {
   const adj = state.board.adjacency;
   const hexes = state.board.hexes;
   // A Landship-class mover (chip `ignoresTerrain`) treats every hex as
@@ -142,8 +156,17 @@ function expandMovement(state, start, budget, blocked, ignoreTerrain, extraCost,
   const halts = CONFIG.movement.mountainHalts && !ignoreTerrain;
   const forestCost = ignoreTerrain ? 1 : CONFIG.movement.forestCost;
   const best = { [start]: budget };
+  const arrive = { [start]: budget };
   const prev = { [start]: null };
   const queue = [start];
+  // A halt keeps its remainder only when the mover could not see it coming.
+  const kept = (nb, rem, cost) => (surprise && surprise.has(nb) ? rem - cost : 0);
+  // `best` drives expansion; `arrive` is relaxed separately, because a halting
+  // hex pins best at 0 and would otherwise never take a cheaper approach.
+  const relax = (nb, cur, enter, landed) => {
+    if (landed > (arrive[nb] ?? -1)) { arrive[nb] = landed; prev[nb] = cur; }
+    if (enter > (best[nb] ?? -1)) { best[nb] = enter; queue.push(nb); }
+  };
   while (queue.length) {
     let bi = 0;
     for (let i = 1; i < queue.length; i++) if (best[queue[i]] > best[queue[bi]]) bi = i;
@@ -159,27 +182,34 @@ function expandMovement(state, start, budget, blocked, ignoreTerrain, extraCost,
       const cost = (mountain ? 1 : (isCover(hexes[nb]) && !road ? forestCost : 1)) + toll;
       if (rem < cost) continue; // not enough movement to enter
       // A mountain (no road) or a blockaded hex halts you on entry: enter, stop.
-      const terminal = mountain || (blocked && blocked.has(nb));
-      const nrem = terminal ? 0 : rem - cost;
-      if (nrem > (best[nb] ?? -1)) { best[nb] = nrem; prev[nb] = cur; queue.push(nb); }
+      // Terrain is never a "surprise" — a mountain is a mountain whether or not
+      // you had scouted it, and §16.2's speed-1 rule is not what this is for.
+      const halted = blocked && blocked.has(nb);
+      const terminal = mountain || halted;
+      const enter = terminal ? 0 : rem - cost;
+      relax(nb, cur, enter, halted && !mountain ? kept(nb, rem, cost) : enter);
     }
     // Rail hops from this hex. Flat 1 MP, and a blockaded far end still halts
     // you there — arriving by train is still arriving.
     for (const nb of (railEdges && railEdges.get(cur)) || []) {
       if (rem < CONFIG.rail.hopCost) continue;
-      const nrem = (blocked && blocked.has(nb)) ? 0 : rem - CONFIG.rail.hopCost;
-      if (nrem > (best[nb] ?? -1)) { best[nb] = nrem; prev[nb] = cur; queue.push(nb); }
+      const halted = blocked && blocked.has(nb);
+      const enter = halted ? 0 : rem - CONFIG.rail.hopCost;
+      relax(nb, cur, enter, halted ? kept(nb, rem, CONFIG.rail.hopCost) : enter);
     }
   }
-  return { best, prev };
+  return { best, arrive, prev };
 }
 
 // Reachable hexes → { hexId: movement points remaining } (start excluded; a
 // halting hex stores 0).
-export function movementField(state, start, budget, { blockedThrough, ignoreTerrain, extraCost, railEdges } = {}) {
-  const { best } = expandMovement(state, start, budget, blockedThrough || null, !!ignoreTerrain, extraCost || null, railEdges || null);
+export function movementField(state, start, budget, { blockedThrough, ignoreTerrain, extraCost, railEdges, surprise } = {}) {
+  const { arrive } = expandMovement(state, start, budget, blockedThrough || null, !!ignoreTerrain, extraCost || null, railEdges || null, surprise || null);
   const out = {};
-  for (const hex in best) if (hex !== start) out[hex] = best[hex];
+  // ARRIVAL values, not pathing values: the reachable set is identical either
+  // way (same keys), but a unit halted by an ambush must be told the movement
+  // it actually kept.
+  for (const hex in arrive) if (hex !== start) out[hex] = arrive[hex];
   return out;
 }
 
@@ -188,10 +218,10 @@ export function movementField(state, start, budget, { blockedThrough, ignoreTerr
 // Returns the ordered hex list [start, …, dest], or null if `dest` isn't
 // reachable within `budget`. Pass a large budget for a budget-agnostic route
 // (e.g. replay display).
-export function movementRoute(state, start, budget, dest, { blockedThrough, ignoreTerrain, extraCost, railEdges } = {}) {
+export function movementRoute(state, start, budget, dest, { blockedThrough, ignoreTerrain, extraCost, railEdges, surprise } = {}) {
   if (dest === start) return [start];
-  const { best, prev } = expandMovement(state, start, budget, blockedThrough || null, !!ignoreTerrain, extraCost || null, railEdges || null);
-  if (best[dest] === undefined) return null;
+  const { arrive, prev } = expandMovement(state, start, budget, blockedThrough || null, !!ignoreTerrain, extraCost || null, railEdges || null, surprise || null);
+  if (arrive[dest] === undefined) return null;
   const path = [];
   for (let c = dest; c != null; c = prev[c]) path.unshift(c);
   return path;

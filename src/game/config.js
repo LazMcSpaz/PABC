@@ -243,6 +243,26 @@ export const CONFIG = {
   // §17.7 Listening Post (Intelligence A2) — a unit-built, concealed Vision
   // source that survives by stealth, not toughness. Costs scrap to build and
   // a trickle of scrap per Upkeep to keep paid (else it goes dormant).
+  // Blockade structures (docs/rail-road-blockade-design.md §3). Numbers are
+  // the doc's placeholders pending a balance pass — the mechanics are settled,
+  // these are not.
+  blockades: {
+    buildCost: 4,  // §3.1 — 1 Action + scrap to break ground
+    cost: 4,       // §3.1 — total construction progress needed
+    // §3.1's floor. Construction is funded from the connected settlement's build
+    // output (§3.4), so without this a rich city could raise one in a single
+    // Upkeep; a site takes at most ceil(cost/minTurns) per turn and the rest
+    // flows on to whatever else that city is building.
+    minTurns: 2,
+    defense: 6,    // §3.2 — Location-style static baseline, before stacking
+    vision: 1,     // §3.2 — its own sight footprint
+    // §3.2 upgrade slots. Deliberately fewer than a settlement's: a blockade is
+    // a chokepoint, not a second city. Palisade / Signal Mast / Toll Booth are
+    // in content.js as kind "blockade"; their bonuses are read off the chip def
+    // (blockadeDefense / blockadeVision / output), never branched on by id.
+    chipSlots: 2,
+  },
+
   posts: {
     buildCost: 3, // §17.7 — 1 Action + 3 scrap to deploy
     upkeep: 1,    // §17.7 — 1 scrap per Upkeep; unpaid → dormant

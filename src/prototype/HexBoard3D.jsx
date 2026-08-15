@@ -7,20 +7,29 @@
 //
 //   tiles    the art, one HexTile per hex, z-ordered by y
 //   routes   the road / rail network, over the tiles
-//   tokens   units and ghosts, over the routes
+//   hits     one invisible polygon per hex, taking clicks on bare ground
+//   tokens   units and ghosts, over the hit layer so they take their own clicks
 //   meters   the Loyalty radials, floating above everything
-//   hits     one invisible polygon per hex, taking all the clicks
 //
 // The hit layer exists because tiles overlap heavily now: rectangular tile
 // boxes would steal each other's clicks, and a tall mountain's bounding box
 // covers half the board. Hit-testing against the projected TOP FACE means you
 // select the ground you pointed at, and the top faces never overlap each other
 // at this spacing, so there is no ambiguity left to resolve.
+//
+// The tile layer has two representations. Zoomed in it is the art, one HexTile
+// per hex. Zoomed out it collapses to a single SVG of flat tinted polygons
+// (FlatTileLayer) — see boardLod.js. Only the TILE layer swaps: routes, tokens,
+// radials and hit polygons are vector already and are drawn the same way at
+// either level of detail.
+import { useMemo } from "react";
 import { LOCATIONS, fullController } from "./data.js";
 import HexTile from "./HexTile.jsx";
+import FlatTileLayer from "./FlatTileLayer.jsx";
 import FloatingControlMeter from "./FloatingControlMeter.jsx";
 import RouteNetwork from "./RouteNetwork.jsx";
 import BoardTokens from "./BoardTokens.jsx";
+import { LOD_FLAT, useBoardLod } from "./boardLod.js";
 import { buildHexGeometry, eastRimHexes, paintOrder, topFacePolygon } from "./hexProjection.js";
 
 function isHeldBy(hex, fid) {
@@ -38,33 +47,54 @@ export default function HexBoard3D({
   onSelect,
   onUnitClick,
 }) {
-  const geom = buildHexGeometry(state.rows);
-  const order = paintOrder(geom.centers);
-  // The sea is off the map's east edge, so only rim hexes may draw the
-  // (oriented) coast tiles.
-  const coast = eastRimHexes(state.rows);
+  const lod = useBoardLod();
+  // Geometry is a pure function of the row shape, which only changes when a new
+  // game is set up — but the board re-renders on every tick, selection and
+  // hover, so recomputing all three each time is pure waste on a 127-hex map.
+  const { geom, order, coast } = useMemo(() => {
+    const g = buildHexGeometry(state.rows);
+    return {
+      geom: g,
+      order: paintOrder(g.centers),
+      // The sea is off the map's east edge, so only rim hexes may draw the
+      // (oriented) coast tiles.
+      coast: eastRimHexes(state.rows),
+    };
+  }, [state.rows]);
 
   return (
     <div
       className="pc-board3d"
       style={{ position: "relative", width: geom.width, height: geom.height }}
     >
-      {order.map((hexId, i) => {
-        const hex = state.hexes[hexId];
-        if (!hex) return null;
-        const c = geom.centers[hexId];
-        return (
-          <div key={hexId} style={{ position: "absolute", left: c.x, top: c.y, zIndex: i + 1 }}>
-            <HexTile
-              hex={hex}
-              selected={hexId === selectedHexId}
-              reachable={reachable?.has(hexId) || false}
-              factionHighlight={highlightedFactionId && isHeldBy(hex, highlightedFactionId)}
-              onCoast={coast.has(hexId)}
-            />
-          </div>
-        );
-      })}
+      {lod === LOD_FLAT ? (
+        <FlatTileLayer
+          order={order}
+          hexes={state.hexes}
+          centers={geom.centers}
+          width={geom.width}
+          height={geom.height}
+          selectedHexId={selectedHexId}
+          reachable={reachable}
+        />
+      ) : (
+        order.map((hexId, i) => {
+          const hex = state.hexes[hexId];
+          if (!hex) return null;
+          const c = geom.centers[hexId];
+          return (
+            <div key={hexId} style={{ position: "absolute", left: c.x, top: c.y, zIndex: i + 1 }}>
+              <HexTile
+                hex={hex}
+                selected={hexId === selectedHexId}
+                reachable={reachable?.has(hexId) || false}
+                factionHighlight={!!(highlightedFactionId && isHeldBy(hex, highlightedFactionId))}
+                onCoast={coast.has(hexId)}
+              />
+            </div>
+          );
+        })
+      )}
 
       <RouteNetwork
         rows={state.rows}
@@ -106,14 +136,23 @@ export default function HexBoard3D({
         })}
       </div>
 
+      {/* Hit layer. It sits BELOW the tokens (8500), not on top: an SVG
+          polygon with `fill="transparent"` is still painted as far as
+          hit-testing is concerned, so a hit layer above the tokens silently
+          swallowed every unit click. Above the routes so the whole hex stays
+          clickable, below anything a player is meant to click directly. */}
       <svg
         width={geom.width}
         height={geom.height}
-        style={{ position: "absolute", inset: 0, zIndex: 9500 }}
+        style={{ position: "absolute", inset: 0, zIndex: 8200 }}
       >
         {order.map((hexId) => {
           const c = geom.centers[hexId];
           const hex = state.hexes[hexId];
+          // Only a Location has anything to say in a tooltip. Emitting an empty
+          // <title> for the rest doubled this layer's node count (117 of the
+          // 127 on a huge map) to produce a blank tooltip on hover.
+          const label = hex?.type === "location" ? LOCATIONS[hex.locationId]?.name : null;
           return (
             <polygon
               key={`hit-${hexId}`}
@@ -122,7 +161,7 @@ export default function HexBoard3D({
               style={{ cursor: reachable?.has(hexId) ? "pointer" : "default" }}
               onClick={() => onSelect(hexId)}
             >
-              <title>{hex?.type === "location" ? LOCATIONS[hex.locationId]?.name || "" : ""}</title>
+              {label ? <title>{label}</title> : null}
             </polygon>
           );
         })}

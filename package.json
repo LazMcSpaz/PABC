@@ -9,6 +9,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "shots": "node scripts/shoot.mjs",
+    "board-perf": "node scripts/board-perf.mjs",
     "motion": "node scripts/motion.mjs"
   },
   "dependencies": {
