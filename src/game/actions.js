@@ -5,7 +5,7 @@
 import { emit } from "./events.js";
 import { activePlayerId } from "./targeting.js";
 import { bfsDistances, reinforcementRoute } from "./board.js";
-import { unitReach, supplyCutter } from "./movement.js";
+import { unitReach, supplyCutter, unseenBlockers } from "./movement.js";
 import { CONFIG } from "./config.js";
 import { FACTIONS, CHIPS, ABILITIES, chipDefOf, factionDef } from "./content.js";
 import { validateContest, runContest } from "./contest.js";
@@ -60,10 +60,24 @@ function runMove(state, { params, ctx }) {
   const unit = state.units[params.unit];
   const from = unit.node;
   const field = unitReach(state, unit);
+  // Did the mover just walk into something it could not see? Read BEFORE the
+  // move, while the destination is still unexplored/unlit for this faction.
+  const ambushed = unseenBlockers(state, unit.owner).has(params.to);
   unit.node = params.to;
   // The field already accounts for forest/road cost, the mountain halt and any
-  // blockade stop, so the remaining budget at the destination is exact.
+  // blockade stop, so the remaining budget at the destination is exact. An
+  // unseen halt leaves the remainder intact rather than zeroing it.
   unit.moveRemaining = Math.max(0, field[params.to] ?? 0);
+  if (ambushed) {
+    // Checked: it keeps its movement but may only fall back or sidestep for the
+    // rest of the turn (unitReach). Being surprised costs you the advance, not
+    // the whole turn.
+    unit.checked = true;
+    unit.turnStartNode = unit.turnStartNode || from;
+    emit(state, "advance_checked", {
+      unit: unit.uid, player: unit.owner, hex: params.to, moveRemaining: unit.moveRemaining,
+    });
+  }
   unit.movedSinceUpkeep = true; // §16.6 fortify — moving voids "dug in"
   // movement/moveRemaining are snapshotted here (not left for a log
   // consumer to read off the live unit later) because both are mutable —

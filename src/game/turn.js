@@ -254,6 +254,10 @@ function refreshMoveBudget(state, pid) {
     }
     u.fortified = !u.movedSinceUpkeep;
     u.movedSinceUpkeep = false;
+    // Where this unit's turn began, and whether an unseen blocker has since
+    // checked its advance. Both drive the retreat/lateral rule in unitReach.
+    u.turnStartNode = u.node;
+    u.checked = false;
   }
 }
 

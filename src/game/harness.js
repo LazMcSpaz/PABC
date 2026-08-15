@@ -1825,6 +1825,106 @@ line("\n  [Tech Wheel §17.7] Listening Post");
 }
 
 // =====================================================================
+// AMBUSH HALTS — a blocker you could not see stops you, but costs you the
+// ADVANCE rather than the whole turn. A blocker you could see costs both.
+// =====================================================================
+line("\n  [§16.2] Halted by something you could not see");
+{
+  // `me`'s lone unit in open country with one enemy planted `range` hexes
+  // ahead. Every other vision source `me` has is stripped (other units, its
+  // Locations, its ZoC) so the mover's OWN sight is the only thing deciding
+  // whether the blocker is a surprise — which is the whole variable here.
+  const stage = (range) => {
+    const g = createGame({ seed }); startTurn(g);
+    const me = g.turnOrder[0], foe = g.turnOrder[1];
+    const u = Object.values(g.units).find((x) => x.owner === me);
+    const fu = Object.values(g.units).find((x) => x.owner === foe);
+    for (const x of Object.values(g.units)) {
+      if (x.uid !== u.uid && x.uid !== fu.uid) delete g.units[x.uid];
+    }
+    for (const l of Object.values(g.locations)) if (l.controller === me) l.controller = null;
+    g.world.zoc = {};
+
+    // Plain ground only — a mountain or forest would halt or tax the move for
+    // reasons that have nothing to do with the blocker.
+    const plain = (h) => g.board.hexes[h] && !g.locations[h] &&
+      !g.board.hexes[h].elevation && !g.board.hexes[h].cover;
+    const start = Object.keys(g.board.hexes).find(
+      (h) => plain(h) && (g.board.adjacency[h] || []).filter(plain).length >= 2);
+    u.node = start; u.moveRemaining = 6; u.turnStartNode = start; u.checked = false;
+
+    const d = bfsDistances(g.board.adjacency, start);
+    const blockHex = Object.keys(g.board.hexes)
+      .filter((h) => plain(h) && d[h] === range).sort()[0];
+    if (!blockHex) throw new Error(`no plain hex ${range} from ${start} on seed ${seed}`);
+    fu.node = blockHex;
+    recomputeStats(g);
+    g.players[me].actions.remaining = 9;
+    recomputeVisibility(g, me, { emitEvents: false });
+    // A hex one step further out than the blocker — where "pressing on" leads.
+    const beyond = (g.board.adjacency[blockHex] || []).find((h) => plain(h) && d[h] === range + 1);
+    return { g, me, foe, u, fu, start, blockHex, beyond, d };
+  };
+
+  // Unseen (3 hexes out, past the mover's own sight): keeps the remainder.
+  {
+    const { g, me, u, blockHex } = stage(3);
+    const hidden = !isHexVisible(g, me, blockHex);
+    // What the trip WOULD have cost with nothing blocking — the movement the
+    // unit should still be holding once it is stopped by a surprise.
+    const owed = u.moveRemaining - (unitReach(g, u)[blockHex] ?? 0);
+    const before = u.moveRemaining;
+    const mv = performAction(g, "move", { unit: u.uid, to: blockHex });
+    check("Ambush: a halt you could not see keeps the movement you had left",
+      hidden && mv.ok && u.node === blockHex && u.moveRemaining > 0 &&
+      u.moveRemaining === before - owed && u.checked === true);
+  }
+
+  // Seen (adjacent, so the mover's own sight covers it): costs the whole move.
+  {
+    const { g, me, u, blockHex } = stage(1);
+    const seen = isHexVisible(g, me, blockHex);
+    const mv = performAction(g, "move", { unit: u.uid, to: blockHex });
+    check("Ambush: a halt you COULD see still costs the rest of the move",
+      seen && mv.ok && u.node === blockHex && u.moveRemaining === 0 && !u.checked);
+  }
+
+  // Checked units may fall back or sidestep, but not press on. Note the unit
+  // may not have the movement to reach its start hex again — the rule is about
+  // DIRECTION, so the test is too: something strictly closer must be open, and
+  // nothing further out may be.
+  {
+    const { g, me, u, blockHex, beyond, d } = stage(3);
+    performAction(g, "move", { unit: u.uid, to: blockHex });
+    const reach = unitReach(g, u);
+    const closer = Object.keys(reach).filter((h) => (d[h] ?? 99) < d[blockHex]);
+    check("Ambush: a checked unit may fall back toward where it started",
+      u.moveRemaining > 0 && closer.length > 0);
+    check("Ambush: a checked unit may sidestep, but never press on past the blocker",
+      Object.keys(reach).every((h) => (d[h] ?? 99) <= d[blockHex]) &&
+      // `beyond` only exists when the blocker isn't on the board's rim.
+      (!beyond || !(beyond in reach)));
+  }
+
+  // The check lasts the turn, and lifts at the next Upkeep.
+  {
+    const { g, me, u, blockHex, d } = stage(3);
+    performAction(g, "move", { unit: u.uid, to: blockHex });
+    const back = Object.keys(unitReach(g, u))
+      .filter((h) => (d[h] ?? 99) < d[blockHex]).sort()[0];
+    performAction(g, "move", { unit: u.uid, to: back });
+    check("Ambush: the check persists after falling back",
+      u.node === back && u.checked === true);
+    // Round the table back to `me` — its own turn has to END first, or the
+    // loop condition is already satisfied and nothing happens.
+    endTurn(g);
+    while (activePlayerId(g) !== me) endTurn(g);
+    check("Ambush: the next Upkeep clears it",
+      u.checked === false && u.turnStartNode === u.node);
+  }
+}
+
+// =====================================================================
 // BLOCKADE STRUCTURES (docs/rail-road-blockade-design.md §3) — build gating →
 // supply-fed construction → blocking + Vision once complete → destroy-only.
 // =====================================================================

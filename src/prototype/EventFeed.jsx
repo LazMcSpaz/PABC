@@ -124,7 +124,30 @@ function formatEvent(ev, engineState) {
       return { color: theme.good, text: `${p.chipId} reactivated` };
     case "build_started":
     case "slider_changed":
+    case "build_priority_changed":
       return null; // directives, not noteworthy outcomes
+    // Rail doc §3 — blockade lifecycle. `blockade_progressed` is deliberately
+    // silent: a bar creeping up every turn is not news.
+    case "blockade_started":
+      return { color: factionColor(p.owner), text: `${who(p.owner)} broke ground on a blockade` };
+    case "blockade_completed":
+      return { color: factionColor(p.owner), text: `${who(p.owner)} blockade complete` };
+    case "blockade_stalled":
+      return { color: theme.accent2, text: `blockade stalled — ${p.reason}` };
+    case "blockade_failed":
+      return { color: theme.accent2, text: `blockade abandoned — ${p.reason}` };
+    case "blockade_destroyed":
+      return { color: theme.accent2, text: `${who(p.owner)} blockade destroyed` };
+    case "blockade_progressed":
+      return null;
+    // The mover walked into something it could not see. This NEEDS saying —
+    // a unit that stops early with movement still in hand reads as a bug
+    // unless the feed explains what stopped it.
+    case "advance_checked":
+      return {
+        color: theme.accent2,
+        text: `${who(p.player)} advance checked — ambushed, ${p.moveRemaining} movement left to fall back`,
+      };
     case "encounter_delivered":
       return {
         color: factionColor(p.recipient),

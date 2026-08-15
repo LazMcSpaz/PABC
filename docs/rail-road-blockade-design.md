@@ -11,7 +11,7 @@ aren't.
 
 | Part | | Where |
 |---|---|---|
-| 1 — Blockade vision-gating | **deferred, decision pending** | `movementBlockers` is still ground truth |
+| 1 — Blockade vision-gating | **deferred, decision pending** | `movementBlockers` is still ground truth (but see *Ambush halts* below) |
 | 2.1 Rail transport | built | `board.js assignRails`, `movement.js unitRailEdges` |
 | 2.2 Rail production pooling | **deferred** | shares a mechanism with 3.4 — build once |
 | 2.3 Rail access | built (endpoints-only) | `movement.js unitRailEdges` |
@@ -27,6 +27,35 @@ allocator (`processLocationEconomy`) is where 2.2 should join it.
 
 "Cut" has one definition across all three systems, in `movement.js
 supplyCutter`, and that is the single place Part 1 would change.
+
+### Ambush halts — a partial answer to Part 0's gap
+
+Part 1 (a blocker must DETECT the mover before it may halt it) is still
+deferred, but the *worst* symptom of the gap is fixed: being stopped by
+something you had no way to see no longer costs you your whole turn.
+
+`blockerScan` in `movement.js` now returns two sets from one pass — every hex
+that halts you, and the subset whose blocker you cannot perceive. A halt on the
+second kind is a **surprise**, and:
+
+- the mover keeps the movement it had left, instead of arriving with zero;
+- it is **checked** for the rest of the turn: it may fall back or sidestep, but
+  never move further from where its turn began than it currently stands. Without
+  that second half the refund would gut blocking outright — a mover could walk
+  into an ambush, stop, and carry on for the price of one movement point, which
+  would make advancing blind strictly better than scouting;
+- an `advance_checked` event fires, because a unit that stops early with
+  movement still in hand reads as a bug unless the feed says what stopped it.
+
+A blocker you *could* see still costs the full stop — you chose to walk into it.
+"Could see" is per blocker kind: a unit by `isUnitVisibleTo` (so concealment
+counts), a Location by whether the hex is explored (you don't forget where a
+city is), a blockade by live sight (it can go up behind your back).
+
+This needed splitting two numbers that used to be one, in `board.js`:
+`best[hex]` is what the search may path onward with (a halt is still 0, so
+nothing routes through it), and `arrive[hex]` is what a unit standing there
+actually holds. Conflating them is what made an ambush cost a whole turn.
 
 ### §3.4 as built — who gets a city's build output
 

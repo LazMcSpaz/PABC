@@ -5,10 +5,11 @@
 // the occupied/enemy hex but stop there (a chokepoint blockade). Enemy-
 // controlled Location hexes block the same way.
 import { CONFIG } from "./config.js";
-import { movementField, movementRoute } from "./board.js";
+import { bfsDistances, movementField, movementRoute } from "./board.js";
 import { CHIPS, ABILITIES, chipBlocksRail } from "./content.js";
 import { getStanding } from "./standing.js";
 import { arePacted, vassalLord } from "./diplomacy.js";
+import { ensureVisibility, isHexVisible, isUnitVisibleTo } from "./visibility.js";
 
 const BIG_BUDGET = 999; // budget-agnostic routing for display
 
@@ -26,17 +27,42 @@ export function passesFreely(state, a, b) {
 // The set of hexes that HALT `ownerId`'s movement on entry (§16.2 blockade):
 // any hex holding a non-passing foreign unit, plus any enemy-controlled
 // Location hex (you can't freely march through a hostile city).
-export function movementBlockers(state, ownerId, { ignoreUnits } = {}) {
+// One scan, two answers, so they can never drift apart:
+//
+//   blocked   every hex that halts `ownerId` on entry (ground truth).
+//   unseen    the subset whose blocker `ownerId` cannot currently perceive.
+//
+// The second is what lets a mover keep its movement after walking into an
+// ambush (board.js `surprise`). Note it is a strict subset: a hex holding both
+// a visible and a hidden blocker is NOT a surprise — you could see a reason to
+// stop there, so stopping costs you the advance as usual.
+function blockerScan(state, ownerId, { ignoreUnits } = {}) {
   const blocked = new Set();
+  const hidden = new Set();
+  const visible = new Set();
+  // Collected as two sets and differenced at the end rather than resolved as we
+  // go: a hex can carry several blockers in any order, and one visible blocker
+  // has to outrank any number of hidden ones however late it turns up.
+  const note = (hex, seen) => {
+    blocked.add(hex);
+    (seen ? visible : hidden).add(hex);
+  };
+
   // Night March (chip `passThroughUnits`): foreign UNITS no longer halt
   // the mover; enemy Locations still do (a city is not a picket line).
   if (!ignoreUnits) for (const u of Object.values(state.units)) {
     if (u.owner === ownerId) continue;
-    if (!passesFreely(state, ownerId, u.owner)) blocked.add(u.node);
+    if (!passesFreely(state, ownerId, u.owner)) {
+      // Concealment-aware: a stealthed unit on a hex you CAN see is still a
+      // surprise, which is exactly what isUnitVisibleTo already answers.
+      note(u.node, isUnitVisibleTo(state, ownerId, u));
+    }
   }
   for (const loc of Object.values(state.locations)) {
     if (loc.controller && loc.controller !== ownerId && !passesFreely(state, ownerId, loc.controller)) {
-      blocked.add(loc.hexId);
+      // A city is remembered once explored — you do not forget where it is or
+      // roughly whose it is — so an explored Location never ambushes anyone.
+      note(loc.hexId, ensureVisibility(state, ownerId).explored.has(loc.hexId));
     }
   }
   // Rail doc §3 — a COMPLETED enemy blockade halts a mover the same way a unit
@@ -49,9 +75,25 @@ export function movementBlockers(state, ownerId, { ignoreUnits } = {}) {
   // blocking above.
   for (const b of Object.values(state.world?.blockades || {})) {
     if (!b.done || b.owner === ownerId) continue;
-    if (!passesFreely(state, ownerId, b.owner)) blocked.add(b.hex);
+    if (!passesFreely(state, ownerId, b.owner)) {
+      // Unlike a city, a blockade can go up (or come down) behind your back, so
+      // it takes LIVE sight rather than memory to count as seen.
+      note(b.hex, isHexVisible(state, ownerId, b.hex));
+    }
   }
-  return blocked;
+  for (const hex of visible) hidden.delete(hex);
+  return { blocked, unseen: hidden };
+}
+
+export function movementBlockers(state, ownerId, opts) {
+  return blockerScan(state, ownerId, opts).blocked;
+}
+
+// The blockers `ownerId` cannot see. Halting on one of these keeps the mover's
+// remaining movement (board.js) — an ambush should cost you the advance, not
+// the whole turn.
+export function unseenBlockers(state, ownerId, opts) {
+  return blockerScan(state, ownerId, opts).unseen;
 }
 
 // Does something hostile to `ownerId` sit on this hex, cutting a road or rail
@@ -147,15 +189,37 @@ export function unitRailEdges(state, unit) {
   return edges.size ? edges : null;
 }
 
+// Once an unseen blocker has checked a unit's advance it keeps its movement,
+// but only to fall back or sidestep — not to press on past the thing that
+// stopped it. "Press on" is measured as distance from where its turn began, so
+// the rule needs no notion of facing: a hex further from the start than the
+// unit currently stands is closed to it for the rest of the turn.
+//
+// Without this the refund would gut blocking entirely — a mover could walk into
+// an ambush, stop, and carry straight on for the price of one movement point,
+// which would make advancing blind strictly better than scouting.
+function restrictToFallback(state, unit, field) {
+  const dist = bfsDistances(state.board.adjacency, unit.turnStartNode);
+  const here = dist[unit.node] ?? 0;
+  const out = {};
+  for (const hex in field) if ((dist[hex] ?? Infinity) <= here) out[hex] = field[hex];
+  return out;
+}
+
 export function unitReach(state, unit) {
   if (!unit) return {};
   const budget = unit.moveRemaining ?? unit.movement ?? 0;
-  return movementField(state, unit.node, budget, {
-    blockedThrough: movementBlockers(state, unit.owner, { ignoreUnits: unitPassesThroughUnits(state, unit) }),
+  const opts = { ignoreUnits: unitPassesThroughUnits(state, unit) };
+  const scan = blockerScan(state, unit.owner, opts);
+  const field = movementField(state, unit.node, budget, {
+    blockedThrough: scan.blocked,
+    surprise: scan.unseen,
     ignoreTerrain: unitIgnoresTerrain(state, unit),
     extraCost: tollTaxedHexes(state, unit.owner),
     railEdges: unitRailEdges(state, unit),
   });
+  if (!unit.checked || !unit.turnStartNode) return field;
+  return restrictToFallback(state, unit, field);
 }
 
 // The exact ROUTE `unit` takes to reach `dest` this turn (same rules as

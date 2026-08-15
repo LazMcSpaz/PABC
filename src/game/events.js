@@ -47,7 +47,7 @@ export const EVENT_NAMES = new Set([
   // Blockade structures — rail doc §3 lifecycle (APPEND-ONLY).
   "blockade_started", "blockade_progressed", "blockade_stalled",
   "blockade_completed", "blockade_failed", "blockade_destroyed",
-  "build_priority_changed",
+  "build_priority_changed", "advance_checked",
   // §18.4–§18.13 Diplomacy (APPEND-ONLY — distinct keys).
   "menace_changed", "honor_changed", "deal_struck", "deal_proposed",
   "war_declared", "peace_made",
