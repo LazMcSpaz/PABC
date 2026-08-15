@@ -13,8 +13,9 @@
 //
 // Everything is positioned in source-image units off the hex centre and scaled
 // by UNIT, so the layout survives a re-export at a different resolution.
-import { LOCATIONS, ownerColor, theme } from "./data.js";
-import { holoTint, tintStrength } from "./holoTint.js";
+import { memo } from "react";
+import { LOCATIONS, theme } from "./data.js";
+import { holoTint, tintStrength, hexRing } from "./holoTint.js";
 import {
   FRAME, HEX_W, HEX_H, SKIRT_H, UNIT, UNIT_Y, layerUrl, tileFor, topFacePolygon,
 } from "./hexProjection.js";
@@ -39,7 +40,7 @@ function Layer({ layer, style, className }) {
   );
 }
 
-export default function HexTile({
+function HexTile({
   hex,
   selected,
   reachable,
@@ -56,20 +57,9 @@ export default function HexTile({
   const strength = tintStrength(hex, tint);
 
   // Selection and reachability ride the top face itself, so the highlight
-  // traces the ground the click will actually land on.
-  let ring = null;
-  if (selected) ring = { color: theme.accent, width: 2.6, dash: null };
-  else if (reachable) ring = { color: theme.good, width: 2.2, dash: null };
-  else if (hex.zocOwner && !isUnexplored) {
-    // Dashed = influence, solid = ownership. Hotter when one of YOUR units is
-    // standing on someone else's ground.
-    ring = {
-      color: ownerColor(hex.zocOwner),
-      width: hex.zocTrespassing ? 2.6 : 1.6,
-      dash: hex.zocTrespassing ? "6 4" : "8 6",
-      opacity: hex.zocTrespassing ? 1 : 0.7,
-    };
-  }
+  // traces the ground the click will actually land on. Shared with the
+  // zoomed-out board (see holoTint.js) so both draw the same ring.
+  const ring = hexRing(hex, { selected, reachable });
 
   const svgW = HEX_W + 8;
   const svgH = HEX_H + 8;
@@ -179,6 +169,13 @@ export default function HexTile({
     </div>
   );
 }
+
+// Memoised because the board re-renders whole. `hex` is rebuilt by the adapter
+// once per tick and is stable within one, and every other prop is a primitive,
+// so selecting a hex or hovering a faction now re-renders the two tiles that
+// changed rather than all 127 — each of which would otherwise rebuild an image
+// pair, a masked div and two blend layers.
+export default memo(HexTile);
 
 
 

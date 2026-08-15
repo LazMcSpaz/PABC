@@ -5,8 +5,21 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { theme } from "./data.js";
 import { animatePan } from "./aiReplay/CameraController.js";
+import { BoardLodContext, LOD_FULL, nextLod } from "./boardLod.js";
 
-const MIN_SCALE = 0.45;
+// The floor exists to stop the board shrinking into illegibility, and it used
+// to be set against the detailed tile art turning to mush. Below ~0.62 the
+// board now swaps to flat tinted polygons (boardLod.js), which stay readable
+// much further out, so the floor can drop.
+//
+// It needs to. A `huge` map's content box is 2365 x 1747, so fit-to-view wants
+// 0.50 at 1600x950 — fine — but 0.42 at 1280x800 and 0.32 at 900x600. At the
+// old 0.45 floor anything at or below a 1280-wide viewport could not fit the
+// whole board on screen at all, and "recenter" quietly did nothing. 0.26 fits a
+// huge board down to roughly 790x550.
+const MIN_SCALE = 0.26;
+// The tile masters are 1024 px square and ship downscaled, so past ~2.4 the art
+// is being magnified past its own resolution. Unchanged.
 const MAX_SCALE = 2.4;
 const clamp = (n, lo, hi) => Math.min(hi, Math.max(lo, n));
 
@@ -20,6 +33,10 @@ export default function BoardViewport({ children, cameraTarget = null, cameraPan
   const moved = useRef(false);
   const [view, setView] = useState({ scale: 1, x: 0, y: 0 });
   const [grabbing, setGrabbing] = useState(false);
+  // Level of detail is derived from the scale but held as its own quantized
+  // state, so the board below only re-renders when the threshold is crossed —
+  // not on every wheel notch or pinch frame. `nextLod` carries the hysteresis.
+  const [lod, setLod] = useState(LOD_FULL);
   const viewRef = useRef(view);
   viewRef.current = view;
   const panStopRef = useRef(null);
@@ -49,6 +66,12 @@ export default function BoardViewport({ children, cameraTarget = null, cameraPan
   useLayoutEffect(() => {
     fitToView();
   }, [fitToView]);
+
+  // Setting the same level is a no-op React bails out of, so this only costs a
+  // render when the board actually changes representation.
+  useEffect(() => {
+    setLod((prev) => nextLod(prev, view.scale));
+  }, [view.scale]);
 
   // Programmatic camera pan: ease the content translate so `cameraTarget`
   // centres in the viewport, keeping the current scale. Driven by the AI
@@ -234,7 +257,10 @@ export default function BoardViewport({ children, cameraTarget = null, cameraPan
           transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})`,
         }}
       >
-        {children}
+        {/* `children` is a stable element reference, so React skips re-rendering
+            the board on pan/zoom entirely; only a change of `lod` propagates
+            through the context to the tile layer. */}
+        <BoardLodContext.Provider value={lod}>{children}</BoardLodContext.Provider>
       </div>
 
       <div

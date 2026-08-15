@@ -4,10 +4,11 @@ Turning the 16 hologram hex renders (now `art/hex-tiles/masters/`) into the
 live game board, with the hologram recoloured per controlling faction, and the
 Loyalty radial lifted off the tile to float above it.
 
-Status: **built and running.** Phases 0–7 below are implemented; the board is
+Status: **built and running.** Phases 0–8 below are implemented; the board is
 live behind `?board=holo` (the default) with `?board=flat` still rendering the
-old one for comparison on the same save. Phase 8 (LOD + perf) and the long tail
-in §5 are not done. Open questions are in [Decisions](#6-decisions).
+old one for comparison on the same save. Phase 8's structural half is done and
+measured (§7); its frame-time half needs a real browser. The long tail in §5 is
+not done. Open questions are in [Decisions](#6-decisions).
 
 ---
 
@@ -270,7 +271,7 @@ Each phase is independently shippable and leaves the game working.
 | 5 | Floating radial | done | `FloatingControlMeter.jsx` — tether, contact ellipse, unsquashed billboard. |
 | 6 | Tint source of truth | done | `holoTint.js` + `holoColor` in `data.js`; 0.45s colour transition on control flips, contested pulses. |
 | 7 | Fog treatment | done | Unexplored = plinth with an unlit top face; explored = projection at 0.34. |
-| 8 | **Perf + LOD pass** | **not done** | No LOD swap below ~0.6 scale, `MIN_SCALE`/`MAX_SCALE` not re-tuned. Fine at 30 hexes; do this before a larger map. |
+| 8 | Perf + LOD pass | done (structurally) | `boardLod.js` + `FlatTileLayer.jsx`; `MIN_SCALE` 0.45 → 0.26. Measured by `npm run board-perf`. Frame time still unprofiled — see §8. |
 
 The flag is `?board=holo` / `?board=flat` (remembered in localStorage under
 `pc.board`, default holo), so both boards run against the same save until the
@@ -327,18 +328,19 @@ rails are drawn as a **vector network over** the tiles rather than as
 edge-socket art (§2.8), so they need no new tile variants — but they also do
 not blend into the terrain they cross.
 
-**P10 — Stale prep work.** `src/prototype/hexArt.js` is built on the assumption
-of *per-faction* art sets chosen by a static region BFS. Generic art plus a
-runtime tint makes that premise obsolete: `resolveTerrainArt`,
-`resolveSettlementArt` and `regionOwnerMap` should be deleted or repurposed
-rather than wired up. `docs/blender-hex-tile-pipeline.md` also needs
-reconciling — the delivered art contradicts three of its locked specifications
-(orientation, camera elevation, alpha).
+**P10 — Stale prep work.** *Resolved:* `src/prototype/hexArt.js` was built on the
+assumption of *per-faction* art sets chosen by a static region BFS, a premise
+generic art plus a runtime tint made obsolete. Nothing imported it; deleted.
+`docs/blender-hex-tile-pipeline.md` still needs reconciling — the delivered art
+contradicts three of its locked specifications (orientation, camera elevation,
+alpha), and its "Art resolver" section describes the file that just went.
 
 **P11 — Performance.** Per tile: 2 images, 1 masked div, 2 blend-mode layers,
 its own stacking context. At 30 hexes this is fine; on a larger map with 120 it
-needs the LOD in phase 8. Bake glow into the layers rather than using CSS
-`drop-shadow`, which is the expensive one.
+needs the LOD in phase 8 — now built, and §7 has the measured numbers. Bake glow
+into the layers rather than using CSS `drop-shadow`, which is the expensive one;
+the ring glow in `HexTile` and the two stacked shadows on each floating radial
+are the remaining users of it.
 
 **P12 — Browser support.** `mix-blend-mode: plus-lighter` needs Firefox 113+;
 older Firefox needs a `screen` fallback. CSS masks still want `-webkit-` prefixes
@@ -346,9 +348,10 @@ for Safari. Also noted from the spike: masks referencing local files are blocked
 on `file://` origins — irrelevant to the dev server and to production, but it
 will silently break for anyone who opens a built `index.html` directly from disk.
 
-**P13 — Zoom range.** The board becomes ~2.4:1. At the current `MIN_SCALE` of
-0.45 the hologram detail turns to mush; `MAX_SCALE` 2.4 is fine against a 1024 px
-source. Both want re-tuning alongside the LOD switch.
+**P13 — Zoom range.** *Resolved.* `MIN_SCALE` is 0.26 — the mush it used to
+guard against is now the LOD's job, and 0.45 could not fit a huge board on a
+1280-wide viewport (§7). `MAX_SCALE` stays 2.4, which is right against a 1024 px
+source.
 
 **P14 — Encounter and wasteland hexes.** The `?` glyph and the "Wasteland" label
 are flat-board idioms. They need a hologram-native treatment (a glitching
@@ -431,7 +434,72 @@ the AI replay), or ship behind a flag first? *My recommendation: flag.*
 
 ---
 
-## 7. What this does not change
+## 7. Level of detail (phase 8)
+
+Below **0.62** zoom the tile layer stops being 127 pieces of art and becomes one
+SVG with a flat tinted polygon per hex (`FlatTileLayer.jsx`); above **0.68** it
+goes back. The gap between the two numbers is hysteresis — a wheel notch is
+1.15× and can never land inside it, but a continuous pinch-zoom can, and without
+the gap it would flip the whole tile layer on every pointer frame. The level is
+exposed as a quantized string through a context (`boardLod.js`), not as the raw
+scale, so ordinary panning and zooming re-render nothing.
+
+Only the *tile* layer swaps. Routes, tokens, radials and hit polygons are vector
+already and are drawn identically at both levels. Tint and ring both come from
+`holoTint.js`, shared by the two paths, so nothing appears to change hands when
+you cross the threshold.
+
+`?lod=full` / `?lod=flat` pins one level, the way `?board=` pins a renderer.
+
+### What it actually saves
+
+`npm run board-perf` (with `npm run dev` running) measures this. Counts are over
+the `.pc-board3d` subtree at 1600×950, seed 424242, fog fully revealed:
+
+| map | hexes | | nodes | imgs | blend | masked |
+|---|---|---|---|---|---|---|
+| small | 30 | full | 546 | 60 | 60 | 30 |
+| | | flat | **397** | **0** | **0** | **0** |
+| medium | 61 | full | 837 | 122 | 122 | 61 |
+| | | flat | **533** | **0** | **0** | **0** |
+| large | 91 | full | 1113 | 182 | 182 | 91 |
+| | | flat | **659** | **0** | **0** | **0** |
+| huge | 127 | full | 1427 | 254 | 254 | 127 |
+| | | flat | **793** | **0** | **0** | **0** |
+
+Every `mix-blend-mode` layer and every CSS mask goes to zero — those are the two
+things P11 and P12 call out as expensive, and they are the entire reason for the
+swap. Node count drops by 40–45%; the remainder is routes, tokens, radials and
+the hit layer, none of which the LOD touches.
+
+Two things fell out of measuring rather than being planned:
+
+- **The turn-1 numbers understate the board by about half.** Fog suppresses the
+  hologram layers, so an unexplored hex draws its plinth and nothing else. The
+  fully-explored huge board is 254 blend layers and 127 masks, which confirms
+  the earlier estimate exactly. `board-perf` reveals fog before measuring.
+- **`MIN_SCALE` was hiding a real bug on large boards.** A huge map's content
+  box is 2365 × 1747: fit-to-view wants 0.50 at 1600×950, but 0.42 at 1280×800
+  and 0.32 at 900×600. At the old 0.45 floor, any viewport 1280 wide or narrower
+  simply could not fit the whole board, and "recenter" silently did nothing.
+  Now 0.26.
+
+### Still open
+
+- **Frame time is still unmeasured.** Headless Chromium's rAF cadence is not a
+  real compositor and reported a 127-hex board as *faster* than a 30-hex one, so
+  `board-perf` deliberately reports no timing at all. Profile in a real browser;
+  `?lod=full` exists so the worst case can be held on screen while you do.
+- **Large and huge maps now open in flat LOD**, because they fit at 0.573 and
+  0.50 — both under the threshold. That is the LOD doing its job, but it does
+  mean the art only appears once you zoom in. If that reads wrong, `FLAT_BELOW`
+  in `boardLod.js` is the one number to change.
+- **`FloatingControlMeter` is the densest thing left**, ~22 nodes each and two
+  stacked CSS `drop-shadow` filters — the effect P11 names as the expensive one.
+  Content-capped at 10, so it is not urgent, and dropping the glow when zoomed
+  out is a look decision rather than a perf one.
+
+## 8. What this does not change
 
 Worth stating plainly, because it bounds the blast radius: no engine file, no
 game rule, no save format, and no content data changes. `buildHexGrid`'s

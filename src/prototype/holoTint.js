@@ -1,4 +1,8 @@
-// What colour a hex's hologram burns, and why.
+// What colour a hex reads as: the tint its hologram burns, and the ring drawn
+// round its top face. Both are pure functions of a hex, and both are needed by
+// each of the two board level-of-detail paths (the full three-layer tile art
+// and the flat polygon it collapses to when zoomed out), so they live here
+// rather than inside either renderer.
 //
 // The board carries two different ownership signals and they mean different
 // things, so they are resolved in order rather than merged:
@@ -12,7 +16,7 @@
 // A Location whose three sections are split between factions is CONTESTED: it
 // gets no faction colour at all, because picking one of the two claimants
 // would state something the game rules do not. It pulses instead.
-import { fullController, holoColor, HOLO_NEUTRAL } from "./data.js";
+import { fullController, holoColor, HOLO_NEUTRAL, ownerColor, theme } from "./data.js";
 
 export function holoTint(hex) {
   if (hex.type === "location" && hex.control?.sections) {
@@ -37,4 +41,23 @@ export function tintStrength(hex, tint) {
   if (hex.fog === "explored") return 0.34;
   if (tint.contested) return 0.72;
   return tint.owner ? 1 : 0.62;
+}
+
+// The outline round a hex's top face, or null for no ring. Selection and
+// reachability are transient answers to "what did I just click / where can this
+// unit go", so they outrank the standing Zone-of-Control read; only one ring is
+// ever drawn. Dashed means influence, solid means ownership, and a trespass
+// (one of YOUR units standing on someone else's ground) burns hotter.
+export function hexRing(hex, { selected, reachable } = {}) {
+  if (selected) return { color: theme.accent, width: 2.6, dash: null, opacity: 1 };
+  if (reachable) return { color: theme.good, width: 2.2, dash: null, opacity: 1 };
+  if (hex.zocOwner && hex.fog !== "unexplored") {
+    return {
+      color: ownerColor(hex.zocOwner),
+      width: hex.zocTrespassing ? 2.6 : 1.6,
+      dash: hex.zocTrespassing ? "6 4" : "8 6",
+      opacity: hex.zocTrespassing ? 1 : 0.7,
+    };
+  }
+  return null;
 }
