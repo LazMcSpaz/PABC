@@ -19,7 +19,7 @@ import {
   tolerance, passesRepGates, factionIds,
   // diplomacy-spec.md additions
   findWar, warExhaustion, aiAcceptsPeace, evaluatePactCall,
-  canDemandTribute, caveOnDemand, hasOpenBorders, formTradingPact,
+  canDemandTribute, caveOnDemand, hasOpenBorders, formTradingPact, openBordersStanding,
   findPactAgreement, honorOf, powerOf,
   // diplomacy robustness pass — baselines, patronage, summit VP
   getBaseline, adjustBaseline, aiAcceptsVassalage, breakPact,
@@ -3189,6 +3189,93 @@ line("\n  [§1.3] Trading Pact");
   runDiplomacyRound(g); runDiplomacyRound(g); // reach the grace limit (3 suspended rounds)
   check("3 suspended rounds auto-dissolve the Trading Pact + remove the Research floor",
     !g.diplomacy.agreements.some((x) => x.type === "trading-pact") && (g.players[a].permanentResearch || 0) === permA);
+}
+
+// Trade routes may run by rail, not only overland. Rail is generated as a
+// spanning tree over the CAPITALS, so it is literally the artery between the
+// two cities a pact joins — a pact should not collapse for want of a footpath
+// while a railway runs between them.
+line("\n  [§1.3] Trading Pact — routing by rail");
+{
+  const stage = () => {
+    const g = createGame({ seed }); ensureDiplomacy(g);
+    const a = "versari", b = "goldgrass";
+    const isCap = (l) => (l.chips || []).some((c) => g.chips[c]?.chipId === "capital");
+    const capA = Object.values(g.locations).find((l) => l.controller === a && isCap(l));
+    const capB = Object.values(g.locations).find((l) => l.controller === b && isCap(l));
+    for (const loc of Object.values(g.locations)) if (loc !== capA && loc !== capB) loc.controller = null;
+    setStanding(g, a, b, 0); setStanding(g, b, a, 0);
+    g.players[a].menace = 0; g.players[b].menace = 0; g.players[a].honor = 6; g.players[b].honor = 6;
+    // Wall the OVERLAND route completely: a third faction's ZoC over every hex
+    // but the two capitals. reinforcementRoute treats enemy ZoC as a wall; rail
+    // does not care about ZoC at all, only about who is standing on the line.
+    g.world.zoc = {};
+    for (const h of Object.keys(g.board.hexes)) {
+      if (h !== capA.hexId && h !== capB.hexId) g.world.zoc[h] = "plainers";
+    }
+    return { g, a, b, capA, capB };
+  };
+
+  {
+    const { g, a, b, capA, capB } = stage();
+    const overland = !!reinforcementRoute(g, a, capB.hexId);
+    const railed = (g.board.rails || []).length > 0;
+    const res = formTradingPact(g, a, b);
+    check("Trading Pact: forms over an intact rail line with the overland route walled off",
+      railed && !overland && res.ok);
+    runDiplomacyRound(g);
+    const agr = g.diplomacy.agreements.find((x) => x.type === "trading-pact");
+    check("Trading Pact: a railed route keeps it running", !!agr && agr.suspended === false);
+  }
+
+  {
+    const { g, a, b } = stage();
+    formTradingPact(g, a, b);
+    // Park a hostile third party on every rail hex — the line is track, not an
+    // abstraction, so standing on it severs it (rail doc §2.1).
+    const railHexes = new Set((g.board.rails || []).flatMap((l) => l.path));
+    setStanding(g, a, "plainers", -8); setStanding(g, "plainers", a, -8);
+    setStanding(g, b, "plainers", -8); setStanding(g, "plainers", b, -8);
+    let n = 0;
+    for (const h of railHexes) {
+      const u = Object.values(g.units).find((x) => x.owner === "plainers" && !x.parked);
+      if (!u) break;
+      u.node = h; u.parked = true; n++;
+    }
+    runDiplomacyRound(g);
+    const agr = g.diplomacy.agreements.find((x) => x.type === "trading-pact");
+    check("Trading Pact: an enemy standing on the line cuts the railed route",
+      n > 0 && !!agr && agr.suspended === true);
+  }
+}
+
+// §1.6 — the open-borders Standing gate reports WHICH side is short.
+line("\n  [§1.6] Open Borders — mutual standing");
+{
+  const g = createGame({ seed }); ensureDiplomacy(g);
+  const a = "versari", b = "goldgrass";
+  const need = DH.tiers.friendly;
+
+  // The case that reads as a bug: they like you plenty, you do not like them.
+  setStanding(g, b, a, need + 2);
+  setStanding(g, a, b, need - 2);
+  const oneWay = openBordersStanding(g, a, b);
+  check("Open Borders: one-sided Friendly is refused, naming YOUR side as short",
+    !oneWay.ok && oneWay.reason.includes("your regard"));
+  const attempt = performDiplomacy(g, a, "set-open-borders", { faction: b, on: true });
+  check("Open Borders: the engine refuses with that same reason",
+    !attempt.ok && attempt.reason === oneWay.reason);
+
+  // And the mirror image, so the message is not just always blaming you.
+  setStanding(g, a, b, need + 2);
+  setStanding(g, b, a, need - 2);
+  check("Open Borders: when THEY are short, the reason says so",
+    openBordersStanding(g, a, b).reason.includes("their regard"));
+
+  setStanding(g, b, a, need);
+  check("Open Borders: exactly Friendly on both sides passes — the tier label is not a lie",
+    openBordersStanding(g, a, b).ok &&
+    performDiplomacy(g, a, "set-open-borders", { faction: b, on: true }).ok);
 }
 
 // §1.4 — Demand Tribute

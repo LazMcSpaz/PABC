@@ -8,8 +8,10 @@
 //   tiles    the art, one HexTile per hex, z-ordered by y
 //   routes   the road / rail network, over the tiles
 //   hits     one invisible polygon per hex, taking clicks on bare ground
-//   tokens   units and ghosts, over the hit layer so they take their own clicks
-//   meters   the Loyalty radials, floating above everything
+//   meters   the Loyalty radials, floating above the tiles
+//   tokens   units and ghosts, top of the stack — above the hit layer so they
+//            take their own clicks, and above the radials so a nearer city's
+//            radial cannot bury a unit standing on the row behind it
 //
 // The hit layer exists because tiles overlap heavily now: rectangular tile
 // boxes would steal each other's clicks, and a tall mountain's bounding box

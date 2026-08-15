@@ -14,6 +14,7 @@ aren't.
 | 1 — Blockade vision-gating | **deferred, decision pending** | `movementBlockers` is still ground truth (but see *Ambush halts* below) |
 | 2.1 Rail transport | built | `board.js assignRails`, `movement.js unitRailEdges` |
 | 2.2 Rail production pooling | **deferred** | shares a mechanism with 3.4 — build once |
+| Rail as a trade route | built | `diplomacy.js tradeRouteOpen` |
 | 2.3 Rail access | built (endpoints-only) | `movement.js unitRailEdges` |
 | 2.4 Rail generation | built (capital spanning tree) | `board.js assignRails` |
 | 3.1 Blockade construction | built | `blockades.js`, `actions.js build-blockade` |
@@ -25,8 +26,27 @@ Rail's production pooling (2.2) is the one piece of the "route output to a
 connected recipient" idea still outstanding. §3.4 landed first and its
 allocator (`processLocationEconomy`) is where 2.2 should join it.
 
-"Cut" has one definition across all three systems, in `movement.js
-supplyCutter`, and that is the single place Part 1 would change.
+"Cut" has one definition across all four systems that ask the question —
+rail's line-cut check, blockade construction supply, blockade funding, and
+trading-pact routes — in `diplomacy.js routeCutter`, and that is the single
+place Part 1 would change. It takes the *parties* to a line rather than one
+faction: a trading pact has two, and neither of them cuts its own route.
+`supplyCutter` is the one-party case. Both live in diplomacy.js (who may pass
+whom is a diplomacy question, not a movement one) and are re-exported from
+`movement.js`, where every mover already looks for them.
+
+### Trading pacts route by rail
+
+A trading pact needs a capital-to-capital route. It used to accept only an
+overland corridor (`reinforcementRoute`), which meant a pact could collapse for
+want of a footpath while a railway ran between the two cities — rail is
+generated as a spanning tree over the CAPITALS, so it is literally the artery
+between the two a pact joins. `tradeRouteOpen` now accepts either.
+
+Rail is not a free pass: a line is a real sequence of hexes, so a hostile third
+party standing anywhere along it severs that link, and a severed link can
+isolate a capital even though the track is still there. That is what keeps a
+railed pact worth attacking.
 
 ### Ambush halts — a partial answer to Part 0's gap
 

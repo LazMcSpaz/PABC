@@ -122,7 +122,14 @@ export function GhostToken({ ghost, slot = 0, count = 1 }) {
 // One positioned group per hex, so token slots stay relative to a hex centre.
 export default function BoardTokens({ order, hexes, units, centers, selectedUnitId, dimmedUnitUid, onUnitClick }) {
   return (
-    <div style={{ position: "absolute", inset: 0, zIndex: 8500, pointerEvents: "none" }}>
+    // Above the Loyalty radials (9000), not below. A radial floats 28-128px
+    // ABOVE its own hex centre while tokens sit 19-46px BELOW theirs, and rows
+    // are only ~110px apart — so a nearer Location's radial lands exactly on
+    // the tokens of the row behind it and hides them completely. A unit you
+    // cannot see is a unit you lose; the radial is readable in the Location
+    // window either way, and in practice a token never reaches high enough to
+    // cover one back.
+    <div style={{ position: "absolute", inset: 0, zIndex: 9200, pointerEvents: "none" }}>
       {order.map((hexId) => {
         const hex = hexes[hexId];
         if (!hex || hex.fog === "unexplored") return null;

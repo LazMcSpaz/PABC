@@ -24,6 +24,7 @@ import {
   arePacted, atWar, vassalLord, coalitionAgainst, factionIds,
   aiAcceptsPact, aiAcceptsVassalage, wouldAccept, passesRepGates,
   evaluatePactCall, canDemandTribute, hasOpenBorders, warJustification,
+  openBordersStanding,
 } from "../game/diplomacy.js";
 import { hasTechNode } from "../game/tech.js";
 import {
@@ -854,7 +855,12 @@ function availableVerbsAgainst(state, viewer, fid) {
       let reason = "They aren't ready for an alliance.";
       const stand = getStanding(state, fid, viewer);
       const req = D.pactStandingReq ?? 1;
-      if (stand < req) reason = `Standing needs Friendly+ (currently ${tier}).`;
+      // Name the NUMBER, not the tier. A pact needs 6 while the Friendly tier
+      // starts at 5, so "needs Friendly+ (currently Friendly)" is a sentence
+      // that reads as a bug — the player can see they are Friendly.
+      if (stand < req) {
+        reason = `Their regard for you is ${stand >= 0 ? "+" : ""}${stand} (${tier}); a pact needs +${req}.`;
+      }
       else if (!passesRepGates(state, fid, viewer)) {
         if (myMenace > tol) reason = "Your Menace is past their Tolerance.";
         else if (myHonor < floor) reason = "Your Honor is below their floor.";
@@ -985,11 +991,22 @@ function availableVerbsAgainst(state, viewer, fid) {
 
   // 14) Open Borders + Allied Vision passive toggles.
   if (!myLord && !myVassal && !war) {
-    out.push({
-      verb: "set-open-borders",
-      state: "enabled",
-      outcome: "Lets them transit your territory; they may grant you the same.",
-    });
+    // Ask the engine for the same verdict it will give when the button is
+    // pressed, rather than offering the verb unconditionally and letting it
+    // fail. The gate is MUTUAL, and the drawer only shows one direction, so an
+    // unexplained refusal here looked like a bug in the standing tiers.
+    const ob = openBordersStanding(state, viewer, fid);
+    out.push(ob.ok
+      ? {
+        verb: "set-open-borders",
+        state: "enabled",
+        outcome: "Opens both territories to each other's units while it stands.",
+      }
+      : {
+        verb: "set-open-borders",
+        state: "disabled",
+        reason: `${ob.reason.charAt(0).toUpperCase()}${ob.reason.slice(1)}.`,
+      });
     out.push({
       verb: "toggle-open-borders",
       state: "enabled",

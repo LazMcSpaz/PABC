@@ -7,22 +7,15 @@
 import { CONFIG } from "./config.js";
 import { bfsDistances, movementField, movementRoute } from "./board.js";
 import { CHIPS, ABILITIES, chipBlocksRail } from "./content.js";
-import { getStanding } from "./standing.js";
-import { arePacted, vassalLord } from "./diplomacy.js";
+// `passesFreely` and `supplyCutter` are pure diplomacy questions — who may
+// pass whom, and what severs a line — so they live in diplomacy.js and are
+// re-exported here, where every mover already looks for them.
+export { passesFreely, supplyCutter } from "./diplomacy.js";
+import { passesFreely } from "./diplomacy.js";
 import { ensureVisibility, isHexVisible, isUnitVisibleTo } from "./visibility.js";
 
 const BIG_BUDGET = 999; // budget-agnostic routing for display
 
-// May `a`'s units move freely THROUGH `b`'s units / Locations? True for the
-// same faction, an alliance (pact or vassalage either way), or MUTUAL Friendly+
-// Standing. Neutral/wary/hostile all block, so a single unit can hold a pass.
-export function passesFreely(state, a, b) {
-  if (!a || !b || a === b) return true;
-  if (arePacted(state, a, b)) return true;
-  if (vassalLord(state, a) === b || vassalLord(state, b) === a) return true;
-  const need = CONFIG.diplomacy.tiers.friendly;
-  return getStanding(state, a, b) >= need && getStanding(state, b, a) >= need;
-}
 
 // The set of hexes that HALT `ownerId`'s movement on entry (§16.2 blockade):
 // any hex holding a non-passing foreign unit, plus any enemy-controlled
@@ -94,27 +87,6 @@ export function movementBlockers(state, ownerId, opts) {
 // the whole turn.
 export function unseenBlockers(state, ownerId, opts) {
   return blockerScan(state, ownerId, opts).unseen;
-}
-
-// Does something hostile to `ownerId` sit on this hex, cutting a road or rail
-// line that runs through it? The rail doc uses one definition of "cut" in three
-// places — rail's line-cut check (§2.1), blockade construction supply (§3.1)
-// and blockade funding (§3.4) — so it is defined once, here.
-//
-// Ground truth today, matching movementBlockers above. Part 1 of the rail doc
-// would additionally require the blocker to have DETECTED the faction whose
-// line it is cutting; that is not built, and this is the single place it would
-// need to change.
-export function supplyCutter(state, ownerId) {
-  return (hexId) => {
-    for (const u of Object.values(state.units)) {
-      if (u.node !== hexId || u.owner === ownerId) continue;
-      if (!passesFreely(state, ownerId, u.owner)) return true;
-    }
-    const b = state.world?.blockades?.[hexId];
-    if (b?.done && b.owner !== ownerId && !passesFreely(state, ownerId, b.owner)) return true;
-    return false;
-  };
 }
 
 // Terrain-, road- and blockade-aware reachability for `unit` this turn →

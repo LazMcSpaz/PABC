@@ -767,6 +767,79 @@ function dropStandingTiers(state, a, b, n) {
   setStanding(state, a, b, Math.min(getStanding(state, a, b), D().tiers[order[idx]]), "tribute-refused");
 }
 
+// --- passage and interruption ----------------------------------------
+// Both of these used to live in movement.js, but neither is about movement:
+// they are the two diplomacy questions the map keeps asking. Keeping them here
+// lets diplomacy answer them for itself (trade routes below) without importing
+// movement.js, which imports this file. movement.js re-exports both, so every
+// mover still finds them where it always did.
+
+// May `a`'s units move freely THROUGH `b`'s units / Locations? True for the
+// same faction, an alliance (pact or vassalage either way), or MUTUAL Friendly+
+// Standing. Neutral/wary/hostile all block, so a single unit can hold a pass.
+export function passesFreely(state, a, b) {
+  if (!a || !b || a === b) return true;
+  if (arePacted(state, a, b)) return true;
+  if (vassalLord(state, a) === b || vassalLord(state, b) === a) return true;
+  const need = D().tiers.friendly;
+  return getStanding(state, a, b) >= need && getStanding(state, b, a) >= need;
+}
+
+// Does something hostile to `ownerId` sit on this hex, cutting a road or rail
+// line that runs through it? The rail doc uses one definition of "cut" in four
+// places now — rail's line-cut check (§2.1), blockade construction supply
+// (§3.1), blockade funding (§3.4) and trading-pact routes — so it is defined
+// once, here.
+//
+// Ground truth today, matching movementBlockers. Part 1 of the rail doc would
+// additionally require the blocker to have DETECTED the faction whose line it
+// is cutting; that is not built, and this is the single place it would change.
+// `parties` is who the line belongs to — one faction for a supply line, two for
+// a trading pact's route. A THIRD party cuts it if any party cannot pass them
+// freely; the parties themselves never cut their own line, which matters for a
+// pact: b's garrison sitting in b's own capital is the far end of the route,
+// not an interruption of it.
+export function routeCutter(state, parties) {
+  const party = new Set([].concat(parties));
+  const severs = (fid) =>
+    !party.has(fid) && [...party].some((p) => !passesFreely(state, p, fid));
+  return (hexId) => {
+    for (const u of Object.values(state.units)) {
+      if (u.node === hexId && severs(u.owner)) return true;
+    }
+    const b = state.world?.blockades?.[hexId];
+    return !!(b?.done && severs(b.owner));
+  };
+}
+
+export function supplyCutter(state, ownerId) {
+  return routeCutter(state, [ownerId]);
+}
+
+// §1.6 — the Standing half of the open-borders gate, exported so the UI can
+// grey the verb out with the SAME answer the engine will give instead of
+// offering it and then refusing.
+//
+// Open borders is a two-way agreement, not a grant you hand over, so it needs
+// Friendly+ in BOTH directions. Reporting that as "need Friendly+ standing"
+// was actively misleading: the drawer only shows their regard for you, so a
+// player looking at a Friendly card was told they needed the thing they could
+// see they already had. The reason now names the side that is short and the
+// numbers, because the failing direction is the one you cannot see.
+export function openBordersStanding(state, a, b) {
+  const need = D().tiers.friendly;
+  const mine = getStanding(state, a, b);
+  const theirs = getStanding(state, b, a);
+  if (mine >= need && theirs >= need) return { ok: true, mine, theirs, need };
+  const short = mine < need
+    ? `your regard for them is ${mine >= 0 ? "+" : ""}${mine}`
+    : `their regard for you is ${theirs >= 0 ? "+" : ""}${theirs}`;
+  return {
+    ok: false, mine, theirs, need,
+    reason: `open borders runs both ways and needs ${need >= 0 ? "+" : ""}${need} each way — ${short}`,
+  };
+}
+
 // --- §1.3 trading pact ----------------------------------------------
 // The Capital hex a faction controls (carries the `capital` chip), or null.
 function capitalHexOf(state, fid) {
@@ -775,6 +848,51 @@ function capitalHexOf(state, fid) {
   }
   return null;
 }
+// Is there a trade route between two capitals? Two ways to have one, and they
+// are genuinely different roads:
+//
+//   overland   `reinforcementRoute` — a corridor of friendly/neutral ground,
+//              which an enemy ZoC can wall off.
+//   rail       the pre-collapse trunk line. Rail is generated as a spanning
+//              tree over the CAPITALS (board.js assignRails), which makes it
+//              literally the trade artery between them — it would be strange
+//              for a pact to collapse for want of a footpath while a railway
+//              runs between the two cities.
+//
+// Rail is not free: a line is a real sequence of hexes (rail doc §2.1), so a
+// hostile third party parked anywhere along it cuts that link, and a cut can
+// isolate a capital even though the track still exists. That is what makes
+// railed trade worth attacking rather than a free pass.
+//
+// `isCut` is injected by the caller so this module stays clear of movement.js.
+function railRouteBetween(state, capA, capB, isCut) {
+  const links = state.board?.rails;
+  if (!links || !links.length) return false;
+  const seen = new Set([capA]);
+  const queue = [capA];
+  while (queue.length) {
+    const cur = queue.shift();
+    if (cur === capB) return true;
+    for (const link of links) {
+      const far = link.a === cur ? link.b : link.b === cur ? link.a : null;
+      if (far === null || seen.has(far)) continue;
+      if (link.path.some((h) => isCut(h))) continue; // this line is severed
+      seen.add(far);
+      queue.push(far);
+    }
+  }
+  return false;
+}
+
+// The trade route between `a` and `b`, overland or by rail.
+function tradeRouteOpen(state, a, b) {
+  const capA = capitalHexOf(state, a);
+  const capB = capitalHexOf(state, b);
+  if (!capA || !capB) return false;
+  if (reinforcementRoute(state, a, capB)) return true;
+  return railRouteBetween(state, capA, capB, routeCutter(state, [a, b]));
+}
+
 function tradingPactBetween(state, a, b) {
   return state.diplomacy.agreements.find(
     (agr) => agr.type === "trading-pact" && ((agr.a === a && agr.b === b) || (agr.a === b && agr.b === a)),
@@ -798,7 +916,8 @@ export function formTradingPact(state, a, b) {
     return { ok: false, reason: "reputation gates fail" };
   const capA = capitalHexOf(state, a), capB = capitalHexOf(state, b);
   if (!capA || !capB) return { ok: false, reason: "both parties need a Capital" };
-  if (!reinforcementRoute(state, a, capB)) return { ok: false, reason: "no clear route between capitals" };
+  if (!tradeRouteOpen(state, a, b))
+    return { ok: false, reason: "no clear route between capitals — by road or by rail" };
   state.diplomacy.agreements.push({
     id: `trade-${a}-${b}-${state.round}`,
     type: "trading-pact", a, b, partyA: a, partyB: b,
@@ -822,8 +941,7 @@ function tradingPactRoundCheck(state) {
   const survivors = [];
   for (const agr of state.diplomacy.agreements) {
     if (agr.type !== "trading-pact") { survivors.push(agr); continue; }
-    const capB = capitalHexOf(state, agr.b);
-    const clear = !!(capB && reinforcementRoute(state, agr.a, capB));
+    const clear = tradeRouteOpen(state, agr.a, agr.b);
     if (!clear) {
       if (!agr.suspended) { agr.suspended = true; emit(state, "trading_pact_suspended", { agreement: agr.id, reason: "route-severed" }); }
       agr.suspendedRounds = (agr.suspendedRounds || 0) + 1;
@@ -1428,8 +1546,8 @@ export function performDiplomacy(state, pid, action, params = {}) {
       const on = params.on !== false;
       if (on) {
         if (atWar(state, pid, f)) return { ok: false, reason: "at war with them" };
-        if (getStanding(state, pid, f) < D().tiers.friendly || getStanding(state, f, pid) < D().tiers.friendly)
-          return { ok: false, reason: "need Friendly+ standing" };
+        const gate = openBordersStanding(state, pid, f);
+        if (!gate.ok) return { ok: false, reason: gate.reason };
         if (!passesRepGates(state, pid, f) || !passesRepGates(state, f, pid))
           return { ok: false, reason: "reputation gates fail" };
         if (!standaloneOpenBorders(state, pid, f)) {
