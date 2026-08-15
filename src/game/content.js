@@ -229,6 +229,18 @@ export function chipDisplayName(chipId, factionId) {
   return CHIP_SKINS[chipId]?.[factionId] || CHIPS[chipId]?.name || chipId;
 }
 
+// docs/rail-road-blockade-design.md §2.1 — a unit carrying a rail-incompatible
+// chip cannot use rail. The rule is "anything bulky enough to need two chip
+// slots is too bulky to put on a train", DERIVED from `slots` rather than read
+// off a hand-set flag, so a future 2-slot unit chip inherits it without anyone
+// remembering to tag it. The explicit `railIncompatible: true` on Bombard and
+// Landship stays as documentation and is asserted against this in the harness.
+// Location chips are exempt whatever their size — they never ride a unit.
+export function chipBlocksRail(chipId) {
+  const def = CHIPS[chipId];
+  return !!def && def.kind === "unit" && (def.slots || 1) >= 2;
+}
+
 // The Capital — a special predefined chip, one per player. Not sold in
 // the Market; placed on each faction's starting location at setup.
 export const CAPITAL = {

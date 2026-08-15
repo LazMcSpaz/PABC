@@ -392,9 +392,10 @@ fix roughly half the board.
 `docs/rail-road-blockade-design.md` (I missed that doc first time round and
 wrongly reported rail as undesigned — it is undesigned only in *code*). What is
 missing is the implementation. `RouteNetwork.jsx` already draws rails off a
-`hex.rail` field, so they appear the moment the engine stamps one. Open items
-are that doc's own list, plus one contradiction: rail there is **player-built**,
-which conflicts with routes being static "rendered at start time".
+`hex.rail` field, so they appear the moment the engine stamps one. Rail is generated at
+setup like roads and never changes during a game, so the renderer's
+"draw once, static" assumption holds. Open items are that doc's own list —
+chiefly which settlement pairs get track.
 
 **Q11 — Should Dambar still be a Versari home Location?** Capitals are now
 declared explicitly (Versari korad, Goldgrass kansit, Lakers droit, Plainers

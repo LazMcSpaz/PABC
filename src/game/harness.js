@@ -33,7 +33,7 @@ import { holderOf, controlLevel, holdsLocation } from "./control.js";
 import { setStanding } from "./standing.js";
 import { factionDef, MINOR_FACTIONS } from "./content.js";
 import { activePlayerId } from "./targeting.js";
-import { FACTIONS, LOCATIONS, ABILITIES, REACTIVES, CHIPS } from "./content.js";
+import { FACTIONS, LOCATIONS, ABILITIES, REACTIVES, CHIPS, chipBlocksRail } from "./content.js";
 import { resolveSalvage } from "./contest.js";
 import { readRivalIntel } from "./intel.js";
 import { postAt, isPostVisibleTo, chargePostUpkeep } from "./posts.js";
@@ -3541,6 +3541,16 @@ line("\n  [Phase 11] text-token resolver");
       cycleTo(gD, dPid);
       return gD.players[dPid].vp === before;
     })());
+
+  // -- content invariant: the rail-incompatibility flag matches the rule.
+  // The rule (2-slot unit chips can't use rail) is the source of truth; the
+  // hand-set flags in content.js are documentation. This catches them drifting
+  // apart, which is the failure mode a derived rule exists to prevent.
+  const railMismatch = Object.values(CHIPS).filter(
+    (c) => !!c.railIncompatible !== chipBlocksRail(c.id) && c.kind === "unit",
+  );
+  check("rail-incompatible chips are exactly the 2-slot unit chips",
+    railMismatch.length === 0, railMismatch.map((c) => c.id));
 
   // -- vassal dominion: a vassal's qualifying city ticks for the overlord.
   const gV = createGame({ seed: 142 });

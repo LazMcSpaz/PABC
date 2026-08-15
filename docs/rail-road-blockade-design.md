@@ -13,10 +13,26 @@ Road today (`src/game/board.js`) is free-for-anyone terrain infrastructure —
 it costs 1 to enter and never halts, even through mountain or forest, and
 there's no ownership check on it: any faction's units benefit, not just
 whoever's territory it's in. A rail line with the same effect would just be
-road reskinned. The differentiation that actually matters: rail is something
-a faction *builds and owns*, not terrain everyone gets for free — which
-opened into a much larger conversation once "owned infrastructure" met the
-question of what already governs whether territory is contested.
+road reskinned.
+
+**Rail is NOT player-built.** An earlier pass in this doc differentiated rail
+by making it something a faction constructs and owns; that is overruled. Rail
+is pre-existing infrastructure, laid at map generation alongside roads —
+surviving track from before the collapse, not something anyone is building
+now.
+
+So the differentiation has to come from what rail *does*, and it still does:
+
+| | Road | Rail |
+|---|---|---|
+| Shape | continuous terrain, most of the map | sparse links between specific settlement pairs |
+| Movement | 1 MP per hex, never halts | **1 MP for the whole hop**, however far apart the endpoints |
+| Economy | none | **production pooling** between the two settlements it joins |
+| Access | anyone | gated on controlling the endpoints (§2.3) |
+
+That is a genuinely different object: road is how you cross ground, rail is
+how you skip it. Neither is a reskin of the other, and neither needs a build
+action to justify itself.
 
 ## Part 0 — Verified current state (before any of this changes anything)
 
@@ -79,12 +95,15 @@ still matters the same way it already does everywhere else.
   walks `adjacency[hex]`) — multi-hop chaining falls out of the existing
   pathfinding with no bespoke new algorithm, and is naturally self-limited
   by the unit's movement budget the same way ordinary movement already is.
-- **Unit eligibility gate**: a unit carrying a chip that's thematically
-  incompatible with rail travel (the example given: a "land ship" chip —
-  you can't put a land ship on a train) cannot use rail at all while that
-  chip is installed. Needs a new boolean-ish flag on chip definitions (e.g.
-  `railIncompatible: true`) that the rail-hop check reads. Which existing
-  chips carry this flag is not yet decided — flagged in Open Questions.
+- **Unit eligibility gate**: a unit carrying a rail-incompatible chip cannot
+  use rail at all while that chip is installed. **Settled: any chip occupying
+  2 chip slots is rail-incompatible** — if it is bulky enough to need two
+  slots, it is too bulky to put on a train. Today that is exactly Bombard and
+  Landship, both of which already carry `railIncompatible: true` in
+  `src/game/content.js`; deriving the flag from `slots >= 2` rather than
+  hand-setting it means any future 2-slot unit chip inherits the rule for
+  free. (`logistics-hub` is also 2-slot but is a Location chip, so it never
+  rides on a unit.)
 - Like a physical road, a rail line occupies a literal sequence of hexes
   (not an abstract point-to-point relationship) — so it's interruptible
   per-hex the same way road/blockade interruption works (2.2, Part 3.4):
@@ -112,11 +131,18 @@ concept needed.
   no partial credit, consistent with how the rest of the economy doesn't do
   partial-progress refunds either.
 
-### 2.3 Ownership and diplomatic access
+### 2.3 Access and diplomatic sharing
 
-- **Default: owned-only.** Earlier in this design pass an ally-extension was
-  proposed as automatic (via pact/vassalage/open-borders); explicitly walked
-  back — rail was never intended to auto-share between allies.
+Rail is not owned by construction any more, so access has to be defined some
+other way. **Proposed (NEEDS CONFIRMING): you may use a rail link if you
+control both endpoint settlements.** That keeps rail feeling like held
+infrastructure rather than public terrain, gives capturing a city a second
+kind of reward, and needs no new ownership state — it reads `loc.controller`,
+which already exists.
+
+- **Default: endpoints-only.** Earlier in this design pass an ally-extension
+  was proposed as automatic (via pact/vassalage/open-borders); explicitly
+  walked back — rail was never intended to auto-share between allies.
 - **Proposed instead**: a distinct, negotiable diplomatic agreement —
   separate from the existing Open Borders toggle — that a faction could
   extend to an ally to grant rail access (both the instant-transport and
@@ -125,12 +151,28 @@ concept needed.
   flagged as future work, consistent with the existing pattern of many
   small discrete diplomatic toggles rather than one monolithic "alliance."
 
-### 2.4 Construction prerequisites
+### 2.4 Generation (replaces the old "construction prerequisites")
 
-- Requires the prospective path to be non-enemy-controlled at build time.
-- No requirement to hold every underlying hex permanently afterward (ZoC
-  drifts constantly at runtime; that would make rail absurdly fragile) — the
-  only ongoing vulnerability is the per-hex blockade-interruption check.
+Rail is laid once at setup, like roads (`assignRoads` in `src/game/board.js`),
+and never changes during a game. There is no build action, no cost, no
+prerequisite, and no way to add or remove track mid-game.
+
+There is no requirement to hold the hexes a line passes through — ZoC drifts
+constantly at runtime and that would make rail absurdly fragile. The only
+ongoing vulnerability is the per-hex blockade-interruption check (2.1).
+
+**Open: which settlement pairs get track.** Roads now connect every settlement
+to its nearest one or two neighbours, so rail must be much sparser or it adds
+nothing. Candidates, not yet decided:
+
+- capital ↔ capital only (4 lines, one per faction pair — very legible, very
+  strategic, and immediately meaningful because capitals are fixed);
+- the *longest* settlement pairs, so rail is specifically the thing that
+  crosses distance road handles badly;
+- value-gated — only `veryHigh`/`high` Locations get a station.
+
+Whichever it is, it wants a `CONFIG.rail` knob for the count, the same way
+`CONFIG.roads.linksByValue` controls road density.
 
 ## Part 3 — The Blockade structure
 
@@ -211,9 +253,9 @@ already works rather than as a new parallel system.
 - **Exact numbers**: blockade scrap-equivalent cost, base defense score,
   base vision range, rail per-hop movement cost (proposed: 1, matching
   road, not yet confirmed), Toll Booth income rate. All placeholders.
-- **Which chips get `railIncompatible`**: the flag concept is settled, the
-  actual list of disqualifying chips (land ship confirmed as one example)
-  is not.
+- **Which settlement pairs get rail** (2.4), and **whether controlling both
+  endpoints is the right access rule** (2.3). Both opened up by rail becoming
+  generated rather than built.
 - **The rail-access diplomatic agreement** (2.3): not yet named, specified,
   or scoped as an actual `DiplomacyDrawer` verb — flagged as future work
   once the core rail mechanic exists.
@@ -225,8 +267,12 @@ already works rather than as a new parallel system.
 - A new Blockade entity — likely closer to a lightweight Location (static
   base value, defender-stacking, chip slots) than to a Unit, but
   destroy-only with no controller-flip/capture logic.
-- `board.js`/movement graph: rail links as extra adjacency edges, likely a
-  `hex.rail`-shaped field paralleling how `hex.road` already works.
+- `board.js`: an `assignRails` generator paralleling `assignRoads`, plus rail
+  links as extra adjacency edges in the movement graph. Rail needs BOTH a
+  `hex.rail` boolean (so the board renderer can draw the line — it already
+  reads this field) and a link registry naming each line's two endpoints and
+  its hex path, since the 1-MP hop and production pooling are properties of
+  the *link*, not of the individual hexes.
 - One shared "route idle/surplus output to a connected recipient, cut by
   interruption" mechanism, reused by both rail production-pooling (2.2) and
   Blockade funding (3.4) rather than built twice.
