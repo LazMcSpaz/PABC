@@ -19,16 +19,27 @@ good news:
 | Property | Value | Spread across the 14 |
 |---|---|---|
 | Canvas | 1024 × 1024 JPEG | — |
-| Hex width (vertex→vertex) | **970 px** | ±4 px (0.4%) |
+| Hex width (vertex→vertex) | **972 px** | ±4 px (0.4%) |
 | Hex centre x | **509 px** | ±0.5 px |
 | Left/right vertex row (y) | **522 px** | **0 px — pixel-identical** |
-| Projected top-face height | **352 px** | ±2 px on flat tiles |
-| Plinth skirt height (at centre) | **139 px** | ±4 px |
+| Top/bottom flat edge | **556 px** | ±3 px |
+| Projected top-face height | **469 px** | fitted, see below |
+| Near-edge slope \|dx/dy\| | **0.887** | 0.851–0.914 |
+| Plinth skirt height (at centre) | **81 px** | ±4 px |
 | Tallest geometry above centreline | 258–335 px | varies by tile (as expected) |
 
 **The camera is locked.** Every tile was rendered from the same rig, so tile
 geometry is a set of constants rather than something to detect per-image. That
 is what makes the whole plan cheap.
+
+The height figure is *fitted*, not read off directly, and an earlier pass got
+it badly wrong. Measuring where the hologram's far rim sits gives 352 — but the
+far half of the top face is hidden behind the terrain, so the rim is not the
+hexagon's edge. The honest fit comes from two things that are unobstructed on
+every master: the bottom face's flat edge (556 px) and the slope of the near
+edges (0.887), which pin the height through `(hexW − hexFlat) / hexH = slope`.
+Using 352 packed tiles at 75% of their true vertical pitch, which is what made
+the board look flattened and clipped tiles into their neighbours.
 
 Three facts that *don't* match the existing pipeline doc and drive most of the
 work below:
@@ -36,8 +47,13 @@ work below:
 1. **The hexes are flat-top** (vertices left and right, flat edges top and
    bottom). `docs/blender-hex-tile-pipeline.md` specifies pointy-top, and the
    live board renders pointy-top.
-2. **Camera elevation is ~24.8°** (vertical squash 0.419), not the 45–55° the
-   pipeline doc specifies. Much more dramatic, much more occlusion.
+2. **Camera elevation is ~34°** (vertical squash 0.557), not the 45–55° the
+   pipeline doc specifies.
+2b. **The tiles are not REGULAR hexagons.** A regular flat-top hexagon has a
+   flat edge of exactly half its vertex-to-vertex width; these measure 0.572 of
+   it. They still tile the plane exactly — opposite sides are parallel and
+   equal, which is all a hexagon needs — but the pitch has to be derived from
+   the measured flat edge, not from the textbook `0.75 × W`.
 3. **Opaque JPEG, no alpha.** The doc asks for WebP + alpha. The dark misty
    background has to be keyed out.
 
@@ -258,10 +274,9 @@ Ordered roughly by how much damage each does if it's discovered late.
 CSS clip-path, the token slots, the ZoC polygon and the replay camera all assume
 pointy-top. Every one of those has to move together. The engine is unaffected.
 
-**P2 — Occlusion at 24.8° (measured).** Tall geometry reaches up to 335 px above
-the hex centreline against a 352 px vertical pitch. At gap 1.00, a tall tile
-hides essentially all of the tile behind it. Gap ≥1.2 makes it acceptable;
-re-rendering at ~40° elevation would fix it properly. See Q3.
+**P2 — Occlusion (measured).** Tall geometry reaches up to 332 px above the hex
+centreline against a 469 px vertical pitch, so a tall tile hides roughly the
+back two-thirds of the tile behind it at `GAP = 1.0`. Accepted (Q3).
 
 **P3 — Lossy masters.** JPEG ringing around the glow leaves faint speckle in the
 alpha mask. The analytic prism mask keeps it out of the plinth, but PNG/WebP
@@ -368,20 +383,27 @@ Either the engine grows a real rail network (a second pass like `assignRoads`,
 plus whatever rail is supposed to *do*), or say the word and I'll generate a
 display-only one at setup.
 
-**Q11 — Which Locations are canonically coastal?** Worth settling before the
-map generator is taught to honour it, because the two data sources disagree.
-The engine (`src/game/content.js`) gives Lakers **chigan + droit** and puts
-**dambar** under Versari; the look-pass table (`src/prototype/data.js`) says
-Lakers' capital *is* dambar and gives it a "Deepwater Port" ability. Coast
-placement is positional today (east rim), so nothing is blocked — but "Grand
-Laker settlements are on the coast" resolves to different hexes depending on
-which table is right.
+**Q11 — Should Dambar still be a Versari home Location?** The capital bug is
+fixed (see below), but one question survives it: `src/game/content.js` lists
+**dambar** among Versari's two affiliated Locations, while the fiction has
+Dambar as the Denver analogue and the Dambarans plainly from there. Moving it
+would leave Versari with one home Location, and `generateLayout` assumes every
+major faction has exactly two — so this is a content change with a generator
+consequence, not a one-line edit.
 
 **Q12 — Should the generator force the coastal factions east?** Coast art is
-positional, so Lakers/Tempest currently start wherever `generateLayout`'s
-farthest-point sampling puts them, which is often inland. Pinning their anchor
-to the eastern rim is a contained change to `generateLayout`, but it is a real
-map-generation change (it re-rolls every existing seed), so I have not made it.
+positional, so Lakers (chigan + droit) and Tempest currently start wherever
+`generateLayout`'s farthest-point sampling puts them, which is often inland.
+Pinning their anchor to the eastern rim is a contained change to
+`generateLayout`, but it is a real map-generation change — it re-rolls every
+existing seed — so I have not made it.
+
+**Q13 — Vertical stretch.** `STRETCH` in `hexProjection.js` fakes a higher
+camera by scaling every vertical measurement; it is at **1.25** (reads as
+~45°). 1.0 is the art exactly as rendered (~34°). It is a cheat: a real camera
+lift would foreshorten tall geometry as it opened up the ground plane, and this
+only does the second half, so mountains grow along with the ground. Fine at
+1.25, breaks down well before 2.
 
 **Q7 — Approve the holo palette** in §2.2, or adjust the four colours.
 

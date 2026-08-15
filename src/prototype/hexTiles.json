@@ -4,10 +4,10 @@
     "src": 1024,
     "cx": 509,
     "cy": 522,
-    "hexW": 970,
-    "hexH": 352,
-    "skirt": 139,
-    "elevationDeg": 24.8,
+    "hexW": 972,
+    "hexFlat": 556,
+    "hexH": 469,
+    "skirt": 81,
     "orientation": "flat-top"
   },
   "exportScale": 0.7,
@@ -25,7 +25,7 @@
           "dy": 6,
           "w": 965,
           "h": 310,
-          "bytes": 9514
+          "bytes": 8866
         },
         "holo": {
           "file": "plains_hills_holo.webp",
@@ -58,7 +58,7 @@
           "dy": 11,
           "w": 966,
           "h": 305,
-          "bytes": 9812
+          "bytes": 8500
         },
         "holo": {
           "file": "flat_forest_holo.webp",
@@ -92,7 +92,7 @@
           "dy": 9,
           "w": 968,
           "h": 307,
-          "bytes": 9230
+          "bytes": 8628
         },
         "holo": {
           "file": "mountains_forest_holo.webp",
@@ -125,7 +125,7 @@
           "dy": 6,
           "w": 969,
           "h": 310,
-          "bytes": 8572
+          "bytes": 7690
         },
         "holo": {
           "file": "mountain_holo.webp",
@@ -158,7 +158,7 @@
           "dy": 6,
           "w": 970,
           "h": 310,
-          "bytes": 9224
+          "bytes": 8352
         },
         "holo": {
           "file": "mountain_2_holo.webp",
@@ -191,7 +191,7 @@
           "dy": 6,
           "w": 968,
           "h": 310,
-          "bytes": 8790
+          "bytes": 8114
         },
         "holo": {
           "file": "mountain_plateau_holo.webp",
@@ -225,7 +225,7 @@
           "dy": 14,
           "w": 962,
           "h": 302,
-          "bytes": 9610
+          "bytes": 8814
         },
         "holo": {
           "file": "plains_settlement_holo.webp",
@@ -259,7 +259,7 @@
           "dy": 16,
           "w": 963,
           "h": 300,
-          "bytes": 10140
+          "bytes": 9750
         },
         "holo": {
           "file": "mountain_settlement_holo.webp",
@@ -290,10 +290,10 @@
         "base": {
           "file": "mountain_plateau_settlement_base.webp",
           "dx": -482,
-          "dy": 6,
+          "dy": 7,
           "w": 967,
-          "h": 310,
-          "bytes": 9338
+          "h": 309,
+          "bytes": 8128
         },
         "holo": {
           "file": "mountain_plateau_settlement_holo.webp",
@@ -327,7 +327,7 @@
           "dy": 18,
           "w": 964,
           "h": 298,
-          "bytes": 9774
+          "bytes": 9072
         },
         "holo": {
           "file": "plains_city_holo.webp",
@@ -361,7 +361,7 @@
           "dy": 14,
           "w": 963,
           "h": 302,
-          "bytes": 9874
+          "bytes": 9006
         },
         "holo": {
           "file": "mountain_city_holo.webp",
@@ -394,7 +394,7 @@
           "dy": 10,
           "w": 966,
           "h": 306,
-          "bytes": 9690
+          "bytes": 8744
         },
         "holo": {
           "file": "coastline_easttowest_holo.webp",
@@ -427,7 +427,7 @@
           "dy": 5,
           "w": 967,
           "h": 311,
-          "bytes": 9074
+          "bytes": 8302
         },
         "holo": {
           "file": "coastline_NEdiagonal_holo.webp",
@@ -460,7 +460,7 @@
           "dy": 14,
           "w": 964,
           "h": 302,
-          "bytes": 9786
+          "bytes": 8698
         },
         "holo": {
           "file": "coastline_NWdiagonal_holo.webp",
@@ -494,7 +494,7 @@
           "dy": 10,
           "w": 967,
           "h": 306,
-          "bytes": 9464
+          "bytes": 8304
         },
         "holo": {
           "file": "coastline_settlement_holo.webp",
@@ -528,7 +528,7 @@
           "dy": 15,
           "w": 966,
           "h": 301,
-          "bytes": 10486
+          "bytes": 9844
         },
         "holo": {
           "file": "coastline_city_holo.webp",

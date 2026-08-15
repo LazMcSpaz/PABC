@@ -4,9 +4,14 @@
 // different camera).
 //
 // The art is FLAT-TOP (vertices left and right, flat edges top and bottom),
-// viewed from ~25° above the horizon, which squashes it vertically. The live
-// board used to be pointy-top, so the renderer transposes: an engine ROW
-// becomes a screen COLUMN.
+// viewed from ~34° above the horizon, which squashes it vertically. It is also
+// not a REGULAR hexagon — the flat edges measure 0.572 of the vertex-to-vertex
+// width rather than 0.5 — so the tiling pitch is derived from the measured
+// shape (see COL_STEP) instead of the usual 0.75 * W. It still tiles exactly:
+// opposite sides are parallel and equal, which is all a hexagon needs.
+//
+// The live board used to be pointy-top, so the renderer transposes: an engine
+// ROW becomes a screen COLUMN.
 //
 // That transpose costs nothing, because the engine's adjacency is purely
 // topological — `buildHexGrid` (src/game/board.js) links hexes by row/col
@@ -30,18 +35,34 @@ export const HEX_W = 216;
 // CSS px per source-image unit. Every measurement out of the manifest is in
 // source units, so this is the only place the two spaces meet.
 export const UNIT = HEX_W / FRAME.hexW;
-export const HEX_H = FRAME.hexH * UNIT;      // projected height of the top face
-export const SKIRT_H = FRAME.skirt * UNIT;   // plinth depth below the near edge
 
-// Tiles pack flush: the plinths meet and the board reads as one continuous
-// map table rather than a scatter of floating dioramas. The cost is
-// occlusion — the art reaches up to ~332 source units above the centreline
-// against a 352-unit vertical pitch, so a tall tile hides most of the tile
-// behind it — and that is an accepted trade, not an oversight. Raising this
-// above 1 floats the tiles apart again and buys the clearance back.
+// Fake a higher camera by stretching everything vertically. A real camera lift
+// would foreshorten tall geometry as it opened up the ground plane; this only
+// does the second half, so mountains grow with the ground and the illusion
+// breaks if you push it far. 1.0 is the art as rendered (~34° above the
+// horizon); ~1.25 reads as ~45°. Applied to every vertical measurement, so the
+// grid, the art and the hit polygons stay in agreement whatever it is set to.
+export const STRETCH = 1.25;
+export const UNIT_Y = UNIT * STRETCH;
+
+export const HEX_H = FRAME.hexH * UNIT_Y;     // projected height of the top face
+export const HEX_FLAT = FRAME.hexFlat * UNIT; // length of the top/bottom edges
+export const SKIRT_H = FRAME.skirt * UNIT_Y;  // plinth depth below the near edge
+
+// Tiles pack flush: the plinths meet and the board reads as one continuous map
+// table rather than a scatter of floating dioramas. The cost is occlusion —
+// the art reaches up to ~332 source units above the centreline against a
+// 469-unit vertical pitch, so a tall tile hides part of the tile behind it —
+// and that is an accepted trade. Raising this above 1 floats the tiles apart
+// again and buys the clearance back.
 export const GAP = 1.0;
-export const COL_STEP = 0.75 * HEX_W * GAP;  // engine row  -> screen x
-export const ROW_STEP = HEX_H * GAP;         // engine hex.x -> screen y
+// Tiling vectors for a hexagon with opposite sides parallel and equal. The
+// familiar 0.75 * W only holds for a REGULAR hexagon (flat edge = W/2); these
+// tiles measure a flat edge of 0.572 * W, so the horizontal pitch has to come
+// from (W + flat) / 2 or every column overlaps its neighbour and the rims
+// visibly cut into each other.
+export const COL_STEP = ((HEX_W + HEX_FLAT) / 2) * GAP;  // engine row  -> screen x
+export const ROW_STEP = HEX_H * GAP;                     // engine hex.x -> screen y
 
 const MAX_PEAK = Math.max(...TILES.map((t) => t.peakAbove)) * UNIT;
 // Headroom above the tallest tile for the Loyalty radial that floats over
@@ -52,14 +73,16 @@ const PAD_BOTTOM = HEX_H / 2 + SKIRT_H + 24;
 const PAD_X = HEX_W / 2 + 24;
 
 // --- the top face --------------------------------------------------------
-// A flat-top hexagon squashed to HEX_H. Used for hit-testing, the selection
-// ring and the Zone-of-Control ring, so all three agree by construction.
+// The tile's actual hexagon — flat edges of HEX_FLAT, vertices at ±HEX_W/2.
+// Used for hit-testing, the selection ring and the Zone-of-Control ring, so
+// all three agree with the art and with each other by construction.
 export function topFacePoints(inset = 0) {
   const w = (HEX_W / 2) * (1 - inset);
+  const f = (HEX_FLAT / 2) * (1 - inset);
   const h = (HEX_H / 2) * (1 - inset);
   return [
-    [-w, 0], [-w / 2, -h], [w / 2, -h],
-    [w, 0], [w / 2, h], [-w / 2, h],
+    [-w, 0], [-f, -h], [f, -h],
+    [w, 0], [f, h], [-f, h],
   ];
 }
 

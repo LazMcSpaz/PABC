@@ -69,6 +69,22 @@ const UI_TO_ENGINE_CHIP = Object.fromEntries(
 export function engineLocationIdToUi(engineId) {
   return ENGINE_TO_UI_LOC[engineId] || engineId;
 }
+
+// The Location a faction currently holds its Capital chip on, as a UI
+// locationId. Derived from live state rather than from a static table: the
+// engine's faction registry (src/game/content.js) carries no `capital` field
+// at all, so the old `def.capital` read was always undefined — which silently
+// disabled the trading-pact route line on the map. Capitals also change hands
+// when a start Location is captured, which a table could never track.
+function capitalLocOf(state, fid) {
+  for (const loc of Object.values(state.locations)) {
+    if (loc.controller !== fid) continue;
+    if ((loc.chips || []).some((c) => state.chips[c]?.chipId === "capital")) {
+      return engineLocationIdToUi(loc.locationId);
+    }
+  }
+  return null;
+}
 export function engineChipIdToUi(engineId) {
   return ENGINE_TO_UI_CHIP[engineId] || engineId;
 }
@@ -570,7 +586,7 @@ function adaptDiplomacy(state, viewer) {
       // Available verbs against this faction, with reasons + outcome hints.
       verbs: availableVerbsAgainst(state, viewer, f),
       // Inbox + capital (for map binding).
-      capital: def.capital || null,
+      capital: capitalLocOf(state, f),
       // §5.3 trading-pact route status — read straight off the agreement
       // shape on `state.diplomacy.agreements` so the map can draw the
       // capital-to-capital line green (clear) or amber (suspended).
@@ -583,6 +599,7 @@ function adaptDiplomacy(state, viewer) {
   });
   return {
     youId: viewer,
+    youCapital: capitalLocOf(state, viewer),
     menace: me?.menace || 0,
     honor: me?.honor ?? CONFIG.diplomacy.honor.start,
     threat: Math.round(threatScore(state, viewer) * 10) / 10,

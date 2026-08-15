@@ -16,7 +16,7 @@
 import { LOCATIONS, ownerColor, theme } from "./data.js";
 import { holoTint, tintStrength } from "./holoTint.js";
 import {
-  FRAME, HEX_W, HEX_H, SKIRT_H, UNIT, layerUrl, tileFor, topFacePolygon,
+  FRAME, HEX_W, HEX_H, SKIRT_H, UNIT, UNIT_Y, layerUrl, tileFor, topFacePolygon,
 } from "./hexProjection.js";
 
 function Layer({ layer, style, className }) {
@@ -29,9 +29,9 @@ function Layer({ layer, style, className }) {
       style={{
         position: "absolute",
         left: layer.dx * UNIT,
-        top: layer.dy * UNIT,
+        top: layer.dy * UNIT_Y,
         width: layer.w * UNIT,
-        height: layer.h * UNIT,
+        height: layer.h * UNIT_Y,
         pointerEvents: "none",
         ...style,
       }}
@@ -106,9 +106,9 @@ export default function HexTile({
             style={{
               position: "absolute",
               left: tile.layers.holo.dx * UNIT,
-              top: tile.layers.holo.dy * UNIT,
+              top: tile.layers.holo.dy * UNIT_Y,
               width: tile.layers.holo.w * UNIT,
-              height: tile.layers.holo.h * UNIT,
+              height: tile.layers.holo.h * UNIT_Y,
               background: tint.color,
               WebkitMaskImage: `url(${layerUrl(tile.layers.holo.file)})`,
               maskImage: `url(${layerUrl(tile.layers.holo.file)})`,

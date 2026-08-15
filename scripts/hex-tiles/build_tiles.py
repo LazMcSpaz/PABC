@@ -39,20 +39,32 @@ OUT = os.path.join(ROOT, "public", "assets", "ui", "board", "tiles")
 MANIFEST = os.path.join(ROOT, "src", "prototype", "hexTiles.json")
 
 # --- locked camera rig, in source-image pixels ---------------------------
-# cx/cy is the centre of the hexagon's top face; the left/right vertices sit
-# on row cy. hexW is vertex-to-vertex, hexH is the full projected height of
-# the top face (squashed by the camera tilt). skirt is how far the plinth
+# cx/cy is the centre of the hexagon's top face; the left/right vertices sit on
+# row cy. hexW is vertex-to-vertex; hexFlat is the length of the top and bottom
+# flat edges; hexH is the full projected height. skirt is how far the plinth
 # extrudes below the top face at the centre column.
+#
+# These are FITTED, not eyeballed, and the fit is self-consistent: the bottom
+# face's flat edge measures 556 wide and the near edges have slope
+# |dx/dy| = 0.887 on every master, and (hexW - hexFlat) / hexH reproduces that
+# slope exactly. An earlier pass read hexH off the hologram's far rim and got
+# 352, which is 25% short -- the far half of the top face is hidden behind the
+# terrain, so the rim is not the hexagon's edge. That error packed tiles at 75%
+# of their true vertical pitch, which is what made the board look squashed and
+# clipped its neighbours.
+#
+# NOTE the tiles are NOT squashed REGULAR hexagons: a regular one would have
+# hexFlat == hexW / 2 == 486, and these measure 556. They are still perfectly
+# tileable -- any hexagon with opposite sides parallel and equal tiles the
+# plane -- but the pitch has to come from hexFlat, not from 0.75 * hexW.
 FRAME = {
     "src": 1024,
     "cx": 509,
     "cy": 522,
-    "hexW": 970,
-    "hexH": 352,
-    "skirt": 139,
-    # elevation implied by hexH / (0.866 * hexW) -- informational, so a future
-    # re-render at a different angle is obvious in a diff.
-    "elevationDeg": 24.8,
+    "hexW": 972,
+    "hexFlat": 556,
+    "hexH": 469,
+    "skirt": 81,
     "orientation": "flat-top",
 }
 
@@ -133,10 +145,13 @@ def build(tile_id, tags):
     lum = 0.2126 * R + 0.7152 * G + 0.0722 * B
     yy, xx = np.mgrid[0:H, 0:W].astype(np.float32)
 
-    # analytic flat-top hexagon, then the same footprint extruded downward
+    # analytic hexagon, then the same footprint extruded downward. The near
+    # boundary is flat out to |x| = hexFlat/2 and then slopes to the vertex,
+    # which for a regular hexagon reduces to the familiar 2*(1-u).
+    fw = FRAME["hexFlat"] / FRAME["hexW"]
     u = np.abs(xx - FRAME["cx"]) / (FRAME["hexW"] / 2)
     v = (yy - FRAME["cy"]) / (FRAME["hexH"] / 2)
-    near_edge = np.minimum(1.0, 2.0 * (1.0 - u))
+    near_edge = np.minimum(1.0, (1.0 - u) / (1.0 - fw))
     skirt = (u <= 1.0) & (v > near_edge) & (v <= near_edge + FRAME["skirt"] / (FRAME["hexH"] / 2))
 
     # hologram: cool + emissive. the plinth is warm and only ever lit.

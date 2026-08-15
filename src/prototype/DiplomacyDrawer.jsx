@@ -1677,10 +1677,11 @@ export default function DiplomacyDrawer({
 
   // §5.3 — when the faction-detail view is showing a faction with an
   // active trading pact, paint the capital-to-capital dotted route line
-  // on the map (green if clear, amber if suspended). Endpoints come from
-  // FACTIONS.{capital} — the viewer's own capital is read from data.js.
+  // on the map (green if clear, amber if suspended). Both endpoints come from
+  // live state via the adapter — a Capital moves when its Location is taken,
+  // so a static table cannot supply them.
   const tradeFor = selectedFaction?.tradingPact || null;
-  const myCapital = UI_FACTIONS[dip.youId]?.capital || null;
+  const myCapital = dip.youCapital || null;
   const theirCapital = selectedFaction?.capital || null;
   const showRoute = tradeFor && myCapital && theirCapital && view === "detail";
 
