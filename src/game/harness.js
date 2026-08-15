@@ -26,7 +26,10 @@ import {
   resolvePactCall, checkRecognitionVictory,
   // diplomacy tuning pass — cooldowns + citations
   mediate, sweepTrespass, warJustification, threatScore,
+  // pace pass — truces + partial control
+  truceBetween, makePeace,
 } from "./diplomacy.js";
+import { holderOf, controlLevel, holdsLocation } from "./control.js";
 import { setStanding } from "./standing.js";
 import { factionDef, MINOR_FACTIONS } from "./content.js";
 import { activePlayerId } from "./targeting.js";
@@ -41,7 +44,7 @@ import { evalCond, evalStrength } from "./dsl.js";
 import { registerQuest } from "./quests.js";
 import { CONFIG } from "./config.js";
 import { takeAITurn, maybeAssignTech } from "./ai.js";
-import { enforceLoyaltySlotCap, chargeChipUpkeep, slotCapacity, effectiveBuildCost, buildableChips, applyOutputAndBuilds } from "./economy.js";
+import { enforceLoyaltySlotCap, chargeChipUpkeep, slotCapacity, effectiveBuildCost, buildableChips, applyOutputAndBuilds, locationOutput } from "./economy.js";
 
 const seed = Number(process.argv[2]) || 42;
 const line = (s = "") => console.log(s);
@@ -3514,14 +3517,16 @@ line("\n  [Phase 11] text-token resolver");
   startTurn(gD);
   const dPid = gD.turnOrder[gD.activeIndex];
   const prize = foreignCity(gD, dPid);
-  grabFor(gD, dPid, prize, 6);
+  // Rung-relative so the fixture survives re-tuning of the bar.
+  const RUNG = CONFIG.victory.dominionLoyaltyMin;
+  grabFor(gD, dPid, prize, RUNG);
   const sentry = Object.values(gD.units).find((u) => u.owner === dPid);
   sentry.node = prize.hexId; // garrisoned: loyalty holds/rises through the tick
   const vp0 = gD.players[dPid].vp;
   cycleTo(gD, dPid);
-  check("dominion: a foreign high city at Loyalty 6+ ticks +1 VP",
+  check("dominion: a foreign high city at the Loyalty rung ticks +1 VP",
     gD.players[dPid].vp === vp0 + 1);
-  prize.loyalty = 4; // below the rung (rises to 5 at Upkeep — still short)
+  prize.loyalty = RUNG - 2; // below the rung (rises 1 at Upkeep — still short)
   const vp1 = gD.players[dPid].vp;
   cycleTo(gD, dPid);
   check("dominion: below the Loyalty rung there is no tick",
@@ -3556,22 +3561,36 @@ line("\n  [Phase 11] text-token resolver");
   check("vassal dominion: a vassal's qualifying city ticks +1 for the overlord",
     gV.players[lord].vp === lordVp + 1);
 
-  // -- alliance trickle: pacted with a majority of the other majors.
+  // -- alliance trickle: a majority of the other MAJORS unlocks it, and
+  // past that bar it pays PER allied major (breadth scales, as Dominion
+  // does for cities — the fix for diplomacy's flat ceiling).
   const gT = createGame({ seed: 143 });
   startTurn(gT);
   const dip = gT.turnOrder[gT.activeIndex];
-  const others14 = gT.turnOrder.filter((f) => f !== dip);
-  formPact(gT, dip, others14[0]);
-  formPact(gT, dip, others14[1]); // 2 of 3 = majority
-  // pre-mark summit dividends so this check measures ONLY the trickle.
-  gT.diplomacy.recognizedEver = {
-    [dip]: [others14[0], others14[1]],
-    [others14[0]]: [dip], [others14[1]]: [dip],
-  };
-  const dipVp = gT.players[dip].vp;
+  const majors14 = gT.turnOrder.filter((f) => f !== dip && factionDef(f)?.tier === "major");
+  // pre-mark summit dividends so these checks measure ONLY the trickle.
+  gT.diplomacy.recognizedEver = { [dip]: [...majors14] };
+  for (const m of majors14) gT.diplomacy.recognizedEver[m] = [dip];
+  // One ally out of three others is NOT a majority — nothing pays.
+  formPact(gT, dip, majors14[0]);
+  const vpMinority = gT.players[dip].vp;
   cycleTo(gT, dip);
-  check("alliance trickle: majority of pacts pays +1 VP per Upkeep",
-    gT.players[dip].vp === dipVp + 1);
+  check("alliance trickle: a single ally is below the majority bar — pays nothing",
+    majors14.length < 2 || gT.players[dip].vp === vpMinority);
+  // A second ally clears the bar and pays for BOTH.
+  formPact(gT, dip, majors14[1]);
+  const vpTwo = gT.players[dip].vp;
+  cycleTo(gT, dip);
+  check("alliance trickle: past the majority bar it pays per allied major",
+    gT.players[dip].vp === vpTwo + 2 * CONFIG.victory.allianceTrickle);
+  // A third ally scales it again.
+  if (majors14[2]) {
+    formPact(gT, dip, majors14[2]);
+    const vpThree = gT.players[dip].vp;
+    cycleTo(gT, dip);
+    check("alliance trickle: each further ally adds another step",
+      gT.players[dip].vp === vpThree + 3 * CONFIG.victory.allianceTrickle);
+  }
 
   // -- elimination: a stripped faction is flagged, skipped, and excluded;
   // last faction standing wins outright.
@@ -3809,8 +3828,14 @@ line("\n  [Phase 11] text-token resolver");
   town.loyalty = 5; town.loyaltyOwner = owner17;
   const guard17 = Object.values(g.units).find((u) => u.owner === owner17);
   guard17.node = town.hexId;
-  g.world.zoc = g.world.zoc || {};
-  g.world.zoc[town.hexId] = presser; // rival influence dominates the town's own hex
+  // The soft-power siege reads the Influence FIELD (a held Location anchors
+  // its own hex in the ZoC map), so pin the field: the rival out-projects
+  // the owner at the town's own hex. tickLoyalty recomputes at the end, so
+  // re-pin before each call.
+  const pressAt = () => {
+    g.world.influence = { [presser]: { [town.hexId]: 999 }, [owner17]: { [town.hexId]: 1 } };
+  };
+  pressAt();
   const menaceBefore = g.players[presser].menace || 0;
   const standingBefore = getStanding(g, owner17, presser);
   tickLoyalty(g, owner17);
@@ -3821,20 +3846,20 @@ line("\n  [Phase 11] text-token resolver");
     (g.players[presser].menace || 0) === menaceBefore + 1);
   // Ungarrisoned: neglect + pressure double-bleeds.
   guard17.node = Object.values(g.board.hexes).find((h) => !g.locations[h.id]).id;
-  g.world.zoc[town.hexId] = presser; // tickLoyalty recomputed influence — re-pin
+  pressAt(); // tickLoyalty recomputed influence — re-pin
   tickLoyalty(g, owner17);
   check("pressure: neglected AND pressured bleeds 2/Upkeep", town.loyalty === 3);
   // Civic Hall stops neglect but NOT foreign dominance.
   const hall = g.nextId("chip");
   g.chips[hall] = { uid: hall, chipId: "civic-hall" };
   town.chips.push(hall);
-  g.world.zoc[town.hexId] = presser;
+  pressAt();
   tickLoyalty(g, owner17);
   check("pressure: Civic Hall cancels neglect but not the rival's dominance",
     town.loyalty === 2);
   // Allies never pressure each other.
   formPact(g, owner17, presser);
-  g.world.zoc[town.hexId] = presser;
+  pressAt();
   const loyBefore = town.loyalty;
   tickLoyalty(g, owner17);
   check("pressure: a pacted ally's ZoC does not bleed your towns",
@@ -4183,6 +4208,93 @@ line("\n  [Phase 11] text-token resolver");
   check("the board murmurs before a coalition actually forms",
     g5.log.slice(logFrom5).some((e) => e.name === "diplomatic_warning" && e.payload.kind === "coalition")
     && !g5.diplomacy.coalitions.find((c) => c.target === "versari"));
+}
+
+// Phase 22 — pace & siege (2026-08-15 playtest): peace now binds for a
+// window, a besieged city keeps working, and a Location anchors its own
+// hex so its garrison is never cited as trespassers at home.
+{
+  line("\n  [Phase 22] pace & siege — truces, partial control, ZoC anchor");
+  const tc = CONFIG.diplomacy.truce;
+
+  // --- truce: peace binds, and the AI honors it ---
+  const g = createGame({ seed: 221, humanFactionId: "versari" });
+  ensureDiplomacy(g);
+  declareWar(g, "lakers", "versari", "test");
+  makePeace(g, "lakers", "versari", "test-peace");
+  check("peace opens a truce window", !!truceBetween(g, "lakers", "versari"));
+  check("peace lifts both sides clear of contempt (no instant re-attack)",
+    getStanding(g, "lakers", "versari") >= tc.standingFloor
+    && getStanding(g, "versari", "lakers") >= tc.standingFloor);
+  const logFrom = g.log.length;
+  runDiplomacyRound(g);
+  check("no war re-declared through a live truce",
+    !g.log.slice(logFrom).some((e) => e.name === "war_declared"
+      && [e.payload.a, e.payload.b].includes("lakers")
+      && [e.payload.a, e.payload.b].includes("versari")));
+  g.round += tc.rounds;
+  check("the truce expires on schedule", !truceBetween(g, "lakers", "versari"));
+
+  // --- breaking a truce is treachery ---
+  const g2 = createGame({ seed: 222, humanFactionId: "versari" });
+  ensureDiplomacy(g2);
+  declareWar(g2, "versari", "goldgrass", "test");
+  makePeace(g2, "versari", "goldgrass", "test-peace");
+  const honorBefore = honorOf(g2, "versari");
+  const menaceBefore = g2.players.versari.menace || 0;
+  const logFrom2 = g2.log.length;
+  onAttack(g2, "versari", "goldgrass");
+  // Striking through a truce is BOTH treachery and a surprise attack —
+  // the tolls stack, so assert "at least the truce toll", not equality.
+  check("striking through a truce costs Honor and raises Menace",
+    honorOf(g2, "versari") <= honorBefore - tc.breakHonorLoss
+    && (g2.players.versari.menace || 0) >= menaceBefore + tc.breakMenace
+    && g2.log.slice(logFrom2).some((e) => e.name === "truce_broken"));
+  check("the victim of a broken truce earns a justified war",
+    !!warJustification(g2, "goldgrass", "versari"));
+  check("the truce is gone once broken", !truceBetween(g2, "versari", "goldgrass"));
+
+  // --- partial control: a besieged city still works ---
+  const g3 = createGame({ seed: 223, humanFactionId: "versari" });
+  ensureDiplomacy(g3);
+  const city = Object.values(g3.locations).find((l) => l.controller === "versari" && l.sections.length === 3);
+  city.sections = ["versari", "versari", "versari"];
+  city.controller = "versari"; city.loyaltyOwner = "versari"; city.loyalty = 6;
+  recomputeInfluence(g3);
+  const fullOut = locationOutput(g3, city);
+  check("full control reads as 'full'", controlLevel(city, "versari") === "full");
+  // an attacker takes ONE section — the old model zeroed the place out
+  city.sections[0] = "lakers";
+  city.controller = null; // engine clears the flag below full control
+  check("2 of 3 sections still HOLDS the city",
+    holderOf(city) === "versari" && controlLevel(city, "versari") === "majority"
+    && holdsLocation(city, "versari"));
+  const bankBefore = g3.players.versari.resource;
+  applyOutputAndBuilds(g3, "versari");
+  const gained = g3.players.versari.resource - bankBefore;
+  check("a besieged city still pays its holder (at reduced output)",
+    gained > 0 && gained <= fullOut);
+  recomputeInfluence(g3);
+  check("a besieged city still projects influence",
+    (g3.world.influence.versari?.[city.hexId] || 0) > 0);
+
+  // --- ZoC anchor: your own city is yours, and its garrison is home ---
+  check("a held Location's own hex sits in its holder's ZoC",
+    g3.world.zoc[city.hexId] === "versari");
+  // even when a rival out-projects there
+  const bully = Object.values(g3.locations).find((l) => l.hexId !== city.hexId);
+  bully.controller = "lakers"; bully.sections = ["lakers", "lakers", "lakers"];
+  bully.loyaltyOwner = "lakers"; bully.loyalty = 8;
+  recomputeInfluence(g3);
+  check("a rival cannot out-influence you out of your own city hex",
+    g3.world.zoc[city.hexId] === "versari");
+  const garrison = Object.values(g3.units).find((u) => u.owner === "versari");
+  garrison.node = city.hexId;
+  g3.world.zoc[city.hexId] = "lakers"; // force the old broken state
+  const standBefore = getStanding(g3, "lakers", "versari");
+  sweepTrespass(g3, "versari");
+  check("your garrison is never cited for trespassing in a city you hold",
+    getStanding(g3, "lakers", "versari") === standBefore);
 }
 
 line(`\n  v0.2 verification: ${v2pass} passed, ${v2fail} failed`);

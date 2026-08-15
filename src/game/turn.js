@@ -13,8 +13,9 @@ import { evaluateTriggers } from "./triggers.js";
 import { evaluateConditionalBeats } from "./quests.js";
 import { applyOutputAndBuilds, chargeChipUpkeep, enforceLoyaltySlotCap } from "./economy.js";
 import { runDiplomacyRound, vassalsOf, arePacted, adjustMenace, sweepTrespass } from "./diplomacy.js";
+import { holdsLocation } from "./control.js";
 import { adjustStanding } from "./standing.js";
-import { zocOwner } from "./influence.js";
+import { pressureSource } from "./influence.js";
 import { hasTechNode } from "./tech.js";
 import { chargePostUpkeep } from "./posts.js";
 import { CHIPS, LOCATIONS, ABILITIES, factionDef } from "./content.js";
@@ -69,7 +70,10 @@ export function tickLoyalty(state, pid) {
     // Menace every Upkeep it squeezes. Allies (pact or vassalage either
     // way) never pressure each other.
     const pcfg = CONFIG.influence.pressure;
-    const presser = zocOwner(state, loc.hexId);
+    // Read the Influence FIELD, not the ZoC map: a held Location anchors
+    // its own hex in that map, but a rival out-projecting it there is
+    // still squeezing — the soft-power siege must survive the anchor.
+    const presser = pressureSource(state, loc, pid);
     const pressured = !!(pcfg && presser && presser !== pid &&
       state.players[presser] && !arePacted(state, pid, presser) &&
       !vassalsOf(state, pid).includes(presser) && !vassalsOf(state, presser).includes(pid));
@@ -180,10 +184,13 @@ function tickVictoryFaucets(state, pid) {
   // ground but don't tick dominion or collect the alliance trickle
   // (playtest log: Croppers/Dambarans were quietly accruing dominion VP).
   if (factionDef(pid)?.tier !== "major") return;
-  // Foreign dominion — cities you hold yourself.
+  // Foreign dominion — cities you hold yourself. "Hold" means outright OR
+  // by majority: a besieged city whose people are still loyal to you is
+  // still yours to draw prestige from (and without this, a city stuck in
+  // majority-limbo silently switched the faucet off).
   let dominion = 0;
   for (const loc of Object.values(state.locations)) {
-    if (loc.controller === pid && dominionQualifies(state, loc, pid)) dominion += 1;
+    if (holdsLocation(loc, pid) && dominionQualifies(state, loc, pid)) dominion += 1;
   }
   awardVp(state, pid, dominion * CONFIG.victory.dominionPerCity, "dominion");
   // Vassal dominion — qualifying cities your vassals hold tick for YOU
@@ -191,19 +198,23 @@ function tickVictoryFaucets(state, pid) {
   let vassalCities = 0;
   for (const vid of vassalsOf(state, pid)) {
     for (const loc of Object.values(state.locations)) {
-      if (loc.controller === vid && dominionQualifies(state, loc, pid)) vassalCities += 1;
+      if (holdsLocation(loc, vid) && dominionQualifies(state, loc, pid)) vassalCities += 1;
     }
   }
   awardVp(state, pid, vassalCities * CONFIG.victory.dominionPerCity, "vassal-dominion");
-  // Alliance trickle — pacted with a majority of the other surviving
-  // MAJORS (seeded minors in the turn order don't move the denominator).
+  // Alliance trickle — you must be pacted with a MAJORITY of the other
+  // surviving MAJORS to draw anything (seeded minors don't move the
+  // denominator), and past that bar every allied major pays. The flat
+  // version was diplomacy's structural weakness: Dominion scales with each
+  // city you take, but a second, third, fourth ally added nothing, so the
+  // peaceful route had a hard ceiling the conquest route did not.
   const others = state.turnOrder.filter(
     (f) => f !== pid && !state.players[f]?.eliminated && factionDef(f)?.tier === "major",
   );
   if (others.length > 0) {
     const pacts = others.filter((f) => arePacted(state, pid, f)).length;
     if (pacts > others.length / 2) {
-      awardVp(state, pid, CONFIG.victory.allianceTrickle, "alliance");
+      awardVp(state, pid, pacts * CONFIG.victory.allianceTrickle, "alliance");
     }
   }
 }

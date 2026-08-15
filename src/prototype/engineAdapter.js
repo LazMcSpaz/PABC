@@ -613,6 +613,19 @@ function adaptDiplomacy(state, viewer) {
     // §1.8 — incoming pact-call inbox: AI allies calling you into their wars.
     // Each carries live accept/refuse consequence previews (computed off the
     // current state, not a stored snapshot — always honest).
+    // Envoy audiences — AI warnings the player answers in a dialogue box.
+    pendingWarnings: (dip.pendingWarnings || []).map((w) => ({
+      id: w.id,
+      kind: w.kind,
+      from: w.from,
+      fromName: w.from ? (factionDef(w.from)?.name || w.from) : null,
+      temperament: w.temperament || null,
+      reason: w.reason || null,
+      threat: w.threat ?? null,
+      placateScrap: CONFIG.diplomacy.warnings.placateScrap,
+      canPlacate: (me?.resource || 0) >= CONFIG.diplomacy.warnings.placateScrap,
+      defyStandingHit: CONFIG.diplomacy.warnings.defyStandingHit,
+    })),
     pendingCalls: (dip.pendingCalls || []).map((c) => ({
       id: c.id,
       from: c.from, fromName: factionDef(c.from)?.name || c.from,

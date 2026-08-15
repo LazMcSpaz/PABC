@@ -55,6 +55,7 @@ import ContestOverlay from "./ContestOverlay.jsx";
 import SalvageModal from "./SalvageModal.jsx";
 import { ConfirmModal, CoalitionModal, isPromptDismissed } from "./ConfirmModal.jsx";
 import { HeraldLayer, heraldFromLog } from "./HeraldBanners.jsx";
+import EnvoyModal from "./EnvoyModal.jsx";
 import { atWar } from "../game/diplomacy.js";
 import { useAIReplay } from "./aiReplay/useAIReplay.js";
 import ReplayLayer from "./aiReplay/ReplayLayer.jsx";
@@ -828,6 +829,29 @@ export default function Prototype({ config, onNewGame }) {
   // §18.7 — issue a diplomatic verb (free of the Action budget). All 18
   // verbs dispatch through performDiplomacy now; the prototype layer just
   // routes params + surfaces the accept/decline result.
+  // Answer an envoy's audience (hear / placate / defy). The engine dequeues
+  // the warning, so the modal closes to whatever is next in line.
+  function onEnvoyRespond(warning, answer) {
+    const game = gameRef.current;
+    const r = performDiplomacy(game, state.youId, "respond-warning", {
+      warningId: warning.id,
+      answer,
+      amount: answer === "placate" ? warning.placateScrap : undefined,
+    });
+    if (r.ok) {
+      const who = warning.fromName || "them";
+      setToast({
+        kind: "info",
+        text: answer === "placate" ? `You send ${r.amount} scrap to ${who}.`
+          : answer === "defy" ? `You defy ${who}.`
+          : "The envoy is heard and sent on their way.",
+      });
+    } else if (r.reason) {
+      setToast({ kind: "error", text: r.reason });
+    }
+    bumpTick();
+  }
+
   function onDiplomacy(action, params) {
     const game = gameRef.current;
     const youId = state.youId;
@@ -1092,6 +1116,13 @@ export default function Prototype({ config, onNewGame }) {
         </TitledWindow>
       )}
       </AnimatePresence>
+
+      {/* Envoy audience — an AI's warning, answered rather than just read.
+          Shown one at a time; only on your own turn so it never interrupts
+          an AI replay. */}
+      {isYourTurn && !showDiplomacy && (
+        <EnvoyModal warning={state.diplomacy?.pendingWarnings?.[0]} onRespond={onEnvoyRespond} />
+      )}
 
       <HeraldLayer banners={heralds} onDismiss={dismissHerald} topOffset={hudOffset + 14} />
 

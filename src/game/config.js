@@ -17,8 +17,16 @@ export const CONFIG = {
   // land, so a homeland never ticks. Alliance trickle: +allianceTrickle
   // per Upkeep while pacted with a majority of the other surviving majors.
   victory: {
-    dominionLoyaltyMin: 6,
+    // 4 (was 6): the rung was calibrated for the old all-or-nothing control
+    // model, where a city you held was quiet. Under graduated control a
+    // contested city hovers around Loyalty 1–4 for most of a war, so the
+    // Dominion faucet ran bone dry — sim leaders plateaued at 9–11 VP with
+    // nothing left to earn. 4 keeps it a real bar (a neglected city still
+    // misses) while rewarding the "hold and settle it" play.
+    dominionLoyaltyMin: 4,
     dominionPerCity: 1,
+    // Paid PER allied major, once you're pacted with a majority of them —
+    // so breadth of alliance scales the way breadth of conquest does.
     allianceTrickle: 1,
   },
 
@@ -128,10 +136,19 @@ export const CONFIG = {
     // ends it. Over-exertion is soft hostility: each bleeding Upkeep
     // costs the presser Standing with the owner and raises their Menace.
     pressure: { bleed: 1, standingHit: 1, menaceHit: 1 },
+    // A Location held by a MAJORITY (2 of 3 sections) but not outright
+    // still projects — at reduced strength. Before this, one flipped
+    // section silenced a city's influence entirely, handing its own hex
+    // to a neighbour's ZoC (playtest 2026-08-15).
+    partialHolderScale: 0.5,
   },
   // §20 Economy & City Development — chips are the output of the economy,
   // built off each Location's Output via the guns/butter slider (Market retired).
   economy: {
+    // A besieged city (majority held, not full) still pays its holder —
+    // at this fraction of Output, rounded down. Losing one section is a
+    // squeeze, not an eviction (playtest 2026-08-15).
+    partialOutputScale: 0.5,
     // §20.6 Tech-Level build gate: chip techLevel T needs player Tech Level >= gate[T].
     buildTechGate: { 1: 1, 2: 3, 3: 5 },
     // §20.6 Loyalty rung granting the +1 chip slot (drop below → eject newest, §20.8).
@@ -235,7 +252,16 @@ export const CONFIG = {
 
     // §18.8 Coalition — threat(player)=wM·Menace + wP·powerLead. Forms past
     // `threshold`, dissolves below `dissolve` (hysteresis).
-    coalition: { wM: 1, wP: 2, threshold: 16, dissolve: 11, vpWeight: 1.5, territoryWeight: 1, standingHit: 4 },
+    // `minRounds` / `reformCooldownRounds` keep a coalition a WEIGHTY event
+    // rather than a flicker: it can't dissolve the moment threat dips, and
+    // the board can't immediately re-raise the same one (playtest
+    // 2026-08-15: 19 coalitions formed across 8 games, and their war
+    // declarations were the last source of peace→war churn).
+    coalition: {
+      wM: 1, wP: 2, threshold: 16, dissolve: 11,
+      vpWeight: 1.5, territoryWeight: 1, standingHit: 4,
+      minRounds: 4, reformCooldownRounds: 5,
+    },
 
     // §18.10 Recognition victory — Allied=1, Vassal=2; win at threshold while
     // Menace < each contributor's Tolerance and Honor > its floor. Threshold
@@ -267,7 +293,9 @@ export const CONFIG = {
       mediateCooldownRounds: 3, // a mediated pair can't be re-mediated (no Honor pump)
       // Casus belli — the AI's blind combat loop only opens hostilities with a
       // reason: an existing war, contempt (Wary-), or a warlike temperament.
-      blindAttackAggressionMin: 0.5,
+      // Raised past the mid-range so ordinary opportunists (0.55) no longer
+      // treat "I am standing next to it" as sufficient reason for a war.
+      blindAttackAggressionMin: 0.7,
     },
 
     // --- diplomacy-spec.md §6.3 — the verb/AI/agreement layer on top of §18.
@@ -322,6 +350,23 @@ export const CONFIG = {
       // (below Neutral) skip the ladder and cite at the full rate at once.
       escalation: [0, 1, 2],
     },
+    // Truce — peace is a PROMISE, not a pause. Making peace lifts both
+    // sides' Standing to a floor above contempt and opens a window during
+    // which neither will re-open hostilities (playtest 2026-08-15: peace
+    // left Standing at exactly the Wary line, so the AI's combat loop
+    // re-attacked and auto-declared war the very next turn — war and peace
+    // churned every round with no legible reason).
+    // `rounds` is short and `standingFloor` deliberately stops at Wary: a
+    // truce must END the same-turn churn without pacifying the map. Lifting
+    // to Neutral instead left former enemies permanently unable to fight
+    // (the AI only presses at Wary-or-worse), and 8 of 24 sim games
+    // deadlocked with leaders stranded at 9–11 VP.
+    truce: {
+      rounds: 2, // hostilities stay shut for this long after peace
+      standingFloor: -3, // peace lifts both sides to Wary — cooled, not friends
+      breakHonorLoss: 6, // attacking through a truce is treachery
+      breakMenace: 3,
+    },
     // Just war — a formal grievance makes a war RIGHTEOUS: fighting it costs
     // no Menace. You earn one by denouncing the target first (a declared
     // intent the board has heard) or by being wronged by them (broken pact
@@ -336,6 +381,8 @@ export const CONFIG = {
     warnings: {
       cooldownRounds: 4, // the same warning won't repeat for this long
       coalitionFraction: 0.7, // murmur when threat ≥ threshold × this
+      defyStandingHit: 2, // telling an envoy where to put it
+      placateScrap: 5, // the offered tribute on the "placate" answer
     },
     pact: { // §1.9, §1.10 — toggle costs
       toggleVisionStandingHit: 1,

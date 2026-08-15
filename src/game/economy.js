@@ -13,6 +13,7 @@ import { emit } from "./events.js";
 import { recomputeStats, recomputeResearch } from "./stats.js";
 import { recomputeInfluence } from "./influence.js";
 import { hasTechNode } from "./tech.js";
+import { holderOf } from "./control.js";
 
 // §20.6 — the Tech Level a chip of `techLevel` T demands of the builder
 // (the same §17.2 thresholds, applied to building). techLevel 1 → L1,
@@ -158,8 +159,11 @@ export function stationedUnitWithBay(state, loc, slots, statType) {
 
 // Apply the guns/butter split for one Location at Upkeep (§20.3) and advance
 // / complete its active build (§20.4 / §20.5). Returns the scrap banked.
-function processLocationEconomy(state, loc) {
-  const output = locationOutput(state, loc);
+function processLocationEconomy(state, loc, { partial = false } = {}) {
+  let output = locationOutput(state, loc);
+  // A besieged city (majority held, not outright) still works — at reduced
+  // capacity. Losing one section used to zero the place out entirely.
+  if (partial) output = Math.floor(output * CONFIG.economy.partialOutputScale);
   loc.output = output; // cache the derived value for the HUD
   const ab = loc.activeBuild;
   // No active build → the whole Output banks as liquid scrap (construction
@@ -252,8 +256,10 @@ function restamp(list, uid) {
 export function applyOutputAndBuilds(state, pid) {
   let banked = 0;
   for (const loc of Object.values(state.locations)) {
-    if (loc.controller !== pid) continue;
-    banked += processLocationEconomy(state, loc);
+    const full = loc.controller === pid;
+    // Majority holders keep a (reduced) economy — see control.js.
+    if (!full && holderOf(loc) !== pid) continue;
+    banked += processLocationEconomy(state, loc, { partial: !full });
   }
   if (banked > 0) {
     state.players[pid].resource += banked;

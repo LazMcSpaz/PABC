@@ -352,3 +352,109 @@ Harness Phases 20–21 cover the ladder, the sweep, justification +
 expiry, the Menace exemption, and both warning kinds — 389 checks green.
 Possible polish later: surface the trespass warning inside the
 move-confirm overlay itself (pre-move), not just the herald.
+
+## 8. Pace, siege & legibility (2026-08-15 playtest #2) — ✅ DONE
+
+Five reports, each traced to a mechanism in the log:
+
+- **"War declared and peace made in the same turn."** Peace adjusted
+  Standing by +3, which from Hostile (−6) landed on exactly −3 — the Wary
+  line the AI's combat loop treats as contempt. So the AI attacked again
+  immediately and `onAttack` auto-declared war. Peace is now a **truce**:
+  a binding window (`diplomacy.truce.rounds`) during which neither side
+  opens hostilities, plus a Standing floor. Striking through one is
+  treachery (Honor + Menace toll, and the victim earns a justified war).
+  Measured over 24 sim games: peace→war-within-one-round churn **201 → 0**.
+- **"One successful contest and I lose control of everything."** Control
+  was all-or-nothing: any single flipped section cleared `loc.controller`
+  and the place went dark — no output, no influence, no rights. Control
+  is now **graduated** (`src/game/control.js`): *full* (3/3) keeps every
+  right; *majority* (2/3) keeps a reduced economy
+  (`economy.partialOutputScale`), still projects influence
+  (`influence.partialHolderScale`), still anchors its own hex, and still
+  ticks Dominion. You are besieged, not evicted.
+- **"An AI's ZoC covered my city and I couldn't have troops there."**
+  Real bug, and a compound one: a city with one flipped section stopped
+  projecting influence entirely, so a neighbour's ZoC swallowed its own
+  hex — and the trespass system then cited the rightful holder's garrison
+  **at home** (log #1518: the human "trespassing" in Erport, a city they
+  held 2 of 3 sections of). Fixed at both ends: a held Location now
+  **anchors its own hex** in the ZoC map, and trespass never fires on a
+  hex you hold. The soft-power siege survives the anchor by reading the
+  raw Influence *field* (`pressureSource`) instead of the ZoC map.
+- **"AI diplomacy feels spastic."** Beyond the churn fix: coalitions gained
+  a minimum life and a re-form cooldown (`coalition.minRounds` /
+  `reformCooldownRounds`) so they stop flickering, a faction under truce
+  is never drafted into one, and `ai.blindAttackAggressionMin` rose to 0.7
+  so ordinary opportunists stop treating adjacency as a casus belli.
+- **"I wanted a Civ-style dialogue box."** Warnings now open an **envoy
+  audience** (`EnvoyModal.jsx`) — faction portrait, temperament-flavored
+  opener, the concrete grievance (menace / honor / trespass / betrayal),
+  and three answers: hear them out, send scrap, or defy them. The herald
+  banner for warnings was removed so the same event notifies once.
+
+### Tuning, and why
+
+Truce + graduated control initially **deadlocked** the sim (24/24 games
+converged before, 16/24 after; 7 stuck at 120 rounds with leaders
+stranded at 9–11 VP). Ablation isolated two causes, both mine:
+- The truce's Standing floor lifted former enemies to Neutral, and since
+  the AI only presses at Wary-or-worse, the map became permanently
+  pacified. Floor now stops at **Wary (−3)** and the window is **2 rounds**
+  — long enough to kill same-turn churn, short enough that wars resume.
+- `victory.dominionLoyaltyMin` 6 → **4**. The rung was calibrated for the
+  old model where a held city was quiet; under graduated control a
+  contested city hovers at Loyalty 1–4, so the faucet ran dry exactly when
+  leaders needed it. (Flagged for review — it is a real balance change.)
+
+Validated on 30 **unseen** seeds: 27/30 converge, mean 16.1 rounds,
+churn 0, all four majors winning. Harness 403 green across seeds.
+
+## 9. VP route balance — scaling alliance trickle — ✅ DONE
+
+Audit question: is VP easier to accumulate by conquest or diplomacy?
+
+Measured steady-state rates (idealized end-states, repeating faucets only)
+and 40 full AI games. The finding was structural, not numeric:
+
+> **Dominion scales with each city taken; the alliance trickle was flat.**
+
+Every conquered high-value city paid twice — a one-time 2–3 VP capture
+plus +1/round of Dominion forever — so a fourth conquest still added
++1/round. A fourth ALLY added nothing: the trickle paid a flat +1 for
+holding a majority of pacts, no matter how many allies you had. Diplomacy
+therefore had a lower ceiling (3.00 vs 4.00 VP/round) *and* its only
+scaling faucet (vassal-dominion) sat behind the hardest requirement in
+the game.
+
+Fix: the trickle still requires a MAJORITY of surviving majors to unlock,
+but past that bar it pays **per allied major**. Breadth of alliance now
+scales the way breadth of conquest does.
+
+| | before | after |
+|---|---|---|
+| alliances only (2 of 3 majors) | 1.33 VP/rd | 2.40 VP/rd |
+| alliances + 1 vassal city | 2.40 VP/rd | 3.50 VP/rd |
+| conquest, 4 foreign high-value cities | 4.00 VP/rd | 4.00 VP/rd |
+| archetype race — diplomat | round 10.0 | round 7.0 |
+| archetype race — conqueror (3 cities) | round 8.0 | round 8.0 |
+| winners' VP from alliance (40 AI games) | 12% | 18% |
+
+Convergence held: 28/30 unseen seeds, mean 15.2 rounds, peace→war churn 0,
+all four majors winning. Harness 405 green.
+
+Notes for later:
+- The archetype race now has the diplomat (7.0) slightly AHEAD of the
+  conqueror (8.0) on raw payout. That looks right on reflection — the sim
+  hands both routes their end-state for free, and alliances need three
+  rivals to consent while conquest needs only your own units — but it is
+  the number to watch if diplomacy starts feeling dominant in play.
+- **Vassals double-dip**: `vassalize` forms a pact, so a vassalized major
+  counts BOTH toward the alliance trickle and toward vassal-dominion.
+  Pre-existing, left alone deliberately. If diplomacy overshoots, excluding
+  vassals from the trickle is the first lever — it keeps "voluntary
+  alliance" and "subject holdings" as distinct faucets.
+- Recognition instant-win still fires 0/40 in AI games. The path exists
+  (patronage 2 minors = 4, plus 2 allied majors = 2, hits the threshold of
+  6); the AI simply never walks it. Confirm in human play before tuning
+  the threshold.
