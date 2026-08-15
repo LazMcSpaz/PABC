@@ -6,7 +6,7 @@
 // controlled Location hexes block the same way.
 import { CONFIG } from "./config.js";
 import { movementField, movementRoute } from "./board.js";
-import { CHIPS, ABILITIES } from "./content.js";
+import { CHIPS, ABILITIES, chipBlocksRail } from "./content.js";
 import { getStanding } from "./standing.js";
 import { arePacted, vassalLord } from "./diplomacy.js";
 
@@ -77,6 +77,43 @@ export function tollTaxedHexes(state, ownerId) {
   return taxed;
 }
 
+// Rail hops this unit may take (docs/rail-road-blockade-design.md §2.1/2.3),
+// as a Map hexId -> [reachable hexIds]. Three gates, all from the doc:
+//   * the unit must not carry a rail-incompatible chip (2-slot chips — a
+//     Landship or a Bombard does not go on a train);
+//   * the mover must control BOTH endpoint settlements, since rail is not
+//     built and so has no owner other than whoever holds its stations;
+//   * an enemy blockade anywhere along the line cuts it for that faction.
+// Returns null when the unit can use no rail at all, so the search skips the
+// whole mechanism rather than walking an empty map.
+export function unitRailEdges(state, unit) {
+  const links = state.board.rails;
+  if (!links || !links.length) return null;
+  const barred = unit.chips.some(
+    (c) => !state.chips[c]?.disabled && chipBlocksRail(state.chips[c]?.chipId),
+  );
+  if (barred) return null;
+
+  const controls = (hexId) => state.locations[hexId]?.controller === unit.owner;
+  // A hex is cut for this mover if a unit it cannot pass freely stands there.
+  const hostile = new Set();
+  for (const u of Object.values(state.units)) {
+    if (u.owner === unit.owner) continue;
+    if (!passesFreely(state, unit.owner, u.owner)) hostile.add(u.node);
+  }
+
+  const edges = new Map();
+  for (const link of links) {
+    if (!controls(link.a) || !controls(link.b)) continue;
+    if (link.path.some((h) => hostile.has(h))) continue; // line is cut
+    if (!edges.has(link.a)) edges.set(link.a, []);
+    if (!edges.has(link.b)) edges.set(link.b, []);
+    edges.get(link.a).push(link.b);
+    edges.get(link.b).push(link.a);
+  }
+  return edges.size ? edges : null;
+}
+
 export function unitReach(state, unit) {
   if (!unit) return {};
   const budget = unit.moveRemaining ?? unit.movement ?? 0;
@@ -84,6 +121,7 @@ export function unitReach(state, unit) {
     blockedThrough: movementBlockers(state, unit.owner, { ignoreUnits: unitPassesThroughUnits(state, unit) }),
     ignoreTerrain: unitIgnoresTerrain(state, unit),
     extraCost: tollTaxedHexes(state, unit.owner),
+    railEdges: unitRailEdges(state, unit),
   });
 }
 
@@ -96,6 +134,7 @@ export function unitMovePath(state, unit, dest) {
     blockedThrough: movementBlockers(state, unit.owner, { ignoreUnits: unitPassesThroughUnits(state, unit) }),
     ignoreTerrain: unitIgnoresTerrain(state, unit),
     extraCost: tollTaxedHexes(state, unit.owner),
+    railEdges: unitRailEdges(state, unit),
   });
 }
 

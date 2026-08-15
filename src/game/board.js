@@ -126,10 +126,14 @@ export function isRoad(hex) {
 //   • `blockedThrough` (a Set of hexIds): you may ENTER such a hex but it HALTS
 //     you there (a foreign unit's blockade, or an enemy Location §16.2) — the
 //     caller computes these via diplomacy (see movement.js).
+//   • `railEdges` (Map hexId -> [hexId]): rail hops available to THIS mover,
+//     each a flat 1 MP however far apart the endpoints. Injected as extra
+//     adjacency rather than special-cased, so chaining across a hub falls out
+//     of the same search with no bespoke algorithm (rail doc §2.1).
 // Best-first expansion (maximise movement left = minimise cost), tracking a
 // predecessor for each hex so the exact ROUTE can be reconstructed. Returns
 // { best: {hex: remaining}, prev: {hex: cameFrom} } including `start`.
-function expandMovement(state, start, budget, blocked, ignoreTerrain, extraCost) {
+function expandMovement(state, start, budget, blocked, ignoreTerrain, extraCost, railEdges) {
   const adj = state.board.adjacency;
   const hexes = state.board.hexes;
   // A Landship-class mover (chip `ignoresTerrain`) treats every hex as
@@ -159,14 +163,21 @@ function expandMovement(state, start, budget, blocked, ignoreTerrain, extraCost)
       const nrem = terminal ? 0 : rem - cost;
       if (nrem > (best[nb] ?? -1)) { best[nb] = nrem; prev[nb] = cur; queue.push(nb); }
     }
+    // Rail hops from this hex. Flat 1 MP, and a blockaded far end still halts
+    // you there — arriving by train is still arriving.
+    for (const nb of (railEdges && railEdges.get(cur)) || []) {
+      if (rem < CONFIG.rail.hopCost) continue;
+      const nrem = (blocked && blocked.has(nb)) ? 0 : rem - CONFIG.rail.hopCost;
+      if (nrem > (best[nb] ?? -1)) { best[nb] = nrem; prev[nb] = cur; queue.push(nb); }
+    }
   }
   return { best, prev };
 }
 
 // Reachable hexes → { hexId: movement points remaining } (start excluded; a
 // halting hex stores 0).
-export function movementField(state, start, budget, { blockedThrough, ignoreTerrain, extraCost } = {}) {
-  const { best } = expandMovement(state, start, budget, blockedThrough || null, !!ignoreTerrain, extraCost || null);
+export function movementField(state, start, budget, { blockedThrough, ignoreTerrain, extraCost, railEdges } = {}) {
+  const { best } = expandMovement(state, start, budget, blockedThrough || null, !!ignoreTerrain, extraCost || null, railEdges || null);
   const out = {};
   for (const hex in best) if (hex !== start) out[hex] = best[hex];
   return out;
@@ -177,9 +188,9 @@ export function movementField(state, start, budget, { blockedThrough, ignoreTerr
 // Returns the ordered hex list [start, …, dest], or null if `dest` isn't
 // reachable within `budget`. Pass a large budget for a budget-agnostic route
 // (e.g. replay display).
-export function movementRoute(state, start, budget, dest, { blockedThrough, ignoreTerrain, extraCost } = {}) {
+export function movementRoute(state, start, budget, dest, { blockedThrough, ignoreTerrain, extraCost, railEdges } = {}) {
   if (dest === start) return [start];
-  const { best, prev } = expandMovement(state, start, budget, blockedThrough || null, !!ignoreTerrain, extraCost || null);
+  const { best, prev } = expandMovement(state, start, budget, blockedThrough || null, !!ignoreTerrain, extraCost || null, railEdges || null);
   if (best[dest] === undefined) return null;
   const path = [];
   for (let c = dest; c != null; c = prev[c]) path.unshift(c);
@@ -290,6 +301,44 @@ export function assignRoads(adjacency, hexes, settlementHexes, valueOfHex = () =
     for (const hex of shortestPathHexes(adjacency, a, b)) hexes[hex].road = true;
   }
   return [...links.values()];
+}
+
+// Rail — docs/rail-road-blockade-design.md §2. NOT player-built: it is
+// pre-collapse trunk line, laid once here and never changed.
+//
+// Rail is deliberately sparse where road is dense. Roads now reach every
+// settlement, so a rail network of comparable size would add nothing; instead
+// rail is a spanning tree over the CAPITALS only — the fewest lines that still
+// tie every faction's home into one system. Capitals are fixed content
+// (`FACTIONS[fid].capital`), so the trunk line is stable across a game.
+//
+// A line occupies a real sequence of hexes, so it can be cut per-hex like a
+// road (§2.1), and `hex.rail` gives the board renderer something to draw. But
+// the 1-MP hop is a property of the LINK, not of its hexes, so the endpoints
+// and the path are returned as records for `state.board.rails`.
+export function assignRails(adjacency, hexes, capitalHexes) {
+  const hubs = [...new Set(capitalHexes)].filter((h) => hexes[h]);
+  if (hubs.length < 2) return [];
+  const distCache = {};
+  const distFrom = (h) => (distCache[h] ||= bfsDistances(adjacency, h));
+  const links = [];
+  const inTree = new Set([hubs[0]]);
+  while (inTree.size < hubs.length) {
+    let best = null;
+    for (const a of inTree) {
+      const da = distFrom(a);
+      for (const b of hubs) {
+        if (inTree.has(b) || da[b] === undefined) continue;
+        if (!best || da[b] < best.d || (da[b] === best.d && b < best.b)) best = { a, b, d: da[b] };
+      }
+    }
+    if (!best) break;
+    inTree.add(best.b);
+    const path = shortestPathHexes(adjacency, best.a, best.b);
+    for (const hex of path) hexes[hex].rail = true;
+    links.push({ a: best.a, b: best.b, path });
+  }
+  return links;
 }
 
 // Constrained-random layout: place the 10 Locations, then fill the rest

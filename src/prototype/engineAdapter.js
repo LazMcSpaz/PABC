@@ -308,6 +308,8 @@ export function adaptState(state) {
       cover: fog === "unexplored" ? false : !!h.cover,
       // §16.2 road modifier (movement only) — shown once the hex is explored.
       road: fog === "unexplored" ? false : !!h.road,
+      // Rail runs over the same hexes; the board draws it as its own network.
+      rail: fog === "unexplored" ? false : !!h.rail,
       // §18.3 ZoC — only where the viewer has live sight (it's live info).
       // `zocForeign` marks another faction's ground; `zocTrespassing` means
       // one of the VIEWER's units is standing on it right now (the border

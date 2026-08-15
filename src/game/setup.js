@@ -5,7 +5,7 @@ import { FACTIONS, MINOR_FACTIONS, LOCATIONS, CAPITAL, ABILITIES, REACTIVES, fac
 import { FIELD_ENCOUNTERS } from "./content/index.js";
 import { makeRng } from "./rng.js";
 import { createIdGen } from "./ids.js";
-import { buildHexGrid, generateLayout, assignTerrainFeatures, assignRoads, bfsDistances } from "./board.js";
+import { buildHexGrid, generateLayout, assignTerrainFeatures, assignRoads, assignRails, bfsDistances } from "./board.js";
 import { recomputeInfluence } from "./influence.js";
 import { recomputeVisibility } from "./visibility.js";
 import { ensureDiplomacy, seedStanding } from "./diplomacy.js";
@@ -85,6 +85,9 @@ export function createGame({
   const settlementHexes = Object.keys(layout.placement);
   assignRoads(grid.adjacency, hexes, settlementHexes,
     (hexId) => LOCATIONS[layout.placement[hexId]]?.strategicValue || "medium");
+  // Rail: pre-collapse trunk line between the capitals. Generated, never
+  // built (docs/rail-road-blockade-design.md §2.4).
+  const rails = assignRails(grid.adjacency, hexes, Object.values(layout.factionStart));
 
   // --- players ---
   const players = {};
@@ -277,7 +280,9 @@ export function createGame({
     turnOrder: [...playing],
     activeIndex: 0,
     players,
-    board: { hexes, adjacency: grid.adjacency },
+    // `rails` is the link registry: the 1-MP hop is a property of the LINK,
+    // not of the hexes it runs over, so hex.rail alone cannot express it.
+    board: { hexes, adjacency: grid.adjacency, rails },
     locations,
     units,
     chips,

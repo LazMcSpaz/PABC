@@ -123,6 +123,14 @@ export const CONFIG = {
     linksByValue: { low: 1, medium: 1, high: 2, veryHigh: 2 },
   },
 
+  // Rail (docs/rail-road-blockade-design.md §2). Pre-collapse trunk line,
+  // generated at setup, never built or destroyed. A hop between two linked
+  // capitals costs this regardless of how far apart they are — that flat cost
+  // IS the mechanic, so it should stay cheap enough to be worth a detour.
+  rail: {
+    hopCost: 1,
+  },
+
   // The v0.1 test board — still the default when no map size is given, so
   // headless games and the harness keep their existing layouts.
   testMap: [3, 4, 5, 6, 5, 4, 3], // 30 hexes
