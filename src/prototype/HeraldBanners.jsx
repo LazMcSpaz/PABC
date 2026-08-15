@@ -6,21 +6,12 @@ import React from "react";
 import { factionDef } from "../game/content.js";
 import { standingTier } from "../game/standing.js";
 import { C } from "./HudChrome.jsx";
+// A banner whose "speaker" is a major carries their portrait; minors (no
+// art yet) fall back to the plain banner.
+import { DIPLO_PORTRAITS } from "./factionPortraits.js";
 
 const name = (f) => factionDef(f)?.name || f;
 const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
-
-// Diplomacy portraits — painted envoy scenes for the four majors. A banner
-// whose "speaker" is a major carries their portrait; minors (no art yet)
-// fall back to the plain banner. object-position keeps the envoy's face in
-// the square crop.
-const A = import.meta.env.BASE_URL;
-const DIPLO_PORTRAITS = {
-  versari:   { src: `${A}assets/portraits/factions/versari/versari_diplomacy_1.webp`, pos: "50% 25%" },
-  lakers:    { src: `${A}assets/portraits/factions/lakers/lakers_diplomacy_1.webp`, pos: "50% 22%" },
-  goldgrass: { src: `${A}assets/portraits/factions/goldgrass/goldgrass_diplomacy_1.webp`, pos: "66% 22%" },
-  plainers:  { src: `${A}assets/portraits/factions/plainers/plainers_diplomacy_1.webp`, pos: "72% 22%" },
-};
 
 // Map fresh log entries to banner messages. Moves the HUMAN initiated are
 // skipped (they clicked the button — no telegraph needed), as are the
@@ -99,21 +90,15 @@ export function heraldFromLog(entries, youId) {
         }
         break;
       }
-      case "diplomatic_warning": {
-        if (p.to !== youId) break;
-        if (p.kind === "coalition") {
-          push("🛡", "The powers whisper against your rise — tread carefully", "warn");
-          break;
-        }
-        const flavor = {
-          warlord: `${name(p.from)} sends word: change course, or we march`,
-          honorable: `${name(p.from)} formally protests your conduct`,
-          pacifist: `${name(p.from)} pleads: mend our relations before this darkens`,
-          opportunist: `${name(p.from)} hints that your position grows… expensive`,
-        }[p.temperament] || `${name(p.from)} warns you: their patience wears thin`;
-        push("✉", flavor, "warn", p.from);
+      // NOTE: `diplomatic_warning` deliberately has no banner — it opens
+      // the envoy audience (EnvoyModal), which the player answers. A
+      // banner too would double-notify the same event.
+      case "truce_broken":
+        if (p.breaker === youId) break;
+        push("🩸", p.victim === youId
+          ? `${name(p.breaker)} breaks the truce with YOU`
+          : `${name(p.breaker)} breaks their truce with ${name(p.victim)}`, "war", p.breaker);
         break;
-      }
       case "standing_changed": {
         // Tier crossings TOWARD the human only — "how they see you" shifts.
         if (p.player !== youId || p.faction === youId || p.delta == null) break;

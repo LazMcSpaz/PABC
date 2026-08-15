@@ -13,6 +13,7 @@ import { FACTIONS, MINOR_FACTIONS, factionDef, LOCATIONS, CHIPS } from "./conten
 import { emit, registerEventHook } from "./events.js";
 import { getStanding, adjustStanding, setStanding, standingTier } from "./standing.js";
 import { bfsDistances, reinforcementRoute } from "./board.js";
+import { holdsLocation } from "./control.js";
 import { revealRegion, applySharedVision, recomputeVisibilityFor } from "./visibility.js";
 import { recomputeResearch } from "./stats.js";
 
@@ -38,6 +39,8 @@ export function ensureDiplomacy(state) {
   if (!state.diplomacy.pendingCalls) state.diplomacy.pendingCalls = [];
   if (!state.diplomacy.standingBaselines) state.diplomacy.standingBaselines = {};
   if (!state.diplomacy.recognizedEver) state.diplomacy.recognizedEver = {};
+  if (!state.diplomacy.truces) state.diplomacy.truces = {};
+  if (!state.diplomacy.pendingWarnings) state.diplomacy.pendingWarnings = [];
   for (const p of Object.values(state.players)) {
     if (p.menace == null) p.menace = 0;
     if (p.honor == null) p.honor = CONFIG.diplomacy.honor.start;
@@ -85,9 +88,15 @@ function installDiplomacyListeners(state) {
 // moot (you're already enemies).
 // Does this unit trespass in `owner`'s territory at all? (Shared by the
 // move hook and the per-turn presence sweep.)
-function unitTrespasses(state, unit, owner) {
+function unitTrespasses(state, unit, owner, hex) {
   const mover = unit.owner;
   if (!owner || owner === mover) return false;     // neutral ground or your own land
+  // Never a trespasser in a place you hold. A besieged city's hex could
+  // fall into a neighbour's ZoC and cite its own garrison at home
+  // (playtest 2026-08-15) — the ZoC anchor fixes the cause, this is the
+  // belt-and-braces guard.
+  const loc = state.locations[hex];
+  if (loc && holdsLocation(loc, mover)) return false;
   if (atWar(state, mover, owner)) return false;    // already at war — penalty is moot
   if (hasOpenBorders(state, mover, owner)) return false; // permission granted
   // Safe Conduct (chip `safeConduct`): forged papers — no citation.
@@ -129,7 +138,7 @@ function onTrespass(state, payload) {
   const unit = state.units[payload.unit];
   if (!unit) return;
   const owner = state.world?.zoc?.[payload.to];
-  if (!unitTrespasses(state, unit, owner)) return;
+  if (!unitTrespasses(state, unit, owner, payload.to)) return;
   citeTrespass(state, unit.owner, owner, payload.to);
 }
 
@@ -142,7 +151,7 @@ export function sweepTrespass(state, pid) {
   for (const unit of Object.values(state.units)) {
     if (unit.owner !== pid) continue;
     const owner = zoc[unit.node];
-    if (!unitTrespasses(state, unit, owner)) continue;
+    if (!unitTrespasses(state, unit, owner, unit.node)) continue;
     citeTrespass(state, pid, owner, unit.node);
   }
 }
@@ -499,6 +508,14 @@ export function declareWar(state, a, b, cause = "declared") {
   emit(state, "war_declared", { a, b, cause, justified });
 }
 
+// A truce between a and b is live (peace is binding for a window), or null.
+export function truceBetween(state, a, b) {
+  const t = state.diplomacy?.truces?.[truceKey(a, b)];
+  if (!t) return null;
+  return state.round < t.until ? t : null;
+}
+const truceKey = (a, b) => [a, b].sort().join("|");
+
 export function makePeace(state, a, b, cause = "peace") {
   const before = state.diplomacy.wars.length;
   state.diplomacy.wars = state.diplomacy.wars.filter(
@@ -507,7 +524,15 @@ export function makePeace(state, a, b, cause = "peace") {
   if (state.diplomacy.wars.length !== before) {
     adjustStanding(state, a, b, 3, cause);
     adjustStanding(state, b, a, 3, cause);
-    emit(state, "peace_made", { a, b, cause });
+    // Peace is a PROMISE: lift both sides clear of contempt and shut
+    // hostilities for a window. Without this, peace left Standing at the
+    // Wary line and the AI's combat loop re-declared war the next turn.
+    const tc = D().truce;
+    if (getStanding(state, a, b) < tc.standingFloor) setStanding(state, a, b, tc.standingFloor, "truce");
+    if (getStanding(state, b, a) < tc.standingFloor) setStanding(state, b, a, tc.standingFloor, "truce");
+    state.diplomacy.truces = state.diplomacy.truces || {};
+    state.diplomacy.truces[truceKey(a, b)] = { a, b, since: state.round, until: state.round + tc.rounds };
+    emit(state, "peace_made", { a, b, cause, truceUntil: state.round + tc.rounds });
   }
 }
 
@@ -640,30 +665,46 @@ function queueHumanPactCalls(state) {
 //    threshold.
 // Each warning repeats only after `warnings.cooldownRounds`, and only
 // while the condition still holds.
+// Why this faction is unhappy — the concrete, checkable grievance behind
+// the warning, so the envoy can name it instead of grumbling vaguely.
+function warningReason(state, f, human) {
+  if (menaceOf(state, human) > tolerance(state, f, human)) return "menace";
+  if (honorOf(state, human) < trustFloor(state, f)) return "honor";
+  const rec = state.diplomacy.trespassRecord?.[`${human}|${f}`];
+  if (rec && state.round - rec.lastRound <= 1) return "trespass";
+  if (getBaseline(state, f, human) < 0) return "betrayal";
+  return "standing";
+}
+
 function queueHumanWarnings(state) {
   const human = state.humanFactionId;
   if (!human) return;
   const w = D().warnings;
   const warned = state.diplomacy.warned = state.diplomacy.warned || {};
+  const queue = state.diplomacy.pendingWarnings = state.diplomacy.pendingWarnings || [];
   const due = (key) => warned[key] == null || state.round - warned[key] >= w.cooldownRounds;
   for (const f of factionIds(state)) {
     if (f === human || atWar(state, f, human) || arePacted(state, f, human)) continue;
     const s = getStanding(state, f, human);
     if (s <= D().tiers.wary && s > D().tiers.hostile && due(`war|${f}`)) {
       warned[`war|${f}`] = state.round;
-      emit(state, "diplomatic_warning", {
-        from: f, to: human, kind: "war", standing: s,
+      const reason = warningReason(state, f, human);
+      const payload = {
+        from: f, to: human, kind: "war", standing: s, reason,
         temperament: factionDef(f)?.temperament || null,
-      });
+      };
+      // The envoy waits at the door: an audience the player answers.
+      queue.push({ id: `warn-${f}-${state.round}`, round: state.round, ...payload });
+      emit(state, "diplomatic_warning", payload);
     }
   }
   const t = threatScore(state, human);
   if (t >= D().coalition.threshold * w.coalitionFraction
     && !coalitionAgainst(state, human) && due("coalition")) {
     warned.coalition = state.round;
-    emit(state, "diplomatic_warning", {
-      from: null, to: human, kind: "coalition", threat: Math.round(t * 10) / 10,
-    });
+    const payload = { from: null, to: human, kind: "coalition", threat: Math.round(t * 10) / 10 };
+    queue.push({ id: `warn-coalition-${state.round}`, round: state.round, ...payload });
+    emit(state, "diplomatic_warning", payload);
   }
 }
 
@@ -957,6 +998,18 @@ function breakPromiseIfAny(state, a, b, kinds) {
 export function onAttack(state, attackerPid, targetFid) {
   if (!targetFid || attackerPid === targetFid) return;
   ensureDiplomacy(state);
+  // Striking through a live truce is treachery on top of everything else:
+  // the truce dies, the breaker's Honor and Menace pay for it, and the
+  // victim earns a grievance (their answering war will be justified).
+  const truce = truceBetween(state, attackerPid, targetFid);
+  if (truce) {
+    delete state.diplomacy.truces[truceKey(attackerPid, targetFid)];
+    const tc = D().truce;
+    if (state.players[attackerPid]) adjustHonor(state, attackerPid, -tc.breakHonorLoss, "truce-broken");
+    adjustMenace(state, attackerPid, tc.breakMenace, "truce-broken");
+    recordGrievance(state, targetFid, attackerPid, "truce-broken");
+    emit(state, "truce_broken", { breaker: attackerPid, victim: targetFid });
+  }
   // §1.1/§6.8 — a "treacherous strike": attacking before any war exists costs
   // a steep Honor toll, ONCE per war-initiation (this check must run before
   // declareWar below establishes the war record). Stacks with any pact-break.
@@ -1050,11 +1103,14 @@ function recomputeCoalitions(state) {
     const score = threatScore(state, pid);
     state.diplomacy.threatScores[pid] = score;
     const existing = coalitionAgainst(state, pid);
-    if (score >= c.threshold && !existing) {
+    const cooling = state.diplomacy.coalitionCooldown?.[pid];
+    const onCooldown = cooling != null && state.round - cooling < c.reformCooldownRounds;
+    if (score >= c.threshold && !existing && !onCooldown) {
       const members = factionIds(state).filter((f) =>
         f !== pid
         && f !== state.humanFactionId // never conscript the player
         && vassalLord(state, f) !== pid && !arePacted(state, f, pid)
+        && !truceBetween(state, f, pid) // a faction under truce keeps its word
         && !coalitionAgainst(state, f) // a hunted faction can't be drafted
         && mayEngage(state, f, pid));
       if (members.length >= 2) {
@@ -1071,9 +1127,12 @@ function recomputeCoalitions(state) {
         }
         emit(state, "coalition_formed", { target: pid, members });
       }
-    } else if (existing && score <= c.dissolve) {
+    } else if (existing && score <= c.dissolve
+      && state.round - (existing.since ?? state.round) >= c.minRounds) {
       state.diplomacy.coalitions = state.diplomacy.coalitions.filter((x) => x !== existing);
       for (const m of existing.members) makePeace(state, m, pid, "coalition-dissolved");
+      state.diplomacy.coalitionCooldown = state.diplomacy.coalitionCooldown || {};
+      state.diplomacy.coalitionCooldown[pid] = state.round;
       emit(state, "coalition_dissolved", { target: pid });
     }
   }
@@ -1190,7 +1249,8 @@ function runAIPolitics(state) {
         continue;
       }
       // declare war: low Standing + aggression, and not already at war/pact
-      if (!atWar(state, a, b) && !arePacted(state, a, b)
+      // — and never through a live truce (peace holds for its window).
+      if (!atWar(state, a, b) && !arePacted(state, a, b) && !truceBetween(state, a, b)
         && s <= d.ai.warGrudgeThreshold && (aDef.aggression ?? 0.5) >= 0.6) {
         declareWar(state, a, b, "ai-grudge");
         continue;
@@ -1445,6 +1505,32 @@ export function performDiplomacy(state, pid, action, params = {}) {
       if (state.players[pid]) adjustHonor(state, pid, -D().honor.breakLoss, "pact-declined");
       emit(state, "pact_call_declined", { caller, ally: pid, target });
       return r({ honored: false });
+    }
+
+    // Answer an envoy's warning (the Civ-style audience). "hear" costs
+    // nothing, "placate" buys goodwill with scrap, "defy" tells them where
+    // to put it — honest, and they take it badly.
+    case "respond-warning": {
+      const queue = state.diplomacy.pendingWarnings || [];
+      const wn = queue.find((x) => x.id === params.warningId);
+      if (!wn) return { ok: false, reason: "no such warning" };
+      state.diplomacy.pendingWarnings = queue.filter((x) => x !== wn);
+      const sender = wn.from;
+      if (!sender) return r({ answered: params.answer || "hear" }); // board murmur — nothing to answer
+      if (params.answer === "placate") {
+        const amount = Math.min(params.amount || 0, state.players[pid]?.resource || 0);
+        if (amount <= 0) return { ok: false, reason: "no scrap to offer" };
+        applyDeal(state, {
+          proposer: pid, recipient: sender,
+          give: [{ resource: { resource: "scrap", amount } }], get: [],
+        }, "gift");
+        return r({ answered: "placate", amount });
+      }
+      if (params.answer === "defy") {
+        adjustStanding(state, sender, pid, -D().warnings.defyStandingHit, "defied");
+        return r({ answered: "defy" });
+      }
+      return r({ answered: "hear" });
     }
 
     // §1.7/§6.10 — voluntarily release a vassal (clemency).

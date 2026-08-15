@@ -22,7 +22,7 @@ import { factionDef } from "./content.js";
 import {
   factionIds, powerOf, arePacted, atWar, vassalLord, mayEngage,
   getStanding, passesRepGates, formPact, vassalize, applyDeal, checkRecognitionVictory,
-  aiAcceptsVassalage,
+  aiAcceptsVassalage, truceBetween,
 } from "./diplomacy.js";
 
 const SAFETY_CAP = 16; // hard stop if priority loop ever spins
@@ -101,6 +101,9 @@ function wouldFight(state, pid, ownerFid) {
   if (!ownerFid || ownerFid === pid) return true; // neutral garrisons are fair game
   if (arePacted(state, pid, ownerFid)) return false; // never blind-strike an ally
   if (atWar(state, pid, ownerFid)) return true;
+  // A truce is a promise the AI keeps — this is what stopped the
+  // peace-then-war-again churn every round (playtest 2026-08-15).
+  if (truceBetween(state, pid, ownerFid)) return false;
   if (getStanding(state, pid, ownerFid) <= CONFIG.diplomacy.tiers.wary) return true;
   return (factionDef(pid)?.aggression ?? 0.5) >= CONFIG.diplomacy.ai.blindAttackAggressionMin;
 }
