@@ -159,12 +159,13 @@ everything below:
   *contributes* to the owning faction's vision (the ZoC hex itself gets
   added to their visible set — `CONFIG.fog.zocVision`, currently 0, means
   only that exact hex, no surrounding radius).
-- **One place breaks that separation today**: the diplomatic trespass
-  penalty (`onTrespass` in `src/game/diplomacy.js`) fires a Standing hit +
-  Menace increase purely off a mover's destination hex being inside an enemy
-  ZoC — no check on whether that faction can actually perceive the
-  intrusion. This is flagged here as a known inconsistency; **not yet
-  resolved whether to fix it as part of this work** — see Open Questions.
+- **One place broke that separation** — the diplomatic trespass penalty
+  (`onTrespass`) fired a Standing hit + Menace increase purely off a mover's
+  destination hex being inside an enemy ZoC, with no check on whether that
+  faction could perceive the intrusion. *Resolved:* `unitTrespasses` now gates
+  on `isUnitVisibleTo(owner, unit)`, so cover hides you from a host without
+  Detection and Detection sees through it, exactly as everywhere else. This is
+  NOT Part 1 — blocking is still ground truth; only the citation is gated.
 - **`fortified`** (the existing per-unit flag shown in `UnitPanel`) is a
   transient, single-turn combat bonus only (+1 defense value in a contest,
   `src/game/contest.js`, doubled with the Turrets tech) — wiped the instant
@@ -356,9 +357,9 @@ already works rather than as a new parallel system.
 
 ## Open questions (explicitly unresolved, not defaults to silently assume)
 
-- **Trespass penalty consistency**: should `onTrespass`'s unconditional
-  Standing/Menace hit also become vision-gated, to match the Part 1 rework?
-  Raised early in this conversation, never explicitly revisited or decided.
+- ~~**Trespass penalty consistency**~~ — *resolved*: `onTrespass` is
+  vision-gated (Part 0 above). Part 1 proper, gating the movement HALT itself,
+  is still open.
 - **Exact numbers**: blockade scrap-equivalent cost, base defense score,
   base vision range, rail per-hop movement cost (proposed: 1, matching
   road, not yet confirmed), Toll Booth income rate. All placeholders.

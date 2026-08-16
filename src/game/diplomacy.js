@@ -14,7 +14,9 @@ import { emit, registerEventHook } from "./events.js";
 import { getStanding, adjustStanding, setStanding, standingTier } from "./standing.js";
 import { bfsDistances, reinforcementRoute } from "./board.js";
 import { holdsLocation } from "./control.js";
-import { revealRegion, applySharedVision, recomputeVisibilityFor } from "./visibility.js";
+import {
+  revealRegion, applySharedVision, recomputeVisibilityFor, isUnitVisibleTo,
+} from "./visibility.js";
 import { recomputeResearch } from "./stats.js";
 
 // --- state ----------------------------------------------------------
@@ -101,6 +103,17 @@ function unitTrespasses(state, unit, owner, hex) {
   if (hasOpenBorders(state, mover, owner)) return false; // permission granted
   // Safe Conduct (chip `safeConduct`): forged papers — no citation.
   if (unit.chips.some((c) => !state.chips[c]?.disabled && CHIPS[state.chips[c]?.chipId]?.safeConduct)) return false;
+  // Nobody cites an intrusion nobody noticed. This was the one place ZoC and
+  // Vision were fused (rail doc Part 0): a citation fired purely off the
+  // destination sitting in a foreign ZoC, so slipping through forest — which
+  // conceals precisely so that it hides you — still got you a formal warning
+  // from a faction that could not see you.
+  //
+  // `isUnitVisibleTo` is the same concealment-aware check the rest of the game
+  // uses, so cover, stealth chips and Detection all keep the meaning they have
+  // everywhere else: cover hides you from an owner without Detection, and
+  // Detection sees through it.
+  if (!isUnitVisibleTo(state, owner, unit)) return false;
   return true;
 }
 

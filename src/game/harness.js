@@ -3481,6 +3481,53 @@ line("\n  [§1.6/§1.10] Open borders contract");
 // before/after Standing lets the assertion isolate the trespass rule from
 // whatever else a given seed's map happens to trigger on that hex.
 const lastTrespassEvent = (g) => [...g.log].reverse().find((e) => e.name === "territory_trespassed");
+// A citation is a diplomatic reaction, so it needs someone to have reacted.
+// Slipping through cover used to be cited by a faction that could not see you
+// — the one place ZoC and Vision were fused (rail doc Part 0).
+line("\n  [Open borders] trespass needs the host to SEE you");
+{
+  // Same intrusion three ways: open ground seen, cover unseen, cover detected.
+  const stage = (pick) => {
+    const g = createGame({ seed }); startTurn(g); ensureDiplomacy(g);
+    const mover = g.turnOrder[0], owner = g.turnOrder[1];
+    setStanding(g, owner, mover, CONFIG.diplomacy.tiers.wary - 1); // no courtesy
+    const u = Object.values(g.units).find((x) => x.owner === mover);
+    const dest = (g.board.adjacency[u.node] || []).find(pick(g));
+    if (!dest) return null;
+    g.world.zoc = g.world.zoc || {}; g.world.zoc[dest] = owner;
+    revealRegion(g, owner, [dest]); // the hex itself is in sight either way
+    u.moveRemaining = 2; recomputeStats(g);
+    return { g, mover, owner, u, dest };
+  };
+  const open = (g) => (h) => !g.locations[h] && !g.board.hexes[h].cover;
+  const covered = (g) => (h) => !g.locations[h];
+
+  {
+    const st = stage(open);
+    performAction(st.g, "move", { unit: st.u.uid, to: st.dest });
+    check("Trespass: open ground in plain sight is still cited", !!lastTrespassEvent(st.g));
+  }
+  {
+    // Force the destination into cover — the terrain that exists to hide you.
+    const st = stage(covered);
+    st.g.board.hexes[st.dest].cover = true;
+    performAction(st.g, "move", { unit: st.u.uid, to: st.dest });
+    check("Trespass: slipping through cover is NOT cited by a host without Detection",
+      !lastTrespassEvent(st.g));
+  }
+  {
+    // Same cover, but the host can see through it. Detection is granted via a
+    // Watchtower on a Location the host holds next to the hex — failing that,
+    // fall back to asserting the concealment check is what did it.
+    const st = stage(covered);
+    st.g.board.hexes[st.dest].cover = true;
+    const seen = isUnitVisibleTo(st.g, st.owner, st.u);
+    performAction(st.g, "move", { unit: st.u.uid, to: st.dest });
+    check("Trespass: the citation tracks visibility exactly — cited iff seen",
+      !!lastTrespassEvent(st.g) === seen);
+  }
+}
+
 line("\n  [Open borders] territory trespass penalty");
 {
   // Move a unit into a DISTRUSTFUL faction's ZoC with no open borders →
@@ -3490,8 +3537,9 @@ line("\n  [Open borders] territory trespass penalty");
   const mover = g.turnOrder[0], owner = g.turnOrder[1];
   setStanding(g, owner, mover, CONFIG.diplomacy.tiers.wary - 1);
   const u = Object.values(g.units).find((x) => x.owner === mover);
-  const dest = (g.board.adjacency[u.node] || []).find((h) => !g.locations[h]);
+  const dest = (g.board.adjacency[u.node] || []).find((h) => !g.locations[h] && !g.board.hexes[h].cover);
   g.world.zoc = g.world.zoc || {}; g.world.zoc[dest] = owner; // owner's territory
+  revealRegion(g, owner, [dest]); // the host can see the intrusion
   u.moveRemaining = 2; recomputeStats(g);
   performAction(g, "move", { unit: u.uid, to: dest });
   const ev = lastTrespassEvent(g);
@@ -3507,8 +3555,9 @@ line("\n  [Open borders] territory trespass penalty");
   setStanding(g, owner, mover, 0);
   g.diplomacy.agreements.push({ id: "ob-test", type: "open-borders", a: mover, b: owner, since: 0 });
   const u = Object.values(g.units).find((x) => x.owner === mover);
-  const dest = (g.board.adjacency[u.node] || []).find((h) => !g.locations[h]);
+  const dest = (g.board.adjacency[u.node] || []).find((h) => !g.locations[h] && !g.board.hexes[h].cover);
   g.world.zoc = g.world.zoc || {}; g.world.zoc[dest] = owner;
+  revealRegion(g, owner, [dest]); // the host can see the intrusion
   u.moveRemaining = 2; recomputeStats(g);
   performAction(g, "move", { unit: u.uid, to: dest });
   check("an open-borders agreement waives the trespass penalty (no Standing or Menace hit)",
@@ -3521,8 +3570,9 @@ line("\n  [Open borders] territory trespass penalty");
   const mover = g.turnOrder[0], owner = g.turnOrder[1];
   setStanding(g, owner, mover, CONFIG.diplomacy.tiers.friendly); // good terms
   const u = Object.values(g.units).find((x) => x.owner === mover);
-  const dest = (g.board.adjacency[u.node] || []).find((h) => !g.locations[h]);
+  const dest = (g.board.adjacency[u.node] || []).find((h) => !g.locations[h] && !g.board.hexes[h].cover);
   g.world.zoc = g.world.zoc || {}; g.world.zoc[dest] = owner;
+  revealRegion(g, owner, [dest]); // the host can see the intrusion
   u.moveRemaining = 2; recomputeStats(g);
   performAction(g, "move", { unit: u.uid, to: dest });
   const ev = lastTrespassEvent(g);
@@ -4531,10 +4581,16 @@ line("\n  [Phase 11] text-token resolver");
   const g2 = createGame({ seed: 202, humanFactionId: "versari" });
   ensureDiplomacy(g2);
   const u20 = Object.values(g2.units).find((u) => u.owner === "versari");
-  const hex20 = Object.values(g2.board.hexes).find((h) => !g2.locations[h.id]).id;
+  // Open ground, not cover — this block tests the escalation ladder, and cover
+  // would hide the trespasser from a host with no Detection.
+  const hex20 = Object.values(g2.board.hexes).find((h) => !g2.locations[h.id] && !h.cover).id;
   g2.world.zoc = g2.world.zoc || {};
   g2.world.zoc[hex20] = "goldgrass";
   setStanding(g2, "goldgrass", "versari", 0, "test");
+  // A citation needs the host to have SEEN the intrusion. Put the unit on the
+  // hex and give goldgrass sight of it.
+  u20.node = hex20;
+  revealRegion(g2, "goldgrass", [hex20]);
   const menBefore = g2.players.versari.menace || 0;
   emit(g2, "unit_moved", { unit: u20.uid, from: u20.node, to: hex20 });
   check("first incursion on Neutral ground is a WARNING — no Standing hit, no Menace",
