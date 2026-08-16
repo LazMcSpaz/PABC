@@ -47,6 +47,9 @@ export const EVENT_NAMES = new Set([
   // Blockade structures — rail doc §3 lifecycle (APPEND-ONLY).
   "blockade_started", "blockade_progressed", "blockade_stalled",
   "blockade_completed", "blockade_failed", "blockade_destroyed",
+  "blockade_paid", "blockade_dormant",
+  // Standing armies eat — 1 scrap per unit each Upkeep, 2 fully chipped.
+  "unit_unsupplied", "unit_supplied",
   "build_priority_changed", "advance_checked",
   // Rail doc §2.2 production pooling.
   "production_pooled", "pool_interrupted", "pool_target_changed",
@@ -66,6 +69,8 @@ export const EVENT_NAMES = new Set([
   "pact_call_requested", "pact_call_honored", "pact_call_declined",
   "tribute_demanded", "tribute_caved", "tribute_refused",
   "allied_vision_toggled", "open_borders_toggled", "gift_counter_decayed",
+  // Rail doc §2.3 — running rights over another faction's stations.
+  "rail_access_toggled",
   "territory_trespassed",
   // Diplomacy robustness pass — earned drift baselines + summit VP.
   "standing_baseline_changed", "recognition_summit",

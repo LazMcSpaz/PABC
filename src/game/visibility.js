@@ -268,7 +268,8 @@ export function recomputeVisibility(state, fid, { emitEvents = true } = {}) {
   const blockades = state.world?.blockades || {};
   for (const hex in blockades) {
     const b = blockades[hex];
-    if (b.owner !== fid || !b.done) continue;
+    // A dormant (unpaid) blockade is unmanned — nobody is up there watching.
+    if (b.owner !== fid || !b.done || b.paid === false) continue;
     const onElev = isElevation(state.board.hexes[b.hex]);
     for (const h of castVision(state, b.hex, blockadeVision(state, b), onElev)) next.add(h);
   }

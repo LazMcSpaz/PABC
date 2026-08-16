@@ -15,13 +15,17 @@ aren't.
 | 2.1 Rail transport | built | `board.js assignRails`, `movement.js unitRailEdges` |
 | 2.2 Rail production pooling | built | `economy.js railPoolRecipient` |
 | Rail as a trade route | built | `diplomacy.js tradeRouteOpen` |
-| 2.3 Rail access | built (endpoints-only) | `movement.js unitRailEdges` |
+| 2.3 Rail access | built (held stations + granted) | `movement.js unitRailEdges` |
 | 2.4 Rail generation | built (capital spanning tree) | `board.js assignRails` |
 | — No terminus at sign-named towns | built | `content.js noRailTerminus`, `setup.js railHubs` |
 | 3.1 Blockade construction | built | `blockades.js`, `actions.js build-blockade` |
 | 3.2 Once complete | built, chips included | `blockades.js`, `contest.js`, `visibility.js` |
 | 3.3 Combat and destruction | built | `contest.js` |
 | 3.4 Blockade funding | built | `economy.js`, `blockades.js` |
+| 2.3 Rail access agreement | built | `diplomacy.js hasRailAccess`, verb `set-rail-access` |
+| Pooling / priority UI | built | `HudChrome.jsx EconomyPanel`, `scripts/check-pooling-ui.mjs` |
+| Blockade upkeep | built | `blockades.js chargeBlockadeUpkeep` |
+| Unit upkeep | built | `economy.js chargeUnitUpkeep` |
 
 Both halves of the "route output to a connected recipient" idea now share one
 allocator in `processLocationEconomy`: blockade funding (§3.4) takes what it is
@@ -45,8 +49,19 @@ its own build always claims its output first. Beyond that, four gates:
   exactly as it would with no arrangement at all, and `pool_interrupted` fires
   so the player can see why the shipment stopped.
 
-Neither `set-pool-target` nor `set-build-priority` has a control in the
-settlement window yet — both are engine-side only.
+Both `set-pool-target` and `set-build-priority` now have controls in the
+settlement window (`EconomyPanel`), each rendered only when it is usable: the
+pooling picker appears when the settlement has a rail-linked sibling you also
+hold, the priority toggle only while a blockade is actually being funded.
+`scripts/check-pooling-ui.mjs` drives a real browser and asserts a click
+changes engine state, not just the DOM.
+
+Worth knowing: **rail is a spanning tree over CAPITALS, and a faction starts
+holding exactly one**, so nobody has a legal pool pair at turn 1. Pooling only
+becomes reachable once you take a second capital. That is why the control was
+never missed — there was nothing to show. If pooling is meant to be an
+early-game tool it needs either non-capital rail termini or a rule change
+letting an ally's station receive (today §2.2 requires you hold both).
 
 "Cut" has one definition across all four systems that ask the question —
 rail's line-cut check, blockade construction supply, blockade funding, and
@@ -81,6 +96,59 @@ signage, not stations, so **no rail link may end at them**. They carry
 A line between two legitimate hubs whose hex path happens to cross one of them
 is fine and deliberately left alone — track passes through a place, it just
 does not stop there. Harness-checked.
+
+### §2.3 as built — running rights
+
+Design call, 2026-08-16, closing the "not yet named, specified, or scoped"
+item in Open questions. Rail has no owner of its own — whoever holds a station
+decides what runs through it — so the agreement is over stations, not track.
+
+`set-rail-access` grants one faction running rights over the grantor's
+stations. Deliberately a **lower bar than open borders**: Neutral+ rather than
+Friendly+, and **one-directional**. Open borders is the right to march an army
+across a neighbour's fields; running rights are commerce — your freight moves
+through their yard. Granting is not receiving; each side decides separately.
+A pact carries running rights implicitly (allies ride each other's lines).
+
+Three things read `hasRailAccess`:
+
+- **Unit transport.** `unitRailEdges` used to require the mover to hold BOTH
+  endpoint settlements. Now a station counts if you hold it, nobody holds it,
+  or its holder has granted you rights. This is what turns rail from a purely
+  territorial asset into something diplomacy can open.
+- **Trading pacts.** `railRouteBetween` now takes the two parties and refuses a
+  link whose stations belong to a third party that has granted neither of them
+  rights. Previously a pact could route its trade through the yards of a
+  faction that wanted nothing to do with either side.
+- **Pooling is deliberately NOT included** — §2.2 still requires you hold both
+  stations. Sharing a rival's track is commerce; pooling your industrial output
+  into their city is not the same promise.
+
+### Upkeep — blockades and standing armies
+
+Design call, 2026-08-16.
+
+- **A blockade costs 1 scrap per Upkeep** once finished. Unpaid it goes
+  DORMANT: it halts nobody, sees nothing, collects no toll, and adds no
+  defense in a contest — the works stand but nobody mans them, so arrears make
+  a line cheap to knock down. Never destroyed by arrears; paying revives it.
+  One reader (`activeBlockadeAt`) gates all of it, so dormancy is total rather
+  than partial.
+- **Every unit costs 1 scrap per Upkeep**, 2 once BOTH bay slots are filled —
+  by two 1-slot chips or one 2-slot chip alike, so the heavy kit (Bombard,
+  Landship) carries a supply tail. Charged cheapest-first, so a broke player
+  keeps as many units in the field as possible and the heavy kit starves first.
+  An unpaid unit is UNSUPPLIED: it holds ground and still defends, but cannot
+  move or spend an action, and cannot reach for a player wildcard to buy back
+  what arrears took away. Never destroyed.
+
+Charged in this order at Upkeep: chips, posts, blockades, then units — so
+structures already paid for keep running and it is the army that goes hungry
+first.
+
+Measured over 24 AI-vs-AI games on medium, upkeep-on vs upkeep-off:
+convergence **16/24 → 21/24**, mean round 21.6 → 23.0, and starvation bites in
+7 of 12 games but only 3.8% of unit-turns. It is pressure, not a collapse.
 
 ### Ambush halts — a partial answer to Part 0's gap
 
@@ -394,15 +462,18 @@ already works rather than as a new parallel system.
 - ~~**Trespass penalty consistency**~~ — *resolved*: `onTrespass` is
   vision-gated (Part 0 above). Part 1 proper, gating the movement HALT itself,
   is still open.
-- **Exact numbers**: blockade scrap-equivalent cost, base defense score,
-  base vision range, rail per-hop movement cost (proposed: 1, matching
-  road, not yet confirmed), Toll Booth income rate. All placeholders.
+- ~~**Exact numbers**~~ — *set 2026-08-16*: blockade build cost **8** scrap,
+  defense **4**, vision range **1**, upkeep **1**/turn; Toll Booth costs **4**
+  and pays **+2**/turn; units cost **1**/turn, **2** with a full chip bay.
+  Still open: **rail per-hop movement cost** (proposed 1, matching road) — the
+  one number in this list nobody has ruled on, because rail today is a free
+  hop between stations rather than a per-hex cost.
 - **Which settlement pairs get rail** (2.4), and **whether controlling both
   endpoints is the right access rule** (2.3). Both opened up by rail becoming
   generated rather than built.
-- **The rail-access diplomatic agreement** (2.3): not yet named, specified,
-  or scoped as an actual `DiplomacyDrawer` verb — flagged as future work
-  once the core rail mechanic exists.
+- ~~**The rail-access diplomatic agreement** (2.3)~~ — *resolved*: shipped as
+  `set-rail-access` ("running rights"), Neutral+ and one-directional. See
+  *§2.3 as built* above.
 
 ## Engineering footprint (rough scoping only, not a task breakdown)
 

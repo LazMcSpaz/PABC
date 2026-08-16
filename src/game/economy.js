@@ -428,6 +428,59 @@ export function chargeChipUpkeep(state, pid) {
   if (changed) { recomputeStats(state); recomputeResearch(state); }
 }
 
+// How many bay slots a unit's installed chips occupy. A 2-slot chip fills the
+// bay on its own, which is the whole point of the "or a single double chip"
+// clause — a Landship is as much of a supply burden as two ordinary upgrades.
+export function unitSlotsUsed(state, u) {
+  let n = 0;
+  for (const c of u.chips || []) n += CHIPS[state.chips[c]?.chipId]?.slots ?? 1;
+  return n;
+}
+
+// What one unit costs its owner each Upkeep: 1 normally, 2 once its bay is
+// full. Read by the charge below and by the HUD, so the number a player is
+// quoted and the number they are charged can never drift apart.
+export function unitUpkeepFor(state, u) {
+  const full = unitSlotsUsed(state, u) >= CONFIG.unit.baySlots;
+  return full ? CONFIG.unit.upkeepFullyChipped : CONFIG.unit.upkeep;
+}
+
+// Standing armies eat. Charge every owned unit its Upkeep, cheapest-first so a
+// broke player keeps as many units in the field as possible and the heavy kit
+// is what goes hungry.
+//
+// Unaffordable → UNSUPPLIED, not destroyed: the unit holds its ground and
+// still defends, but it cannot move or spend an action until it is paid again.
+// Arrears are always recoverable, matching how dormancy works for chips, posts
+// and blockades. This runs after `refreshMoveBudget` and the action refresh in
+// startTurn, so zeroing those here is what actually strands the unit.
+export function chargeUnitUpkeep(state, pid) {
+  const player = state.players[pid];
+  if (!player) return;
+  const mine = Object.values(state.units).filter((u) => u.owner === pid);
+  const dues = mine.map((u) => ({ u, due: unitUpkeepFor(state, u) }));
+  // Cheapest first, then uid — deterministic, so the same units starve on a
+  // replay of the same game.
+  dues.sort((a, b) => a.due - b.due || String(a.u.uid).localeCompare(String(b.u.uid)));
+
+  for (const { u, due } of dues) {
+    const was = !u.unsupplied;
+    if (player.resource >= due) {
+      player.resource -= due;
+      emit(state, "resource_spent", {
+        player: pid, resource: "Resource", amount: -due, source: "unit-upkeep",
+      });
+      u.unsupplied = false;
+      if (!was) emit(state, "unit_supplied", { owner: pid, unit: u.uid });
+    } else {
+      u.unsupplied = true;
+      u.moveRemaining = 0;
+      u.actionsRemaining = 0;
+      if (was) emit(state, "unit_unsupplied", { owner: pid, unit: u.uid, due });
+    }
+  }
+}
+
 // §20.8 — when a Location's Loyalty falls below the bonus-slot rung, the chip
 // occupying that extra slot is at risk: ejected newest-first (mirroring the
 // §17.3 LIFO peel) until the installed count fits the base capacity again.

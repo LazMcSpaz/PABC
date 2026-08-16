@@ -9,7 +9,7 @@ import { emit } from "./events.js";
 import { recomputeStats, recomputeResearch, assignTechNode, effectiveVeteran } from "./stats.js";
 import { recomputeInfluence, zocOwner, inZoC } from "./influence.js";
 import { reinforcementRoute, bfsDistances, movementField, movementRoute } from "./board.js";
-import { passesFreely, movementBlockers, unitReach, unitIgnoresTerrain, supplyCutter } from "./movement.js";
+import { passesFreely, movementBlockers, unitReach, unitIgnoresTerrain, supplyCutter, unitRailEdges } from "./movement.js";
 import { recomputeVisibility, isUnitVisibleTo, revealRegion, unitVision, isHexVisible } from "./visibility.js";
 import {
   ensureDiplomacy, menaceFromAttack, onAttack,
@@ -20,6 +20,7 @@ import {
   // diplomacy-spec.md additions
   findWar, warExhaustion, aiAcceptsPeace, evaluatePactCall,
   canDemandTribute, caveOnDemand, hasOpenBorders, formTradingPact, openBordersStanding,
+  hasRailAccess, railAccessStanding,
   findPactAgreement, honorOf, powerOf,
   // diplomacy robustness pass — baselines, patronage, summit VP
   getBaseline, adjustBaseline, aiAcceptsVassalage, breakPact,
@@ -41,6 +42,7 @@ import { postAt, isPostVisibleTo, chargePostUpkeep } from "./posts.js";
 import {
   blockadeAt, activeBlockadeAt, creditCap, roadSupplyPath,
   blockadeDefense, blockadeVision, blockadeIncome, destroyBlockade,
+  chargeBlockadeUpkeep,
 } from "./blockades.js";
 import { loadFieldEncounters, findUnsupportedTypes, choiceIsRunnable, WORLD_ENCOUNTERS } from "./content-loader.js";
 import { pickHexByFilter, encounterRedrawBudget } from "./encounters.js";
@@ -49,10 +51,17 @@ import { evalCond, evalStrength } from "./dsl.js";
 import { registerQuest } from "./quests.js";
 import { CONFIG } from "./config.js";
 import { takeAITurn, maybeAssignTech } from "./ai.js";
-import { enforceLoyaltySlotCap, chargeChipUpkeep, slotCapacity, effectiveBuildCost, buildableChips, applyOutputAndBuilds, locationOutput } from "./economy.js";
+import { enforceLoyaltySlotCap, chargeChipUpkeep, slotCapacity, effectiveBuildCost, buildableChips, applyOutputAndBuilds, locationOutput, unitUpkeepFor, chargeUnitUpkeep } from "./economy.js";
 
 const seed = Number(process.argv[2]) || 42;
 const line = (s = "") => console.log(s);
+
+// What `pid`'s standing army bills each Upkeep. Income checks net this out so
+// they keep measuring income rather than income-minus-whatever-army-the-seed-
+// happened-to-deal.
+const armyUpkeep = (g, pid) => Object.values(g.units)
+  .filter((u) => u.owner === pid)
+  .reduce((n, u) => n + unitUpkeepFor(g, u), 0);
 
 const game = createGame({ seed });
 line(`\n=== Ashland Conquest — engine harness (seed ${seed}) ===`);
@@ -1434,7 +1443,10 @@ line("\n  [Tech Wheel] entry-node effects");
     const me = g.turnOrder[0];
     g.players[me].techLevel = 2; g.players[me].techWheel = ["eco-entry"];
     const locs = Object.values(g.locations).filter((l) => l.controller === me);
-    const expected = locs.reduce((n, l) => n + l.production, 0) + locs.length;
+    // Net of the army's keep — this check is about INCOME, and standing units
+    // now bill against the same pot.
+    const expected = locs.reduce((n, l) => n + l.production, 0) + locs.length
+      - armyUpkeep(g, me);
     const before = g.players[me].resource;
     for (let i = 0; i < g.turnOrder.length; i++) endTurn(g); // back to me's Upkeep
     check("Economy (Industry): +1 scrap per held Location",
@@ -1672,7 +1684,8 @@ line("\n  [Tech Wheel §17.5] Economy branch (Industry / Construction)");
     const me = g.turnOrder[0];
     g.players[me].techLevel = 5; g.players[me].techWheel = ["eco-entry", "eco-a1"];
     const locs = Object.values(g.locations).filter((l) => l.controller === me);
-    const expected = locs.reduce((n, l) => n + l.production, 0) + locs.length * 2;
+    const expected = locs.reduce((n, l) => n + l.production, 0) + locs.length * 2
+      - armyUpkeep(g, me);
     const before = g.players[me].resource;
     for (let i = 0; i < g.turnOrder.length; i++) endTurn(g);
     check("Economy A1 (Refineries): +2 scrap/held Location (entry + A1)",
@@ -2152,8 +2165,9 @@ line("\n  [Rail doc §3] Blockade structures");
     const twice = performAction(g, "build-blockade", { hex });
     check("Blockade: build needs a road hex, off a Location, with scrap — then succeeds",
       !notRoad.ok && !onLoc.ok && !poor.ok && built.ok && !twice.ok && !!blockadeAt(g, hex));
-    check("Blockade: costs 4 scrap and starts unfinished, pinning its builder",
-      g.players[me].resource === 6 && blockadeAt(g, hex).done === false &&
+    check(`Blockade: costs ${CONFIG.blockades.buildCost} scrap and starts unfinished, pinning its builder`,
+      g.players[me].resource === 10 - CONFIG.blockades.buildCost &&
+      blockadeAt(g, hex).done === false &&
       blockadeAt(g, hex).builder === u.uid);
     // Step the builder aside to read the SITE's own blocking: with the unit
     // still on it the hex is blocked either way, and the point of the check is
@@ -2273,6 +2287,118 @@ line("\n  [Rail doc §3] Blockade structures");
     recomputeVisibility(g, me, { emitEvents: false });
     check("Blockade: a completed blockade is a Vision source for its owner",
       isHexVisible(g, me, hex));
+  }
+
+  // Standing armies eat — 1 scrap a unit, 2 with a full bay, and an unpaid
+  // unit is stranded rather than killed.
+  {
+    const g = createGame({ seed }); startTurn(g);
+    const me = g.turnOrder[0];
+    const mine = Object.values(g.units).filter((u) => u.owner === me);
+    const u = mine[0];
+
+    check("Unit upkeep: a bare unit bills 1", unitUpkeepFor(g, u) === CONFIG.unit.upkeep);
+    // Two 1-slot chips and one 2-slot chip must price identically — that is
+    // the whole "or a single double chip" clause.
+    const put = (unit, chipId) => {
+      const uid = g.nextId("chip");
+      g.chips[uid] = { uid, chipId };
+      unit.chips.push(uid);
+      return uid;
+    };
+    const oneSlot = put(u, "drilled-troops");
+    check("Unit upkeep: a half-filled bay still bills 1",
+      unitUpkeepFor(g, u) === CONFIG.unit.upkeep);
+    put(u, "drilled-troops");
+    check("Unit upkeep: two 1-slot chips fill the bay and double it",
+      unitUpkeepFor(g, u) === CONFIG.unit.upkeepFullyChipped);
+    u.chips = [];
+    put(u, "bombard"); // slots: 2
+    check("Unit upkeep: one 2-slot chip fills the bay on its own",
+      unitUpkeepFor(g, u) === CONFIG.unit.upkeepFullyChipped);
+    u.chips = [oneSlot];
+
+    // Park it on plain ground so the build-post case below has a legal site.
+    u.node = (g.board.adjacency[u.node] || []).find((h) => !g.locations[h]) || u.node;
+    recomputeStats(g);
+
+    // Charged against an empty pot: stranded, not destroyed.
+    const before = Object.keys(g.units).length;
+    g.players[me].resource = 0;
+    chargeUnitUpkeep(g, me);
+    check("Unit upkeep: an unpayable unit goes unsupplied, not destroyed",
+      mine.every((x) => x.unsupplied) && Object.keys(g.units).length === before);
+    check("Unit upkeep: an unsupplied unit cannot move or act",
+      mine.every((x) => x.moveRemaining === 0 && x.actionsRemaining === 0));
+    const moved = performAction(g, "move", {
+      unit: u.uid, to: g.board.adjacency[u.node][0],
+    });
+    check("Unit upkeep: the move verb refuses an unsupplied unit",
+      !moved.ok && /unsupplied/.test(moved.reason || ""));
+    // A wildcard must not buy back what arrears took away. Everything else
+    // about this build-post is made legal first (tech, scrap, wildcards), so
+    // the only thing left to refuse it is the arrears — note the scrap is
+    // restored AFTER the charge above, so the unit stays unsupplied.
+    g.players[me].actions.remaining = 5;
+    g.players[me].resource = 99;
+    g.players[me].techLevel = 5;
+    g.players[me].techWheel = ["int-entry", "int-a2"];
+    const acted = performAction(g, "build-post", { unit: u.uid, hex: u.node });
+    check("Unit upkeep: a player wildcard cannot revive an unsupplied unit",
+      !acted.ok && /unsupplied/.test(acted.reason || ""));
+
+    // Partial funds feed the cheap units first.
+    g.players[me].resource = CONFIG.unit.upkeep;
+    chargeUnitUpkeep(g, me);
+    const fed = mine.filter((x) => !x.unsupplied);
+    check("Unit upkeep: partial funds feed as many units as they cover",
+      fed.length === 1 && g.players[me].resource === 0);
+
+    g.players[me].resource = 99;
+    chargeUnitUpkeep(g, me);
+    check("Unit upkeep: paying up restores the whole army",
+      mine.every((x) => !x.unsupplied));
+  }
+
+  // §3.1 — a finished blockade is manned, and an unmanned one is no obstacle.
+  {
+    const { g, me, hex, u } = stage();
+    const foe = g.turnOrder[1];
+    performAction(g, "build-blockade", { hex });
+    upkeep(g, me); upkeep(g, me);
+    const b = blockadeAt(g, hex);
+    check("Blockade upkeep: a blockade opens paid, before any Upkeep bills it",
+      b.done && b.paid === true);
+    // Step the builder off, or the hex reads as blocked by the UNIT and the
+    // dormancy check below would pass for the wrong reason.
+    u.node = g.board.adjacency[hex][0]; recomputeStats(g);
+
+    // Broke: the whole army and the blockade bill against an empty pot.
+    g.players[me].resource = 0;
+    for (const l of Object.values(g.locations)) if (l.controller === me) l.production = 0;
+    chargeBlockadeUpkeep(g, me);
+    check("Blockade upkeep: unaffordable upkeep puts it dormant, not destroyed",
+      b.paid === false && !!blockadeAt(g, hex));
+    check("Blockade upkeep: a dormant blockade halts nobody",
+      !activeBlockadeAt(g, hex) && !movementBlockers(g, foe).has(hex));
+    check("Blockade upkeep: a dormant toll booth collects nothing", (() => {
+      const uid = g.nextId("chip");
+      g.chips[uid] = { uid, chipId: "toll-booth" };
+      b.chips = [...(b.chips || []), uid];
+      const dark = blockadeIncome(g, me);
+      b.paid = true;
+      const lit = blockadeIncome(g, me);
+      b.chips = (b.chips || []).filter((c) => c !== uid);
+      b.paid = false;
+      return dark === 0 && lit === CHIPS["toll-booth"].output;
+    })());
+
+    // Pay the arrears and it comes straight back.
+    g.players[me].resource = 20;
+    chargeBlockadeUpkeep(g, me);
+    check("Blockade upkeep: paying the arrears revives it",
+      b.paid === true && !!activeBlockadeAt(g, hex) &&
+      g.players[me].resource === 20 - CONFIG.blockades.upkeep);
   }
 
   // §3.2 — upgrade chips: queued free, paid by the same settlement draw,
@@ -3649,6 +3775,64 @@ line("\n  [§1.6/§1.10] Open borders contract");
     performDiplomacy(g, a, "set-open-borders", { faction: b, on: true }).ok && hasOpenBorders(g, a, b));
   check("set-open-borders off removes standalone passage",
     performDiplomacy(g, a, "set-open-borders", { faction: b, on: false }).ok && !hasOpenBorders(g, a, b));
+}
+
+// Rail doc §2.3 — running rights over another faction's stations.
+{
+  line("\n  [Rail doc §2.3] Running rights");
+  const g = createGame({ seed }); ensureDiplomacy(g);
+  const a = "versari", b = "lakers";
+  g.players[a].menace = 0; g.players[b].menace = 0; g.players[a].honor = 6; g.players[b].honor = 6;
+
+  // Below Neutral, nobody is lending anybody a railway.
+  setStanding(g, a, b, -4); setStanding(g, b, a, -4);
+  check("rail access refused below Neutral",
+    !performDiplomacy(g, a, "set-rail-access", { faction: b, on: true }).ok);
+
+  // Neutral is enough — a LOWER bar than open borders (Friendly+), which is
+  // the point: freight is not an army.
+  setStanding(g, a, b, 0); setStanding(g, b, a, 0);
+  const grant = performDiplomacy(g, a, "set-rail-access", { faction: b, on: true });
+  check("rail access granted at Neutral, a lower bar than open borders",
+    grant.ok && !openBordersStanding(g, a, b).ok);
+  check("rail access is one-directional — granting is not receiving",
+    hasRailAccess(g, b, a) && !hasRailAccess(g, a, b));
+  check("rail access revokes cleanly",
+    performDiplomacy(g, a, "set-rail-access", { faction: b, on: false }).ok &&
+    !hasRailAccess(g, b, a));
+
+  // A pact carries running rights without a separate negotiation.
+  check("pacted factions ride each other's lines implicitly", (() => {
+    const h = createGame({ seed }); ensureDiplomacy(h);
+    formPact(h, a, b);
+    return hasRailAccess(h, a, b) && hasRailAccess(h, b, a);
+  })());
+
+  // Transport: a link whose far station belongs to someone else is closed
+  // until they grant rights, then it opens.
+  check("running rights open a foreign station for unit transport", (() => {
+    const h = createGame({ seed }); ensureDiplomacy(h);
+    const link = (h.board.rails || [])[0];
+    if (!link) return false;
+    const holderA = h.locations[link.a]?.controller;
+    const holderB = h.locations[link.b]?.controller;
+    if (!holderA || !holderB || holderA === holderB) return false;
+    // Pick the rider FIRST, then clear every other unit off the line so a
+    // parked garrison isn't what closes it (deleting first can delete the
+    // only unit holderA has).
+    const rider = Object.values(h.units).find((u) => u.owner === holderA);
+    if (!rider) return false;
+    for (const uid of Object.keys(h.units)) {
+      if (uid !== rider.uid && link.path.includes(h.units[uid].node)) delete h.units[uid];
+    }
+    rider.node = link.a;
+    const before = unitRailEdges(h, rider);
+    setStanding(h, holderB, holderA, 0);
+    h.players[holderB].menace = 0; h.players[holderA].honor = 6;
+    const ok = performDiplomacy(h, holderB, "set-rail-access", { faction: holderA, on: true }).ok;
+    const after = unitRailEdges(h, rider);
+    return ok && !before?.has(link.a) && !!after?.get(link.a)?.includes(link.b);
+  })());
 }
 
 // Open borders is a permit, not a wall — moving through territory without it

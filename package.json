@@ -13,7 +13,8 @@
     "preview": "vite preview",
     "shots": "node scripts/shoot.mjs",
     "board-perf": "node scripts/board-perf.mjs",
-    "motion": "node scripts/motion.mjs"
+    "motion": "node scripts/motion.mjs",
+    "check:pooling": "node scripts/check-pooling-ui.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.30.1",

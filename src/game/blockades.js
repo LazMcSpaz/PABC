@@ -19,7 +19,10 @@
 //   done: false   under construction. Holds `progress` against `cost`, and the
 //                 uid of the unit pinned to the hex building it.
 //   done: true    a real structure. The builder is free to leave; the blockade
-//                 defends itself, sees for its owner, and halts enemy movement.
+//                 defends itself, sees for its owner, and halts enemy movement
+//                 — for as long as `paid` holds. A finished blockade costs
+//                 scrap every Upkeep; unpaid it goes dormant (paid: false) and
+//                 does none of those three things until the arrears clear.
 import { CONFIG } from "./config.js";
 import { CHIPS } from "./content.js";
 import { emit } from "./events.js";
@@ -29,11 +32,15 @@ export function blockadeAt(state, hex) {
   return state.world?.blockades?.[hex] || null;
 }
 
-// The blockade on `hex` only if it is finished — the phase that actually
-// blocks, defends and sees. Construction sites do none of those things.
+// The blockade on `hex` only if it is finished AND paid — the phase that
+// actually blocks, defends and sees. Construction sites do none of those
+// things, and neither does a position whose upkeep went unpaid: an unpaid
+// blockade is DORMANT, still standing and still repairable, but the road is
+// open through it and it contributes no sight. Routing every consumer through
+// this one reader is what makes dormancy total rather than partial.
 export function activeBlockadeAt(state, hex) {
   const b = blockadeAt(state, hex);
-  return b && b.done ? b : null;
+  return b && b.done && b.paid !== false ? b : null;
 }
 
 export function ownedBlockades(state, pid) {
@@ -72,10 +79,40 @@ export function blockadeVision(state, b) {
 export function blockadeIncome(state, pid) {
   let n = 0;
   for (const b of ownedBlockades(state, pid)) {
-    if (!b.done) continue;
+    if (!b.done || b.paid === false) continue; // a dormant booth collects nothing
     n += chipSum(state, b, "output");
   }
   return n;
+}
+
+// §3.1 — 1 scrap per finished blockade each Upkeep. Unaffordable → DORMANT
+// (blocks nobody, sees nothing, collects no toll) until it is paid again.
+// Emits only on transitions, and never destroys: arrears are recoverable.
+//
+// Ordering note: charged cheapest-first is meaningless here (every blockade
+// costs the same), so we walk them in hexId order for determinism — a player
+// who can only afford some of their line keeps the same ones each turn.
+export function chargeBlockadeUpkeep(state, pid) {
+  const player = state.players[pid];
+  if (!player) return;
+  const mine = ownedBlockades(state, pid)
+    .filter((b) => b.done)
+    .sort((a, b) => String(a.hex).localeCompare(String(b.hex)));
+  for (const b of mine) {
+    const was = b.paid !== false;
+    const due = CONFIG.blockades.upkeep;
+    if (player.resource >= due) {
+      player.resource -= due;
+      emit(state, "resource_spent", {
+        player: pid, resource: "Resource", amount: -due, source: "blockade-upkeep",
+      });
+      b.paid = true;
+      if (!was) emit(state, "blockade_paid", { owner: pid, hex: b.hex });
+    } else {
+      b.paid = false;
+      if (was) emit(state, "blockade_dormant", { owner: pid, hex: b.hex });
+    }
+  }
 }
 
 // Slots a blockade's installed chips occupy, against CONFIG.blockades.chipSlots.
@@ -240,6 +277,7 @@ export function creditBlockade(state, b, amount) {
     b.done = true;
     b.progress = b.cost;
     b.builder = null; // §3.2 — the builder is free to leave the moment it lands
+    b.paid = true;    // manned from the day it opens; upkeep bites next Upkeep
     emit(state, "blockade_completed", { owner: b.owner, hex: b.hex });
   } else {
     emit(state, "blockade_progressed", {

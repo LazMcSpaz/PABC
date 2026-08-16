@@ -195,7 +195,7 @@ export const CHIPS = {
   // (§3.4). Excluded from the Location build menu by that kind.
   palisade: { id: "palisade", name: "Palisade", kind: "blockade", slots: 1, techLevel: 1, cost: 4, blockadeDefense: 3, buildCost: 4, loyaltyReq: 0, desc: "+3 blockade defense" },
   "signal-mast": { id: "signal-mast", name: "Signal Mast", kind: "blockade", slots: 1, techLevel: 1, cost: 3, blockadeVision: 1, buildCost: 3, loyaltyReq: 0, desc: "+1 Vision from this blockade" },
-  "toll-booth": { id: "toll-booth", name: "Toll Booth", kind: "blockade", slots: 1, techLevel: 2, cost: 5, output: 1, buildCost: 5, loyaltyReq: 0, desc: "+1 scrap each Upkeep — a fortified chokepoint taxing what passes" },
+  "toll-booth": { id: "toll-booth", name: "Toll Booth", kind: "blockade", slots: 1, techLevel: 2, cost: 4, output: 2, buildCost: 4, loyaltyReq: 0, desc: "+2 scrap each Upkeep — a fortified chokepoint taxing what passes" },
   // --- special unit chips: buildable (docs/chip-set-v0.1.md) ---
   // No statType — specials compete for bay slots but not stat families.
   "field-medics": { id: "field-medics", name: "Field Medics", kind: "unit", slots: 1, techLevel: 2, cost: 4, buildCost: 4, loyaltyReq: 3, healAnywhere: 1, desc: "Heals +1 at Upkeep anywhere, not only on a held Location" },

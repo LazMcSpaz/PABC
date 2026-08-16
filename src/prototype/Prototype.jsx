@@ -200,6 +200,13 @@ function buildLocView(state, hex, isYourTurn) {
       chips: chipDefs,
       canManage: isYourTurn,
       scrap: you.scrap,
+      // Rail doc §2.2 pooling + §3.4 funding priority.
+      poolTarget: e.poolTarget,
+      poolTargetName: e.poolTargetName,
+      poolTargets: e.poolTargets,
+      poolBlocked: e.poolBlocked,
+      buildPriority: e.buildPriority,
+      fundsBlockade: e.fundsBlockade,
     };
   }
 
@@ -802,6 +809,16 @@ export default function Prototype({ config, onNewGame }) {
   function onSetSlider(hexId, value) {
     return runAction("set-slider", { at: hexId, value });
   }
+  // Rail doc §2.2 / §3.4 — both are free (no action cost), so they run
+  // straight through without a confirm.
+  function onSetPoolTarget(hexId, to) {
+    return runAction("set-pool-target", { at: hexId, to },
+      null, to ? "Rail shipment set." : "Rail shipment stopped.");
+  }
+  function onSetBuildPriority(hexId, value) {
+    return runAction("set-build-priority", { at: hexId, value },
+      null, value === "chips" ? "Chips funded first." : "Blockade funded first.");
+  }
 
   function onEndTurn() {
     if (!isYourTurn || replay.isReplaying) return;
@@ -990,6 +1007,8 @@ export default function Prototype({ config, onNewGame }) {
             onUpgrade={onUpgrade}
             onRush={onRush}
             onSetSlider={onSetSlider}
+            onSetPoolTarget={onSetPoolTarget}
+            onSetBuildPriority={onSetBuildPriority}
             onContest={(p) => {
               onContest(p);
               setSelectedHexId(null);

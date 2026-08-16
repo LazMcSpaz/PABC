@@ -45,6 +45,9 @@ function validateMove(state, { pid, params }) {
   if (unit.owner !== pid) return fail("not your unit");
   if (unit.immobilizedUntil != null && turnOrdinal(state) <= unit.immobilizedUntil)
     return fail("unit is immobilized");
+  // Arrears strand a unit where it stands. Its budget was already zeroed at
+  // Upkeep, but say so plainly rather than reporting "out of range".
+  if (unit.unsupplied) return fail("unit is unsupplied — pay its upkeep first");
   if (!state.board.hexes[params.to]) return fail("no such hex");
   if (params.to === unit.node) return fail("unit is already on that hex");
   // v0.2 §16.2 — Move spends the per-turn move budget (not Actions), consumed
@@ -791,6 +794,11 @@ export function performAction(state, type, params = {}, ctx = {}) {
   if (payer) {
     const units = (payer.units || []).map((u) => state.units[u]).filter(Boolean);
     const locs = (payer.locations || []).map((h) => state.locations[h]).filter(Boolean);
+    // An unsupplied unit is stranded outright — its own action was zeroed at
+    // Upkeep, and it may not reach for a player wildcard either. Without this
+    // the wildcard pool would quietly buy back exactly what arrears took away.
+    const starving = units.find((u) => u.unsupplied);
+    if (starving) return fail("that unit is unsupplied — pay its upkeep first");
     let shortfall = 0;
     for (const u of units) if ((u.actionsRemaining ?? 0) < 1) shortfall += 1;
     for (const l of locs) if ((l.actionsRemaining ?? 0) < 1) shortfall += 1;

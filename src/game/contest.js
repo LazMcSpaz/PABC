@@ -274,8 +274,13 @@ function defenderValue(state, t) {
   // A site still under construction has no defense of its own — §3.1 is
   // explicit that a builder attacked mid-build fights as an ordinary unit — so
   // it contributes only the stack.
+  // A DORMANT blockade (upkeep unpaid) contributes nothing either: the works
+  // are still there but nobody is manning them, so an attacker faces only
+  // whatever units happen to be standing on the hex. Arrears make a line
+  // cheap to knock down, which is the pressure the upkeep is there to apply.
   if (t.kind === "blockade") {
-    const base = t.blockade.done ? blockadeDefense(state, t.blockade) : 0;
+    const manned = t.blockade.done && t.blockade.paid !== false;
+    const base = manned ? blockadeDefense(state, t.blockade) : 0;
     return base + stackStrength(state, t.blockade.owner, t.blockade.hex);
   }
   const loc = t.loc;

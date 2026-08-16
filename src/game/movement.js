@@ -10,8 +10,8 @@ import { CHIPS, ABILITIES, chipBlocksRail } from "./content.js";
 // `passesFreely` and `supplyCutter` are pure diplomacy questions — who may
 // pass whom, and what severs a line — so they live in diplomacy.js and are
 // re-exported here, where every mover already looks for them.
-export { passesFreely, supplyCutter } from "./diplomacy.js";
-import { passesFreely } from "./diplomacy.js";
+export { passesFreely, supplyCutter, hasRailAccess } from "./diplomacy.js";
+import { passesFreely, hasRailAccess } from "./diplomacy.js";
 import { ensureVisibility, isHexVisible, isUnitVisibleTo } from "./visibility.js";
 
 const BIG_BUDGET = 999; // budget-agnostic routing for display
@@ -67,7 +67,9 @@ function blockerScan(state, ownerId, { ignoreUnits } = {}) {
   // blockade still stops it — the same reasoning that keeps enemy Locations
   // blocking above.
   for (const b of Object.values(state.world?.blockades || {})) {
-    if (!b.done || b.owner === ownerId) continue;
+    // `paid === false` is a dormant position — standing, but unmanned, so the
+    // road is open through it until its owner clears the arrears.
+    if (!b.done || b.paid === false || b.owner === ownerId) continue;
     if (!passesFreely(state, ownerId, b.owner)) {
       // Unlike a city, a blockade can go up (or come down) behind your back, so
       // it takes LIVE sight rather than memory to count as seen.
@@ -141,7 +143,15 @@ export function unitRailEdges(state, unit) {
   );
   if (barred) return null;
 
-  const controls = (hexId) => state.locations[hexId]?.controller === unit.owner;
+  // Rail doc §2.3 — you may work a station you hold, or one whose holder has
+  // granted you running rights (a pact grants them implicitly). Unheld track
+  // is nobody's to close. This is what turns rail from a purely territorial
+  // asset into something diplomacy can open.
+  const controls = (hexId) => {
+    const holder = state.locations[hexId]?.controller;
+    if (!holder) return true;
+    return holder === unit.owner || hasRailAccess(state, unit.owner, holder);
+  };
   // A hex is cut for this mover if a unit it cannot pass freely stands there.
   const hostile = new Set();
   for (const u of Object.values(state.units)) {

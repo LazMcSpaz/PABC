@@ -38,6 +38,13 @@ export const CONFIG = {
     baseStrength: 4,
     baseMovement: 2, // v0.2 §16.2 — was 1; movement is now its own budget
     baySlots: 2,
+    // Standing armies eat. 1 scrap per unit each Upkeep, doubled once BOTH
+    // bay slots are filled — whether by two 1-slot chips or one 2-slot chip,
+    // so the heavy kit (Bombard, Landship) carries a supply tail. An unpaid
+    // unit is UNSUPPLIED: it holds ground but cannot move or act until it is
+    // paid again. Never destroyed by arrears.
+    upkeep: 1,
+    upkeepFullyChipped: 2,
     baseStrengthCap: 4, // v0.2 §16.3 — base Strength doubles as HP, capped here
     veteranStrengthCap: 8, // §16.7 combining (deferred)
   },
@@ -248,15 +255,20 @@ export const CONFIG = {
   // the doc's placeholders pending a balance pass — the mechanics are settled,
   // these are not.
   blockades: {
-    buildCost: 4,  // §3.1 — 1 Action + scrap to break ground
+    buildCost: 8,  // §3.1 — 1 Action + scrap to break ground
     cost: 4,       // §3.1 — total construction progress needed
     // §3.1's floor. Construction is funded from the connected settlement's build
     // output (§3.4), so without this a rich city could raise one in a single
     // Upkeep; a site takes at most ceil(cost/minTurns) per turn and the rest
     // flows on to whatever else that city is building.
     minTurns: 2,
-    defense: 6,    // §3.2 — Location-style static baseline, before stacking
+    defense: 4,    // §3.2 — Location-style static baseline, before stacking
     vision: 1,     // §3.2 — its own sight footprint
+    // A blockade is a manned position, not a wall you walk away from: 1 scrap
+    // each Upkeep or it goes DORMANT — blocks nobody and sees nothing until
+    // it is paid again. Never destroyed by arrears; the garrison drifts off
+    // and comes back. Same contract as a listening post (§17.7).
+    upkeep: 1,
     // §3.2 upgrade slots. Deliberately fewer than a settlement's: a blockade is
     // a chokepoint, not a second city. Palisade / Signal Mast / Toll Booth are
     // in content.js as kind "blockade"; their bonuses are read off the chip def

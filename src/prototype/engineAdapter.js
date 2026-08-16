@@ -25,6 +25,8 @@ import {
   aiAcceptsPact, aiAcceptsVassalage, wouldAccept, passesRepGates,
   evaluatePactCall, canDemandTribute, hasOpenBorders, warJustification,
   openBordersStanding,
+  railAccessStanding,
+  hasRailAccess,
 } from "../game/diplomacy.js";
 import { hasTechNode } from "../game/tech.js";
 import {
@@ -526,12 +528,43 @@ function adaptEconomy(state, loc) {
     if (u.owner === loc.controller && u.node === loc.hexId) for (const c of u.chips) collect(c);
   }
 
+  // Rail doc §2.2 — the settlements this one may pool into. Mirrors
+  // validateSetPoolTarget exactly (direct link, both stations held by the same
+  // faction), so the menu can never offer a target the engine will refuse.
+  const poolTargets = [];
+  for (const link of state.board.rails || []) {
+    const far = link.a === loc.hexId ? link.b : link.b === loc.hexId ? link.a : null;
+    if (far == null) continue;
+    const dest = state.locations[far];
+    if (!dest || dest.controller !== loc.controller) continue;
+    poolTargets.push({
+      hexId: far,
+      name: ENGINE_LOCATIONS[dest.locationId]?.name || far,
+      building: !!dest.activeBuild,
+    });
+  }
+  // Rail doc §3.4 — does this settlement actually fund a blockade? The
+  // priority toggle is meaningless without one, so the UI can hide it.
+  const fundsBlockade = Object.values(state.world?.blockades || {}).some(
+    (b) => !b.done && b.owner === loc.controller,
+  );
+
   return {
     output: locationOutput(state, loc),
     slider: loc.buildSlider ?? 0,
     progress: loc.buildProgress || 0,
     slotCapacity: cap,
     slotsUsed: used,
+    // Pooling (§2.2) + funding priority (§3.4) — engine actions that had no
+    // control anywhere in the UI until now.
+    poolTarget: loc.poolTarget ?? null,
+    poolTargetName: loc.poolTarget
+      ? (ENGINE_LOCATIONS[state.locations[loc.poolTarget]?.locationId]?.name || loc.poolTarget)
+      : null,
+    poolTargets,
+    poolBlocked: loc.activeBuild ? "this settlement is building something of its own" : null,
+    buildPriority: loc.buildPriority || "blockade",
+    fundsBlockade,
     activeBuild: ab
       ? {
           kind: ab.kind,
@@ -1019,6 +1052,24 @@ function availableVerbsAgainst(state, viewer, fid) {
       state: "enabled",
       outcome: "Toggle the current open-borders agreement on or off from your side.",
     });
+    // Rail doc §2.3 — running rights. A lower bar than open borders and only
+    // one direction: this is YOUR grant over YOUR stations, so the drawer can
+    // read the gate off the one side it actually knows.
+    const ra = railAccessStanding(state, viewer, fid);
+    const granted = hasRailAccess(state, fid, viewer);
+    out.push(ra.ok || granted
+      ? {
+        verb: "set-rail-access",
+        state: "enabled",
+        outcome: granted
+          ? "Revoke their running rights over your rail — their freight and troops stop using your stations."
+          : "Let their units and trade run over the rail lines your settlements hold.",
+      }
+      : {
+        verb: "set-rail-access",
+        state: "disabled",
+        reason: `${ra.reason.charAt(0).toUpperCase()}${ra.reason.slice(1)}.`,
+      });
   }
   if (pacted) {
     out.push({

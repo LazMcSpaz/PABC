@@ -11,13 +11,16 @@ import { activePlayerId } from "./targeting.js";
 import { sweepDeferred } from "./deferred.js";
 import { evaluateTriggers } from "./triggers.js";
 import { evaluateConditionalBeats } from "./quests.js";
-import { applyOutputAndBuilds, chargeChipUpkeep, enforceLoyaltySlotCap } from "./economy.js";
+import {
+  applyOutputAndBuilds, chargeChipUpkeep, chargeUnitUpkeep, enforceLoyaltySlotCap,
+} from "./economy.js";
 import { runDiplomacyRound, vassalsOf, arePacted, adjustMenace, sweepTrespass } from "./diplomacy.js";
 import { holdsLocation } from "./control.js";
 import { adjustStanding } from "./standing.js";
 import { pressureSource } from "./influence.js";
 import { hasTechNode } from "./tech.js";
 import { chargePostUpkeep } from "./posts.js";
+import { chargeBlockadeUpkeep } from "./blockades.js";
 import { bankVp, recomputeVp } from "./victory.js";
 import { CHIPS, LOCATIONS, ABILITIES, factionDef } from "./content.js";
 
@@ -361,6 +364,14 @@ export function startTurn(state) {
   // post goes dormant (no Vision) until repaid. Refresh fog so a post that
   // just went dormant stops contributing sight this turn.
   chargePostUpkeep(state, pid);
+  // Rail doc §3.1 — a finished blockade is manned, so it costs scrap; unpaid
+  // it goes dormant and the road opens back up through it.
+  chargeBlockadeUpkeep(state, pid);
+  // Standing armies eat. Charged LAST of the four, so structures a player has
+  // already sunk scrap into keep running and it is the army that goes hungry
+  // first. Must follow the action reset and refreshMoveBudget above — an
+  // unsupplied unit is stranded by having those zeroed back out.
+  chargeUnitUpkeep(state, pid);
   // Refresh fog last: a post that just went dormant stops contributing sight
   // this turn, and a blockade that completed during the economy step (rail doc
   // §3.4 funds construction out of Output) starts.

@@ -525,7 +525,7 @@ function Stat({ icon, value, label }) {
 }
 
 // Single-window Location view. `view` is a plain object built by the host.
-export function LocationWindow({ view, onClose, onActivate, onContest, onRecruit, onBuild, onUpgrade, onRush, onSetSlider }) {
+export function LocationWindow({ view, onClose, onActivate, onContest, onRecruit, onBuild, onUpgrade, onRush, onSetSlider, onSetPoolTarget, onSetBuildPriority }) {
   const v = view;
   // On desktop a city is a panel you consult while still working the map, not a
   // modal that takes the screen hostage. On a phone it fills the screen either
@@ -581,7 +581,7 @@ export function LocationWindow({ view, onClose, onActivate, onContest, onRecruit
         </div>
 
         {v.economy && (
-          <EconomyPanel hexId={v.hexId} eco={v.economy} onBuild={onBuild} onUpgrade={onUpgrade} onRush={onRush} onSetSlider={onSetSlider} />
+          <EconomyPanel hexId={v.hexId} eco={v.economy} onBuild={onBuild} onUpgrade={onUpgrade} onRush={onRush} onSetSlider={onSetSlider} onSetPoolTarget={onSetPoolTarget} onSetBuildPriority={onSetBuildPriority} />
         )}
 
         {v.ability && (
@@ -632,18 +632,20 @@ export function LocationWindow({ view, onClose, onActivate, onContest, onRecruit
 // installed chip opens its upgrade view (always shows the next tier, greyed
 // if Tech or Loyalty is short). Construction advances at Upkeep; Rush spends
 // banked scrap to finish now.
-function EconomyPanel({ hexId, eco, onBuild, onUpgrade, onRush, onSetSlider }) {
+function EconomyPanel({ hexId, eco, onBuild, onUpgrade, onRush, onSetSlider, onSetPoolTarget, onSetBuildPriority }) {
   const [open, setOpen] = useState(null); // null | "build" | { upgrade: chipUid }
   const can = eco.canManage;
-  const slot = (label, active, val) => (
+  // One pill button, shared by the guns/butter slider, the pooling picker and
+  // the funding-priority toggle so all three read as the same control.
+  const slotButton = (label, active, enabled, onClick) => (
     <button
       key={label}
       className="hud-int"
-      disabled={!can}
-      onClick={can ? () => onSetSlider?.(hexId, val) : undefined}
+      disabled={!enabled}
+      onClick={enabled ? onClick : undefined}
       style={{
         flex: 1, fontFamily: C.font, fontSize: 10, fontWeight: 700, letterSpacing: 1,
-        textTransform: "uppercase", padding: "5px 4px", borderRadius: 5, cursor: can ? "pointer" : "default",
+        textTransform: "uppercase", padding: "5px 4px", borderRadius: 5, cursor: enabled ? "pointer" : "default",
         border: `1px solid ${active ? C.holo : "rgba(86,211,198,0.3)"}`,
         background: active ? "rgba(86,211,198,0.18)" : "rgba(0,0,0,0.25)",
         color: active ? C.holoHi : C.textDim,
@@ -652,6 +654,8 @@ function EconomyPanel({ hexId, eco, onBuild, onUpgrade, onRush, onSetSlider }) {
       {label}
     </button>
   );
+  const slot = (label, active, val) =>
+    slotButton(label, active, can, () => onSetSlider?.(hexId, val));
   const f = eco.slider ?? 0;
   const emptySlots = Math.max(0, eco.slotCapacity - eco.slotsUsed);
 
@@ -710,6 +714,48 @@ function EconomyPanel({ hexId, eco, onBuild, onUpgrade, onRush, onSetSlider }) {
           </button>
         ))}
       </div>
+
+      {/* Rail doc §2.2 — pool this settlement's build output down a rail link.
+          Only rendered when a legal recipient exists, so a settlement with no
+          rail never shows a control it could not use. */}
+      {eco.poolTargets?.length > 0 && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+          <SectionLabel>Rail · pool build output</SectionLabel>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+            {slotButton("Keep", !eco.poolTarget, can, () => onSetPoolTarget?.(hexId, null))}
+            {eco.poolTargets.map((t) => slotButton(
+              `→ ${t.name}`, eco.poolTarget === t.hexId, can,
+              () => onSetPoolTarget?.(hexId, eco.poolTarget === t.hexId ? null : t.hexId),
+            ))}
+          </div>
+          <div style={{ fontSize: 9.5, color: C.textFaint, lineHeight: 1.45 }}>
+            {eco.poolBlocked
+              ? `Pooling paused — ${eco.poolBlocked}.`
+              : eco.poolTarget
+                ? `Shipping this settlement's build output to ${eco.poolTargetName} each Upkeep. Anyone parked on the line cuts the shipment.`
+                : "Ship your idle build output down the rail to a settlement you also hold."}
+          </div>
+        </div>
+      )}
+
+      {/* Rail doc §3.4 — who gets the output first when a blockade is being
+          funded. Hidden entirely when there is no site to argue over. */}
+      {eco.fundsBlockade && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+          <SectionLabel>Funding priority</SectionLabel>
+          <div style={{ display: "flex", gap: 6 }}>
+            {slotButton("Blockade first", eco.buildPriority !== "chips", can,
+              () => onSetBuildPriority?.(hexId, "blockade"))}
+            {slotButton("Chips first", eco.buildPriority === "chips", can,
+              () => onSetBuildPriority?.(hexId, "chips"))}
+          </div>
+          <div style={{ fontSize: 9.5, color: C.textFaint, lineHeight: 1.45 }}>
+            {eco.buildPriority === "chips"
+              ? "This settlement finishes its own chip before it pays for the blockade."
+              : "The blockade takes its share first; the rest goes to this settlement's own build."}
+          </div>
+        </div>
+      )}
 
       {/* build menu — §20.6: only Tech-allowed chips; Loyalty-locked greyed */}
       {open === "build" && (
