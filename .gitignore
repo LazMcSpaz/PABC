@@ -17,3 +17,9 @@ Thumbs.db
 
 __pycache__/
 *.pyc
+
+# Unit sheets copied out of art/units/ by scripts/build-units.mjs. Byte-identical
+# to the sources, so tracking both would just double their weight in the repo.
+# The generated manifest (src/prototype/unitSprites.json) IS tracked, because
+# the renderer imports it.
+public/assets/units/

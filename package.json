@@ -5,7 +5,10 @@
   "type": "module",
   "description": "Ashland Conquest — post-apocalyptic strategy card game prototype",
   "scripts": {
+    "predev": "node scripts/build-units.mjs",
     "dev": "vite",
+    "build:units": "node scripts/build-units.mjs",
+    "prebuild": "node scripts/build-units.mjs",
     "build": "vite build",
     "preview": "vite preview",
     "shots": "node scripts/shoot.mjs",

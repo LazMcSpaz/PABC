@@ -8,6 +8,7 @@
 // mountain in front of it, which matters more for something you have to click.
 import { FACTIONS, ownerColor, theme } from "./data.js";
 import { HEX_W, HEX_H } from "./hexProjection.js";
+import { spriteFor, variantFor, spriteStyle, spriteScale, hitBoxStyle, ensureIdleKeyframes } from "./unitSprites.js";
 
 // Tokens stand on the near apron of the top face, not out on the terrain.
 // Baked art carries no depth buffer, so nothing knows how tall the ground is
@@ -29,9 +30,105 @@ export function slotPos(i, count) {
   return { left: x * HEX_W, top: y * HEX_H };
 }
 
+// Sprite-sheet token. Drawn for any faction that has unit art built into
+// `unitSprites.json`; everyone else falls back to the coloured disc below, so
+// the board stays readable while the other three factions are still being
+// modelled.
+//
+// Layout note: the wrapper is a zero-size div sitting exactly on the unit's
+// ground point, and both children hang off that origin. The sprite is offset by
+// its anchor rather than its bottom edge, which is the whole reason it lines up
+// with the contact ellipse.
+function SpriteToken({ unit, spec, faction, selected, pos, onClick, dim }) {
+  ensureIdleKeyframes(spec);
+  const s = spriteScale(spec);
+  const style = spriteStyle(spec, variantFor(unit), { uid: unit.uid });
+  // Ground ellipse, squashed to the projection. §6 of the pipeline doc keeps
+  // shadows out of the render precisely so this can scale with the board.
+  const shadowW = spec.footprintMetres * spec.pixelsPerMetre * s * 0.82;
+  return (
+    <div
+      style={{
+        position: "absolute",
+        left: pos.left,
+        top: pos.top,
+        width: 0,
+        height: 0,
+        opacity: dim ? 0.3 : 1,
+        filter: dim ? "saturate(0.6) brightness(0.85)" : undefined,
+        transition: "opacity .18s ease, filter .18s ease",
+      }}
+    >
+      <div
+        style={{
+          position: "absolute",
+          left: 0,
+          top: 0,
+          width: shadowW,
+          height: shadowW * (HEX_H / HEX_W),
+          transform: "translate(-50%, -50%)",
+          borderRadius: "50%",
+          background: selected
+            ? `radial-gradient(ellipse, ${theme.accent}88, transparent 70%)`
+            : `radial-gradient(ellipse, ${faction.color}55, transparent 70%)`,
+        }}
+      />
+      <div
+        data-unit-sprite=""
+        style={{
+          position: "absolute",
+          left: 0,
+          top: 0,
+          // The cell is mostly transparent headroom; clicks are taken by the
+          // footprint-sized target below instead, so tokens do not steal each
+          // other's clicks where their canvases overlap.
+          pointerEvents: "none",
+          ...style,
+          // Selection reads as a glow on the figure itself; a border would
+          // frame the transparent cell, not the unit.
+          filter: selected
+            ? `drop-shadow(0 0 3px ${theme.accent}) drop-shadow(0 0 6px ${theme.accent})`
+            : "drop-shadow(0 1px 1px rgba(0,0,0,0.55))",
+        }}
+      />
+      <div
+        data-unit-uid={unit.uid}
+        title={`${unit.name} — ${faction.name}`}
+        onClick={(e) => {
+          if (!onClick) return;
+          e.stopPropagation();
+          onClick(unit);
+        }}
+        style={{
+          position: "absolute",
+          left: 0,
+          top: 0,
+          ...hitBoxStyle(spec),
+          pointerEvents: "auto",
+          cursor: onClick ? "pointer" : undefined,
+        }}
+      />
+    </div>
+  );
+}
+
 export function UnitToken({ unit, selected, slot = 0, count = 1, onClick, dim = false }) {
   const faction = FACTIONS[unit.owner] || { name: unit.owner || "Unknown", color: "#888" };
   const pos = slotPos(slot, count);
+  const spec = spriteFor(unit.owner);
+  if (spec) {
+    return (
+      <SpriteToken
+        unit={unit}
+        spec={spec}
+        faction={faction}
+        selected={selected}
+        pos={pos}
+        onClick={onClick}
+        dim={dim}
+      />
+    );
+  }
   const size = selected ? 30 : 27;
   return (
     <div
