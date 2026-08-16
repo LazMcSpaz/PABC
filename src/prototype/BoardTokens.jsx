@@ -6,8 +6,14 @@
 // above a sibling tile. The cost is that a nearer tile no longer occludes a
 // farther tile's tokens; the gain is that a unit is never buried under the
 // mountain in front of it, which matters more for something you have to click.
+import { useMemo } from "react";
 import { FACTIONS, ownerColor, theme } from "./data.js";
 import { HEX_W, HEX_H } from "./hexProjection.js";
+import { radialBox, hasRadial } from "./radialGeometry.js";
+import { slotPos, chooseSlots } from "./boardSlots.js";
+import {
+  spriteFor, variantFor, spriteStyle, spriteScale, hitBoxStyle, drawnBox, ensureIdleKeyframes,
+} from "./unitSprites.js";
 
 // Tokens stand on the near apron of the top face, not out on the terrain.
 // Baked art carries no depth buffer, so nothing knows how tall the ground is
@@ -18,20 +24,107 @@ import { HEX_W, HEX_H } from "./hexProjection.js";
 // are actually present, so a lone unit stands in the middle of its tile
 // instead of clinging to one edge. `y` bows inward with `x` to follow the
 // apron's near boundary.
-const MAX_SLOTS = 5;
-const SLOT_SPACING = 0.155;
+export { slotPos, chooseSlots } from "./boardSlots.js";
 
-export function slotPos(i, count) {
-  const n = Math.min(count || 1, MAX_SLOTS);
-  const idx = Math.min(i, n - 1);
-  const x = (idx - (n - 1) / 2) * SLOT_SPACING;
-  const y = 0.44 - Math.abs(x) * 0.45;
-  return { left: x * HEX_W, top: y * HEX_H };
+// Sprite-sheet token. Drawn for any faction that has unit art built into
+// `unitSprites.json`; everyone else falls back to the coloured disc below, so
+// the board stays readable while the other three factions are still being
+// modelled.
+//
+// Layout note: the wrapper is a zero-size div sitting exactly on the unit's
+// ground point, and both children hang off that origin. The sprite is offset by
+// its anchor rather than its bottom edge, which is the whole reason it lines up
+// with the contact ellipse.
+function SpriteToken({ unit, spec, faction, selected, pos, onClick, dim }) {
+  ensureIdleKeyframes(spec);
+  const s = spriteScale(spec);
+  const style = spriteStyle(spec, variantFor(unit), { uid: unit.uid });
+  // Ground ellipse, squashed to the projection. §6 of the pipeline doc keeps
+  // shadows out of the render precisely so this can scale with the board.
+  const shadowW = spec.footprintMetres * spec.pixelsPerMetre * s * 0.82;
+  return (
+    <div
+      style={{
+        position: "absolute",
+        left: pos.left,
+        top: pos.top,
+        width: 0,
+        height: 0,
+        opacity: dim ? 0.3 : 1,
+        filter: dim ? "saturate(0.6) brightness(0.85)" : undefined,
+        transition: "opacity .18s ease, filter .18s ease",
+      }}
+    >
+      <div
+        style={{
+          position: "absolute",
+          left: 0,
+          top: 0,
+          width: shadowW,
+          height: shadowW * (HEX_H / HEX_W),
+          transform: "translate(-50%, -50%)",
+          borderRadius: "50%",
+          background: selected
+            ? `radial-gradient(ellipse, ${theme.accent}88, transparent 70%)`
+            : `radial-gradient(ellipse, ${faction.color}55, transparent 70%)`,
+        }}
+      />
+      <div
+        data-unit-sprite=""
+        style={{
+          position: "absolute",
+          left: 0,
+          top: 0,
+          // The cell is mostly transparent headroom; clicks are taken by the
+          // footprint-sized target below instead, so tokens do not steal each
+          // other's clicks where their canvases overlap.
+          pointerEvents: "none",
+          ...style,
+          // Selection reads as a glow on the figure itself; a border would
+          // frame the transparent cell, not the unit.
+          filter: selected
+            ? `drop-shadow(0 0 3px ${theme.accent}) drop-shadow(0 0 6px ${theme.accent})`
+            : "drop-shadow(0 1px 1px rgba(0,0,0,0.55))",
+        }}
+      />
+      <div
+        data-unit-uid={unit.uid}
+        title={`${unit.name} — ${faction.name}`}
+        onClick={(e) => {
+          if (!onClick) return;
+          e.stopPropagation();
+          onClick(unit);
+        }}
+        style={{
+          position: "absolute",
+          left: 0,
+          top: 0,
+          ...hitBoxStyle(spec),
+          pointerEvents: "auto",
+          cursor: onClick ? "pointer" : undefined,
+        }}
+      />
+    </div>
+  );
 }
 
-export function UnitToken({ unit, selected, slot = 0, count = 1, onClick, dim = false }) {
+export function UnitToken({ unit, selected, slot = 0, count = 1, pos: posIn, onClick, dim = false }) {
   const faction = FACTIONS[unit.owner] || { name: unit.owner || "Unknown", color: "#888" };
-  const pos = slotPos(slot, count);
+  const pos = posIn || slotPos(slot, count);
+  const spec = spriteFor(unit.owner);
+  if (spec) {
+    return (
+      <SpriteToken
+        unit={unit}
+        spec={spec}
+        faction={faction}
+        selected={selected}
+        pos={pos}
+        onClick={onClick}
+        dim={dim}
+      />
+    );
+  }
   const size = selected ? 30 : 27;
   return (
     <div
@@ -91,9 +184,9 @@ export function UnitToken({ unit, selected, slot = 0, count = 1, onClick, dim = 
   );
 }
 
-export function GhostToken({ ghost, slot = 0, count = 1 }) {
+export function GhostToken({ ghost, slot = 0, count = 1, pos: posIn }) {
   const color = ownerColor(ghost.owner);
-  const pos = slotPos(slot, count);
+  const pos = posIn || slotPos(slot, count);
   return (
     <div
       title={`Last seen: ${FACTIONS[ghost.owner]?.name || ghost.owner} (Str ${ghost.strength}, round ${ghost.round})${ghost.false ? " — unverified" : " — may have moved"}`}
@@ -119,8 +212,27 @@ export function GhostToken({ ghost, slot = 0, count = 1 }) {
   );
 }
 
+// A token's board-space box, used only for the radial-occlusion test. Sprites
+// know their own drawn extent; the fallback disc is a 27 px circle sitting on
+// its slot point.
+function tokenBox(faction) {
+  const spec = spriteFor(faction);
+  if (spec) return (x, y) => drawnBox(spec, x, y);
+  return (x, y) => ({ x0: x - 15, x1: x + 15, y0: y - 30, y1: y + 3 });
+}
+
 // One positioned group per hex, so token slots stay relative to a hex centre.
 export default function BoardTokens({ order, hexes, units, centers, selectedUnitId, dimmedUnitUid, onUnitClick }) {
+  // Every radial on the board, in board space. Built once per render rather
+  // than per hex: a radial hangs over its own tile and reaches the hex behind,
+  // so a hex has to be checked against its neighbours' radials, not just its own.
+  const occluders = useMemo(
+    () => order
+      .filter((id) => hasRadial(hexes[id]) && centers[id])
+      .map((id) => radialBox(centers[id].x, centers[id].y)),
+    [order, hexes, centers],
+  );
+
   return (
     // Above the Loyalty radials (9000), not below. A radial floats 28-128px
     // ABOVE its own hex centre while tokens sit 19-46px BELOW theirs, and rows
@@ -137,21 +249,22 @@ export default function BoardTokens({ order, hexes, units, centers, selectedUnit
         const here = (hex.unitIds || []).map((id) => units[id]).filter(Boolean);
         const ghosts = hex.ghosts || [];
         if (!here.length && !ghosts.length) return null;
+        const unitSlots = chooseSlots(here.length, c, occluders, tokenBox(here[0]?.owner));
+        const ghostSlots = chooseSlots(ghosts.length, c, occluders, tokenBox(ghosts[0]?.owner));
         return (
           <div key={`tok-${hexId}`} style={{ position: "absolute", left: c.x, top: c.y }}>
             {here.map((u, i) => (
               <UnitToken
                 key={u.uid}
                 unit={u}
-                slot={i}
-                count={here.length}
+                pos={unitSlots[i]}
                 selected={u.uid === selectedUnitId}
                 dim={u.uid === dimmedUnitUid}
                 onClick={onUnitClick}
               />
             ))}
             {ghosts.map((g, i) => (
-              <GhostToken key={`ghost-${i}`} ghost={g} slot={i} count={ghosts.length} />
+              <GhostToken key={`ghost-${i}`} ghost={g} pos={ghostSlots[i]} />
             ))}
           </div>
         );

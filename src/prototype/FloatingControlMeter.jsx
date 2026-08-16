@@ -6,12 +6,15 @@
 // tile look like it has height. The radial itself is deliberately NOT squashed
 // by the projection — it stays a true circle, a billboard facing the viewer,
 // which is both what sells it as hovering and what keeps it readable.
+import { METER } from "./radialGeometry.js";
 import ControlMeter from "./ControlMeter.jsx";
 import GarrisonValue from "./GarrisonValue.jsx";
 import { fullController, holoColor, HOLO_NEUTRAL, theme } from "./data.js";
 import { FLOAT_LIFT, HEX_W, HEX_H } from "./hexProjection.js";
 
-const METER = 58;
+// Geometry lives in radialGeometry.js so the token layer and the tests can read
+// it without pulling in this component. Re-exported for existing callers.
+export { METER, radialBox, hasRadial } from "./radialGeometry.js";
 
 export default function FloatingControlMeter({ x, y, name, control, locationId, dim }) {
   const ctrl = fullController(control.sections);
@@ -48,6 +51,7 @@ export default function FloatingControlMeter({ x, y, name, control, locationId, 
       </svg>
 
       <div
+        data-radial=""
         style={{
           position: "absolute",
           left: 0,
