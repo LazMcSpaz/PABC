@@ -17,6 +17,7 @@ aren't.
 | Rail as a trade route | built | `diplomacy.js tradeRouteOpen` |
 | 2.3 Rail access | built (endpoints-only) | `movement.js unitRailEdges` |
 | 2.4 Rail generation | built (capital spanning tree) | `board.js assignRails` |
+| — No terminus at sign-named towns | built | `content.js noRailTerminus`, `setup.js railHubs` |
 | 3.1 Blockade construction | built | `blockades.js`, `actions.js build-blockade` |
 | 3.2 Once complete | built, chips included | `blockades.js`, `contest.js`, `visibility.js` |
 | 3.3 Combat and destruction | built | `contest.js` |
