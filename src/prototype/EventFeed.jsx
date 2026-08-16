@@ -4,6 +4,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { FACTIONS as UI_FACTIONS, theme } from "./data.js";
 import { engineLocationIdToUi } from "./engineAdapter.js";
+import { useIsPhone } from "./useViewport.js";
 
 const MAX_ROWS = 14;
 
@@ -20,10 +21,8 @@ function formatEvent(ev, engineState) {
   switch (ev.name) {
     case "turn_started":
       return { color: factionColor(p.player), text: `${who(p.player)} — turn start` };
-    case "unit_moved": {
-      const u = engineState.units[p.unit];
-      return { color: factionColor(u?.owner), text: `${who(u?.owner)} moved ${p.from} → ${p.to}` };
-    }
+    case "unit_moved":
+      return { color: factionColor(p.player), text: `${who(p.player)} moved ${p.from} → ${p.to}` };
     case "unit_recruited":
       return { color: factionColor(p.player), text: `${who(p.player)} recruited a unit` };
     case "unit_retreated": {
@@ -125,7 +124,30 @@ function formatEvent(ev, engineState) {
       return { color: theme.good, text: `${p.chipId} reactivated` };
     case "build_started":
     case "slider_changed":
+    case "build_priority_changed":
       return null; // directives, not noteworthy outcomes
+    // Rail doc §3 — blockade lifecycle. `blockade_progressed` is deliberately
+    // silent: a bar creeping up every turn is not news.
+    case "blockade_started":
+      return { color: factionColor(p.owner), text: `${who(p.owner)} broke ground on a blockade` };
+    case "blockade_completed":
+      return { color: factionColor(p.owner), text: `${who(p.owner)} blockade complete` };
+    case "blockade_stalled":
+      return { color: theme.accent2, text: `blockade stalled — ${p.reason}` };
+    case "blockade_failed":
+      return { color: theme.accent2, text: `blockade abandoned — ${p.reason}` };
+    case "blockade_destroyed":
+      return { color: theme.accent2, text: `${who(p.owner)} blockade destroyed` };
+    case "blockade_progressed":
+      return null;
+    // The mover walked into something it could not see. This NEEDS saying —
+    // a unit that stops early with movement still in hand reads as a bug
+    // unless the feed explains what stopped it.
+    case "advance_checked":
+      return {
+        color: theme.accent2,
+        text: `${who(p.player)} advance checked — ambushed, ${p.moveRemaining} movement left to fall back`,
+      };
     case "encounter_delivered":
       return {
         color: factionColor(p.recipient),
@@ -192,7 +214,8 @@ function formatEvent(ev, engineState) {
   }
 }
 
-export default function EventFeed({ engineState, tick }) {
+export default function EventFeed({ engineState, tick, topOffset = 14 }) {
+  const isPhone = useIsPhone();
   // Pull every event from the engine log; format the visible ones; keep
   // only the tail. The component re-runs on every tick bump so AI turns
   // surface immediately.
@@ -219,10 +242,10 @@ export default function EventFeed({ engineState, tick }) {
     <div
       style={{
         position: "absolute",
-        top: 14,
-        right: 14,
-        width: 270,
-        maxHeight: 260,
+        top: topOffset,
+        right: isPhone ? 8 : 14,
+        width: isPhone ? 170 : 270,
+        maxHeight: isPhone ? 130 : 260,
         background: "rgba(20, 17, 13, 0.92)",
         border: `1px solid ${theme.border}`,
         borderRadius: 7,

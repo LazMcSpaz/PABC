@@ -7,6 +7,7 @@ import { useState } from "react";
 import { motion } from "framer-motion";
 import { TECH_NODES, TECH_PATHS } from "../game/tech.js";
 import { CloseX, useEscClose } from "./HudChrome.jsx";
+import { useViewportSize } from "./useViewport.js";
 
 const HOLO = "#56d3c6";
 const HOLO_HI = "#8ff6ea";
@@ -33,15 +34,31 @@ const PATH_PREFIX = { military: "mil", logistics: "log", economy: "eco", intelli
 // Order clockwise from 12 o'clock (HoloSegments angle convention).
 const PATHS_CW = ["military", "economy", "intelligence", "logistics"];
 
-const SIZE = 480;
-const CTR = SIZE / 2;
-const RINGS = {
+// Base (desktop/iPad) geometry — scaled down as a whole via `k` on phone
+// screens, where a fixed 480px wheel plus its info strip wouldn't fit.
+const BASE_SIZE = 480;
+const BASE_RINGS = {
   hub: { ri: 0, ro: 56 },
   entry: { ri: 56, ro: 116 },
   layer2: { ri: 116, ro: 176 },
   layer3: { ri: 176, ro: 234 },
 };
-const GAP_PX = 5;
+const BASE_GAP_PX = 5;
+
+function useWheelGeometry() {
+  const { width: vw, height: vh } = useViewportSize();
+  const SIZE = Math.min(BASE_SIZE, vw * 0.94, vh * 0.62);
+  const k = SIZE / BASE_SIZE;
+  const CTR = SIZE / 2;
+  const scaleRing = ({ ri, ro }) => ({ ri: ri * k, ro: ro * k });
+  const RINGS = {
+    hub: scaleRing(BASE_RINGS.hub),
+    entry: scaleRing(BASE_RINGS.entry),
+    layer2: scaleRing(BASE_RINGS.layer2),
+    layer3: scaleRing(BASE_RINGS.layer3),
+  };
+  return { SIZE, CTR, RINGS, GAP_PX: BASE_GAP_PX * k, k };
+}
 
 // HoloSegments angle convention: 0=top, +90=right, +180=bottom, +270=left.
 function pt(cx, cy, r, deg) {
@@ -151,11 +168,24 @@ function buildSegments(assigned, points) {
   return segs;
 }
 
-function Segment({ seg, hovered, onHover, onClick }) {
-  const isHover = hovered === seg.id;
+// Mouse gets the old hover→click flow unchanged (hovering arms `active`
+// before the click ever fires, so a click always lands on the confirm
+// branch below). Touch has no real hover, but mobile browsers SYNTHESIZE
+// mouseenter+mouseleave+click around every tap anyway (so CSS :hover can
+// briefly "flash" and clear) — all three fire in one burst, before React
+// gets a chance to re-render in between, so a plain onMouseEnter here
+// would arm `active` and then the synthesized onMouseLeave would un-arm
+// it again before the click handler's own render ever saw the update.
+// Fix: use Pointer Events (which carry the TRUE originating device,
+// unlike synthetic MouseEvents) and only let a real mouse arm `active` via
+// hover. Touch has no other way to fire enter/leave, so it's naturally
+// left to arm/confirm purely through two separate onClick calls (tap 1
+// previews, tap 2 — a genuinely separate later event — confirms).
+function Segment({ seg, active, onPreview, onConfirm, geo }) {
+  const isHover = active === seg.id;
   const col = PATH_COLOR[seg.path];
-  const { ri, ro } = RINGS[seg.ring];
-  const d = donut(CTR, CTR, ri, ro, seg.a0, seg.a1, GAP_PX);
+  const { ri, ro } = geo.RINGS[seg.ring];
+  const d = donut(geo.CTR, geo.CTR, ri, ro, seg.a0, seg.a1, geo.GAP_PX);
   const { isAssigned, canAssign } = seg;
   const isDim = !isAssigned && !canAssign;
   const fillOpacity = isAssigned ? 0.34 : isHover ? 0.24 : canAssign ? 0.13 : 0.04;
@@ -173,25 +203,36 @@ function Segment({ seg, hovered, onHover, onClick }) {
       strokeLinejoin="round"
       style={{
         cursor: canAssign ? "pointer" : "default",
+        touchAction: "manipulation",
         filter: glow ? `drop-shadow(0 0 ${glow}px ${col})` : undefined,
         transition: "fill-opacity .14s ease, stroke-width .14s ease, filter .14s ease, stroke-opacity .14s ease",
       }}
-      onMouseEnter={() => onHover(seg.id)}
-      onMouseLeave={() => onHover((h) => (h === seg.id ? null : h))}
-      onClick={() => canAssign && onClick(seg.id)}
+      onPointerEnter={(e) => { if (e.pointerType === "mouse") onPreview(seg.id); }}
+      onPointerLeave={(e) => {
+        if (e.pointerType !== "mouse") return;
+        onPreview((h) => (h === seg.id ? null : h));
+      }}
+      onClick={(e) => {
+        e.stopPropagation();
+        if (active !== seg.id) { onPreview(seg.id); return; } // tap/click 1 — preview only
+        if (canAssign) onConfirm(seg.id); // tap/click 2 on the already-previewed segment
+      }}
       className={canAssign ? "tech-pulse" : undefined}
     />
   );
 }
 
-function SegmentContent({ seg, hovered }) {
-  const midR = (RINGS[seg.ring].ri + RINGS[seg.ring].ro) / 2;
+function SegmentContent({ seg, active, geo }) {
+  const midR = (geo.RINGS[seg.ring].ri + geo.RINGS[seg.ring].ro) / 2;
   const midA = (seg.a0 + seg.a1) / 2;
-  const [cx, cy] = pt(CTR, CTR, midR, midA);
+  const [cx, cy] = pt(geo.CTR, geo.CTR, midR, midA);
   const col = PATH_COLOR[seg.path];
   const { isAssigned, canAssign } = seg;
-  const isHover = hovered === seg.id;
+  const isHover = active === seg.id;
   const isDim = !isAssigned && !canAssign && !isHover;
+  // Floor the scale at 0.8 so labels stay legible even when the whole
+  // wheel has shrunk hard to fit a small phone screen.
+  const fk = Math.max(geo.k, 0.8);
   return (
     <div style={{
       position: "absolute", left: cx, top: cy, transform: "translate(-50%, -50%)",
@@ -199,11 +240,11 @@ function SegmentContent({ seg, hovered }) {
       display: "flex", flexDirection: "column", alignItems: "center", gap: 2,
     }}>
       {seg.ring === "entry" ? (
-        <PathIcon path={seg.path} color={isAssigned ? "#fff" : col} size={34} dim={isDim} />
+        <PathIcon path={seg.path} color={isAssigned ? "#fff" : col} size={34 * fk} dim={isDim} />
       ) : (
         <span style={{
           fontFamily: "'Oswald',sans-serif", fontWeight: 700,
-          fontSize: seg.ring === "layer2" ? 12.5 : 13,
+          fontSize: (seg.ring === "layer2" ? 12.5 : 13) * fk,
           letterSpacing: 1.4, textTransform: "uppercase",
           color: isAssigned ? "#fff" : (canAssign || isHover) ? col : "rgba(143,246,234,0.45)",
           textShadow: isAssigned ? `0 0 6px ${col}cc` : isHover ? `0 0 6px ${col}aa` : undefined,
@@ -218,11 +259,16 @@ function SegmentContent({ seg, hovered }) {
 
 export default function TechWheel({ player, onAssign, onClose, levelInfo }) {
   useEscClose(onClose);
-  const [hover, setHover] = useState(null);
+  // Doubles as mouse-hover preview AND the touch tap-to-preview /
+  // tap-again-to-confirm primitive — see the Segment component below.
+  const [active, setActive] = useState(null);
+  const geo = useWheelGeometry();
+  const { SIZE, CTR, RINGS } = geo;
   const assigned = new Set(player?.techWheel || []);
   const points = player?.abilityPointsAvailable || 0;
   const segs = buildSegments(assigned, points);
-  const hovered = hover ? TECH_NODES[hover] : null;
+  const activeSeg = active ? segs.find((s) => s.id === active) : null;
+  const hovered = activeSeg?.node || null;
   const byRing = { entry: [], layer2: [], layer3: [] };
   segs.forEach((s) => byRing[s.ring].push(s));
 
@@ -285,7 +331,7 @@ export default function TechWheel({ player, onAssign, onClose, levelInfo }) {
                 transition={{ duration: 0.32, delay: 0.12 + ri * 0.13, ease: "easeOut" }}
               >
                 {byRing[ring].map((seg) => (
-                  <Segment key={seg.id} seg={seg} hovered={hover} onHover={setHover} onClick={onAssign} />
+                  <Segment key={seg.id} seg={seg} active={active} onPreview={setActive} onConfirm={onAssign} geo={geo} />
                 ))}
               </motion.g>
             ))}
@@ -318,7 +364,7 @@ export default function TechWheel({ player, onAssign, onClose, levelInfo }) {
               transition={{ duration: 0.32, delay: 0.22 + ri * 0.13, ease: "easeOut" }}
             >
               {byRing[ring].map((seg) => (
-                <SegmentContent key={`c-${seg.id}`} seg={seg} hovered={hover} />
+                <SegmentContent key={`c-${seg.id}`} seg={seg} active={active} geo={geo} />
               ))}
             </motion.div>
           ))}
@@ -349,6 +395,13 @@ export default function TechWheel({ player, onAssign, onClose, levelInfo }) {
               <div className="pc-prose" style={{ fontSize: 12.5, color: "#cfd6dc", marginTop: 4, lineHeight: 1.5 }}>
                 {nodeText(hovered)}
               </div>
+              {activeSeg?.canAssign && (
+                <div style={{
+                  fontFamily: "'Oswald',sans-serif", fontSize: 10.5, letterSpacing: 1.6,
+                  textTransform: "uppercase", color: HOLO_HI, marginTop: 6,
+                  textShadow: `0 0 8px ${HOLO}66`,
+                }}>Tap again to research</div>
+              )}
             </>
           ) : (
             <>
@@ -367,7 +420,7 @@ export default function TechWheel({ player, onAssign, onClose, levelInfo }) {
                 marginTop: 6, textShadow: points > 0 ? `0 0 8px ${HOLO}66` : undefined,
               }}>
                 {points > 0
-                  ? `${points} Ability Point${points === 1 ? "" : "s"} to spend — click a glowing slice`
+                  ? `${points} Ability Point${points === 1 ? "" : "s"} to spend — tap a glowing slice`
                   : "No Ability Points — reach the next Tech Level to earn one"}
               </div>
             </>

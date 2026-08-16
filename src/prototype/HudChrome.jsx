@@ -3,8 +3,10 @@
 // props so the same chrome drives both the live game (Prototype.jsx) and
 // the static look-pass (HudShowcase.jsx).
 import { useEffect, useState } from "react";
-import { motion } from "framer-motion";
+import { CONFIG } from "../game/config.js";
+import { motion, useDragControls } from "framer-motion";
 import ControlMeter from "./ControlMeter.jsx";
+import { useIsPhone, useViewportSize } from "./useViewport.js";
 
 // Close the active modal on Escape.
 export function useEscClose(onClose) {
@@ -178,12 +180,74 @@ function DialCell({ label, children }) {
   );
 }
 
+// Phone-width HUD is a fixed, deterministic height (no flowing text that
+// could change it) so BoardViewport's zoom cluster and EventFeed can
+// offset below it without measuring the DOM.
+export const COMPACT_HUD_H = 116;
+
+function CompactStat({ icon, value, color }) {
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 4, minWidth: 0 }}>
+      <img src={icon} alt="" style={{ width: 15, height: 15, objectFit: "contain", flexShrink: 0 }} />
+      <span style={{ fontFamily: C.font, fontWeight: 700, fontSize: 12, color: "#f4efe2", textShadow: `0 0 6px ${color}`, whiteSpace: "nowrap" }}>{value}</span>
+    </span>
+  );
+}
+
+// Compact phone HUD — the ornate flared desktop bar assumes ~700px+ of
+// width for its three independently-positioned clusters (resources,
+// name, VP/Actions dials); at phone width those clusters collide. This
+// swaps to a plain three-row rectangular bar: faction/settings, a row of
+// icon+value stats, then a full-width End Turn button underneath.
+function CompactTopBar({ scrap, units, tech, name, color = C.red, vp, vpGoal, actions, round, onEndTurn, endDisabled, onSettings }) {
+  return (
+    <div style={{
+      position: "absolute", top: 0, left: 0, right: 0, height: COMPACT_HUD_H, zIndex: 30,
+      background: "linear-gradient(180deg, rgba(16,28,29,0.97) 0%, rgba(8,15,16,0.98) 100%)",
+      borderBottom: `1px solid ${C.holo}`,
+      boxShadow: `0 4px 14px rgba(0,0,0,0.5), 0 1px 0 ${C.holo}55`,
+      padding: "8px 12px 10px", display: "flex", flexDirection: "column",
+    }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, height: 26, marginBottom: 6 }}>
+        <button className="hud-int" title="Settings" onClick={onSettings}
+          style={{ width: 26, height: 26, borderRadius: "50%", border: `1px solid ${C.holo}`, background: "radial-gradient(circle at 40% 34%, rgba(86,211,198,0.16), rgba(8,16,16,0.9) 78%)", display: "flex", alignItems: "center", justifyContent: "center", padding: 0, color: C.holoHi, cursor: "pointer", flexShrink: 0 }}>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3.2" /><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5 5l2.1 2.1M16.9 16.9L19 19M19 5l-2.1 2.1M7.1 16.9L5 19" strokeLinecap="round" /></svg>
+        </button>
+        <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", lineHeight: 1.15 }}>
+          <span style={{ fontFamily: C.font, fontSize: 12, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", color, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{name}</span>
+        </div>
+        <span style={{ fontFamily: C.font, fontSize: 8, letterSpacing: 1.4, textTransform: "uppercase", color: C.textFaint, flexShrink: 0 }}>Rnd {round}</span>
+      </div>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 4, height: 26, marginBottom: 8 }}>
+        <CompactStat icon={ICON.scrap} value={scrap} color={RES.scrap.color} />
+        <CompactStat icon={ICON.units} value={`${units.n}/${units.cap}`} color={RES.units.color} />
+        <CompactStat icon={ICON.research} value={`L${tech.level}`} color={RES.tech.color} />
+        <CompactStat icon={ICON.vp} value={`${vp}/${vpGoal}`} color={C.gold} />
+        <CompactStat icon={ICON.shield} value={`${actions.remaining}/${actions.max}`} color={C.red} />
+      </div>
+      <button className="hud-int" onClick={endDisabled ? undefined : onEndTurn} disabled={endDisabled}
+        style={{ height: 32, fontFamily: C.font, fontSize: 12, fontWeight: 700, letterSpacing: 1.6, textTransform: "uppercase", color: "#08100f", borderRadius: 7, border: `1px solid ${C.holo}`, background: `linear-gradient(180deg, ${C.holoHi}, ${C.holo})`, boxShadow: `0 0 12px ${C.holo}55`, cursor: endDisabled ? "not-allowed" : "pointer", opacity: endDisabled ? 0.4 : 1 }}>
+        End Turn
+      </button>
+    </div>
+  );
+}
+
 // Unified top bar — one flared strip across the top: tall, colour-coded
 // resources at the left flare; small faction name + round in the pinched
 // centre; VP + Actions dials at the right flare, with End Turn beneath.
 // Responsive width via clip-path (% x / px y); a matching SVG strokes the
 // glowing edge (non-scaling-stroke keeps the line crisp at any width).
-export function TopBar({ scrap, units, tech, name, color = C.red, vp, vpGoal, actions, round, onEndTurn, endDisabled, onSettings }) {
+// Below PHONE_MAX_WIDTH the flared multi-cluster layout has nowhere near
+// enough room for all three clusters at once (verified: they collide) —
+// swap to CompactTopBar instead, same props, same call sites.
+export function TopBar(props) {
+  const isPhone = useIsPhone();
+  if (isPhone) return <CompactTopBar {...props} />;
+  return <DesktopTopBar {...props} />;
+}
+
+function DesktopTopBar({ scrap, units, tech, name, color = C.red, vp, vpGoal, actions, round, onEndTurn, endDisabled, onSettings }) {
   const H = 60;
   const clip = "polygon(0 0, 100% 0, 100% 60px, 78% 60px, 72% 28px, 28% 28px, 22% 60px, 0 60px)";
   const outline = "M0 0 L100 0 L100 60 L78 60 L72 28 L28 28 L22 60 L0 60 Z";
@@ -323,7 +387,10 @@ function ScannerRing({ size, accent = C.holo, hi = C.holoHi }) {
 
 export function RadialMenu({ items, onPick, onClose }) {
   useEscClose(onClose);
-  const S = 460, c = S / 2, ri = 84, ro = 208;
+  const { width: vw, height: vh } = useViewportSize();
+  const S = Math.min(460, vw * 0.92, vh * 0.72);
+  const k = S / 460;
+  const c = S / 2, ri = 84 * k, ro = 208 * k;
   const span = 360 / items.length;
   const seg = (i) => ({ a0: -span / 2 + i * span, a1: -span / 2 + (i + 1) * span });
   return (
@@ -338,8 +405,8 @@ export function RadialMenu({ items, onPick, onClose }) {
         style={{ position: "relative", width: S, height: S }}>
         <div className="hud-glitch" style={{ position: "absolute", inset: 0 }}>
           <ScannerRing size={S} />
-          <HoloSegments svgW={S} svgH={S} cx={c} cy={c} ri={ri} ro={ro} accent={C.holo} prominent gapPx={10}
-            segments={items.map((it, i) => ({ ...seg(i), icon: it.icon, iconSize: 46, label: it.label, onClick: () => onPick(it.key) }))}
+          <HoloSegments svgW={S} svgH={S} cx={c} cy={c} ri={ri} ro={ro} accent={C.holo} prominent gapPx={10 * k}
+            segments={items.map((it, i) => ({ ...seg(i), icon: it.icon, iconSize: 46 * k, label: it.label, onClick: () => onPick(it.key) }))}
             hub={<span style={{ display: "flex", flexDirection: "column", alignItems: "center", color: C.holoHi }}><span style={{ fontFamily: C.font, fontSize: 13, fontWeight: 700, letterSpacing: 3 }}>SELECT</span><span style={{ fontSize: 9, letterSpacing: 1.5, color: C.textFaint }}>tap a sector</span></span>}
           />
           <div className="hud-scanlines" style={{ position: "absolute", left: c - ro, top: c - ro, width: ro * 2, height: ro * 2, borderRadius: "50%" }} />
@@ -376,21 +443,54 @@ export function CornerBrackets({ color = C.holo, len = 16, inset = 7, w = 2 }) {
 // Pure-holographic floating window — translucent teal-lit plate, glowing edge,
 // corner brackets, scanlines and a spring entrance. Optional title/icon header
 // and footer slot. Replaces the old painted-frame image.
-export function FrameWindow({ children, onClose, footer, width = 470, title, icon }) {
+// `floating` turns the window from a modal into a movable panel: no scrim, no
+// blur, and the board underneath stays live — you can pan, zoom and click hexes
+// with a city open. Desktop only, and by choice: on a phone the window is most
+// of the screen anyway, so a scrim is the honest thing and there is nowhere to
+// drag it to.
+export function FrameWindow({ children, onClose, footer, width = 470, title, icon, floating = false }) {
   useEscClose(onClose);
+  const dragControls = useDragControls();
   return (
-    <motion.div onClick={onClose}
+    <motion.div onClick={floating ? undefined : onClose}
       initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, transition: { duration: 0.2 } }} transition={{ duration: 0.16 }}
-      style={{ position: "fixed", inset: 0, zIndex: 58, background: "radial-gradient(ellipse at center, rgba(8,14,14,0.82), rgba(2,5,5,0.93))", backdropFilter: "blur(3px)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+      style={{ position: "fixed", inset: 0, zIndex: 58, display: "flex", alignItems: "center",
+        // Floating: hug the right edge and let every event fall through to the
+        // board. Modal: centred over a scrim that eats them.
+        justifyContent: floating ? "flex-end" : "center",
+        padding: floating ? "0 22px" : 0,
+        pointerEvents: floating ? "none" : "auto",
+        background: floating ? "none" : "radial-gradient(ellipse at center, rgba(8,14,14,0.82), rgba(2,5,5,0.93))",
+        backdropFilter: floating ? undefined : "blur(3px)" }}>
       <motion.div onClick={(e) => e.stopPropagation()} className="hud-scratch"
+        drag={floating} dragControls={dragControls} dragListener={false} dragMomentum={false}
+        // Keep it reachable: it may be dragged well off-centre but never
+        // entirely off the window.
+        dragConstraints={{ left: -window.innerWidth + 120, right: 60, top: -window.innerHeight + 140, bottom: window.innerHeight - 140 }}
         initial={{ opacity: 0, scale: 0.95, y: 10 }} animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.96, y: 8, transition: { duration: 0.18, ease: "easeIn" } }}
         transition={{ type: "spring", stiffness: 300, damping: 26 }}
-        style={{ position: "relative", width, maxHeight: "88vh", display: "flex", flexDirection: "column",
+        style={{ position: "relative", width, maxWidth: "94vw", maxHeight: "88vh", display: "flex", flexDirection: "column",
+          pointerEvents: "auto",
           background: "linear-gradient(158deg, rgba(18,31,32,0.97) 0%, rgba(9,17,18,0.98) 58%, rgba(6,11,12,0.99) 100%)",
           border: `1px solid ${C.holo}`, borderRadius: 8,
           boxShadow: `inset 0 0 34px rgba(86,211,198,0.07), 0 0 0 1px rgba(86,211,198,0.12), 0 0 36px rgba(86,211,198,0.22), 0 26px 70px rgba(0,0,0,0.72)` }}>
         <div style={{ position: "absolute", top: 0, left: 20, right: 20, height: 2, background: `linear-gradient(90deg, transparent, ${C.holoHi}, transparent)`, opacity: 0.7, pointerEvents: "none" }} />
+        {/* Grab strip. A dedicated handle rather than dragging the whole panel:
+            the body holds buttons, a slider and a scroll area, all of which a
+            panel-wide drag would fight. */}
+        {floating && (
+          <div
+            onPointerDown={(e) => dragControls.start(e)}
+            title="Drag to move"
+            style={{ position: "relative", height: 18, flexShrink: 0, cursor: "grab", display: "flex",
+              alignItems: "center", justifyContent: "center", gap: 3, touchAction: "none" }}
+          >
+            {[0, 1, 2].map((i) => (
+              <span key={i} style={{ width: 16, height: 2, borderRadius: 1, background: C.holo, opacity: 0.4 }} />
+            ))}
+          </div>
+        )}
         <CornerBrackets />
         <div className="hud-scanlines" style={{ position: "absolute", inset: 0, borderRadius: 8 }} />
         {title != null && (
@@ -427,11 +527,16 @@ function Stat({ icon, value, label }) {
 // Single-window Location view. `view` is a plain object built by the host.
 export function LocationWindow({ view, onClose, onActivate, onContest, onRecruit, onBuild, onUpgrade, onRush, onSetSlider }) {
   const v = view;
+  // On desktop a city is a panel you consult while still working the map, not a
+  // modal that takes the screen hostage. On a phone it fills the screen either
+  // way, so it stays a modal there.
+  const floating = !useIsPhone();
   const hair = "1px solid rgba(86,211,198,0.22)";
   const holoBtn = { fontFamily: C.font, fontSize: 12, fontWeight: 700, letterSpacing: 1.4, textTransform: "uppercase", color: "#08100f", padding: "9px 16px", borderRadius: 7, border: `1px solid ${C.holo}`, background: `linear-gradient(180deg, ${C.holoHi}, ${C.holo})`, boxShadow: `0 0 14px ${C.holo}55` };
   return (
     <FrameWindow
       onClose={onClose}
+      floating={floating}
       footer={
         <>
           <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
@@ -484,7 +589,7 @@ export function LocationWindow({ view, onClose, onActivate, onContest, onRecruit
             <SectionLabel>{v.ability.name}</SectionLabel>
             <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 6 }}>
               <p className="pc-prose" style={{ margin: 0, fontSize: 12.5, lineHeight: 1.5, color: C.text, flex: 1 }}>{v.ability.text}</p>
-              {v.ability.canActivate != null && (
+              {v.ability.canActivate != null && !v.ability.passiveOnly && (
                 <button className="hud-int" onClick={v.ability.canActivate ? () => onActivate?.(v.hexId) : undefined} disabled={!v.ability.canActivate}
                   style={{ flexShrink: 0, ...holoBtn, cursor: v.ability.canActivate ? "pointer" : "not-allowed", opacity: v.ability.canActivate ? 1 : 0.5 }}>
                   {v.ability.usedThisTurn ? "Used" : "Activate"}
@@ -575,9 +680,12 @@ function EconomyPanel({ hexId, eco, onBuild, onUpgrade, onRush, onSetSlider }) {
               {Math.floor(eco.activeBuild.progress)}/{eco.activeBuild.cost} · {eco.activeBuild.remaining} to go
             </div>
           </div>
-          <button className="hud-int" disabled={!can || eco.scrap < 1} onClick={can && eco.scrap >= 1 ? () => onRush?.(hexId) : undefined}
-            style={{ flexShrink: 0, fontFamily: C.font, fontSize: 11, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", color: "#1a1206", padding: "7px 12px", borderRadius: 6, border: "1px solid #8a6a16", background: `linear-gradient(180deg, #f0c44e, ${C.gold})`, boxShadow: `0 0 12px ${C.gold}55`, cursor: can && eco.scrap >= 1 ? "pointer" : "not-allowed", opacity: can && eco.scrap >= 1 ? 1 : 0.5 }}>
-            Rush
+          <button className="hud-int" disabled={!can || eco.scrap < CONFIG.economy.rushScrapPerPoint} onClick={can && eco.scrap >= CONFIG.economy.rushScrapPerPoint ? () => onRush?.(hexId) : undefined}
+            style={{ flexShrink: 0, fontFamily: C.font, fontSize: 11, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", color: "#1a1206", padding: "7px 12px", borderRadius: 6, border: "1px solid #8a6a16", background: `linear-gradient(180deg, #f0c44e, ${C.gold})`, boxShadow: `0 0 12px ${C.gold}55`, cursor: can && eco.scrap >= CONFIG.economy.rushScrapPerPoint ? "pointer" : "not-allowed", opacity: can && eco.scrap >= CONFIG.economy.rushScrapPerPoint ? 1 : 0.5 }}>
+            <span style={{ display: "block" }}>Rush</span>
+            <span style={{ display: "block", fontSize: 8.5, fontWeight: 600, letterSpacing: 0.4, textTransform: "none", opacity: 0.8 }}>
+              {CONFIG.economy.rushScrapPerPoint} scrap / point
+            </span>
           </button>
         </div>
       ) : (

@@ -26,6 +26,8 @@ import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { FACTIONS as UI_FACTIONS } from "./data.js";
 import { C, CornerBrackets } from "./HudChrome.jsx";
+import { useIsPhone } from "./useViewport.js";
+import { CONFIG } from "../game/config.js";
 import "./prototype.css";
 
 // ─── constants ──────────────────────────────────────────────────────────────
@@ -47,13 +49,16 @@ const TAGLINE = {
   plainers:  "Wasteland raiders · opportunistic",
 };
 
-// Placeholder hex counts — ascending, placeholder values for UI display only.
-const MAP_SIZES = [
-  { id: "small",  label: "Small",  hexes: 30  },
-  { id: "medium", label: "Medium", hexes: 54  },
-  { id: "large",  label: "Large",  hexes: 85  },
-  { id: "huge",   label: "Huge",   hexes: 128 },
-];
+// Read straight off the engine's own board table, so the counts shown are the
+// board you actually get. They were placeholders, and worse, `mapSize` never
+// reached createGame at all — every game was the 30-hex board whatever you
+// picked here.
+const MAP_SIZES = ["small", "medium", "large", "huge"].map((id) => ({
+  id,
+  label: id[0].toUpperCase() + id.slice(1),
+  hexes: (CONFIG.mapSizes[id]?.rows || []).reduce((a, b) => a + b, 0),
+  locations: CONFIG.mapSizes[id]?.locations ?? 0,
+}));
 
 const VICTORY_CONDITIONS = [
   {
@@ -133,16 +138,33 @@ function FactionCard({ fid, picked, onPick }) {
         overflow: "hidden",
         borderBottom: `1px solid ${on ? f.color : "rgba(86,211,198,0.18)"}`,
       }}>
-        <img src={PORTRAITS[fid]} alt={f.name} style={{
-          position: "absolute", top: "50%", left: "50%",
-          transform: "translate(-50%, -50%)",
-          height: "100%",
-          objectFit: "cover",
-          filter: on
-            ? `saturate(1.05) drop-shadow(0 0 12px ${f.color}55)`
-            : "saturate(0.7) brightness(0.78)",
-          transition: "filter .22s ease",
-        }} />
+        <img
+          src={PORTRAITS[fid]}
+          alt={f.name}
+          className={on ? "portrait-slow-zoom" : undefined}
+          style={{
+            // `inset: 0` instead of the old top/left 50% + translate(-50%,-50%)
+            // centering trick — that combined three independent percentage
+            // calculations (top, left, and the transform's own -50%-of-
+            // itself) that could each round to a different sub-pixel value
+            // and leave a hairline gap on one edge. Since width/height are
+            // already 100% of the box, inset:0 ties all four edges to the
+            // container directly with a single unambiguous computation.
+            position: "absolute", inset: 0,
+            width: "100%",
+            height: "100%",
+            objectFit: "cover",
+            // Portraits are headshots with little headroom in the source
+            // art; a centred (50%) crop shaves the same amount off the
+            // top as the bottom, which cuts into hair/hats. Biasing
+            // toward the top crops mostly from the body/shoulders instead.
+            objectPosition: "50% 18%",
+            filter: on
+              ? `saturate(1.05) drop-shadow(0 0 12px ${f.color}55)`
+              : "saturate(0.7) brightness(0.78)",
+            transition: "filter .22s ease",
+          }}
+        />
         <div className="hud-scanlines" style={{ position: "absolute", inset: 0 }} />
       </div>
       <div style={{ padding: "9px 11px 11px" }}>
@@ -387,6 +409,8 @@ function Divider() {
 // ─── main component ─────────────────────────────────────────────────────────
 
 export default function SetupScreen({ onStart, onBack }) {
+  const isPhone = useIsPhone();
+
   // faction picker
   const [picked, setPicked] = useState("versari");
 
@@ -518,7 +542,7 @@ export default function SetupScreen({ onStart, onBack }) {
           position: "relative",
           width: 980,
           maxWidth: "94vw",
-          padding: "26px 26px 28px",
+          padding: isPhone ? "18px 14px 20px" : "26px 26px 28px",
           background: "linear-gradient(158deg, rgba(16,28,29,0.85), rgba(8,15,16,0.88) 60%, rgba(6,11,12,0.92))",
           border: `1px solid ${C.holo}`,
           borderRadius: 10,
@@ -537,11 +561,13 @@ export default function SetupScreen({ onStart, onBack }) {
           position: "absolute", inset: 0, borderRadius: 10,
         }} />
 
-        {/* two-column layout: left = faction, right = settings */}
+        {/* Two-column layout on desktop/tablet (left = faction, right =
+            settings); a single stacked column on phone — there's no width
+            to split, and scrolling to see the rest is fine there. */}
         <div style={{
           display: "grid",
-          gridTemplateColumns: "1fr 340px",
-          gap: 24,
+          gridTemplateColumns: isPhone ? "1fr" : "1fr 340px",
+          gap: isPhone ? 22 : 24,
           position: "relative",
           alignItems: "start",
         }}>
@@ -553,7 +579,7 @@ export default function SetupScreen({ onStart, onBack }) {
             </div>
             <div style={{
               display: "grid",
-              gridTemplateColumns: "repeat(4, 1fr)",
+              gridTemplateColumns: isPhone ? "repeat(2, 1fr)" : "repeat(4, 1fr)",
               gap: 10,
             }}>
               {PLAYABLE.map((fid) => (
@@ -749,14 +775,16 @@ export default function SetupScreen({ onStart, onBack }) {
         <div style={{
           marginTop: 22,
           display: "flex",
+          flexDirection: isPhone ? "column" : "row",
           justifyContent: "flex-end",
-          alignItems: "center",
+          alignItems: isPhone ? "stretch" : "center",
           gap: 14,
           position: "relative",
         }}>
           <div style={{
             fontFamily: C.font, fontSize: 9.5, letterSpacing: 1.6,
             textTransform: "uppercase",
+            textAlign: isPhone ? "center" : "left",
             color: "rgba(143,246,234,0.38)",
           }}>
             {`${UI_FACTIONS[picked]?.name} · ${MAP_SIZES.find((m) => m.id === mapSize)?.label} Map · ${factionCount} Factions`}

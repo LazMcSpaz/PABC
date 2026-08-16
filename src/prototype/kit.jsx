@@ -1,5 +1,45 @@
 // Shared UI primitives — restyled for the wasteland art pass.
+import { useCallback, useEffect, useRef, useState } from "react";
 import { theme } from "./data.js";
+
+// A hover-to-show tooltip that ALSO works as a tap-to-toggle on touch
+// (no hover event exists there). Desktop keeps the exact hover behavior
+// every call site already had; onClick is a pure addition — toggling an
+// already-open tooltip on a stray desktop click is harmless. Returns an
+// `anchor` ({cx, top, bottom} in viewport coords, or null when closed) for
+// positioning a portalled popover, a `ref` to put on the trigger element,
+// and the event handlers to spread onto it.
+export function useTapTooltip() {
+  const ref = useRef(null);
+  const [anchor, setAnchor] = useState(null);
+
+  const computeAnchor = useCallback(() => {
+    const r = ref.current?.getBoundingClientRect();
+    return r ? { cx: r.left + r.width / 2, top: r.top, bottom: r.bottom } : null;
+  }, []);
+  const show = useCallback(() => setAnchor(computeAnchor()), [computeAnchor]);
+  const hide = useCallback(() => setAnchor(null), []);
+  const toggle = useCallback((e) => {
+    e?.stopPropagation();
+    setAnchor((a) => (a ? null : computeAnchor()));
+  }, [computeAnchor]);
+
+  // Tap elsewhere closes it — mirrors the editor's HelpTip tap-popover.
+  useEffect(() => {
+    if (!anchor) return undefined;
+    const onOutside = (e) => {
+      if (ref.current && !ref.current.contains(e.target)) hide();
+    };
+    document.addEventListener("touchstart", onOutside, { passive: true });
+    document.addEventListener("mousedown", onOutside);
+    return () => {
+      document.removeEventListener("touchstart", onOutside);
+      document.removeEventListener("mousedown", onOutside);
+    };
+  }, [anchor, hide]);
+
+  return { ref, anchor, onMouseEnter: show, onMouseLeave: hide, onClick: toggle };
+}
 
 export function Label({ children, style }) {
   return (

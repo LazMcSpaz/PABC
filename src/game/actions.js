@@ -5,11 +5,11 @@
 import { emit } from "./events.js";
 import { activePlayerId } from "./targeting.js";
 import { bfsDistances, reinforcementRoute } from "./board.js";
-import { unitReach } from "./movement.js";
+import { unitReach, supplyCutter, unseenBlockers } from "./movement.js";
 import { CONFIG } from "./config.js";
 import { FACTIONS, CHIPS, ABILITIES, chipDefOf, factionDef } from "./content.js";
 import { validateContest, runContest } from "./contest.js";
-import { recomputeStats } from "./stats.js";
+import { recomputeStats, recomputeResearch, effectiveVeteran } from "./stats.js";
 import { recomputeInfluence } from "./influence.js";
 import { recomputeVisibility } from "./visibility.js";
 import { applyEffects } from "./effects.js";
@@ -17,6 +17,9 @@ import { drawFieldEncounter, resolveMarkerOnHex } from "./encounters.js";
 import { makeUnit } from "./setup.js";
 import { hasTechNode } from "./tech.js";
 import { postAt, buildPost, revealPost } from "./posts.js";
+import {
+  blockadeAt, startBlockade, supplyStatus, blockadeSlotsUsed,
+} from "./blockades.js";
 import {
   meetsTech, meetsLoyalty, slotCapacity, slotsUsed, stationedUnitWithBay,
   techLevelReqFor, upgradeOption, completeBuildIfDone, effectiveBuildCost,
@@ -57,12 +60,34 @@ function runMove(state, { params, ctx }) {
   const unit = state.units[params.unit];
   const from = unit.node;
   const field = unitReach(state, unit);
+  // Did the mover just walk into something it could not see? Read BEFORE the
+  // move, while the destination is still unexplored/unlit for this faction.
+  const ambushed = unseenBlockers(state, unit.owner).has(params.to);
   unit.node = params.to;
   // The field already accounts for forest/road cost, the mountain halt and any
-  // blockade stop, so the remaining budget at the destination is exact.
+  // blockade stop, so the remaining budget at the destination is exact. An
+  // unseen halt leaves the remainder intact rather than zeroing it.
   unit.moveRemaining = Math.max(0, field[params.to] ?? 0);
+  if (ambushed) {
+    // Checked: it keeps its movement but may only fall back or sidestep for the
+    // rest of the turn (unitReach). Being surprised costs you the advance, not
+    // the whole turn.
+    unit.checked = true;
+    unit.turnStartNode = unit.turnStartNode || from;
+    emit(state, "advance_checked", {
+      unit: unit.uid, player: unit.owner, hex: params.to, moveRemaining: unit.moveRemaining,
+    });
+  }
   unit.movedSinceUpkeep = true; // §16.6 fortify — moving voids "dug in"
-  emit(state, "unit_moved", { unit: unit.uid, from, to: params.to });
+  // movement/moveRemaining are snapshotted here (not left for a log
+  // consumer to read off the live unit later) because both are mutable —
+  // by the time anyone exports state.log, a unit that moved many times
+  // (or died) would only show its FINAL values against every historical
+  // move, not what was true at each one.
+  emit(state, "unit_moved", {
+    unit: unit.uid, player: unit.owner, from, to: params.to,
+    movement: unit.movement, moveRemaining: unit.moveRemaining,
+  });
 
   // §19.11 — INCREMENTAL recompute (the scale guard): a move only changes
   // the MOVER's own sight footprint, so we refresh that one faction's
@@ -117,19 +142,20 @@ function tryPickupLoot(state, unit, hex, ctx) {
   else delete state.hexLoot[hex];
   if (taken.length) {
     recomputeStats(state);
-    emit(state, "loot_claimed", { killer: unit.uid, hex, chips: taken });
+    emit(state, "loot_claimed", { killer: unit.uid, player: unit.owner, hex, chips: taken });
   }
 }
 
 // --- Recruit ---------------------------------------------------------
-// Spawn a unit at a controlled location. A Training Grounds chip there
-// is the prerequisite, and each one also raises the unit cap by one
-// (cap = the one starting unit + one per Training Grounds).
-function trainingGroundsCount(state, pid) {
+// Spawn a unit at a controlled location. Any chip carrying `unitCapBonus`
+// (Training Grounds today; content may add alternatives later) is the
+// prerequisite, and each one also raises the unit cap by its bonus
+// (cap = baseUnitCap + the sum of unitCapBonus across owned chips).
+export function recruitCapBonus(state, pid) {
   let n = 0;
   for (const loc of Object.values(state.locations)) {
     if (loc.controller !== pid) continue;
-    for (const c of loc.chips) if (state.chips[c]?.chipId === "training-grounds") n++;
+    for (const c of loc.chips) n += CHIPS[state.chips[c]?.chipId]?.unitCapBonus || 0;
   }
   return n;
 }
@@ -138,21 +164,33 @@ function ownedUnitCount(state, pid) {
   return Object.values(state.units).filter((u) => u.owner === pid).length;
 }
 
+// Motor Pool (and future recruiter chips): per-Location discount off the
+// base recruit cost, floored at 1 scrap. Dormant chips grant nothing.
+export function recruitCostAt(state, loc) {
+  let cost = CONFIG.unitRecruitCost;
+  for (const c of loc.chips) {
+    if (state.chips[c]?.disabled) continue;
+    cost -= CHIPS[state.chips[c]?.chipId]?.recruitDiscount || 0;
+  }
+  return Math.max(1, cost);
+}
+
 function validateRecruit(state, { pid, player, params }) {
   const loc = state.locations[params.at];
   if (!loc) return fail("no such location");
   if (loc.controller !== pid) return fail("you do not control that location");
-  const tg = trainingGroundsCount(state, pid);
-  if (tg < 1) return fail("requires a Training Grounds");
-  if (player.resource < CONFIG.unitRecruitCost) return fail("not enough scrap");
-  if (ownedUnitCount(state, pid) >= CONFIG.baseUnitCap + tg) return fail("unit cap reached");
+  const capBonus = recruitCapBonus(state, pid);
+  if (capBonus < 1) return fail("requires a chip that unlocks recruiting");
+  if (player.resource < recruitCostAt(state, loc)) return fail("not enough scrap");
+  if (ownedUnitCount(state, pid) >= CONFIG.baseUnitCap + capBonus) return fail("unit cap reached");
   return { ok: true };
 }
 
 function runRecruit(state, { pid, player, params }) {
-  player.resource -= CONFIG.unitRecruitCost;
+  const cost = recruitCostAt(state, state.locations[params.at]);
+  player.resource -= cost;
   emit(state, "resource_spent", {
-    player: pid, resource: "Resource", amount: -CONFIG.unitRecruitCost,
+    player: pid, resource: "Resource", amount: -cost,
   });
 
   const loc = state.locations[params.at];
@@ -169,24 +207,31 @@ function runRecruit(state, { pid, player, params }) {
 // `mode:"field"` dispatches a convoy that arrives in N round-ends, where
 // N is the supply distance through friendly/neutral hexes (re-targets a
 // moving unit, §16.5). Both cost 1 Action.
-function unitStrengthCap(unit) {
-  return unit.veteran ? CONFIG.unit.veteranStrengthCap : CONFIG.unit.baseStrengthCap;
+function unitStrengthCap(state, unit) {
+  return effectiveVeteran(state, unit) ? CONFIG.unit.veteranStrengthCap : CONFIG.unit.baseStrengthCap;
 }
 
 // §17.5 Logistics B2 (Supply Convoys): a holder heals at 1 scrap per Strength
-// (was 2). Plain reinforcement uses the §16.5 base rate.
-function scrapPerStrengthFor(state, pid) {
-  return hasTechNode(state, pid, "log-b2") ? 1 : CONFIG.heal.scrapPerStrength;
+// (was 2). An Infirmary chip on the unit's own hex gives the same rate for
+// instant top-ups there. Plain reinforcement uses the §16.5 base rate.
+function scrapPerStrengthFor(state, pid, unit) {
+  if (hasTechNode(state, pid, "log-b2")) return 1;
+  const loc = unit && state.locations[unit.node];
+  if (loc && loc.controller === pid &&
+      loc.chips.some((c) => !state.chips[c]?.disabled && CHIPS[state.chips[c]?.chipId]?.cheapReinforce)) {
+    return 1;
+  }
+  return CONFIG.heal.scrapPerStrength;
 }
 
 function validateReinforce(state, { pid, player, params }) {
   const unit = state.units[params.unit];
   if (!unit) return fail("no such unit");
   if (unit.owner !== pid) return fail("not your unit");
-  const cap = unitStrengthCap(unit);
+  const cap = unitStrengthCap(state, unit);
   const deficit = cap - unit.baseStrength;
   if (deficit <= 0) return fail("unit is already at full Strength");
-  const cost = scrapPerStrengthFor(state, pid) * deficit;
+  const cost = scrapPerStrengthFor(state, pid, unit) * deficit;
   if (player.resource < cost) return fail("not enough scrap");
 
   const mode = params.mode || "instant";
@@ -206,9 +251,9 @@ function validateReinforce(state, { pid, player, params }) {
 
 function runReinforce(state, { pid, player, params }) {
   const unit = state.units[params.unit];
-  const cap = unitStrengthCap(unit);
+  const cap = unitStrengthCap(state, unit);
   const deficit = cap - unit.baseStrength;
-  const cost = scrapPerStrengthFor(state, pid) * deficit;
+  const cost = scrapPerStrengthFor(state, pid, unit) * deficit;
   player.resource -= cost;
   emit(state, "resource_spent", { player: pid, resource: "Resource", amount: -cost });
 
@@ -253,11 +298,15 @@ function validateBuild(state, { pid, player, params }) {
   if (loc.controller !== pid) return fail("you do not fully control that location");
   const def = CHIPS[params.chipId];
   if (!def) return fail("unknown chip");
+  if (def.faction && def.faction !== pid) return fail("that chip is another faction's signature");
+  if (def.reward) return fail("that chip cannot be built — it is found, not made");
   if (!meetsTech(player, def)) return fail(`needs Tech Level ${techLevelReqFor(def.techLevel || 1)}`);
   if (!meetsLoyalty(loc, def)) return fail(`needs Loyalty ${def.loyaltyReq}`);
   if (def.kind === "unit") {
-    if (!stationedUnitWithBay(state, loc, def.slots || 1))
-      return fail("needs a friendly unit stationed here with bay space");
+    if (!stationedUnitWithBay(state, loc, def.slots || 1, def.statType))
+      return fail(def.statType
+        ? `needs a stationed friendly unit with bay space and no ${def.statType} chip`
+        : "needs a friendly unit stationed here with bay space");
   } else if (slotsUsed(state, loc.chips) + (def.slots || 1) > slotCapacity(loc, state)) {
     return fail("not enough chip slots");
   }
@@ -270,7 +319,7 @@ function runBuild(state, { params }) {
   const targetUnit = def.kind === "unit"
     ? (params.into?.unit && state.units[params.into.unit]?.node === loc.hexId
         ? params.into.unit
-        : stationedUnitWithBay(state, loc, def.slots || 1)?.uid)
+        : stationedUnitWithBay(state, loc, def.slots || 1, def.statType)?.uid)
     : null;
   loc.activeBuild = {
     kind: "build", chipId: def.id, cost: effectiveBuildCost(state, loc.controller, def),
@@ -368,20 +417,57 @@ function runSetSlider(state, { params }) {
   return { hex: loc.hexId, value: loc.buildSlider };
 }
 
+// Rail doc §3.4 — which claim on this city's build output wins when it is both
+// building a chip and funding a blockade down the road. Persists until changed,
+// like the slider. Costs no Action (it is a standing policy, not a move).
+function validateSetBuildPriority(state, { pid, params }) {
+  const loc = state.locations[params.at];
+  if (!loc) return fail("no such location");
+  if (loc.controller !== pid) return fail("you do not fully control that location");
+  if (params.value !== "blockade" && params.value !== "chips")
+    return fail('build priority must be "blockade" or "chips"');
+  return { ok: true };
+}
+
+function runSetBuildPriority(state, { params }) {
+  const loc = state.locations[params.at];
+  loc.buildPriority = params.value;
+  emit(state, "build_priority_changed", { hex: loc.hexId, value: loc.buildPriority });
+  return { hex: loc.hexId, value: loc.buildPriority };
+}
+
 // --- Activate --------------------------------------------------------
 // Invoke a location ability (§13.2). The dispatcher charges the
 // ability's own `cost.action`; the ability also pays any `cost.resource`
 // in its runner.
+// --- per-entity payers (docs/vp-and-actions-design.md §4) -------------
+// Each action names WHO spends: units and/or Locations. An entity out of
+// actions may burn one of the player's wildcards instead.
+const payLoc = (key) => (state, { params }) => ({ locations: [params[key]] });
+
+function reinforcePayer(state, { pid, params }) {
+  const unit = state.units[params.unit];
+  if (!unit) return null;
+  if ((params.mode || "instant") === "instant") return { locations: [unit.node] };
+  const route = reinforcementRoute(state, pid, unit.node);
+  return route ? { locations: [route.originHex] } : null;
+}
+
+function contestPayer(state, { params }) {
+  return { units: [params.unit, ...(params.coalition || [])] };
+}
+
+function buildPostPayer(state, { pid, params }) {
+  const crew = Object.values(state.units).find((u) => u.owner === pid && u.node === params.hex);
+  return crew ? { units: [crew.uid] } : null;
+}
+
 function getActivatable(state, params) {
   const loc = state.locations[params.location];
   if (!loc || !loc.abilityId) return null;
   const ability = ABILITIES[loc.abilityId];
   if (!ability) return null;
   return { loc, ability, opt: ability.activated?.[params.abilityIndex || 0] };
-}
-
-function activateActionCost(state, { params }) {
-  return getActivatable(state, params)?.opt?.cost?.action ?? 0;
 }
 
 function validateActivate(state, { pid, player, params }) {
@@ -395,6 +481,8 @@ function validateActivate(state, { pid, player, params }) {
   // spammed for unlimited resources / actions.
   if (got.loc.abilityActivatedTurn === turnOrdinal(state))
     return fail("this ability was already activated this turn");
+  if (got.opt.oncePerGame && got.loc.abilityUsedEver)
+    return fail("this ability has already been used this game");
   const cost = got.opt.cost || {};
   if (cost.resource && player.resource < cost.resource) return fail("not enough scrap");
   return { ok: true };
@@ -410,6 +498,7 @@ function runActivate(state, { pid, player, params, ctx }) {
     });
   }
   loc.abilityActivatedTurn = turnOrdinal(state); // once-per-turn lock
+  if (opt.oncePerGame) loc.abilityUsedEver = true; // Old Armory — once EVER
   applyEffects(state, opt.effects || [], { ...ctx, sourcePlayer: pid, source: loc });
   return { location: loc.hexId, ability: ability.id };
 }
@@ -419,14 +508,18 @@ function runActivate(state, { pid, player, params, ctx }) {
 // Validates the A2 assignment, a friendly unit on the hex, a non-Location
 // hex, and ≥3 scrap; costs 1 Action + 3 scrap (paid immediately).
 function validateBuildPost(state, { pid, player, params }) {
-  if (!hasTechNode(state, pid, "int-a2"))
-    return fail("requires Intelligence A2 (Listening Post)");
   const hex = params.hex;
   if (!state.board.hexes[hex]) return fail("no such hex");
   if (state.locations[hex]) return fail("cannot build a post on a Location hex");
   if (postAt(state, hex)) return fail("a listening post already occupies that hex");
-  const friendlyHere = Object.values(state.units).some((u) => u.owner === pid && u.node === hex);
-  if (!friendlyHere) return fail("needs a friendly unit on the target hex");
+  const crew = Object.values(state.units).filter((u) => u.owner === pid && u.node === hex);
+  if (!crew.length) return fail("needs a friendly unit on the target hex");
+  // Relay Kit (chip `postsWithoutTech`): the artifact IS the know-how — a
+  // carrier on the hex stands in for the Intelligence A2 assignment.
+  const kitted = crew.some((u) =>
+    u.chips.some((c) => !state.chips[c]?.disabled && CHIPS[state.chips[c]?.chipId]?.postsWithoutTech));
+  if (!hasTechNode(state, pid, "int-a2") && !kitted)
+    return fail("requires Intelligence A2 (Listening Post)");
   if (player.resource < CONFIG.posts.buildCost) return fail("not enough scrap");
   return { ok: true };
 }
@@ -439,6 +532,162 @@ function runBuildPost(state, { pid, player, params }) {
   const post = buildPost(state, pid, params.hex);
   recomputeVisibility(state, pid, { emitEvents: false }); // §17.7 — a new Vision source
   return { hex: post.hex };
+}
+
+// --- Build Blockade (rail doc §3.1) ----------------------------------
+// A road-only fortification, funded down the road it sits on. Validates a road
+// hex with no Location and no existing blockade, a friendly unit to pin there,
+// an uninterrupted road connection to the nearest settlement this player fully
+// holds, and the scrap. Costs 1 Action + scrap up front; the structure itself
+// then accrues over at least two Upkeeps (turn.js).
+function buildBlockadePayer(state, { pid, params }) {
+  const crew = Object.values(state.units).find((u) => u.owner === pid && u.node === params.hex);
+  return crew ? { units: [crew.uid] } : null;
+}
+
+function validateBuildBlockade(state, { pid, player, params }) {
+  const hex = params.hex;
+  const cell = state.board.hexes[hex];
+  if (!cell) return fail("no such hex");
+  if (!cell.road) return fail("a blockade can only be built on a road hex");
+  if (state.locations[hex]) return fail("cannot build a blockade on a Location hex");
+  if (blockadeAt(state, hex)) return fail("a blockade already occupies that hex");
+  if (postAt(state, hex)) return fail("a listening post already occupies that hex");
+  const crew = Object.values(state.units).filter((u) => u.owner === pid && u.node === hex);
+  if (!crew.length) return fail("needs a friendly unit on the target hex");
+  const supply = supplyStatus(state, pid, hex, supplyCutter(state, pid));
+  if (!supply.path) return fail("no road connection to a settlement you hold");
+  if (!supply.ok) return fail("that road connection is cut");
+  if (player.resource < CONFIG.blockades.buildCost) return fail("not enough scrap");
+  return { ok: true, crew };
+}
+
+function runBuildBlockade(state, { pid, player, params }) {
+  player.resource -= CONFIG.blockades.buildCost;
+  emit(state, "resource_spent", {
+    player: pid, resource: "Resource", amount: -CONFIG.blockades.buildCost, source: "build-blockade",
+  });
+  // The pinned builder is the unit that paid the Action, so the player's own
+  // choice of crew is honoured rather than re-picked here.
+  const crew = Object.values(state.units).find((u) => u.owner === pid && u.node === params.hex);
+  const b = startBlockade(state, pid, params.hex, crew.uid);
+  return { hex: b.hex, unit: crew.uid, cost: b.cost };
+}
+
+// --- Upgrade Blockade (rail doc §3.2) --------------------------------
+// Queue a chip into a COMPLETED blockade. Free to queue, like a Location build:
+// the cost is paid out of the funding settlement's build output over the
+// following Upkeeps (§3.4), not from banked scrap up front. No unit has to be
+// present — the builder was released when the structure landed.
+function validateUpgradeBlockade(state, { pid, player, params }) {
+  const b = blockadeAt(state, params.hex);
+  if (!b) return fail("no blockade on that hex");
+  if (b.owner !== pid) return fail("not your blockade");
+  if (!b.done) return fail("that blockade is still under construction");
+  if (b.build) return fail("that blockade is already building something");
+  const def = CHIPS[params.chipId];
+  if (!def || def.kind !== "blockade") return fail("not a blockade chip");
+  if (!meetsTech(player, def)) return fail(`needs Tech L${techLevelReqFor(def.techLevel || 1)}`);
+  if (blockadeSlotsUsed(state, b) + (def.slots || 1) > CONFIG.blockades.chipSlots)
+    return fail("no free slot on that blockade");
+  if (b.chips.some((c) => state.chips[c]?.chipId === params.chipId))
+    return fail("that chip is already installed here");
+  // The same road that pays for it has to be open, or the queue would sit at
+  // zero progress with nothing saying why.
+  const supply = supplyStatus(state, pid, b.hex, supplyCutter(state, pid));
+  if (!supply.path) return fail("no road connection to a settlement you hold");
+  if (!supply.ok) return fail("that road connection is cut");
+  return { ok: true, def };
+}
+
+function runUpgradeBlockade(state, { pid, params }) {
+  const b = blockadeAt(state, params.hex);
+  const def = CHIPS[params.chipId];
+  b.build = { chipId: def.id, cost: effectiveBuildCost(state, pid, def), progress: 0 };
+  emit(state, "build_started", { hex: b.hex, chipId: def.id, cost: b.build.cost });
+  return { hex: b.hex, chipId: def.id, cost: b.build.cost };
+}
+
+// --- Remove chip (design ruling: chips are removable/replaceable) ------
+// Refit happens at a friendly Location. A removed UNIT chip drops as hex
+// loot (old gear hits the ground — anyone may claim it); a removed
+// LOCATION chip is demolished outright (buildings don't travel). The
+// Capital is never removable. Costs 1 Action.
+function validateRemoveChip(state, { pid, params }) {
+  const loc = state.locations[params.at];
+  if (!loc) return fail("no such location");
+  if (loc.controller !== pid) return fail("you do not fully control that location");
+  if (state.chips[params.chip]?.chipId === "capital") return fail("the Capital cannot be removed");
+  if (!findChipHolder(state, loc, params.chip, pid))
+    return fail("that chip is not installed at this location");
+  return { ok: true };
+}
+
+function runRemoveChip(state, { pid, params }) {
+  const loc = state.locations[params.at];
+  const holder = findChipHolder(state, loc, params.chip, pid);
+  const chipId = state.chips[params.chip]?.chipId;
+  if (holder.kind === "unit") {
+    const u = state.units[holder.uid];
+    u.chips.splice(u.chips.indexOf(params.chip), 1);
+    state.hexLoot = state.hexLoot || {};
+    (state.hexLoot[loc.hexId] = state.hexLoot[loc.hexId] || []).push(params.chip);
+    emit(state, "loot_dropped", { hex: loc.hexId, chips: [params.chip] });
+  } else {
+    loc.chips.splice(loc.chips.indexOf(params.chip), 1);
+    state.removed.push(params.chip);
+  }
+  emit(state, "chip_removed", {
+    hex: loc.hexId, chip: params.chip, chipId, player: pid, holder: holder.kind,
+  });
+  recomputeStats(state);
+  recomputeResearch(state);
+  recomputeInfluence(state);
+  recomputeVisibility(state, pid, { emitEvents: false });
+  return { chip: params.chip, chipId };
+}
+
+// --- Activate chip (docs/chip-set-v0.1.md — Cold Camp) ----------------
+// A chip with an `activatable` block is switched on by paying its scrap
+// cost; the effect lasts until the start of the owner's next turn. Free of
+// the Action budget (like build) — the scrap IS the cost.
+function findActivatableChip(state, unit, chipUid) {
+  if (!unit || !unit.chips.includes(chipUid)) return null;
+  const inst = state.chips[chipUid];
+  if (!inst || inst.disabled) return null;
+  const def = CHIPS[inst.chipId];
+  return def?.activatable ? def : null;
+}
+
+function validateActivateChip(state, { pid, player, params }) {
+  const unit = state.units[params.unit];
+  if (!unit) return fail("no such unit");
+  if (unit.owner !== pid) return fail("not your unit");
+  const def = findActivatableChip(state, unit, params.chip);
+  if (!def) return fail("that chip has no activation");
+  if (def.activatable.grants === "stealth" &&
+      unit.stealthUntil != null && turnOrdinal(state) <= unit.stealthUntil)
+    return fail("already active until your next turn");
+  if (player.resource < (def.activatable.cost || 0)) return fail("not enough scrap");
+  return { ok: true };
+}
+
+function runActivateChip(state, { pid, player, params }) {
+  const unit = state.units[params.unit];
+  const def = findActivatableChip(state, unit, params.chip);
+  const cost = def.activatable.cost || 0;
+  if (cost > 0) {
+    player.resource -= cost;
+    emit(state, "resource_spent", { player: pid, resource: "Resource", amount: -cost, source: "activate-chip" });
+  }
+  if (def.activatable.grants === "stealth") {
+    // Concealed through everyone else's turns; expires when the owner's
+    // next turn starts (same ordinal convention as immobilizedUntil).
+    unit.stealthUntil = turnOrdinal(state) + state.turnOrder.length - 1;
+    recomputeVisibility(state, pid, { emitEvents: false });
+  }
+  emit(state, "chip_activated", { unit: unit.uid, player: pid, chip: params.chip, chipId: def.id });
+  return { unit: unit.uid, chipId: def.id };
 }
 
 // --- Sabotage (§17.5 Intelligence B2 — Saboteurs) --------------------
@@ -470,23 +719,29 @@ function runSabotage(state, { pid, params }) {
 
 // --- dispatch --------------------------------------------------------
 const ACTIONS = {
-  move: { cost: 0, validate: validateMove, run: runMove }, // §16.2 — free of Actions
-  recruit: { cost: 1, validate: validateRecruit, run: runRecruit },
-  reinforce: { cost: 1, validate: validateReinforce, run: runReinforce },
-  contest: { cost: 1, validate: validateContest, run: runContest },
+  move: { validate: validateMove, run: runMove }, // §16.2 — free of Actions
+  recruit: { payer: payLoc("at"), validate: validateRecruit, run: runRecruit },
+  reinforce: { payer: reinforcePayer, validate: validateReinforce, run: runReinforce },
+  contest: { payer: contestPayer, validate: validateContest, run: runContest },
+  "activate-chip": { validate: validateActivateChip, run: runActivateChip },
+  "remove-chip": { payer: payLoc("at"), validate: validateRemoveChip, run: runRemoveChip },
   // §20.4–20.7 — economic directives. Queuing a build/upgrade and setting the
   // slider are free (the cost is the slider split + scrap); RUSH costs 1 Action
   // since it actively converts banked scrap into immediate construction.
-  build: { cost: 0, validate: validateBuild, run: runBuild },
-  upgrade: { cost: 0, validate: validateUpgrade, run: runUpgrade },
+  build: { validate: validateBuild, run: runBuild },
+  upgrade: { validate: validateUpgrade, run: runUpgrade },
   // Rushing is an active push of banked scrap into construction — it costs 1
   // Action (and scrap). Queuing a build/upgrade and the slider stay free.
-  rush: { cost: 1, validate: validateRush, run: runRush },
-  "set-slider": { cost: 0, validate: validateSetSlider, run: runSetSlider },
-  activate: { cost: activateActionCost, validate: validateActivate, run: runActivate },
+  rush: { payer: payLoc("at"), validate: validateRush, run: runRush },
+  "set-slider": { validate: validateSetSlider, run: runSetSlider },
+  "set-build-priority": { validate: validateSetBuildPriority, run: runSetBuildPriority },
+  activate: { payer: payLoc("location"), validate: validateActivate, run: runActivate },
   // §17.7 / §17.5 Intelligence A2 + B2 — deploy a Listening Post, run a Saboteur.
-  "build-post": { cost: 1, validate: validateBuildPost, run: runBuildPost },
-  sabotage: { cost: 1, validate: validateSabotage, run: runSabotage },
+  "build-post": { payer: buildPostPayer, validate: validateBuildPost, run: runBuildPost },
+  "build-blockade": { payer: buildBlockadePayer, validate: validateBuildBlockade, run: runBuildBlockade },
+  // Queuing an upgrade is free, exactly as queuing a Location build is.
+  "upgrade-blockade": { validate: validateUpgradeBlockade, run: runUpgradeBlockade },
+  sabotage: { validate: validateSabotage, run: runSabotage }, // once/round stamp is its cost
 };
 
 export function performAction(state, type, params = {}, ctx = {}) {
@@ -501,11 +756,33 @@ export function performAction(state, type, params = {}, ctx = {}) {
 
   const check = def.validate(state, arg);
   if (!check.ok) return check;
-  const cost = typeof def.cost === "function" ? def.cost(state, arg) : def.cost;
-  if (player.actions.remaining < cost) return fail("not enough Actions");
 
-  player.actions.remaining -= cost;
-  emit(state, "action_spent", { player: pid, action: type, cost });
+  // Per-entity charging: every named unit/Location spends its action; an
+  // entity that has already acted may burn a player wildcard instead.
+  const payer = def.payer ? def.payer(state, arg) : null;
+  if (payer) {
+    const units = (payer.units || []).map((u) => state.units[u]).filter(Boolean);
+    const locs = (payer.locations || []).map((h) => state.locations[h]).filter(Boolean);
+    let shortfall = 0;
+    for (const u of units) if ((u.actionsRemaining ?? 0) < 1) shortfall += 1;
+    for (const l of locs) if ((l.actionsRemaining ?? 0) < 1) shortfall += 1;
+    if (shortfall > player.actions.remaining) {
+      return fail(units.length ? "that unit has already acted this turn"
+        : "that location has already acted this turn");
+    }
+    for (const u of units) {
+      if ((u.actionsRemaining ?? 0) >= 1) u.actionsRemaining -= 1;
+      else player.actions.remaining -= 1;
+    }
+    for (const l of locs) {
+      if ((l.actionsRemaining ?? 0) >= 1) l.actionsRemaining -= 1;
+      else player.actions.remaining -= 1;
+    }
+    emit(state, "action_spent", {
+      player: pid, action: type,
+      units: (payer.units || []), locations: (payer.locations || []),
+    });
+  }
 
   const result = def.run(state, arg) || {};
   return { ok: true, action: type, ...result };

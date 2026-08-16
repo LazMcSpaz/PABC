@@ -1,5 +1,21 @@
 # Implementation Instructions — Tech Wheel
 
+> **STATUS (2026-08-07): fully shipped, beyond original scope.** The 4
+> entry nodes are implemented and wired into the AI and UI, as planned. The
+> "Out of scope" section below originally deferred the 16 branch nodes as
+> `noop` stubs for a later design pass — that pass has since happened: all
+> 16 have real names, tooltips, and effects in `tech.js`'s `TECH_PATHS` +
+> `hasTechNode(state, pid, "<id>")` checks at their consumer sites
+> (`contest.js`, `stats.js`, `board.js`, `turn.js`, `actions.js`,
+> `economy.js`, `visibility.js`, `intel.js`, `posts.js`), tested by the
+> harness's `[Tech Wheel §17.5]` blocks. (An earlier pass of
+> `docs/v0.3-roadmap.md` and `docs/ai-overhaul-plan.md` mistakenly said
+> otherwise — both corrected 2026-08-07.) `TECH_NODES`' `effect:
+> {kind:"noop"}` field on branch nodes is unused leftover shape from this
+> doc's original plan, not a live gap — the real behavior bypasses it
+> entirely via direct per-node `hasTechNode` checks. Nothing here is open
+> work anymore; see `docs/v0.3-roadmap.md` for what actually is.
+
 Quick build guide. **Read `docs/mechanical-spec-v0.1.md` §17 first** — it's the
 design of record; this is the how/where. Build on
 `claude/ashland-conquest-demo-BViiz`.
@@ -121,8 +137,12 @@ Browser: assign nodes on the wheel; confirm the entry effects fire (a Military
 unit rolls +1, Logistics unit moves +1, Economy +1 scrap/loc, Intelligence
 offers the redraw and stacks with Recon Team).
 
-## Out of scope
+## Out of scope (at the time this plan was written — since resolved)
 
-- The 16 branch-node effects (stub as `noop`; design pass later).
-- Stacking-vs-replace within a branch (decide when branches are written).
-- Diplomacy victory (later; would read the existing track/standing state).
+- ~~The 16 branch-node effects (stub as `noop`; design pass later).~~ Done
+  — see the status banner at the top of this doc.
+- ~~Stacking-vs-replace within a branch~~ — resolved as ADD (each branch
+  node adds to its entry and to earlier nodes in the same branch; see
+  `tech.js`'s header comment).
+- ~~Diplomacy victory~~ — done; `diplomacy.js`'s `checkRecognitionVictory`
+  is wired and reachable from play (see `docs/v0.3-roadmap.md`).

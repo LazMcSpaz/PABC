@@ -334,3 +334,35 @@
 @media (prefers-reduced-motion: reduce) {
   .tech-pulse { animation: none; }
 }
+
+/* Faction-select portrait — a slow, subtle "living portrait" breathe on
+ * the currently-picked faction card so the setup screen isn't static.
+ * The portrait is positioned with `inset: 0` (not a translate-based
+ * centering trick), so a plain scale is all this needs. */
+@keyframes portrait-slow-zoom {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.07); }
+}
+.portrait-slow-zoom {
+  animation: portrait-slow-zoom 9s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .portrait-slow-zoom { animation: none; }
+}
+
+/* --- holographic board ---------------------------------------------------
+ * A contested Location has no single owner to colour, so its projection
+ * breathes instead of picking a side.
+ */
+@keyframes pc-holo-contested {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 0.85; }
+}
+/* An unresolved encounter reads as a projection that hasn't locked on. */
+@keyframes pc-holo-flicker {
+  0%, 92%, 96% { opacity: 0.9; }
+  94%, 98% { opacity: 0.35; }
+}
+.pc-hex-tile {
+  transition: transform 0.12s ease;
+}

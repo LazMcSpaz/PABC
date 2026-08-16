@@ -5,7 +5,7 @@ import { FACTIONS, MINOR_FACTIONS, LOCATIONS, CAPITAL, ABILITIES, REACTIVES, fac
 import { FIELD_ENCOUNTERS } from "./content/index.js";
 import { makeRng } from "./rng.js";
 import { createIdGen } from "./ids.js";
-import { buildHexGrid, generateLayout, assignTerrainFeatures, assignRoads, bfsDistances } from "./board.js";
+import { buildHexGrid, generateLayout, assignTerrainFeatures, assignRoads, assignRails, bfsDistances } from "./board.js";
 import { recomputeInfluence } from "./influence.js";
 import { recomputeVisibility } from "./visibility.js";
 import { ensureDiplomacy, seedStanding } from "./diplomacy.js";
@@ -23,6 +23,7 @@ export function makeUnit(uid, owner, node, factionName) {
     strength: CONFIG.unit.baseStrength,
     movement: CONFIG.unit.baseMovement,
     moveRemaining: CONFIG.unit.baseMovement,
+    actionsRemaining: 0, // acts from its owner's NEXT Upkeep (no same-turn strike)
     movedSinceUpkeep: false,
     fortified: false,
     contestsWon: 0,
@@ -38,6 +39,10 @@ export function createGame({
   factionIds,
   humanFactionId = null,
   minors = [], // §18.4.1 — a VARIABLE subset of minor faction ids to seed
+  // "small" | "medium" | "large" | "huge" (CONFIG.mapSizes). Omitted means
+  // the legacy testMap board, so headless callers and the harness keep the
+  // exact layouts they had before board size became selectable.
+  mapSize = null,
 } = {}) {
   const rng = makeRng(seed);
   const uid = createIdGen();
@@ -47,8 +52,10 @@ export function createGame({
   const seededMinors = (minors || []).filter((m) => MINOR_FACTIONS[m]);
   const playing = [...majors, ...seededMinors];
 
-  const grid = buildHexGrid(CONFIG.testMap);
-  const layout = generateLayout(rng, grid, FACTIONS, LOCATIONS);
+  const size = (mapSize && CONFIG.mapSizes[mapSize]) || null;
+  const grid = buildHexGrid(size ? size.rows : CONFIG.testMap);
+  const layout = generateLayout(rng, grid, FACTIONS, LOCATIONS,
+    { locationBudget: size ? size.locations : undefined });
 
   // chip-instance registry — every chip in play has a uid
   const chips = {};
@@ -72,7 +79,15 @@ export function createGame({
   // §16.2 — lay road corridors between the faction capitals (deterministic
   // MST over the start hexes). Roads negate terrain movement cost along the
   // lane (a fast, contestable highway); cover/visibility are unaffected.
-  assignRoads(grid.adjacency, hexes, Object.values(layout.factionStart));
+  // Roads tie settlements together, not just capitals — see assignRoads. The
+  // value lookup drives how many links each one gets, so a city is a hub and a
+  // town is a stop on the way.
+  const settlementHexes = Object.keys(layout.placement);
+  assignRoads(grid.adjacency, hexes, settlementHexes,
+    (hexId) => LOCATIONS[layout.placement[hexId]]?.strategicValue || "medium");
+  // Rail: pre-collapse trunk line between the capitals. Generated, never
+  // built (docs/rail-road-blockade-design.md §2.4).
+  const rails = assignRails(grid.adjacency, hexes, Object.values(layout.factionStart));
 
   // --- players ---
   const players = {};
@@ -164,6 +179,10 @@ export function createGame({
       buildSlider: CONFIG.economy.defaultSlider,
       buildProgress: 0,
       activeBuild: null,
+      // Rail doc §3.4 — who gets this city's build output when it is building a
+      // chip AND funding a blockade. "blockade" (the default) answers the map;
+      // "chips" says the building matters more and makes the blockade wait.
+      buildPriority: "blockade",
     };
   }
 
@@ -265,7 +284,9 @@ export function createGame({
     turnOrder: [...playing],
     activeIndex: 0,
     players,
-    board: { hexes, adjacency: grid.adjacency },
+    // `rails` is the link registry: the 1-MP hop is a property of the LINK,
+    // not of the hexes it runs over, so hex.rail alone cannot express it.
+    board: { hexes, adjacency: grid.adjacency, rails },
     locations,
     units,
     chips,
@@ -299,6 +320,9 @@ export function createGame({
       zoc: {},
       // §17.7 Listening Posts — hexId -> { owner, hex, strength, paid, revealedTo }.
       listeningPosts: {},
+      // Blockades (rail doc §3) — hexId -> { owner, hex, done, progress, cost,
+      // builder, chips }. Under construction while `done` is false.
+      blockades: {},
     },
     factionStanding: Object.fromEntries(
       playing.map((fid) => [fid, Object.fromEntries(playing.map((pid) => [pid, 0]))]),

@@ -7,6 +7,7 @@ import { TECH_NODES, hasTechNode, prereqMet } from "./tech.js";
 
 export function recomputeStats(state) {
   for (const unit of Object.values(state.units)) {
+    const prevMovement = unit.movement;
     let strength = unit.baseStrength;
     let movement = unit.baseMovement;
 
@@ -34,7 +35,19 @@ export function recomputeStats(state) {
     if (hasTechNode(state, unit.owner, "log-a1")) movement += 1;
 
     unit.strength = Math.max(0, strength);
-    unit.movement = Math.max(0, movement);
+    movement = Math.max(0, movement);
+    // A movement change mid-turn (tech assigned, chip picked up/lost,
+    // dormant toggle) previously only touched the CAP (unit.movement) —
+    // this turn's actual usable budget (unit.moveRemaining) only ever got
+    // re-synced at the next Upkeep (turn.js refreshMoveBudget), so e.g.
+    // assigning +1 Movement tech didn't extend how far you could move
+    // THIS turn at all — the reported bug. Carry the delta into
+    // moveRemaining too, preserving how much was already spent (a gain
+    // extends what's left; a loss trims it), clamped to the new cap.
+    if (prevMovement != null && unit.moveRemaining != null && movement !== prevMovement) {
+      unit.moveRemaining = Math.max(0, Math.min(movement, unit.moveRemaining + (movement - prevMovement)));
+    }
+    unit.movement = movement;
   }
 }
 
@@ -102,6 +115,16 @@ export function assignTechNode(state, pid, nodeId) {
   emit(state, "tech_node_assigned", { player: pid, node: nodeId });
   recomputeStats(state); // a Logistics node changes unit movement at once
   return { ok: true, node: nodeId };
+}
+
+// Old Hands (chip `veteranEquiv`): the unit counts as a veteran while the
+// chip is installed and paid up. Every veteran read (contest bonus,
+// Strength cap, heal cap) goes through this so the rental is complete.
+export function effectiveVeteran(state, unit) {
+  if (unit.veteran) return true;
+  return unit.chips.some(
+    (c) => !state.chips[c]?.disabled && CHIPS[state.chips[c]?.chipId]?.veteranEquiv,
+  );
 }
 
 // §17.5 Military B2 (Citadel): Locations a B2 holder controls gain +2

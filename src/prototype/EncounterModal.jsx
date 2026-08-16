@@ -7,6 +7,7 @@
 import { motion } from "framer-motion";
 import { C, CornerBrackets, useEscClose } from "./HudChrome.jsx";
 import { RichText } from "./RichText.jsx";
+import { useIsPhone } from "./useViewport.js";
 
 // The image goes in here at a 2:3 ratio. The outer chrome is a slightly
 // raised holo bezel; the inner display is recessed (inset shadows + dark
@@ -121,6 +122,7 @@ function displayName(id) {
 export default function EncounterModal({ encounter, choices, eligibleIds, redrawsLeft = 0, onRedraw, onPick }) {
   // Block Escape — the encounter must be resolved.
   useEscClose(() => {});
+  const isPhone = useIsPhone();
   const title = encounter.title || displayName(encounter.id);
 
   return (
@@ -166,20 +168,23 @@ export default function EncounterModal({ encounter, choices, eligibleIds, redraw
           }}>{title}</div>
         </div>
 
-        {/* Body — split: image left, content right */}
-        <div style={{ display: "flex", gap: 18, padding: "18px 24px 18px", flex: 1, minHeight: 0 }}>
+        {/* Body — image beside the text on desktop/iPad; stacked (image on
+            top, shrunk down) on phone, where a 220px-wide image plus its
+            gap left only ~80px for text and squeezed every line of prose
+            and every choice button down to one word per line. */}
+        <div style={{ display: "flex", flexDirection: isPhone ? "column" : "row", gap: isPhone ? 12 : 18, padding: isPhone ? "14px 16px 16px" : "18px 24px 18px", flex: 1, minHeight: 0, overflowY: isPhone ? "auto" : "visible" }}>
           <motion.div
             initial={{ opacity: 0, scale: 0.96 }}
             animate={{ opacity: 1, scale: 1 }}
             transition={{ delay: 0.1, duration: 0.32, ease: "easeOut" }}
-            style={{ width: 220, flexShrink: 0 }}
+            style={isPhone ? { width: "38%", maxWidth: 150, alignSelf: "center", flexShrink: 0 } : { width: 220, flexShrink: 0 }}
           >
             <ImageFrame imageUrl={encounter.imagePath || encounter.imageUrl} />
           </motion.div>
 
           <div className="pc-scroll" style={{
             flex: 1, display: "flex", flexDirection: "column", gap: 14,
-            overflowY: "auto", minHeight: 0,
+            overflowY: isPhone ? "visible" : "auto", minHeight: 0,
           }}>
             {encounter.text && (
               <motion.div

@@ -7,8 +7,8 @@
 import { emit } from "./events.js";
 import { openReactionWindow } from "./reactions.js";
 import { CONFIG } from "./config.js";
-import { CHIPS, LOCATIONS, FACTIONS, factionDef } from "./content.js";
-import { recomputeStats, recomputeResearch, citadelGarrison } from "./stats.js";
+import { CHIPS, LOCATIONS, FACTIONS, ABILITIES, factionDef } from "./content.js";
+import { recomputeStats, recomputeResearch, citadelGarrison, effectiveVeteran } from "./stats.js";
 import { recomputeInfluence } from "./influence.js";
 import { recomputeVisibility, recomputeVisibilityFor, isUnitVisibleTo } from "./visibility.js";
 import { onLocationCaptured, onRaidWon } from "./standing.js";
@@ -16,8 +16,35 @@ import { onAttack } from "./diplomacy.js";
 import { makeUnit } from "./setup.js";
 import { TECH_NODES, hasTechNode } from "./tech.js";
 import { destroyPost } from "./posts.js";
+import { blockadeAt, blockadeDefense, destroyBlockade } from "./blockades.js";
 
 const fail = (reason) => ({ ok: false, reason });
+
+// Fortified Ruins (ability passive SUPPRESS_CHIP_BONUSES): attacking units
+// get no chip-derived Strength when contesting this Location. Schema-driven
+// off the ability def — the engine never branches on ability ids.
+function abilitySuppressesChips(loc) {
+  const ab = loc?.abilityId && ABILITIES[loc.abilityId];
+  return !!ab?.passives?.some((pv) => pv.type === "SUPPRESS_CHIP_BONUSES");
+}
+
+function unitChipStrength(state, u) {
+  let n = 0;
+  for (const c of u.chips) {
+    if (state.chips[c]?.disabled) continue;
+    n += CHIPS[state.chips[c]?.chipId]?.strength || 0;
+  }
+  return n;
+}
+
+function stackChipStrength(state, owner, hex) {
+  let n = 0;
+  for (const u of Object.values(state.units)) {
+    if (u.owner !== owner || u.node !== hex) continue;
+    n += unitChipStrength(state, u);
+  }
+  return n;
+}
 
 // Garrison Strength contributed by a Location's installed chips. No v0.1
 // chip carries a structured `garrison` bonus yet, so this is 0 today —
@@ -31,15 +58,20 @@ function chipGarrison(state, loc) {
   return g;
 }
 
-// The strongest unit the controller has standing on a held Location's
-// node, or null — a held Location's defence adds this unit's Strength.
-function defendingUnit(state, loc) {
+// The strongest unit `owner` has standing on `hex`, or null.
+function strongestUnitOn(state, owner, hex) {
   let best = null;
   for (const u of Object.values(state.units)) {
-    if (u.owner !== loc.controller || u.node !== loc.hexId) continue;
+    if (u.owner !== owner || u.node !== hex) continue;
     if (!best || u.strength > best.strength) best = u;
   }
   return best;
+}
+
+// The strongest unit the controller has standing on a held Location's
+// node, or null — a held Location's defence adds this unit's Strength.
+function defendingUnit(state, loc) {
+  return strongestUnitOn(state, loc.controller, loc.hexId);
 }
 
 // Combined effective Strength of every unit `owner` has stacked on `hex`.
@@ -57,11 +89,106 @@ function stackStrength(state, owner, hex) {
 // stacked on `hex`, excluding `excludeUid` (the contesting / defending
 // unit itself).
 function concentration(state, owner, hex, excludeUid) {
-  let n = 0;
+  let n = 0, banners = 0, capRaise = 0;
   for (const u of Object.values(state.units)) {
-    if (u.owner === owner && u.node === hex && u.uid !== excludeUid) n++;
+    if (u.owner !== owner || u.node !== hex) continue;
+    // War Banner: every banner in the stack (the contesting unit's own
+    // included) counts as an extra body and raises the stack's cap.
+    for (const c of u.chips) {
+      if (state.chips[c]?.disabled) continue;
+      banners += CHIPS[state.chips[c]?.chipId]?.concentrationBonus || 0;
+      capRaise += CHIPS[state.chips[c]?.chipId]?.concentrationCapBonus || 0;
+    }
+    if (u.uid !== excludeUid) n++;
   }
-  return Math.min(n, CONFIG.combat.concentrationCap) * CONFIG.combat.concentrationPerUnit;
+  const cap = CONFIG.combat.concentrationCap + capRaise;
+  return Math.min(n + banners, cap) * CONFIG.combat.concentrationPerUnit;
+}
+
+// Attacker-side preview: the combined Strength of `ownerId`'s stack on
+// `hexId` plus its Concentration bonus — what the attacker brings before
+// the d6. Used both by the UI (pre-contest odds) and by the AI (EV-gating
+// whether to pick a fight at all) — no dice, no mutation.
+export function previewAttackerStrength(state, hexId, ownerId) {
+  let strength = stackStrength(state, ownerId, hexId);
+  // Fortified Ruins on the contested hex — the preview must show the same
+  // suppressed number runContest will use.
+  const loc = state.locations[hexId];
+  if (loc && loc.controller !== ownerId && abilitySuppressesChips(loc)) {
+    strength -= stackChipStrength(state, ownerId, hexId);
+  }
+  const stack = Object.values(state.units).filter(
+    (u) => u.owner === ownerId && u.node === hexId,
+  );
+  const lead = stack.reduce((a, b) => (!a || b.strength > a.strength ? b : a), null);
+  const conc = concentration(state, ownerId, hexId, lead?.uid);
+  return { strength, concentration: conc, units: stack.length, total: strength + conc };
+}
+
+// Preview a Location contest's defender side exactly as runContest would
+// resolve it, so callers (UI odds, AI EV-gating) see the true number the
+// attacker must beat — not just the bare garrison. Mirrors defenderValue()
+// + the garrison-only no-die house rule. No dice, no mutation.
+export function previewLocationContest(state, hexId) {
+  const loc = state.locations[hexId];
+  if (!loc) return null;
+  const hasNeutral = loc.sections.includes("neutral");
+  let locChipGarrison = 0;
+  for (const c of loc.chips) {
+    locChipGarrison += CHIPS[state.chips[c]?.chipId]?.garrison || 0;
+  }
+  let value = loc.garrison + locChipGarrison;
+
+  // A defending unit only counts when the Location is fully held by its
+  // controller (no neutral sections) and that controller has a unit on
+  // the hex — same gate as defendingUnit(). Stacked defenders fight
+  // together: sum the controller's units on the hex (the strongest is the
+  // "lead" for display / attrition).
+  let defender = null;
+  let defenderStack = 0;
+  if (!hasNeutral && loc.controller) {
+    for (const u of Object.values(state.units)) {
+      if (u.owner !== loc.controller || u.node !== loc.hexId) continue;
+      defenderStack += u.strength;
+      if (!defender || u.strength > defender.strength) defender = u;
+    }
+    value += defenderStack;
+  }
+
+  // §16.6 combat levers on the defender side.
+  const mountain =
+    state.board.hexes[hexId]?.terrain === "mountain" ? CONFIG.combat.mountainDefenseBonus : 0;
+  let conc = 0, fortify = 0, veteran = 0;
+  if (defender) {
+    conc = concentration(state, loc.controller, hexId, defender.uid);
+    if (defender.fortified) {
+      let dug = 0;
+      for (const c of defender.chips) {
+        if (state.chips[c]?.disabled) continue;
+        dug += CHIPS[state.chips[c]?.chipId]?.fortifyBonus || 0;
+      }
+      fortify = CONFIG.combat.fortifyBonus + dug;
+    }
+    if (effectiveVeteran(state, defender)) veteran = CONFIG.combat.veteranBonus;
+  }
+  value += mountain + conc + fortify + veteran;
+
+  // House rule: a garrison-only defence (no defending unit) does NOT
+  // roll a d6 — its total is the static value.
+  const defenderRollsDie = !!defender;
+  return {
+    value,
+    garrison: loc.garrison + locChipGarrison,
+    defendingUnit: defender
+      ? { uid: defender.uid, owner: defender.owner, strength: defender.strength }
+      : null,
+    modifiers: {
+      mountain, concentration: conc, fortify, veteran,
+      allies: defender ? defenderStack - defender.strength : 0,
+    },
+    hasNeutral,
+    defenderRollsDie,
+  };
 }
 
 // §16.6 Veterancy — after a contest, every surviving participant banks a
@@ -99,6 +226,16 @@ function resolveTarget(state, pid, unit, params) {
     return { ok: true, kind: "post", post };
   }
 
+  // Rail doc §3.3 — attack an enemy blockade on this hex (explicit target).
+  // A construction site is a legal target too: destroying one is exactly how
+  // you stop a blockade from existing, and it is much the easier moment.
+  if (params.target === "blockade") {
+    const b = blockadeAt(state, node);
+    if (!b) return fail("no blockade on this hex");
+    if (b.owner === pid) return fail("cannot contest your own blockade");
+    return { ok: true, kind: "blockade", blockade: b };
+  }
+
   if (params.target && state.units[params.target]) {
     const tu = state.units[params.target];
     if (tu.node !== node) return fail("that unit is not on your unit's hex");
@@ -128,6 +265,18 @@ function defenderValue(state, t) {
   // §17.7 — a listening post defends as a standing garrison: Strength 5, no
   // chip/garrison/unit additions (it has no troops).
   if (t.kind === "post") return t.post.strength;
+  // Rail doc §3.2 — a completed blockade's static defense, plus the Strength of
+  // any friendly unit standing on it. That is the same defender-stacking a
+  // Location gets, and it is deliberate: the structure is a force multiplier for
+  // a garrison, not a replacement for one.
+  //
+  // A site still under construction has no defense of its own — §3.1 is
+  // explicit that a builder attacked mid-build fights as an ordinary unit — so
+  // it contributes only the stack.
+  if (t.kind === "blockade") {
+    const base = t.blockade.done ? blockadeDefense(state, t.blockade) : 0;
+    return base + stackStrength(state, t.blockade.owner, t.blockade.hex);
+  }
   const loc = t.loc;
   // §17.5 Military B2 (Citadel) adds +2 garrison Strength here (derived).
   let v = loc.garrison + chipGarrison(state, loc) + citadelGarrison(state, loc);
@@ -154,6 +303,23 @@ function flipSection(state, loc, victor, params) {
     idx = loc.sections.indexOf(rival);
   }
   loc.sections[idx] = victor;
+  // A section lost to a contest can drop the location's PREVIOUS full
+  // controller below full control (winning one of their three sections
+  // without yet winning all three). `resolveLocationWin` below only ever
+  // SETS loc.controller (via captureLocation, once the victor holds all
+  // three) — nothing previously cleared it when the old controller no
+  // longer does, so it went stale: still pointing at a player who now
+  // holds only 1-2 of 3 sections. That stale flag is read everywhere
+  // (`loc.controller`) as "this player fully controls this hex" — output
+  // collection, build/upgrade rights, passive heal, ZoC/movement
+  // blocking, and — the reported bug — contest eligibility, since "you
+  // already fully control this location" no longer matched reality while
+  // the stale flag still granted every other full-control right. Mirrors
+  // the reset turn.js's Loyalty-decay peel already does on the same
+  // condition, applied here for the contest-loss path it didn't cover.
+  if (loc.controller && !loc.sections.every((s) => s === loc.controller)) {
+    loc.controller = null;
+  }
   emit(state, "section_flipped", { hex: loc.hexId, to: victor, cause: "contest" });
 }
 
@@ -173,7 +339,14 @@ function destroyLocationChip(state, loc, chipUid) {
 // destroyed, any Capital is removed (never inherited), the rest carry
 // over, and Loyalty initialises low for the new controller (§18.2).
 function captureLocation(state, loc, victor) {
-  const from = loc.controller;
+  // loc.controller now clears the moment full control is lost (see
+  // flipSection's fix above), so by the time a rival completes full
+  // capture it's already null — `loyaltyOwner` is the right fallback for
+  // "who this is being captured FROM": it only clears once a Location
+  // decays fully to neutral (turn.js), so it still names the last
+  // meaningful holder through a partial-control interim. Read before it's
+  // overwritten below.
+  const from = loc.controller || loc.loyaltyOwner;
   if (loc.chips.length)
     destroyLocationChip(state, loc, loc.chips[loc.chips.length - 1]);
   for (const c of [...loc.chips])
@@ -191,6 +364,7 @@ function captureLocation(state, loc, victor) {
   loc.activeBuild = null;
   loc.buildProgress = 0;
   loc.buildSlider = CONFIG.economy.defaultSlider;
+  loc.buildPriority = "blockade"; // rail doc §3.4 — a captor inherits the default
   emit(state, "location_captured", { hex: loc.hexId, controller: victor, from });
 
   // §16.5 severed supply — any in-transit reinforcement whose origin was
@@ -440,18 +614,28 @@ function validRetreatHexes(state, unit) {
 // whether and where). Headless default: first valid hex; `params.retreatTo`
 // overrides; ctx.interact lets the UI prompt (and "stay" cancels).
 function offerRetreat(state, unit, ctx, preferred) {
-  const opts = validRetreatHexes(state, unit);
-  if (!opts.length) return;
-  let dest = opts[0];
-  if (preferred && opts.includes(preferred)) dest = preferred;
-  else if (ctx.interact) {
-    const pick = ctx.interact({ kind: "retreat", unit: unit.uid, options: [...opts, "stay"] });
-    if (pick === "stay" || !opts.includes(pick)) return;
-    dest = pick;
+  // Rearguard (chip `retreatBonus`): each point is one extra retreat step,
+  // resolved as repeated single-hex retreats so the same safe-hex rules
+  // apply at every step.
+  let steps = 1;
+  for (const c of unit.chips) {
+    if (state.chips[c]?.disabled) continue;
+    steps += CHIPS[state.chips[c]?.chipId]?.retreatBonus || 0;
   }
-  const from = unit.node;
-  unit.node = dest;
-  emit(state, "unit_retreated", { unit: unit.uid, from, to: dest });
+  for (let i = 0; i < steps; i++) {
+    const opts = validRetreatHexes(state, unit);
+    if (!opts.length) return;
+    let dest = opts[0];
+    if (i === 0 && preferred && opts.includes(preferred)) dest = preferred;
+    else if (ctx.interact) {
+      const pick = ctx.interact({ kind: "retreat", unit: unit.uid, options: [...opts, "stay"] });
+      if (pick === "stay" || !opts.includes(pick)) return;
+      dest = pick;
+    }
+    const from = unit.node;
+    unit.node = dest;
+    emit(state, "unit_retreated", { unit: unit.uid, player: unit.owner, from, to: dest });
+  }
 }
 
 // A player wins immediately at the VP threshold (§3 / §14.1). Checked
@@ -519,6 +703,26 @@ export function runContest(state, { pid, params, ctx = {} }) {
     return { won: false, cancelled: true, kind: t.kind };
   }
 
+  // Burning Glass (chip `garrisonErosion`): marching on the mirror wall
+  // costs the attacker base Strength BEFORE the contest resolves. Floor 1 —
+  // the beam burns, it doesn't finish the job — so a weakened attacker
+  // limps into the fight rather than dying on approach.
+  if (t.kind === "location") {
+    let erosion = 0;
+    for (const c of t.loc.chips) {
+      if (state.chips[c]?.disabled) continue;
+      erosion += CHIPS[state.chips[c]?.chipId]?.garrisonErosion || 0;
+    }
+    if (erosion > 0 && unit.baseStrength > 1) {
+      const before = unit.baseStrength;
+      unit.baseStrength = Math.max(1, unit.baseStrength - erosion);
+      recomputeStats(state);
+      emit(state, "garrison_erosion", {
+        hex: t.loc.hexId, unit: unit.uid, player: pid, amount: before - unit.baseStrength,
+      });
+    }
+  }
+
   // §9 step 2 — roll. defValue and unit.strength are read AFTER the
   // window so any MODIFY_STAT from on-mode subscribers is reflected.
   //
@@ -535,9 +739,16 @@ export function runContest(state, { pid, params, ctx = {} }) {
     t.kind === "location" && !t.loc.sections.includes("neutral")
       ? defendingUnit(state, t.loc)
       : null;
-  const defenderUnit = t.kind === "raid" ? t.unit : locDefUnit;
+  // Rail doc §3.2 — a blockade is defended by whoever is standing on it, the
+  // same way a Location is. That unit rolls, takes the casualty on a loss, and
+  // is why holding a blockade with a garrison is worth more than leaving it bare.
+  const blockadeDefUnit = t.kind === "blockade"
+    ? strongestUnitOn(state, t.blockade.owner, t.blockade.hex)
+    : null;
+  const defenderUnit = t.kind === "raid" ? t.unit : (locDefUnit || blockadeDefUnit);
   const defHex = t.kind === "raid" ? t.unit.node
     : t.kind === "post" ? t.post.hex
+    : t.kind === "blockade" ? t.blockade.hex
     : t.loc.hexId;
 
   // §17.5 Military B1 (Turrets): defending a hex you CONTROL grants +1 contest
@@ -546,46 +757,90 @@ export function runContest(state, { pid, params, ctx = {} }) {
   const defLocHere = state.locations[defHex];
   const defenderHexOwner = t.kind === "raid" ? t.unit.owner
     : t.kind === "post" ? t.post.owner
+    : t.kind === "blockade" ? t.blockade.owner
     : t.loc.controller;
   const turrets = !!(defLocHere && defLocHere.controller && defLocHere.controller === defenderHexOwner
-    && t.kind !== "post" && hasTechNode(state, defLocHere.controller, "mil-b1"));
+    && t.kind !== "post" && t.kind !== "blockade" && hasTechNode(state, defLocHere.controller, "mil-b1"));
 
   // Combined stack Strength: every friendly unit on the contesting hex
   // fights together, so their Strengths sum (Concentration is added on top).
-  const atkStrength = stackStrength(state, pid, unit.node);
-  const atkAllies = atkStrength - unit.strength; // contribution from stacked allies
+  // Coalition contests (action-rework design): params.coalition names the
+  // allied units on this hex fighting alongside the initiator — only their
+  // Strengths join the attack. Absent → the whole stack fights (legacy
+  // §combined-stack rule, kept for back-compat until the per-entity action
+  // model lands). Under that model, joining a coalition costs each member
+  // its action — charged by the dispatcher, not here.
+  const coalition = Array.isArray(params.coalition)
+    ? params.coalition
+        .map((uid) => state.units[uid])
+        .filter((u) => u && u.owner === pid && u.node === unit.node && u.uid !== unit.uid)
+    : null;
+  let atkStrength = coalition
+    ? unit.strength + coalition.reduce((n, u) => n + u.strength, 0)
+    : stackStrength(state, pid, unit.node);
+  const atkAllies = atkStrength - unit.strength; // contribution from committed allies
+  const fighters = coalition ? [unit, ...coalition] : null;
+  const chipsSuppressed = t.kind === "location" && abilitySuppressesChips(t.loc)
+    ? (fighters
+        ? fighters.reduce((n, u) => n + unitChipStrength(state, u), 0)
+        : stackChipStrength(state, pid, unit.node))
+    : 0;
+  atkStrength -= chipsSuppressed;
   const defAllies = defenderUnit
     ? stackStrength(state, defenderUnit.owner, defHex) - defenderUnit.strength
     : 0;
 
   // §16.6 combat levers — additive modifiers computed before the roll.
   const atkConcentration = concentration(state, pid, unit.node, unit.uid);
-  const atkVeteran = unit.veteran ? CONFIG.combat.veteranBonus : 0;
-  const defMountain =
+  const atkVeteran = effectiveVeteran(state, unit) ? CONFIG.combat.veteranBonus : 0;
+  // Bombard (chip `siege`): a siege piece contesting a LOCATION negates the
+  // defence's static bonuses — high ground, dug-in fortify (incl. the
+  // Turrets doubling) and the Turrets contest point. Raids (units in the
+  // open) have no walls to flatten, so siege does nothing there.
+  const siege = t.kind === "location" && unit.chips.some(
+    (c) => !state.chips[c]?.disabled && CHIPS[state.chips[c]?.chipId]?.siege,
+  );
+  let defMountain =
     state.board.hexes[defHex]?.terrain === "mountain" ? CONFIG.combat.mountainDefenseBonus : 0;
   let defConcentration = 0, defFortify = 0, defVeteran = 0;
   if (defenderUnit) {
     defConcentration = concentration(state, defenderUnit.owner, defHex, defenderUnit.uid);
     // §17.5 Turrets doubles the fortify bonus for a B1 holder on its own hex.
-    if (defenderUnit.fortified) defFortify = CONFIG.combat.fortifyBonus * (turrets ? 2 : 1);
-    if (defenderUnit.veteran) defVeteran = CONFIG.combat.veteranBonus;
+    // Entrenching Tools (chip `fortifyBonus`) adds on top of the doubled base.
+    if (defenderUnit.fortified) {
+      let dug = 0;
+      for (const c of defenderUnit.chips) {
+        if (state.chips[c]?.disabled) continue;
+        dug += CHIPS[state.chips[c]?.chipId]?.fortifyBonus || 0;
+      }
+      defFortify = CONFIG.combat.fortifyBonus * (turrets ? 2 : 1) + dug;
+    }
+    if (effectiveVeteran(state, defenderUnit)) defVeteran = CONFIG.combat.veteranBonus;
   }
+  if (siege) { defMountain = 0; defFortify = 0; }
 
   // §17.5 Military entry (Doctrine): +1 to that player's contest roll,
   // whether they are attacking or defending. The defending player is the
   // raided unit's owner / the Location's controller (even garrison-only). A
-  // listening post (§17.7) has no controlling unit, so no Doctrine bonus.
+  // listening post (§17.7) has no controlling unit, so no Doctrine bonus — and
+  // by the same reasoning an UNDEFENDED blockade gets none either, while one
+  // with a unit standing on it does (that unit is the doctrine).
   const milAmt = TECH_NODES["mil-entry"].effect.amount;
   const defOwner = t.kind === "raid" ? t.unit.owner
     : t.kind === "post" ? t.post.owner
+    : t.kind === "blockade" ? t.blockade.owner
     : t.loc.controller;
+  const defHasTroops = t.kind !== "blockade" ||
+    Object.values(state.units).some((u) => u.owner === t.blockade.owner && u.node === t.blockade.hex);
   const atkMilitary = hasTechNode(state, pid, "mil-entry") ? milAmt : 0;
-  const defMilitary = defOwner && t.kind !== "post" && hasTechNode(state, defOwner, "mil-entry") ? milAmt : 0;
+  const defMilitary = defOwner && t.kind !== "post" && defHasTroops
+    && hasTechNode(state, defOwner, "mil-entry") ? milAmt : 0;
   // §17.5 Military A1 (Vanguard): +1 to the INITIATOR's roll (you attacking) —
   // ADDS to Doctrine (so +2 attacking, +1 defending for a holder of both).
   const atkVanguard = hasTechNode(state, pid, "mil-a1") ? 1 : 0;
-  // §17.5 Military B1 (Turrets): +1 contest for the defender on its own hex.
-  const defTurrets = turrets ? 1 : 0;
+  // §17.5 Military B1 (Turrets): +1 contest for the defender on its own hex
+  // (flattened by a siege attacker along with the other static defences).
+  const defTurrets = turrets && !siege ? 1 : 0;
 
   // House rule (departs from spec §9): a Location defended purely by its
   // garrison — no defending unit — does NOT roll a d6.
@@ -602,7 +857,8 @@ export function runContest(state, { pid, params, ctx = {} }) {
   }
 
   // §17.7 — a listening post defends as a standing garrison and rolls 1d6.
-  const defenderRollsDie = t.kind === "raid" || t.kind === "post" || (t.kind === "location" && !!defenderUnit);
+  const defenderRollsDie = t.kind === "raid" || t.kind === "post" || t.kind === "blockade" ||
+    (t.kind === "location" && !!defenderUnit);
   const initiatorRoll = state.rng.roll(CONFIG.contestDieSides);
   const defenderRoll = defenderRollsDie ? state.rng.roll(CONFIG.contestDieSides) : 0;
   const initiatorTotal = atkStrength + atkConcentration + atkVeteran + atkMilitary + atkVanguard + atkAmbush + initiatorRoll;
@@ -622,6 +878,7 @@ export function runContest(state, { pid, params, ctx = {} }) {
     defenderAllies: defAllies, defenderMilitary: defMilitary, defenderTurrets: defTurrets,
     // §19.5 ambush
     attackerAmbush, defenderAmbush, attackerAmbushBonus: atkAmbush, defenderAmbushBonus: defAmbush,
+    attackerSiege: siege, attackerChipsSuppressed: chipsSuppressed,
   };
   const winnerUnit = won ? attackerUnit : defenderUnit;
   const loserUnit = won ? defenderUnit : attackerUnit;
@@ -659,6 +916,14 @@ export function runContest(state, { pid, params, ctx = {} }) {
       loseBaseStrength(state, winnerUnit.uid, 1, null, ctx, note);
     }
   } else {
+    // Rail doc §3.3 — destroy-only, no capture/flip: a blockade has no VP or
+    // economic identity worth inheriting. Attrition below then runs normally,
+    // so a unit garrisoning it takes the loser's casualty exactly as it would
+    // defending anything else.
+    if (t.kind === "blockade" && won) {
+      destroyBlockade(state, t.blockade.hex, pid);
+      recomputeVisibilityFor(state, [t.blockade.owner, pid], { emitEvents: false });
+    }
     // 1. Loser −1 (garrison loser has no unit to wound). §17.5 Military A2
     //    (Killing Blow): a winning ATTACKER holding A2 drops the loser by 2.
     const loserLoss = won && hasTechNode(state, pid, "mil-a2") ? 2 : 1;
@@ -668,8 +933,11 @@ export function runContest(state, { pid, params, ctx = {} }) {
     // 2. Rout: an overwhelming margin spills a casualty to a 2nd friendly
     //    unit stacked on the loser's hex.
     if (margin >= CONFIG.attrition.routMargin && loserOwner) {
+      // Rearguard (chip `routSpillImmune`): a disciplined screen never
+      // takes the rout spill — the casualty passes over it.
       const second = Object.values(state.units).find(
-        (u) => u.node === loserHex && u.owner === loserOwner && u.uid !== loserUid,
+        (u) => u.node === loserHex && u.owner === loserOwner && u.uid !== loserUid &&
+          !u.chips.some((c) => !state.chips[c]?.disabled && CHIPS[state.chips[c]?.chipId]?.routSpillImmune),
       );
       if (second) loseBaseStrength(state, second.uid, 1, winnerUnit?.uid ?? null, ctx, note);
     }

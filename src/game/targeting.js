@@ -50,6 +50,19 @@ export function resolveTargets(state, token, ctx = {}) {
     }
     case "defending_unit":
       return ctx.contest?.defendingUnit ? [ctx.contest.defendingUnit] : [];
+    case "stationed_unit": {
+      // A friendly unit standing on the source Location's hex (ability
+      // effects that arm/boost the garrison's units — e.g. Rail Corridor).
+      const hex = ctx.source?.hexId;
+      if (!hex) return [];
+      const mine = Object.values(state.units).filter((u) => u.owner === owner && u.node === hex);
+      if (!mine.length) return [];
+      if (ctx.interact) {
+        const pick = ctx.interact({ kind: "chooseUnit", options: mine.map((u) => u.uid) });
+        if (mine.some((u) => u.uid === pick)) return [pick];
+      }
+      return [mine[0].uid];
+    }
     case "entity":
       return ctx.contest?.targetEntity ? [ctx.contest.targetEntity] : [];
     case "claimant":

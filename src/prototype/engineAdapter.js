@@ -11,17 +11,19 @@ import {
   LOCATIONS as ENGINE_LOCATIONS,
   CHIPS as ENGINE_CHIPS,
   ABILITIES as ENGINE_ABILITIES,
+  chipDisplayName,
 } from "../game/content.js";
 import {
   buildableChips, upgradeOption, slotCapacity, slotsUsed, locationOutput,
 } from "../game/economy.js";
+import { recruitCapBonus } from "../game/actions.js";
 import { isUnitVisibleTo } from "../game/visibility.js";
 import { factionDef } from "../game/content.js";
 import {
   recognitionScore, threatScore, tolerance, trustFloor, standingTier, getStanding,
   arePacted, atWar, vassalLord, coalitionAgainst, factionIds,
   aiAcceptsPact, aiAcceptsVassalage, wouldAccept, passesRepGates,
-  evaluatePactCall, canDemandTribute, hasOpenBorders,
+  evaluatePactCall, canDemandTribute, hasOpenBorders, warJustification,
 } from "../game/diplomacy.js";
 import { hasTechNode } from "../game/tech.js";
 import {
@@ -40,11 +42,25 @@ const ENGINE_TO_UI_LOC = {
 const ENGINE_TO_UI_CHIP = {
   "sharpened-blades": "sharpenedBlades",
   "drilled-troops": "drilledTroops",
+  "troop-carrier": "troopCarrier",
+  "field-glass": "fieldGlass",
+  "spotter-net": "spotterNet",
   "training-grounds": "trainingGrounds",
   "defense-turrets": "defenseTurrets",
   "logistics-hub": "logisticsHub",
-  "town-hall": "townHall",
   "recon-team": "reconTeam",
+  "civic-hall": "civicHall",
+  "burning-glass": "burningGlass",
+  "guest-house": "guestHouse",
+  "motor-pool": "motorPool",
+  "field-medics": "fieldMedics",
+  "entrenching-tools": "entrenchingTools",
+  "cold-camp": "coldCamp",
+  "night-march": "nightMarch",
+  "war-banner": "warBanner",
+  "old-hands": "oldHands",
+  "safe-conduct": "safeConduct",
+  "relay-kit": "relayKit",
 };
 const UI_TO_ENGINE_CHIP = Object.fromEntries(
   Object.entries(ENGINE_TO_UI_CHIP).map(([e, u]) => [u, e]),
@@ -52,6 +68,22 @@ const UI_TO_ENGINE_CHIP = Object.fromEntries(
 
 export function engineLocationIdToUi(engineId) {
   return ENGINE_TO_UI_LOC[engineId] || engineId;
+}
+
+// The Location a faction currently holds its Capital chip on, as a UI
+// locationId. Derived from live state rather than from a static table: the
+// engine's faction registry (src/game/content.js) carries no `capital` field
+// at all, so the old `def.capital` read was always undefined — which silently
+// disabled the trading-pact route line on the map. Capitals also change hands
+// when a start Location is captured, which a table could never track.
+function capitalLocOf(state, fid) {
+  for (const loc of Object.values(state.locations)) {
+    if (loc.controller !== fid) continue;
+    if ((loc.chips || []).some((c) => state.chips[c]?.chipId === "capital")) {
+      return engineLocationIdToUi(loc.locationId);
+    }
+  }
+  return null;
 }
 export function engineChipIdToUi(engineId) {
   return ENGINE_TO_UI_CHIP[engineId] || engineId;
@@ -151,6 +183,16 @@ function describeEffectShort(e) {
     }
     case "ADJUST_TRACK":
       return `${e.amount >= 0 ? "+" : ""}${e.amount} ${e.track}`;
+    case "MODIFY_STAT":
+      return `give a stationed unit ${e.amount >= 0 ? "+" : ""}${e.amount} ${e.stat}${e.duration === "this_turn" ? " this turn" : ""}`;
+    case "MOVE_CARD":
+      return "draw a Reactive card";
+    case "DISABLE_CHIP":
+      return "disable an enemy chip until your next turn";
+    case "STRIP_CHIP":
+      return "rip a chip off an enemy unit here (drops as loot)";
+    case "GRANT_CHIP":
+      return e.pool === "reward" ? "dig up a random reward chip" : "grant a chip";
     default:
       return e.type;
   }
@@ -266,8 +308,16 @@ export function adaptState(state) {
       cover: fog === "unexplored" ? false : !!h.cover,
       // §16.2 road modifier (movement only) — shown once the hex is explored.
       road: fog === "unexplored" ? false : !!h.road,
-      // §18.3 ZoC tint — only where the viewer has live sight (it's live info).
+      // Rail runs over the same hexes; the board draws it as its own network.
+      rail: fog === "unexplored" ? false : !!h.rail,
+      // §18.3 ZoC — only where the viewer has live sight (it's live info).
+      // `zocForeign` marks another faction's ground; `zocTrespassing` means
+      // one of the VIEWER's units is standing on it right now (the border
+      // renders hotter as the "you are trespassing" cue).
       zocOwner: live ? zoc[h.id] || null : null,
+      zocForeign: live && !!zoc[h.id] && zoc[h.id] !== viewer,
+      zocTrespassing: live && !!zoc[h.id] && zoc[h.id] !== viewer
+        && (unitIdsAt[h.id] || []).some((uid) => state.units[uid]?.owner === viewer),
     };
     // Live unit tokens only on visible hexes.
     if (live && unitAt[h.id]) hex.unitId = unitAt[h.id];
@@ -278,6 +328,20 @@ export function adaptState(state) {
       hex.ghosts = mem.ghosts.map((g) => ({
         owner: g.owner, strength: g.strength, round: g.round, stale: true, false: !!g.false,
       }));
+    }
+    // Blockades (rail doc §3). Live sight only — a fortification is not
+    // concealed the way a listening post is, but it can still be built or torn
+    // down behind your back, so a remembered one would be a lie. A site under
+    // construction reports `done: false` so the board can show it as scaffolding
+    // rather than as something that already stops you.
+    const bl = live ? state.world?.blockades?.[h.id] : null;
+    if (bl) {
+      hex.blockade = {
+        owner: bl.owner,
+        done: !!bl.done,
+        progress: bl.progress || 0,
+        cost: bl.cost,
+      };
     }
     const loot = state.hexLoot?.[h.id];
     if (live && loot?.length) {
@@ -345,8 +409,18 @@ export function adaptState(state) {
       techLevel: p.techLevel || 1,
       techWheel: [...(p.techWheel || [])],
       abilityPointsAvailable: (p.techLevel || 1) - 1 - (p.techWheel?.length || 0),
-      actions: { ...p.actions },
-      unitCap: CONFIG.baseUnitCap + countTrainingGrounds(state, pid),
+      // Per-entity actions: the HUD dial aggregates what this faction can
+      // still DO — every unit/Location action left plus wildcards. Max is
+      // the same census at full refresh.
+      actions: (() => {
+        const unitActs = Object.values(state.units).filter((u) => u.owner === p.id);
+        const locActs = Object.values(state.locations).filter((l) => l.controller === p.id);
+        const remaining = p.actions.remaining +
+          unitActs.reduce((n, u) => n + (u.actionsRemaining ?? 0), 0) +
+          locActs.reduce((n, l) => n + (l.actionsRemaining ?? 0), 0);
+        return { remaining, max: p.actions.remaining + unitActs.length + locActs.length };
+      })(),
+      unitCap: CONFIG.baseUnitCap + recruitCapBonus(state, pid),
       isAI: !!p.isAI,
       isMinor: !!p.isMinor,
       hand: [...p.hand],
@@ -413,7 +487,7 @@ function adaptEconomy(state, loc) {
     return {
       chipId: o.chipId,
       uiChipId: engineChipIdToUi(o.chipId),
-      name: o.def.name,
+      name: chipDisplayName(o.chipId, loc.controller),
       kind: o.def.kind,
       cost: o.def.buildCost ?? o.def.cost ?? 0,
       slots: o.def.slots || 1,
@@ -431,7 +505,7 @@ function adaptEconomy(state, loc) {
       upgrades[chipUid] = {
         chipId: opt.chipId,
         uiChipId: engineChipIdToUi(opt.chipId),
-        name: opt.def.name,
+        name: chipDisplayName(opt.chipId, loc.controller),
         cost: opt.def.buildCost ?? opt.def.cost ?? 0,
         desc: opt.def.desc || "",
         locked: opt.locked,
@@ -455,7 +529,7 @@ function adaptEconomy(state, loc) {
           kind: ab.kind,
           chipId: ab.chipId,
           uiChipId: engineChipIdToUi(ab.chipId),
-          name: ENGINE_CHIPS[ab.chipId]?.name || ab.chipId,
+          name: chipDisplayName(ab.chipId, loc.controller),
           cost: ab.cost,
           progress: loc.buildProgress || 0,
           remaining: Math.max(0, ab.cost - (loc.buildProgress || 0)),
@@ -488,6 +562,9 @@ function adaptDiplomacy(state, viewer) {
     return {
       id: f,
       name: def.name || f,
+      // Public scoreboard — VP is common knowledge (the race is visible
+      // even when the map is not). Null for factions with no player seat.
+      vp: state.players[f]?.vp ?? null,
       color: def.color || "#888",
       tier: def.tier || "major",
       temperament: def.temperament,
@@ -502,8 +579,10 @@ function adaptDiplomacy(state, viewer) {
       inCoalition: (coalitionAgainst(state, viewer)?.members || []).includes(f),
       menace: state.players[f]?.menace || 0,
       honor: state.players[f]?.honor ?? CONFIG.diplomacy.honor.start,
-      tolerance: Math.round(tol * 10) / 10,
-      trustFloor: Math.round(floor * 10) / 10,
+      // Exact gate numbers are espionage product — Spy Ring (int-b1) only.
+      // The anonymised markers below stay public (coarse read, no numbers).
+      tolerance: spyRing ? Math.round(tol * 10) / 10 : null,
+      trustFloor: spyRing ? Math.round(floor * 10) / 10 : null,
       threat: Math.round(threatScore(state, f) * 10) / 10,
       wants: factionWants(def),
       // §3.2 — plain-English sentiment, derived from tier + reputation
@@ -523,7 +602,7 @@ function adaptDiplomacy(state, viewer) {
       // Available verbs against this faction, with reasons + outcome hints.
       verbs: availableVerbsAgainst(state, viewer, f),
       // Inbox + capital (for map binding).
-      capital: def.capital || null,
+      capital: capitalLocOf(state, f),
       // §5.3 trading-pact route status — read straight off the agreement
       // shape on `state.diplomacy.agreements` so the map can draw the
       // capital-to-capital line green (clear) or amber (suspended).
@@ -536,10 +615,24 @@ function adaptDiplomacy(state, viewer) {
   });
   return {
     youId: viewer,
+    youCapital: capitalLocOf(state, viewer),
     menace: me?.menace || 0,
     honor: me?.honor ?? CONFIG.diplomacy.honor.start,
     threat: Math.round(threatScore(state, viewer) * 10) / 10,
-    recognition: { score: rec.total, threshold: CONFIG.diplomacy.recognition.threshold, contributors: rec.contributors, met: rec.total >= CONFIG.diplomacy.recognition.threshold },
+    recognition: {
+      score: rec.total,
+      threshold: CONFIG.diplomacy.recognition.threshold,
+      contributors: rec.contributors,
+      met: rec.total >= CONFIG.diplomacy.recognition.threshold,
+      // Per-faction backing checklist — WHO backs your claim and, for the
+      // rest, a coarse why-not. Coarse status is common knowledge; the
+      // precise numbers behind it (their exact Standing toward you, their
+      // Menace tolerance / Honor floor) are Spy Ring product.
+      backing: recognitionBacking(state, viewer, spyRing),
+      // Summit VP already banked (first-time backers, once each per game).
+      summits: [...(dip.recognizedEver?.[viewer] || [])],
+      summitVp: CONFIG.diplomacy.recognition.summitVp,
+    },
     coalitionAgainstYou: coalitionAgainst(state, viewer)?.members || null,
     factions,
     pacts: dip.pacts.map((p) => ({ a: p.a, b: p.b, vassal: !!p.vassal })),
@@ -553,6 +646,19 @@ function adaptDiplomacy(state, viewer) {
     // §1.8 — incoming pact-call inbox: AI allies calling you into their wars.
     // Each carries live accept/refuse consequence previews (computed off the
     // current state, not a stored snapshot — always honest).
+    // Envoy audiences — AI warnings the player answers in a dialogue box.
+    pendingWarnings: (dip.pendingWarnings || []).map((w) => ({
+      id: w.id,
+      kind: w.kind,
+      from: w.from,
+      fromName: w.from ? (factionDef(w.from)?.name || w.from) : null,
+      temperament: w.temperament || null,
+      reason: w.reason || null,
+      threat: w.threat ?? null,
+      placateScrap: CONFIG.diplomacy.warnings.placateScrap,
+      canPlacate: (me?.resource || 0) >= CONFIG.diplomacy.warnings.placateScrap,
+      defyStandingHit: CONFIG.diplomacy.warnings.defyStandingHit,
+    })),
     pendingCalls: (dip.pendingCalls || []).map((c) => ({
       id: c.id,
       from: c.from, fromName: factionDef(c.from)?.name || c.from,
@@ -562,6 +668,53 @@ function adaptDiplomacy(state, viewer) {
       ifRefuse: `−${CONFIG.diplomacy.pactCall.declineStandingHit} Standing with ${factionDef(c.from)?.name || c.from} · −${CONFIG.diplomacy.honor.breakLoss} Honor`,
     })),
   };
+}
+
+// Recognition checklist — one row per other faction, mirroring
+// recognitionScore's gates exactly so the screen never lies about the
+// score. Coarse `status`/`hint` are common knowledge; `detail` (exact
+// Standing and gate numbers) rides only with the Spy Ring.
+function recognitionBacking(state, viewer, spyRing) {
+  const rc = CONFIG.diplomacy.recognition;
+  const tiers = CONFIG.diplomacy.tiers;
+  const me = state.players[viewer];
+  const coal = coalitionAgainst(state, viewer);
+  return factionIds(state).filter((f) => f !== viewer).map((f) => {
+    const def = factionDef(f) || {};
+    const s = getStanding(state, f, viewer);
+    const isVassal = vassalLord(state, f) === viewer;
+    const allied = arePacted(state, f, viewer) && standingTier(s) === "allied";
+    const gatesPass = passesRepGates(state, f, viewer);
+    let status, weight = 0, hint;
+    if (coal && coal.members.includes(f)) {
+      status = "coalition";
+      hint = "Marches in the coalition against you — lends your claim nothing while it stands.";
+    } else if (!gatesPass) {
+      status = "blocked";
+      hint = "Your reputation fails their gates — too much Menace for their tolerance, or your Honor sits below their floor.";
+    } else if (isVassal) {
+      status = "backs"; weight = rc.vassalWeight;
+      hint = "Your vassal — full backing.";
+    } else if (allied) {
+      status = "backs"; weight = rc.alliedWeight;
+      hint = "A sworn ally at Allied regard — backs your claim.";
+    } else if (arePacted(state, f, viewer)) {
+      status = "warming";
+      hint = "Pacted, but their regard hasn't reached Allied yet.";
+    } else {
+      status = "cold";
+      hint = "No pact — courtship hasn't begun.";
+    }
+    const detail = spyRing ? {
+      standing: s,
+      needStanding: tiers.allied,
+      yourMenace: me?.menace || 0,
+      theirTolerance: Math.round(tolerance(state, f, viewer) * 10) / 10,
+      yourHonor: me?.honor ?? CONFIG.diplomacy.honor.start,
+      theirFloor: Math.round(trustFloor(state, f) * 10) / 10,
+    } : null;
+    return { id: f, name: def.name || f, tier: def.tier || "major", status, weight, hint, detail };
+  });
 }
 
 // Per-faction qualitative sentiment, modulated by reputation extremes.
@@ -715,8 +868,16 @@ function availableVerbsAgainst(state, viewer, fid) {
   if (!war && !myLord && !myVassal) {
     if (pacted) {
       out.push({ verb: "declare-war", state: "disabled", reason: "Break the pact first." });
+    } else if (warJustification(state, viewer, fid)) {
+      out.push({
+        verb: "declare-war", state: "enabled",
+        outcome: "JUSTIFIED — your grievance is on record. Fighting this war costs no Menace.",
+      });
     } else {
-      out.push({ verb: "declare-war", state: "enabled", outcome: "Opens hostilities. Menace rises; their allies may join in." });
+      out.push({
+        verb: "declare-war", state: "enabled",
+        outcome: "UNPROVOKED — fighting them will raise your Menace. Denounce them first to declare a just war.",
+      });
     }
   }
 
@@ -747,10 +908,17 @@ function availableVerbsAgainst(state, viewer, fid) {
   }
 
   // 8) Vassalize (engine handles eligibility; UI shows disabled with reason).
-  if (!myLord && !myVassal && !pacted) {
+  // A pacted faction that would ACCEPT still shows the verb — patronage's
+  // ally → protectorate upgrade is the peaceful road to a vassal.
+  if (!myLord && !myVassal) {
     if (aiAcceptsVassalage(state, fid, viewer)) {
-      out.push({ verb: "vassalize", state: "enabled", outcome: "They will accept submission." });
-    } else {
+      const cornered = atWar(state, fid, viewer)
+        || getStanding(state, fid, viewer) <= CONFIG.diplomacy.tiers.wary;
+      out.push({
+        verb: "vassalize", state: "enabled",
+        outcome: cornered ? "They will accept submission." : "They would welcome your protection.",
+      });
+    } else if (!pacted) {
       out.push({ verb: "vassalize", state: "disabled", reason: "They will not submit." });
     }
   }
@@ -879,92 +1047,8 @@ export function reinforcePreview(state, unitUid) {
   };
 }
 
-function countTrainingGrounds(state, pid) {
-  let n = 0;
-  for (const loc of Object.values(state.locations)) {
-    if (loc.controller !== pid) continue;
-    for (const c of loc.chips) {
-      if (state.chips[c]?.chipId === "training-grounds") n++;
-    }
-  }
-  return n;
-}
-
-// Attacker-side preview: the combined Strength of `ownerId`'s stack on
-// `hexId` plus its Concentration bonus — what the attacker brings before
-// the d6. Mirrors contest.js (stackStrength + concentration).
-export function previewAttackerStrength(state, hexId, ownerId) {
-  let strength = 0;
-  let n = 0;
-  for (const u of Object.values(state.units)) {
-    if (u.owner !== ownerId || u.node !== hexId) continue;
-    strength += u.strength;
-    n += 1;
-  }
-  const concentration =
-    Math.min(n - 1, CONFIG.combat.concentrationCap) * CONFIG.combat.concentrationPerUnit;
-  return { strength, concentration, units: n, total: strength + concentration };
-}
-
-// Preview a Location contest's defender side exactly as contest.js would
-// resolve it, so the UI shows the true number the attacker must beat —
-// not just the bare garrison. Mirrors defenderValue() + the
-// garrison-only no-die house rule.
-export function previewLocationContest(state, hexId) {
-  const loc = state.locations[hexId];
-  if (!loc) return null;
-  const hasNeutral = loc.sections.includes("neutral");
-  let chipGarrison = 0;
-  for (const c of loc.chips) {
-    chipGarrison += ENGINE_CHIPS[state.chips[c]?.chipId]?.garrison || 0;
-  }
-  let value = loc.garrison + chipGarrison;
-
-  // A defending unit only counts when the Location is fully held by its
-  // controller (no neutral sections) and that controller has a unit on
-  // the hex — same gate as contest.js defendingUnit().
-  // Stacked defenders fight together: sum the controller's units on the
-  // hex (the strongest is the "lead" for display / attrition).
-  let defendingUnit = null;
-  let defenderStack = 0;
-  if (!hasNeutral && loc.controller) {
-    for (const u of Object.values(state.units)) {
-      if (u.owner !== loc.controller || u.node !== loc.hexId) continue;
-      defenderStack += u.strength;
-      if (!defendingUnit || u.strength > defendingUnit.strength) defendingUnit = u;
-    }
-    value += defenderStack;
-  }
-
-  // §16.6 combat levers on the defender side.
-  const mountain =
-    state.board.hexes[hexId]?.terrain === "mountain" ? CONFIG.combat.mountainDefenseBonus : 0;
-  let concentration = 0, fortify = 0, veteran = 0;
-  if (defendingUnit) {
-    let n = 0;
-    for (const u of Object.values(state.units)) {
-      if (u.owner === loc.controller && u.node === hexId && u.uid !== defendingUnit.uid) n++;
-    }
-    concentration = Math.min(n, CONFIG.combat.concentrationCap) * CONFIG.combat.concentrationPerUnit;
-    if (defendingUnit.fortified) fortify = CONFIG.combat.fortifyBonus;
-    if (defendingUnit.veteran) veteran = CONFIG.combat.veteranBonus;
-  }
-  value += mountain + concentration + fortify + veteran;
-
-  // House rule: a garrison-only defence (no defending unit) does NOT
-  // roll a d6 — its total is the static value.
-  const defenderRollsDie = !!defendingUnit;
-  return {
-    value,
-    garrison: loc.garrison + chipGarrison,
-    defendingUnit: defendingUnit
-      ? { uid: defendingUnit.uid, owner: defendingUnit.owner, strength: defendingUnit.strength }
-      : null,
-    modifiers: {
-      mountain, concentration, fortify, veteran,
-      allies: defendingUnit ? defenderStack - defendingUnit.strength : 0,
-    },
-    hasNeutral,
-    defenderRollsDie,
-  };
-}
+// previewAttackerStrength / previewLocationContest now live in
+// contest.js (the engine owns the math they mirror; the AI needs them
+// too, not just this UI adapter) — re-exported here so Inspector.jsx /
+// Prototype.jsx don't need to change their import path.
+export { previewAttackerStrength, previewLocationContest } from "../game/contest.js";

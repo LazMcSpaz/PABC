@@ -13,6 +13,11 @@ import { emit } from "./events.js";
 import { recomputeStats, recomputeResearch } from "./stats.js";
 import { recomputeInfluence } from "./influence.js";
 import { hasTechNode } from "./tech.js";
+import { holderOf } from "./control.js";
+import {
+  resolveBlockadeSites, creditBlockade, blockadeIncome, ownedBlockades,
+} from "./blockades.js";
+import { supplyCutter } from "./movement.js";
 
 // §20.6 — the Tech Level a chip of `techLevel` T demands of the builder
 // (the same §17.2 thresholds, applied to building). techLevel 1 → L1,
@@ -94,6 +99,13 @@ export function buildableChips(state, loc) {
   if (!player) return [];
   const out = [];
   for (const def of Object.values(CHIPS)) {
+    // Signature chips are faction-locked — invisible to everyone else,
+    // including a captor browsing a captured Location's menu.
+    if (def.faction && def.faction !== loc.controller) continue;
+    // Reward chips are found, never built (docs/chip-set-v0.1.md).
+    if (def.reward) continue;
+    // Blockade chips install into a structure out on the road, not here.
+    if (def.kind === "blockade") continue;
     if (!meetsTech(player, def)) continue; // Tech-forbidden → not shown at all
     const locked = !meetsLoyalty(loc, def);
     out.push({
@@ -131,29 +143,73 @@ export function upgradeOption(state, loc, chipUid) {
   };
 }
 
-// A friendly unit stationed at the Location with room for `slots` more bay,
-// or null. Unit chips (§20.4) install into such a unit's Bay.
-export function stationedUnitWithBay(state, loc, slots) {
+// One-chip-per-stat rule (docs/chip-set-v0.1.md): does this unit already
+// carry a chip of `statType`? Dormant chips still hold their slot AND
+// their stat claim — dormancy is a payment lapse, not removal.
+export function unitHasStatType(state, unit, statType) {
+  if (!statType) return false;
+  return unit.chips.some((c) => CHIPS[state.chips[c]?.chipId]?.statType === statType);
+}
+
+// A friendly unit stationed at the Location with room for `slots` more bay
+// (and, when `statType` is given, no chip of that stat family already
+// installed), or null. Unit chips (§20.4) install into such a unit's Bay.
+export function stationedUnitWithBay(state, loc, slots, statType) {
   for (const u of Object.values(state.units)) {
     if (u.owner !== loc.controller || u.node !== loc.hexId) continue;
+    if (statType && unitHasStatType(state, u, statType)) continue;
     if (slotsUsed(state, u.chips) + slots <= CONFIG.unit.baySlots) return u;
   }
   return null;
 }
 
-// Apply the guns/butter split for one Location at Upkeep (§20.3) and advance
-// / complete its active build (§20.4 / §20.5). Returns the scrap banked.
-function processLocationEconomy(state, loc) {
-  const output = locationOutput(state, loc);
+// Apply the guns/butter split for one Location at Upkeep (§20.3), advance /
+// complete its active build (§20.4 / §20.5), and pay for any blockade drawing
+// on it (rail doc §3.4). Returns the scrap banked.
+//
+// `sites` are the construction sites this Location funds — already filtered to
+// ones with a live builder and an uncut road (blockades.js).
+function processLocationEconomy(state, loc, { partial = false, sites = [] } = {}) {
+  let output = locationOutput(state, loc);
+  // A besieged city (majority held, not outright) still works — at reduced
+  // capacity. Losing one section used to zero the place out entirely.
+  if (partial) output = Math.floor(output * CONFIG.economy.partialOutputScale);
   loc.output = output; // cache the derived value for the HUD
   const ab = loc.activeBuild;
-  // No active build → the whole Output banks as liquid scrap (construction
-  // throughput has nowhere to go, so it is never wasted).
-  if (!ab) return output;
+  // Nothing to build, here or down the road → the whole Output banks as liquid
+  // scrap (construction throughput has nowhere to go, so it is never wasted).
+  if (!ab && !sites.length) return output;
 
-  const f = Math.max(0, Math.min(1, loc.buildSlider ?? 0));
+  const f = Math.max(0, Math.min(1, loc.buildSlider ?? CONFIG.economy.defaultSlider));
   const scrapGain = Math.floor((1 - f) * output);
-  const buildGain = output - scrapGain; // conserve the total; build keeps the remainder
+  let buildGain = output - scrapGain; // conserve the total; build keeps the remainder
+  // Works chip: flat extra build progress, outside the slider split (it's
+  // labor, not Output). Only while something is actually under construction.
+  for (const c of loc.chips) {
+    if (state.chips[c]?.disabled) continue;
+    buildGain += chipDefOf(state, c)?.buildRate || 0;
+  }
+
+  // §3.4 — who gets the build output when a city is building a chip AND
+  // funding a blockade at the same time.
+  //
+  // The blockade wins by default: it is the answer to something happening on
+  // the map right now, where a chip is an investment that keeps. A site can
+  // only absorb ceil(cost/minTurns) per turn though (§3.1's floor), so the city
+  // is never starved — the remainder flows straight on to its own build.
+  //
+  // `buildPriority: "chips"` flips it, and flips it hard: while a chip is under
+  // construction it takes everything and the blockade waits until it is done.
+  // That is the point of the toggle — a player who sets it has decided the
+  // building matters more, and a half-measure would just make both slow.
+  const chipsFirst = loc.buildPriority === "chips" && !!ab;
+  if (!chipsFirst) {
+    for (const s of sites) {
+      if (buildGain <= 0) break;
+      buildGain = creditBlockade(state, s.blockade, buildGain);
+    }
+  }
+
   loc.buildProgress = (loc.buildProgress || 0) + buildGain;
   completeBuildIfDone(state, loc);
   return scrapGain;
@@ -193,9 +249,10 @@ export function completeBuildIfDone(state, loc) {
     if (def?.kind === "unit") {
       const u = ab.targetUnit && state.units[ab.targetUnit];
       const target = u && u.node === loc.hexId && u.owner === loc.controller &&
-        slotsUsed(state, u.chips) + (def.slots || 1) <= CONFIG.unit.baySlots
+        slotsUsed(state, u.chips) + (def.slots || 1) <= CONFIG.unit.baySlots &&
+        !unitHasStatType(state, u, def.statType)
         ? u
-        : stationedUnitWithBay(state, loc, def.slots || 1);
+        : stationedUnitWithBay(state, loc, def.slots || 1, def.statType);
       if (!target) {
         // No friendly unit to arm — forfeit (the chip never lands).
         delete state.chips[uid];
@@ -229,14 +286,36 @@ function restamp(list, uid) {
 // active build. The gun half stays local as buildProgress.
 export function applyOutputAndBuilds(state, pid) {
   let banked = 0;
+  // Rail doc §3.4 — resolve blockade sites first (this is also where a site
+  // whose builder walked off fails, and where a cut line stalls), then index
+  // them by the settlement that pays so each Location funds its own.
+  const bySettlement = new Map();
+  for (const s of resolveBlockadeSites(state, pid, supplyCutter(state, pid))) {
+    if (!bySettlement.has(s.settlement)) bySettlement.set(s.settlement, []);
+    bySettlement.get(s.settlement).push(s);
+  }
   for (const loc of Object.values(state.locations)) {
-    if (loc.controller !== pid) continue;
-    banked += processLocationEconomy(state, loc);
+    const full = loc.controller === pid;
+    // Majority holders keep a (reduced) economy — see control.js.
+    if (!full && holderOf(loc) !== pid) continue;
+    banked += processLocationEconomy(state, loc, {
+      partial: !full,
+      sites: bySettlement.get(loc.hexId) || [],
+    });
   }
   if (banked > 0) {
     state.players[pid].resource += banked;
     emit(state, "resource_gained", {
       player: pid, resource: "Resource", amount: banked, source: "output",
+    });
+  }
+  // §3.2 Toll Booth — a blockade's own income, emitted separately from city
+  // Output so the log says where the scrap came from.
+  const toll = blockadeIncome(state, pid);
+  if (toll > 0) {
+    state.players[pid].resource += toll;
+    emit(state, "resource_gained", {
+      player: pid, resource: "Resource", amount: toll, source: "toll",
     });
   }
 }
@@ -263,6 +342,15 @@ export function chargeChipUpkeep(state, pid) {
       if (up > 0) bearing.push({ uid: c, upkeep: up, holder: u });
     }
   }
+  // Blockade chips pay upkeep like any other. None of the three authored today
+  // charges any, but a chip def's `upkeep` being silently ignored is exactly
+  // the hole that bites when the content batch adds one.
+  for (const b of ownedBlockades(state, pid)) {
+    for (const c of b.chips || []) {
+      const up = chipDefOf(state, c)?.upkeep || 0;
+      if (up > 0) bearing.push({ uid: c, upkeep: up, holder: b });
+    }
+  }
   if (!bearing.length) return;
   bearing.sort((a, b) => a.upkeep - b.upkeep);
 
@@ -273,7 +361,9 @@ export function chargeChipUpkeep(state, pid) {
     if (player.resource >= b.upkeep) {
       player.resource -= b.upkeep;
       emit(state, "resource_spent", { player: pid, resource: "Resource", amount: -b.upkeep, source: "upkeep" });
-      if (inst.disabled) {
+      // A Blacksite-suppressed chip stays dark even when its upkeep is
+      // paid — sabotage outranks bookkeeping until the window passes.
+      if (inst.disabled && inst.suppressedUntil == null) {
         inst.disabled = false;
         changed = true;
         emit(state, "chip_reactivated", { chip: b.uid, chipId: inst.chipId });

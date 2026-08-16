@@ -5,24 +5,49 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { theme } from "./data.js";
 import { animatePan } from "./aiReplay/CameraController.js";
+import { BoardLodContext, LOD_FULL, nextLod } from "./boardLod.js";
 
-const MIN_SCALE = 0.45;
+// The floor exists to stop the board shrinking into illegibility, and it used
+// to be set against the detailed tile art turning to mush. Below ~0.62 the
+// board now swaps to flat tinted polygons (boardLod.js), which stay readable
+// much further out, so the floor can drop.
+//
+// It needs to. A `huge` map's content box is 2365 x 1747, so fit-to-view wants
+// 0.50 at 1600x950 — fine — but 0.42 at 1280x800 and 0.32 at 900x600. At the
+// old 0.45 floor anything at or below a 1280-wide viewport could not fit the
+// whole board on screen at all, and "recenter" quietly did nothing. 0.26 fits a
+// huge board down to roughly 790x550.
+const MIN_SCALE = 0.26;
+// The tile masters are 1024 px square and ship downscaled, so past ~2.4 the art
+// is being magnified past its own resolution. Unchanged.
 const MAX_SCALE = 2.4;
 const clamp = (n, lo, hi) => Math.min(hi, Math.max(lo, n));
 
 // `cameraTarget` is a content-space point {x,y} (a hex centre) the AI replay
 // wants centred; `cameraPanMs` is the eased pan duration (0 = snap). User
 // drag / wheel still work and simply override the last programmatic pan.
-export default function BoardViewport({ children, cameraTarget = null, cameraPanMs = 350 }) {
+export default function BoardViewport({ children, cameraTarget = null, cameraPanMs = 350, controlsTop = 14 }) {
   const vpRef = useRef(null);
   const contentRef = useRef(null);
   const drag = useRef(null);
   const moved = useRef(false);
   const [view, setView] = useState({ scale: 1, x: 0, y: 0 });
   const [grabbing, setGrabbing] = useState(false);
+  // Level of detail is derived from the scale but held as its own quantized
+  // state, so the board below only re-renders when the threshold is crossed —
+  // not on every wheel notch or pinch frame. `nextLod` carries the hysteresis.
+  const [lod, setLod] = useState(LOD_FULL);
   const viewRef = useRef(view);
   viewRef.current = view;
   const panStopRef = useRef(null);
+  // Two-finger pinch-to-zoom (touch only — mouse only ever produces one
+  // pointer, so this branch is simply unreachable for mouse input, no
+  // desktop behavior change). `pointers` tracks every currently-down
+  // pointer by id; `pinch` holds the previous frame's midpoint/distance
+  // between the first two fingers so each move applies an incremental
+  // scale + pan, exactly like a native map/photo app pinch.
+  const pointers = useRef(new Map());
+  const pinch = useRef(null);
 
   const fitToView = useCallback(() => {
     const vp = vpRef.current;
@@ -41,6 +66,12 @@ export default function BoardViewport({ children, cameraTarget = null, cameraPan
   useLayoutEffect(() => {
     fitToView();
   }, [fitToView]);
+
+  // Setting the same level is a no-op React bails out of, so this only costs a
+  // render when the board actually changes representation.
+  useEffect(() => {
+    setLod((prev) => nextLod(prev, view.scale));
+  }, [view.scale]);
 
   // Programmatic camera pan: ease the content translate so `cameraTarget`
   // centres in the viewport, keeping the current scale. Driven by the AI
@@ -96,8 +127,26 @@ export default function BoardViewport({ children, cameraTarget = null, cameraPan
     });
   };
 
+  // The first two pointers down, in touch order — a stray 3rd/4th finger
+  // is tracked (so counts stay right) but never enters the pinch math.
+  const pinchPair = () => [...pointers.current.values()].slice(0, 2);
+  const midOf = (pts) => ({ x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 });
+  const distOf = (pts) => Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+
   const onPointerDown = (e) => {
     if (e.button !== 0) return;
+    pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pointers.current.size >= 2) {
+      // A 2nd finger landed — hand off from single-finger pan to pinch.
+      if (drag.current?.captured) {
+        try { vpRef.current?.releasePointerCapture(drag.current.pointerId); } catch {}
+      }
+      drag.current = null;
+      const pts = pinchPair();
+      pinch.current = { lastMid: midOf(pts), lastDist: distOf(pts) };
+      moved.current = true; // suppress any click once fingers lift
+      return;
+    }
     // Don't capture yet — capture redirects pointerup (and the
     // subsequent click) to the viewport, which would steal clicks
     // from hex / unit / button targets nested inside the board. We
@@ -110,6 +159,32 @@ export default function BoardViewport({ children, cameraTarget = null, cameraPan
     setGrabbing(true);
   };
   const onPointerMove = (e) => {
+    if (pointers.current.has(e.pointerId)) {
+      pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    }
+    if (pinch.current && pointers.current.size >= 2) {
+      const rect = vpRef.current?.getBoundingClientRect();
+      const ox = rect?.left || 0, oy = rect?.top || 0;
+      const pts = pinchPair();
+      const curMid = midOf(pts);
+      const curDist = distOf(pts);
+      const { lastMid, lastDist } = pinch.current;
+      setView((v) => {
+        const scaleRatio = lastDist > 0 ? curDist / lastDist : 1;
+        const scale = clamp(v.scale * scaleRatio, MIN_SCALE, MAX_SCALE);
+        const appliedRatio = scale / v.scale;
+        // Two-finger drag pans first (viewport-local, so subtract origin)...
+        let x = v.x + (curMid.x - lastMid.x);
+        let y = v.y + (curMid.y - lastMid.y);
+        // ...then zoom anchored at the current midpoint.
+        const px = curMid.x - ox, py = curMid.y - oy;
+        x = px - (px - x) * appliedRatio;
+        y = py - (py - y) * appliedRatio;
+        return { scale, x, y };
+      });
+      pinch.current = { lastMid: curMid, lastDist: curDist };
+      return;
+    }
     const d = drag.current;
     if (!d) return;
     const dx = e.clientX - d.sx;
@@ -127,6 +202,18 @@ export default function BoardViewport({ children, cameraTarget = null, cameraPan
     if (moved.current) setView((v) => ({ ...v, x: d.ox + dx, y: d.oy + dy }));
   };
   const endDrag = (e) => {
+    pointers.current.delete(e.pointerId);
+    if (pointers.current.size < 2) pinch.current = null;
+    if (pointers.current.size === 1) {
+      // One finger remains after a pinch — resume it as a pan from here
+      // rather than leaving a dead zone until it's lifted and re-pressed.
+      // Already know this is a drag (we were just pinching), so capture
+      // immediately instead of waiting for the usual 4px tap/drag threshold.
+      const [remainingId, pt] = [...pointers.current.entries()][0];
+      try { vpRef.current?.setPointerCapture(remainingId); } catch {}
+      drag.current = { sx: pt.x, sy: pt.y, ox: view.x, oy: view.y, pointerId: remainingId, captured: true };
+      return;
+    }
     const vp = vpRef.current;
     const d = drag.current;
     if (d?.captured && vp?.hasPointerCapture?.(e.pointerId)) {
@@ -170,14 +257,17 @@ export default function BoardViewport({ children, cameraTarget = null, cameraPan
           transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})`,
         }}
       >
-        {children}
+        {/* `children` is a stable element reference, so React skips re-rendering
+            the board on pan/zoom entirely; only a change of `lod` propagates
+            through the context to the tile layer. */}
+        <BoardLodContext.Provider value={lod}>{children}</BoardLodContext.Provider>
       </div>
 
       <div
         onPointerDown={(e) => e.stopPropagation()}
         style={{
           position: "absolute",
-          top: 14,
+          top: controlsTop,
           left: 14,
           display: "flex",
           flexDirection: "column",
