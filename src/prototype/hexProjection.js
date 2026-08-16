@@ -21,13 +21,20 @@
 //
 // JSX-free on purpose so the pure geometry stays importable headless (the AI
 // replay's CameraController leans on it).
-import manifest from "./hexTiles.json";
+// The import attribute is required by Node (Vite does not need it), and this
+// module is imported headless by scripts/check-slot-occlusion.mjs as well as by
+// the AI replay's CameraController.
+import manifest from "./hexTiles.json" with { type: "json" };
 
 export const FRAME = manifest.frame;
 export const TILES = manifest.tiles;
 // Vite serves this app under a base path (`/PABC/` for Pages), so asset URLs
 // have to go through BASE_URL like every other static asset in the prototype.
-export const TILE_BASE_URL = `${import.meta.env.BASE_URL}assets/ui/board/tiles`;
+// `import.meta.env` is a Vite injection and is undefined under plain Node, so
+// this falls back rather than throwing on import — the geometry below is the
+// part headless callers want, and they never resolve an asset URL.
+const BASE_URL = import.meta.env?.BASE_URL ?? "/";
+export const TILE_BASE_URL = `${BASE_URL}assets/ui/board/tiles`;
 
 // --- scale ---------------------------------------------------------------
 // One hex, vertex to vertex, at board scale 1. BoardViewport then applies its

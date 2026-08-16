@@ -232,6 +232,37 @@ check("click targets do not swallow neighbours", stack.hit.worst < 0.30,
   `hit box ${stack.hit.width.toFixed(1)}px vs full canvas ${stack.canvas.width.toFixed(1)}px ` +
   `(canvas boxes would overlap ${(stack.canvas.worst * 100).toFixed(1)}%)`);
 
+// --- 9. no unit hidden behind a floating radial --------------------------
+// Radials paint above the token layer, so any overlap is a unit the player
+// simply cannot see. Measured in screen space against what is actually drawn:
+// the figure's own extent, not its mostly-empty 192 px canvas.
+const hidden = await page.evaluate(() => {
+  // Drawn extent inside the cell, relative to the anchor (see unitSprites.js).
+  const HALF_W = 63 / 192, ABOVE = 130 / 192, BELOW = 33 / 192;
+  const radials = [...document.querySelectorAll("[data-radial]")].map((e) => e.getBoundingClientRect());
+  const out = [];
+  for (const el of document.querySelectorAll("[data-unit-sprite]")) {
+    const r = el.getBoundingClientRect();
+    const cx = r.left + r.width / 2;
+    const anchorY = r.top + r.height * (150 / 192);
+    const box = {
+      x0: cx - r.width * HALF_W, x1: cx + r.width * HALF_W,
+      y0: anchorY - r.height * ABOVE, y1: anchorY + r.height * BELOW,
+    };
+    for (const q of radials) {
+      const ox = Math.min(box.x1, q.right) - Math.max(box.x0, q.left);
+      const oy = Math.min(box.y1, q.bottom) - Math.max(box.y0, q.top);
+      if (ox > 0 && oy > 0) {
+        out.push(((ox * oy) / ((box.x1 - box.x0) * (box.y1 - box.y0)) * 100).toFixed(1));
+      }
+    }
+  }
+  return { radials: radials.length, hits: out };
+});
+check("no unit hidden behind a radial", hidden.hits.length === 0,
+  hidden.radials === 0 ? "no radials on screen this seed"
+    : `${hidden.radials} radials, ${hidden.hits.length} overlapping units${hidden.hits.length ? ` (${hidden.hits.join("%, ")}%)` : ""}`);
+
 check("no console/page errors", errors.length === 0, errors.slice(0, 2).join(" | ") || "clean");
 
 await page.screenshot({ path: `${OUT}/unit-sprites-board.png` });

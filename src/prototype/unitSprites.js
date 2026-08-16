@@ -111,6 +111,26 @@ export function hitBoxStyle(spec) {
   };
 }
 
+// Where the figure actually sits inside its cell, relative to the anchor, in
+// sheet px. Measured off the sheets rather than assumed: across all four
+// arrangements the drawn pixels span x 33..159 and y 20..183 against an anchor
+// at (96, 150). The cell is 192 square, so most of it is empty headroom — using
+// the cell for occlusion or overlap tests overstates the unit by a wide margin.
+const DRAWN_HALF_W = 63;
+const DRAWN_ABOVE = 130;
+const DRAWN_BELOW = 33;
+
+// Board-space box the figure covers, given the ground point it stands on.
+export function drawnBox(spec, x, y) {
+  const s = spriteScale(spec);
+  return {
+    x0: x - DRAWN_HALF_W * s,
+    x1: x + DRAWN_HALF_W * s,
+    y0: y - DRAWN_ABOVE * s,
+    y1: y + DRAWN_BELOW * s,
+  };
+}
+
 // Deterministic per-unit phase offset, so the same unit keeps the same phase
 // across re-renders instead of jumping when React reconciles.
 function idleOffset(uid, spec) {
