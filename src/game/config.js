@@ -10,23 +10,13 @@ export const CONFIG = {
   // action is gone.
   baseActions: 0,
 
-  // Repeatable VP faucets (docs/vp-and-actions-design.md §1). Dominion:
-  // +vpPerCity per Upkeep for each high/veryHigh Location the player (or a
-  // vassal of theirs) fully holds at Loyalty >= loyaltyMin that is NOT one
-  // of the player's own affiliated cities — dominion is rule over others'
-  // land, so a homeland never ticks. Alliance trickle: +allianceTrickle
-  // per Upkeep while pacted with a majority of the other surviving majors.
+  // VP is HELD, not banked (src/game/victory.js): a faction draws a Location's
+  // vpReward for as long as it holds the place — full value while Loyalty is
+  // OVER half the counter, half (floored) below. Dominion's per-Upkeep tick and
+  // the one-off capture bounty are both gone; the scoreboard is the map.
   victory: {
-    // 4 (was 6): the rung was calibrated for the old all-or-nothing control
-    // model, where a city you held was quiet. Under graduated control a
-    // contested city hovers around Loyalty 1–4 for most of a war, so the
-    // Dominion faucet ran bone dry — sim leaders plateaued at 9–11 VP with
-    // nothing left to earn. 4 keeps it a real bar (a neglected city still
-    // misses) while rewarding the "hold and settle it" play.
-    dominionLoyaltyMin: 4,
-    dominionPerCity: 1,
-    // Paid PER allied major, once you're pacted with a majority of them —
-    // so breadth of alliance scales the way breadth of conquest does.
+    // The one faucet that was never about territory, so it still accumulates:
+    // paid PER allied major, once you're pacted with a majority of them.
     allianceTrickle: 1,
   },
 
@@ -134,6 +124,11 @@ export const CONFIG = {
   // The v0.1 test board — still the default when no map size is given, so
   // headless games and the harness keep their existing layouts.
   testMap: [3, 4, 5, 6, 5, 4, 3], // 30 hexes
+  // …and how many Locations it seats. PINNED at 10 (the count that existed
+  // before the 2026-08-16 content pass took the roster to 19) precisely so the
+  // headless harness keeps its fixtures. Leaving it unset would have handed the
+  // legacy 30-hex board all 19 Locations — two thirds of the map a settlement.
+  testMapLocations: 10,
 
   // Board sizes offered on the setup screen. `rows` is the row-width array
   // fed to buildHexGrid; the bigger ones are hexagons-of-hexes of radius
@@ -147,14 +142,20 @@ export const CONFIG = {
   // budget of 6 gives everyone exactly one home and two neutral targets
   // rather than handing one faction two cities and another none.
   //
-  // NOTE the ceiling: src/game/content.js defines ten Locations, so `large`
-  // and `huge` are content-capped, not design-capped. Authoring more named
-  // Locations is what makes the big maps denser.
+  // Locations arrive in fairness BANDS (board.js generateLayout): capitals,
+  // then every faction's second home, then every faction's third, each taken
+  // whole or not at all; the unaffiliated prizes then fill whatever room is
+  // left. So a budget lands on a band boundary — 4, 8, 12 — plus prizes.
   mapSizes: {
     small:  { rows: [3, 4, 5, 6, 5, 4, 3], locations: 6 },   //  30 hexes, diameter 6
     medium: { rows: [5, 6, 7, 8, 9, 8, 7, 6, 5], locations: 8 },  //  61 hexes, diameter 8
-    large:  { rows: [6, 7, 8, 9, 10, 11, 10, 9, 8, 7, 6], locations: 10 }, // 91, diameter 10
-    huge:   { rows: [7, 8, 9, 10, 11, 12, 13, 12, 11, 10, 9, 8, 7], locations: 10 }, // 127, d 12
+    // Raised from 10 with the 2026-08-16 content pass (19 Locations now
+    // exist, up from 10). At 10 the big boards could not reach past every
+    // faction's SECOND home, so the third-home band never appeared on any map
+    // — the new content would have been unreachable. 14/19 keeps roughly the
+    // medium board's Location density on a much bigger field.
+    large:  { rows: [6, 7, 8, 9, 10, 11, 10, 9, 8, 7, 6], locations: 14 }, // 91, diameter 10
+    huge:   { rows: [7, 8, 9, 10, 11, 12, 13, 12, 11, 10, 9, 8, 7], locations: 19 }, // 127, d 12
   },
 
   // Of the hexes left over after Locations are placed, this share become

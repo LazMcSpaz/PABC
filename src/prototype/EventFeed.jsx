@@ -132,6 +132,12 @@ function formatEvent(ev, engineState) {
     // the kind of thing that reads as a bug.
     case "production_pooled":
       return null;
+    case "vp_changed": {
+      const d = p.to - p.from;
+      // Only the direction is news; the running total is on the HUD.
+      return { color: d > 0 ? theme.good : theme.accent2,
+        text: `${who(p.player)} ${d > 0 ? "+" : ""}${d} VP (now ${p.to})` };
+    }
     case "pool_interrupted":
       return { color: theme.accent2, text: `rail pooling cut at ${p.at} — nothing shipped this turn` };
     // Rail doc §3 — blockade lifecycle. `blockade_progressed` is deliberately

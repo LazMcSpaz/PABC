@@ -458,3 +458,121 @@ Notes for later:
   (patronage 2 minors = 4, plus 2 allied majors = 2, hits the threshold of
   6); the AI simply never walks it. Confirm in human play before tuning
   the threshold.
+
+## 10. VP is HELD, not banked — abilities withdrawn, roster grown (2026-08-16)
+
+Design call, three parts. The first replaces most of §1.
+
+### 10.1 The scoreboard is the map
+
+> "A faction holds the VP for a location so long as they hold the location. A
+> place worth 2 VP is worth the full amount if the loyalty counter is over half,
+> half of the VP if under half. No ticking up over time, just check for
+> ownership."
+
+Implemented in the new `src/game/victory.js`. A faction's total is now:
+
+```
+vp = bankedVp + settlementVp
+```
+
+- **`settlementVp`** is recomputed from the board. Each Location pays
+  `vpReward` to whoever holds it (`holdsLocation` — full 3/3 *or* majority
+  2/3, the same bar the rest of the engine uses), halved (floor) when Loyalty
+  is at or below half the counter. Capitals store `loyalty: null` and always
+  count as settled.
+- **`bankedVp`** is the ratchet: recognition summits, encounter/quest grants,
+  the alliance trickle. Those still only go up.
+
+Removed with it: the **capture bounty** (one-off VP on first capture,
+`contest.js`) and the **dominion faucets** — foreign-dominion tick and
+vassal-dominion, plus `victory.dominionLoyaltyMin` / `dominionPerCity` in
+config. §1's items 1 and 2 and §8's `dominionLoyaltyMin 6 → 4` tuning are now
+historical record, not live behaviour. The **alliance trickle survives
+unchanged** (§9's per-allied-major scaling included) because it is a
+diplomatic faucet, not a territorial one.
+
+`recomputeVp(state)` runs at the end of `startTurn`, after a Location
+resolves in `contest.js`, and once at `createGame` with events suppressed. It
+emits `vp_changed { player, from, to }` on every move in either direction —
+the event feed renders gains in green and losses in the accent colour. The
+win check latches inside `recomputeVp` and is major-only, so a minor can score
+but never win.
+
+**Consequence — VP is now volatile.** Losing a city costs its VP immediately.
+An early land-grab can no longer be coasted on, which was the point, but it
+also means a leader can be knocked *back* below the threshold before their
+turn comes round. That is intended; watch it in play.
+
+**Consequence — minors now score.** Minor factions hold Locations, so they
+have non-zero VP from setup (Croppers seeded on Dambar open at 3, ahead of a
+major's 2). They cannot win, but `powerOf` reads VP, so territory is now
+double-weighted in threat / coalition / vassalage scoring. Flagged, not
+changed.
+
+**Consequence — the trickle is now asymmetric.** Alliance VP accumulates and
+never falls; conquest VP does both. If diplomacy starts feeling dominant,
+this asymmetry is the first thing to look at, ahead of §9's vassal double-dip.
+
+### 10.2 The threshold needs recalibrating per map size — data
+
+Deferred by design call ("we can recalibrate VP later"), but the numbers are
+worth recording now because the smaller boards are mathematically closed:
+
+| map | Locations | total board VP | vs threshold 12 |
+|---|---|---|---|
+| small | 6 | **10** | conquest alone CANNOT win — the whole board is short of the bar |
+| testMap (legacy) | 10 | 19 | need 63% of the board at full Loyalty |
+| medium | 8 | 17 | need 71% |
+| large | 14 | 27 | need 44% |
+| huge | 19 | 32 | need 38% |
+
+Every major opens at exactly 2 VP (its capital). A small board is winnable
+today only via alliance trickle / summit VP on top of near-total conquest.
+Scaling `vpThreshold` with `size.locations` is the obvious lever when this
+gets picked up.
+
+### 10.3 Abilities withdrawn
+
+> "Let's scrap all abilities until we can revisit it. I'm not happy with what
+> currently exists."
+
+`setup.js` no longer assigns `abilityId` to any Location. The roster in
+`content.js` (§3 item 2's ten abilities), the activation verb, the effects,
+and `collectTriggers`' ability branch all remain — nothing is deleted, so
+re-enabling is a one-line change in setup. Because an ability seat used to
+cost a chip slot, **every high / veryHigh Location gets that slot back**:
+`chipSlots` now reads straight from `CONFIG.chipSlotsByValue`. A harness
+check asserts no Location ships with an ability, so this stays deliberate.
+
+### 10.4 Nine new Locations, and rail may not terminate at a sign
+
+The roster grew from 18 to 27. Four are affiliated (a third homeland city per
+major): **Runaway** (Versari), **Witcha** (Goldgrass), **Dulut** (Lakers),
+**Linkin** (Free Plainers). Five are unaffiliated smaller settlements:
+**Restaria**, **Lastgas**, **Overlook** (medium) and **Nosservis**, **Detor**
+(low) — the first `low`-tier Locations actually placed on a board.
+
+> "The 5 new medium and low locations should never have railways linked to
+> them. If a rail has to pass through them to get to another location, that's
+> fine, but they shouldn't terminate there (because they are all based on road
+> signs, not rail)"
+
+Modelled as `noRailTerminus: true` on the def. `setup.js` filters those
+Locations out of `railHubs`, so no rail link can be *built to* them; a link
+between two legitimate hubs whose path crosses their hex is untouched.
+Harness-checked.
+
+**Placement.** `generateLayout` now allocates homeland Locations in **ranked
+bands** — every faction's 2nd-choice city, then every faction's 3rd — and a
+band is all-or-nothing, so no faction ever gets a homeland city a rival was
+denied. Unaffiliated Locations are divisible and fill whatever budget is left.
+Placement distance scales with rank (`near = 1 + rank`, `far = 2 + rank`), so
+the third city sits further out than the second.
+
+Budgets rose to make room: large 10 → **14**, huge 10 → **19**. Without that
+the third home band would never fit on any board. Small (6) and medium (8) are
+unchanged and still have no room for neutral prizes — see
+`playtest-2026-08-15-findings.md` §2. The legacy 30-hex `testMap` is pinned at
+`CONFIG.testMapLocations: 10` so the harness fixtures keep the board they were
+written against.

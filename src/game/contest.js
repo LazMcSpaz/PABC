@@ -17,6 +17,7 @@ import { makeUnit } from "./setup.js";
 import { TECH_NODES, hasTechNode } from "./tech.js";
 import { destroyPost } from "./posts.js";
 import { blockadeAt, blockadeDefense, destroyBlockade } from "./blockades.js";
+import { recomputeVp } from "./victory.js";
 
 const fail = (reason) => ({ ok: false, reason });
 
@@ -373,24 +374,10 @@ function captureLocation(state, loc, victor) {
   // at the reinforced unit's position (allowed past unit cap).
   strandReinforcementsFrom(state, loc.hexId);
 
-  // VP is banked once per Location, on the FIRST capture only —
-  // subsequent recaptures don't re-pay (loc.vpAwarded gates it). The
-  // value comes from LOCATIONS[id].vpReward (1/2/3 by strategic
-  // value). Sets winnerId if this push crosses the threshold.
-  if (!loc.vpAwarded) {
-    const reward = LOCATIONS[loc.locationId]?.vpReward || 0;
-    if (reward > 0) {
-      const p = state.players[victor];
-      p.vp += reward;
-      loc.vpAwarded = true;
-      emit(state, "resource_gained", {
-        player: victor, resource: "VP", amount: reward, source: "capture",
-      });
-      if (p.vp >= CONFIG.vpThreshold && !state.winnerId) {
-        state.winnerId = victor;
-      }
-    }
-  }
+  // No capture bounty any more: VP is HELD, not banked (victory.js). Taking
+  // the place moves its value onto your side of the board and off whoever had
+  // it — recomputed below once control has settled, so a recapture is worth
+  // exactly what holding it is worth, every time.
 
   // Control changed; a Lab on this location may have changed hands or
   // been destroyed — resync Research for everyone (§17.3: tech denial is
@@ -897,7 +884,7 @@ export function runContest(state, { pid, params, ctx = {} }) {
   // — "after the section/raid result is applied"), then attrition.
   if (won) {
     emit(state, "contest_won", { initiator: unit.uid, player: pid, ...detail });
-    if (t.kind === "location") resolveLocationWin(state, pid, t.loc, params);
+    if (t.kind === "location") { resolveLocationWin(state, pid, t.loc, params); recomputeVp(state); }
     else if (t.kind === "raid") onRaidWon(state, pid, t.unit); // standing hook; retreat after attrition
   } else {
     emit(state, "contest_lost", { initiator: unit.uid, player: pid, ...detail });

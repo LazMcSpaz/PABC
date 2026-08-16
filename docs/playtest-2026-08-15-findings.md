@@ -87,3 +87,19 @@ Both invariants are locked by harness checks.
 - **VP is far too slow to threaten.** Best AI total was 3 in 15 rounds against
   a 12 threshold. Either the faucets are too thin or the AI never holds a
   high-value Location long enough to tick Dominion.
+
+## 4. Follow-up (2026-08-16)
+
+- **"VP is far too slow to threaten"** — addressed at the root rather than by
+  widening the faucets. VP is now HELD, not banked: a faction draws a
+  Location's `vpReward` for as long as it holds the place, halved while
+  Loyalty sits at or below half. The capture bounty and both dominion ticks
+  are gone. Every major now opens at 2 (its capital) instead of 0, and the
+  scoreboard tracks the map turn by turn. See `vp-and-actions-design.md` §10.
+- **The threshold is now the bottleneck, not the rate.** Total board VP is 10
+  on small and 17 on medium against a threshold of 12 — a small board cannot
+  be won by conquest at all. Recalibration is deferred by design call; the
+  per-size numbers are tabulated in `vp-and-actions-design.md` §10.2.
+- **Medium-map fairness** (§2) is locked by harness checks and unchanged by
+  the roster growth: medium still seats 8 Locations, all homelands. The new
+  neutral settlements only appear on large (14) and huge (19).

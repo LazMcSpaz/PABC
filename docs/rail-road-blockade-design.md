@@ -69,6 +69,18 @@ party standing anywhere along it severs that link, and a severed link can
 isolate a capital even though the track is still there. That is what keeps a
 railed pact worth attacking.
 
+### Rail never terminates at a sign-named settlement
+
+Design call, 2026-08-16. The five unaffiliated Locations added that day —
+Restaria, Lastgas, Overlook, Nosservis, Detor — are named for misread road
+signage, not stations, so **no rail link may end at them**. They carry
+`noRailTerminus: true` in `content.js`; `setup.js` filters them out of
+`railHubs` before the spanning tree is built, so they can never be an endpoint.
+
+A line between two legitimate hubs whose hex path happens to cross one of them
+is fine and deliberately left alone — track passes through a place, it just
+does not stop there. Harness-checked.
+
 ### Ambush halts — a partial answer to Part 0's gap
 
 Part 1 (a blocker must DETECT the mover before it may halt it) is still

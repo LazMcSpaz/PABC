@@ -9,6 +9,7 @@ import { buildHexGrid, generateLayout, assignTerrainFeatures, assignRoads, assig
 import { recomputeInfluence } from "./influence.js";
 import { recomputeVisibility } from "./visibility.js";
 import { ensureDiplomacy, seedStanding } from "./diplomacy.js";
+import { recomputeVp } from "./victory.js";
 
 // A fresh unit with the full v0.2 field set (§16.3 / plan). `moveRemaining`
 // seeds to base Movement; the owner's Upkeep refreshes it from effective.
@@ -55,7 +56,7 @@ export function createGame({
   const size = (mapSize && CONFIG.mapSizes[mapSize]) || null;
   const grid = buildHexGrid(size ? size.rows : CONFIG.testMap);
   const layout = generateLayout(rng, grid, FACTIONS, LOCATIONS,
-    { locationBudget: size ? size.locations : undefined });
+    { locationBudget: size ? size.locations : CONFIG.testMapLocations });
 
   // chip-instance registry — every chip in play has a uid
   const chips = {};
@@ -87,7 +88,15 @@ export function createGame({
     (hexId) => LOCATIONS[layout.placement[hexId]]?.strategicValue || "medium");
   // Rail: pre-collapse trunk line between the capitals. Generated, never
   // built (docs/rail-road-blockade-design.md §2.4).
-  const rails = assignRails(grid.adjacency, hexes, Object.values(layout.factionStart));
+  // Rail termini. Sign-named settlements (`noRailTerminus`) are never stations
+  // — they grew up around ROAD signage, and a railway had no reason to stop at
+  // a lay-by. A line may still run THROUGH their hex to reach somewhere that
+  // does matter. Capitals are the only hubs today, so this filter changes
+  // nothing yet; it is here so the rule holds if either end of that ever moves.
+  const railHubs = Object.values(layout.factionStart).filter(
+    (hexId) => !LOCATIONS[layout.placement[hexId]]?.noRailTerminus,
+  );
+  const rails = assignRails(grid.adjacency, hexes, railHubs);
 
   // --- players ---
   const players = {};
@@ -103,7 +112,11 @@ export function createGame({
       menace: 0,
       honor: CONFIG.diplomacy.honor.start,
       resource: 0,
+      // `vp` is DERIVED (victory.js): bankedVp + whatever this faction holds
+      // right now. `bankedVp` is the half that only ever goes up — recognition
+      // summits, encounter grants, the alliance trickle.
       vp: 0,
+      bankedVp: 0,
       tech: CONFIG.tech.start,
       actions: { remaining: CONFIG.baseActions, max: CONFIG.baseActions },
       // §17 Tech Wheel. `research` = permanent + Lab-derived (recomputed);
@@ -143,19 +156,16 @@ export function createGame({
       production += CONFIG.capital.productionBonus;
     }
 
-    // Every High / Very High location gets one random ability (§6.3),
-    // and that ability costs the location one of its chip slots.
-    let abilityId = null;
-    if (def.strategicValue === "high" || def.strategicValue === "veryHigh") {
-      const pool = Object.values(ABILITIES).filter(
-        (a) => a.eligibleTier === def.strategicValue || a.eligibleTier === "either",
-      );
-      if (pool.length) abilityId = rng.pick(pool).id;
-    }
-    const chipSlots = Math.max(
-      0,
-      CONFIG.chipSlotsByValue[def.strategicValue] - (abilityId ? 1 : 0),
-    );
+    // Location abilities are WITHDRAWN pending a redesign (2026-08-16). Every
+    // High / Very High Location used to roll one at random from ABILITIES, and
+    // it cost the Location a chip slot. The content did not earn its keep, so
+    // nothing is assigned; the machinery in effects/actions/contest is intact
+    // and a future pass only has to start handing ids out again.
+    //
+    // Side effect worth knowing: every High / Very High Location now keeps the
+    // full CONFIG.chipSlotsByValue count instead of paying one for its ability.
+    const abilityId = null;
+    const chipSlots = CONFIG.chipSlotsByValue[def.strategicValue];
 
     locations[hexId] = {
       hexId,
@@ -348,5 +358,9 @@ export function createGame({
   // so the main contest stream is untouched; human rows start neutral.
   ensureDiplomacy(state);
   seedStanding(state, makeRng((seed ^ 0x517cc1b7) >>> 0));
+  // VP is held, not banked (victory.js) — so every faction opens with whatever
+  // its starting homeland is worth, rather than at zero. Quietly: nobody has
+  // "gained" anything yet.
+  recomputeVp(state, { emitEvents: false });
   return state;
 }

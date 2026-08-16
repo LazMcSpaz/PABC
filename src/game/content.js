@@ -16,25 +16,25 @@
 // chip slots, production or VP.
 export const FACTIONS = {
   versari: {
-    id: "versari", name: "Versari Korad", color: "#3a7d44", affiliatedLocations: ["korad", "dambar"], capital: "korad",
+    id: "versari", name: "Versari Korad", color: "#3a7d44", affiliatedLocations: ["korad", "dambar", "runaway"], capital: "korad",
     tier: "major", scope: "global", playable: true,
     temperament: "schemer", aggression: 0.4, trust: 0.55, grudge: 0.4, sociability: 0.8,
     victoryLean: "diplomacy", expansion: 0.5,
   },
   goldgrass: {
-    id: "goldgrass", name: "Goldgrass Coalition", color: "#d8a72b", affiliatedLocations: ["kansit", "omara"], capital: "kansit",
+    id: "goldgrass", name: "Goldgrass Coalition", color: "#d8a72b", affiliatedLocations: ["kansit", "omara", "witcha"], capital: "kansit",
     tier: "major", scope: "global", playable: true,
     temperament: "pacifist", aggression: 0.1, trust: 0.9, grudge: 0.25, sociability: 0.95,
     victoryLean: "diplomacy", expansion: 0.3,
   },
   lakers: {
-    id: "lakers", name: "Grand Lakers", color: "#21406e", affiliatedLocations: ["chigan", "droit"], capital: "droit",
+    id: "lakers", name: "Grand Lakers", color: "#21406e", affiliatedLocations: ["droit", "chigan", "dulut"], capital: "droit",
     tier: "major", scope: "global", playable: true,
     temperament: "warlord", aggression: 0.9, trust: 0.6, grudge: 0.7, sociability: 0.2,
     victoryLean: "conquest", expansion: 0.9,
   },
   plainers: {
-    id: "plainers", name: "Free Plainers", color: "#c43b35", affiliatedLocations: ["the-shelf", "tin-town"], capital: "tin-town",
+    id: "plainers", name: "Free Plainers", color: "#c43b35", affiliatedLocations: ["tin-town", "the-shelf", "linkin"], capital: "tin-town",
     tier: "major", scope: "global", playable: true,
     temperament: "opportunist", aggression: 0.5, trust: 0.3, grudge: 0.3, sociability: 0.65,
     victoryLean: "opportunist", expansion: 0.6,
@@ -111,6 +111,26 @@ export const LOCATIONS = {
   "tin-town": { id: "tin-town", name: "Tin Town", strategicValue: "high", affiliation: "plainers", production: [3, 3], vpReward: 2 },
   concordan: { id: "concordan", name: "Concordan", strategicValue: "medium", affiliation: null, production: [2, 3], vpReward: 1 },
   erport: { id: "erport", name: "Erport", strategicValue: "medium", affiliation: null, production: [2, 3], vpReward: 1 },
+
+  // Third homes — one per faction, so the group stays a whole fairness group
+  // (board.js generateLayout admits them all or none).
+  runaway: { id: "runaway", name: "Runaway", strategicValue: "high", affiliation: "versari", production: [3, 4], vpReward: 2 },
+  witcha: { id: "witcha", name: "Witcha", strategicValue: "high", affiliation: "goldgrass", production: [3, 4], vpReward: 2 },
+  dulut: { id: "dulut", name: "Dulut", strategicValue: "high", affiliation: "lakers", production: [3, 4], vpReward: 2 },
+  linkin: { id: "linkin", name: "Linkin", strategicValue: "high", affiliation: "plainers", production: [3, 4], vpReward: 2 },
+
+  // Sign-named settlements. These grew up around ROAD signage that the
+  // survivors read as a place name — REST AREA, LAST GAS, SCENIC OVERLOOK, NO
+  // SERVICES, DETOUR — which is why `noRailTerminus` is set on every one of
+  // them: a railway never had reason to stop at a lay-by. A line may still run
+  // THROUGH their hex on its way somewhere that matters.
+  restaria: { id: "restaria", name: "Restaria", strategicValue: "medium", affiliation: null, production: [2, 3], vpReward: 1, noRailTerminus: true },
+  lastgas: { id: "lastgas", name: "Lastgas", strategicValue: "medium", affiliation: null, production: [2, 3], vpReward: 1, noRailTerminus: true },
+  overlook: { id: "overlook", name: "Overlook", strategicValue: "medium", affiliation: null, production: [2, 3], vpReward: 1, noRailTerminus: true },
+  // The first `low` Locations in the set: one chip slot, a garrison of 4, and
+  // little to lose. Cheap to take and cheap to give up again.
+  nosservis: { id: "nosservis", name: "Nosservis", strategicValue: "low", affiliation: null, production: [1, 2], vpReward: 1, noRailTerminus: true },
+  detor: { id: "detor", name: "Detor", strategicValue: "low", affiliation: null, production: [1, 2], vpReward: 1, noRailTerminus: true },
 };
 
 // Upgrade chips — §20 makes these the whole economy: built at a Location

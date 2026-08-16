@@ -18,6 +18,7 @@ import { adjustStanding } from "./standing.js";
 import { pressureSource } from "./influence.js";
 import { hasTechNode } from "./tech.js";
 import { chargePostUpkeep } from "./posts.js";
+import { bankVp, recomputeVp } from "./victory.js";
 import { CHIPS, LOCATIONS, ABILITIES, factionDef } from "./content.js";
 
 // Sum a numeric chip field across a Location's installed, non-dormant
@@ -155,59 +156,27 @@ export function tickLoyalty(state, pid) {
   recomputeVisibility(state, pid, { emitEvents: false });
 }
 
-// docs/vp-and-actions-design.md §1 — the repeatable VP faucets, awarded at
-// the player's Upkeep (after the Loyalty tick so a city that just reached
-// the rung counts this turn).
-function dominionQualifies(state, loc, beneficiary) {
-  const def = LOCATIONS[loc.locationId];
-  if (!def) return false;
-  if (def.strategicValue !== "high" && def.strategicValue !== "veryHigh") return false;
-  if (def.affiliation === beneficiary) return false; // your homeland never ticks
-  const loy = loc.loyalty == null ? CONFIG.loyalty.ceiling : loc.loyalty;
-  return loy >= CONFIG.victory.dominionLoyaltyMin;
-}
-
+// The repeatable VP faucet, awarded at the player's Upkeep.
+//
+// DOMINION IS GONE. VP is held, not ticked (victory.js): a city you hold is
+// already worth its value every moment you hold it, so paying again each
+// Upkeep counted the same ground twice and made an early land-grab impossible
+// to catch up with. What remains is the one faucet that was never about
+// territory.
 function awardVp(state, pid, amount, source) {
   if (amount <= 0) return;
-  const p = state.players[pid];
-  p.vp += amount;
-  emit(state, "resource_gained", { player: pid, resource: "VP", amount, source });
-  // Only MAJOR factions race the victory threshold — a seeded minor can
-  // bank VP (captures etc.) but never wins the game.
-  if (p.vp >= CONFIG.vpThreshold && !state.winnerId && factionDef(pid)?.tier === "major") {
-    state.winnerId = pid;
-  }
+  bankVp(state, pid, amount, source);
 }
 
 function tickVictoryFaucets(state, pid) {
-  // The victory faucets are the MAJORS' race — seeded minors hold their
-  // ground but don't tick dominion or collect the alliance trickle
-  // (playtest log: Croppers/Dambarans were quietly accruing dominion VP).
+  // The trickle is the MAJORS' race — seeded minors hold ground but never
+  // collect it.
   if (factionDef(pid)?.tier !== "major") return;
-  // Foreign dominion — cities you hold yourself. "Hold" means outright OR
-  // by majority: a besieged city whose people are still loyal to you is
-  // still yours to draw prestige from (and without this, a city stuck in
-  // majority-limbo silently switched the faucet off).
-  let dominion = 0;
-  for (const loc of Object.values(state.locations)) {
-    if (holdsLocation(loc, pid) && dominionQualifies(state, loc, pid)) dominion += 1;
-  }
-  awardVp(state, pid, dominion * CONFIG.victory.dominionPerCity, "dominion");
-  // Vassal dominion — qualifying cities your vassals hold tick for YOU
-  // (still never your own affiliated cities, even in a vassal's hands).
-  let vassalCities = 0;
-  for (const vid of vassalsOf(state, pid)) {
-    for (const loc of Object.values(state.locations)) {
-      if (holdsLocation(loc, vid) && dominionQualifies(state, loc, pid)) vassalCities += 1;
-    }
-  }
-  awardVp(state, pid, vassalCities * CONFIG.victory.dominionPerCity, "vassal-dominion");
   // Alliance trickle — you must be pacted with a MAJORITY of the other
   // surviving MAJORS to draw anything (seeded minors don't move the
-  // denominator), and past that bar every allied major pays. The flat
-  // version was diplomacy's structural weakness: Dominion scales with each
-  // city you take, but a second, third, fourth ally added nothing, so the
-  // peaceful route had a hard ceiling the conquest route did not.
+  // denominator), and past that bar every allied major pays. Unlike territory
+  // this one still ACCUMULATES: an alliance you held and lost was still held.
+  // Worth watching now that conquest VP is volatile and this is not.
   const others = state.turnOrder.filter(
     (f) => f !== pid && !state.players[f]?.eliminated && factionDef(f)?.tier === "major",
   );
@@ -396,6 +365,9 @@ export function startTurn(state) {
   // this turn, and a blockade that completed during the economy step (rail doc
   // §3.4 funds construction out of Output) starts.
   recomputeVisibility(state, pid, { emitEvents: false });
+  // VP is held, not banked — Loyalty ticked and Control may have peeled, and a
+  // city sliding under half its Loyalty is worth half as much from now on.
+  recomputeVp(state);
 
   // Preparation (the optional stat-buy step) is folded in once Layer 3
   // gives it something to do; for now the turn opens straight into Main.

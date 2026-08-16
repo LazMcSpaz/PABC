@@ -414,19 +414,36 @@ export function generateLayout(rng, grid, factions, locations, { locationBudget 
   // 10 → everything. Only the 8 case changes, and it is the one that was unfair.
   const fids = Object.keys(factions);
   const capitals = fids.map((f) => factions[f].capital).filter(Boolean);
-  const seconds = fids
-    .map((f) => (factions[f].affiliatedLocations || []).find((l) => l !== factions[f].capital))
-    .filter(Boolean);
+  // Homes beyond the capital, banded by RANK: band 0 is every faction's second
+  // home, band 1 every faction's third, and so on. Ranking rather than
+  // hard-coding "seconds" means a faction gaining a fourth affiliated Location
+  // extends the sequence instead of silently unbalancing it.
+  const homeBands = [];
+  for (const f of fids) {
+    const rest = (factions[f].affiliatedLocations || []).filter((l) => l !== factions[f].capital);
+    rest.forEach((id, rank) => { (homeBands[rank] ||= []).push(id); });
+  }
   const unaffiliated = Object.values(locations).filter((l) => !l.affiliation).map((l) => l.id);
-  const total = capitals.length + seconds.length + unaffiliated.length;
+  const total = capitals.length + homeBands.flat().length + unaffiliated.length;
   const budget = Math.max(capitals.length, Math.min(locationBudget ?? total, total));
 
   const inPlay = new Set(capitals); // capitals are never optional
   let room = budget - capitals.length;
-  for (const group of [seconds, unaffiliated]) {
-    if (group.length === 0 || group.length > room) continue;
-    for (const id of group) inPlay.add(id);
-    room -= group.length;
+  // Each home band is ALL-OR-NOTHING: half a band means some factions get an
+  // extra city and others do not, which is exactly the unfairness this replaced.
+  for (const band of homeBands) {
+    if (band.length === 0 || band.length > room) continue;
+    for (const id of band) inPlay.add(id);
+    room -= band.length;
+  }
+  // The neutral prizes are NOT a fairness group — they belong to nobody, so a
+  // subset is perfectly fair as long as it is deterministic. Taking them
+  // all-or-nothing would mean that authoring more of them SHRINKS the big
+  // boards, which is the opposite of what more content should do.
+  for (const id of unaffiliated) {
+    if (room <= 0) break;
+    inPlay.add(id);
+    room -= 1;
   }
 
   const placement = {}; // hexId -> locationId
@@ -449,24 +466,31 @@ export function generateLayout(rng, grid, factions, locations, { locationBudget 
       : [...affiliated].sort(
           (p, q) => VALUE_RANK[locations[p].strategicValue] - VALUE_RANK[locations[q].strategicValue],
         )[0];
-    const other = affiliated.find((l) => l !== start);
     placement[anchor] = start;
     factionStart[fid] = anchor;
     used.add(anchor);
 
-    // The second home Location only exists on boards that budgeted for it. On
-    // a small map a faction holds its capital and nothing else, which is the
-    // point: fewer objectives, more ground between them.
-    if (!other || !inPlay.has(other)) return;
-    let candidates = hexIds.filter(
-      (id) => !used.has(id) && distFrom[anchor][id] >= 1 && distFrom[anchor][id] <= 2,
-    );
-    if (candidates.length === 0) {
-      candidates = hexIds.filter((id) => !used.has(id) && distFrom[anchor][id] <= 3);
-    }
-    const partner = rng.pick(candidates);
-    placement[partner] = other;
-    used.add(partner);
+    // The rest of the homeland, in rank order, each dropped near the anchor.
+    // A faction's second home sits closest; the third pushes a ring further
+    // out so a homeland spreads rather than stacking on one spot. Boards that
+    // did not budget for a band simply do not reach it — on a small map a
+    // faction holds its capital and nothing else, which is the point: fewer
+    // objectives, more ground between them.
+    const homeland = affiliated.filter((l) => l !== start && inPlay.has(l));
+    homeland.forEach((locId, rank) => {
+      const near = 1 + rank;      // 2nd home within 1-2, 3rd within 2-3, …
+      const far = 2 + rank;
+      let candidates = hexIds.filter(
+        (id) => !used.has(id) && distFrom[anchor][id] >= near && distFrom[anchor][id] <= far,
+      );
+      if (candidates.length === 0) {
+        candidates = hexIds.filter((id) => !used.has(id) && distFrom[anchor][id] <= far + 1);
+      }
+      if (candidates.length === 0) return; // board too small to seat it
+      const partner = rng.pick(candidates);
+      placement[partner] = locId;
+      used.add(partner);
+    });
   });
 
   // unaffiliated Locations — biased toward hexes far from every anchor

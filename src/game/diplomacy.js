@@ -18,6 +18,7 @@ import {
   revealRegion, applySharedVision, recomputeVisibilityFor, isUnitVisibleTo,
 } from "./visibility.js";
 import { recomputeResearch } from "./stats.js";
+import { recomputeVp } from "./victory.js";
 
 // --- state ----------------------------------------------------------
 export function ensureDiplomacy(state) {
@@ -1210,9 +1211,11 @@ export function checkRecognitionVictory(state) {
       for (const backer of sc.contributors) {
         if (ever.includes(backer)) continue;
         ever.push(backer);
-        p.vp += rc.summitVp;
+        // Banked, not held — a summit you were granted stays granted.
+        p.bankedVp = (p.bankedVp || 0) + rc.summitVp;
         emit(state, "recognition_summit", { player: pid, backer, vp: rc.summitVp });
-        if (p.vp >= CONFIG.vpThreshold && !state.winnerId) { state.winnerId = pid; return; }
+        recomputeVp(state);
+        if (state.winnerId) return;
       }
     }
     if (sc.total >= rc.threshold) { state.winnerId = pid; return; }

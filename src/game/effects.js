@@ -57,6 +57,15 @@ const EFFECTS = {
         });
         continue;
       }
+      // VP granted by an encounter or quest is BANKED, not held (victory.js):
+      // it is not tied to a place, so it survives losing one. Both `bankedVp`
+      // and the `vp` total move by the same amount, which keeps the
+      // vp === bankedVp + settlementVp invariant true without importing
+      // victory.js — events.js already imports THIS module, so that would be a
+      // cycle. The next recomputeVp lands on the identical number.
+      if (e.resource === "VP") {
+        p.bankedVp = Math.max(0, (p.bankedVp || 0) + e.amount);
+      }
       const key = POOL_KEY[e.resource] || "resource";
       p[key] = Math.max(0, p[key] + e.amount);
       emit(state, e.amount >= 0 ? "resource_gained" : "resource_spent", {

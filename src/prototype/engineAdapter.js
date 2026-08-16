@@ -107,6 +107,13 @@ export function ensureUiConstantsSynced() {
 
   for (const [engineId, def] of Object.entries(ENGINE_LOCATIONS)) {
     const uiId = engineLocationIdToUi(engineId);
+    // Backfill anything the UI table has never heard of. Adding a Location to
+    // the engine and forgetting the UI row used to render a nameless city; now
+    // it renders with engine-correct numbers and the content id as its name
+    // until someone writes a nicer one.
+    if (!UI_LOCATIONS[uiId]) {
+      UI_LOCATIONS[uiId] = { id: uiId, name: def.name || uiId, ability: null };
+    }
     const uiDef = UI_LOCATIONS[uiId];
     if (!uiDef) continue;
     uiDef.garrison = CONFIG.garrisonByValue[def.strategicValue] ?? uiDef.garrison;

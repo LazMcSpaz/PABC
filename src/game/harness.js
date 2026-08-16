@@ -30,6 +30,7 @@ import {
   truceBetween, makePeace,
 } from "./diplomacy.js";
 import { holderOf, controlLevel, holdsLocation } from "./control.js";
+import { recomputeVp, settlementVp, locationVp } from "./victory.js";
 import { setStanding } from "./standing.js";
 import { factionDef, MINOR_FACTIONS } from "./content.js";
 import { activePlayerId } from "./targeting.js";
@@ -251,6 +252,10 @@ line(`  upgrade Labs -> ${up.ok ? `ok (now ${game.chips[labUid]?.chipId})` : "bl
 
 line("\nACTIVATE");
 const korad = Object.values(game.locations).find((l) => l.locationId === "korad");
+// Setup no longer hands out abilities (withdrawn 2026-08-16 pending a
+// redesign), so the walkthrough assigns one to keep exercising the machinery —
+// which is intact and waiting for content.
+korad.abilityId = korad.abilityId || "staging-ground";
 const koradAbility = ABILITIES[korad.abilityId];
 const before = {
   scrap: game.players[me].resource, vp: game.players[me].vp,
@@ -736,6 +741,48 @@ line("\n  [Setup] every faction gets the same number of home Locations");
   const wanted = ["small", "medium", "large", "huge"].map((size) => CONFIG.mapSizes[size].locations);
   check(`the Location budget is spent in full at every size (${placed.join("/")} of ${wanted.join("/")})`,
     placed.every((n, i) => n === wanted[i]));
+}
+
+// Content rules that are easy to break by adding a Location and forgetting.
+line("\n  [Content] Location rules that must hold at every board size");
+{
+  const sizes = ["small", "medium", "large", "huge"];
+  const games = sizes.map((size) => ({ size, g: createGame({ seed, mapSize: size }) }));
+
+  // Sign-named settlements grew up around ROAD signage, so a railway never had
+  // reason to STOP at one. Passing through their hex is fine.
+  let badTerminus = [];
+  for (const { g } of games) {
+    for (const link of g.board.rails || []) {
+      for (const end of [link.a, link.b]) {
+        const id = g.locations[end]?.locationId;
+        if (id && LOCATIONS[id]?.noRailTerminus) badTerminus.push(id);
+      }
+    }
+  }
+  check("rail never terminates at a sign-named settlement", badTerminus.length === 0, badTerminus);
+
+  // …and the rule is only meaningful if such places actually reach a board.
+  const huge = games.find((x) => x.size === "huge").g;
+  const signNamed = Object.values(huge.locations)
+    .filter((l) => LOCATIONS[l.locationId]?.noRailTerminus);
+  check(`sign-named settlements do reach the big boards (${signNamed.length} on huge)`,
+    signNamed.length >= 3);
+
+  // Abilities are withdrawn pending a redesign — nothing should carry one, and
+  // High/VeryHigh Locations get their chip slot back.
+  const withAbility = games.flatMap(({ g }) =>
+    Object.values(g.locations).filter((l) => l.abilityId).map((l) => l.locationId));
+  check("no Location is assigned an ability", withAbility.length === 0, withAbility);
+  const slotShort = Object.values(huge.locations).filter(
+    (l) => l.chipSlots !== CONFIG.chipSlotsByValue[LOCATIONS[l.locationId].strategicValue]);
+  check("every Location keeps its full chip-slot count now nothing pays for an ability",
+    slotShort.length === 0);
+
+  // Every engine Location must be renderable — the UI keeps its own table.
+  check("the `low` tier is in use (Nosservis / Detor)",
+    Object.values(huge.locations).some(
+      (l) => LOCATIONS[l.locationId].strategicValue === "low"));
 }
 
 line("\n  [Route] the move path follows real movement rules");
@@ -4164,35 +4211,43 @@ line("\n  [Phase 11] text-token resolver");
     loc.loyalty = loyalty;
   };
 
-  // -- foreign dominion ticks; homeland and low loyalty never do.
+  // -- VP is HELD, not ticked: taking a city moves its value across, losing it
+  // moves it back, and Loyalty scales what it is worth while you have it.
   const gD = createGame({ seed: 141 });
   startTurn(gD);
   const dPid = gD.turnOrder[gD.activeIndex];
   const prize = foreignCity(gD, dPid);
-  // Rung-relative so the fixture survives re-tuning of the bar.
-  const RUNG = CONFIG.victory.dominionLoyaltyMin;
-  grabFor(gD, dPid, prize, RUNG);
-  const sentry = Object.values(gD.units).find((u) => u.owner === dPid);
-  sentry.node = prize.hexId; // garrisoned: loyalty holds/rises through the tick
-  const vp0 = gD.players[dPid].vp;
-  cycleTo(gD, dPid);
-  check("dominion: a foreign high city at the Loyalty rung ticks +1 VP",
-    gD.players[dPid].vp === vp0 + 1);
-  prize.loyalty = RUNG - 2; // below the rung (rises 1 at Upkeep — still short)
-  const vp1 = gD.players[dPid].vp;
-  cycleTo(gD, dPid);
-  check("dominion: below the Loyalty rung there is no tick",
-    gD.players[dPid].vp === vp1);
-  // Homeland check: pid's own affiliated city never ticks even fully held.
-  const home14 = Object.values(gD.locations).find(
-    (l) => LOCATIONS[l.locationId]?.affiliation === dPid && l.controller === dPid);
-  check("dominion: your own affiliated city never qualifies",
-    !!home14 && (() => {
-      const before = gD.players[dPid].vp;
-      prize.loyalty = 0;
-      cycleTo(gD, dPid);
-      return gD.players[dPid].vp === before;
-    })());
+  const rival = holderOf(prize);
+  const prizeWorth = LOCATIONS[prize.locationId].vpReward;
+  const before = gD.players[dPid].vp;
+  const rivalBefore = rival ? gD.players[rival].vp : null;
+  grabFor(gD, dPid, prize, CONFIG.loyalty.ceiling); // fully settled
+  recomputeVp(gD);
+  check("held VP: taking a settled city is worth its full value immediately",
+    gD.players[dPid].vp === before + prizeWorth);
+  check("held VP: and the same value leaves whoever held it",
+    rival === null || gD.players[rival].vp === rivalBefore - prizeWorth);
+
+  prize.loyalty = Math.floor(CONFIG.loyalty.ceiling / 2); // exactly half — not OVER
+  recomputeVp(gD);
+  check("held VP: under half Loyalty a city is worth half, rounded down",
+    gD.players[dPid].vp === before + Math.floor(prizeWorth / 2));
+
+  prize.loyalty = CONFIG.loyalty.ceiling / 2 + 1; // over half
+  recomputeVp(gD);
+  check("held VP: over half Loyalty restores the full value",
+    gD.players[dPid].vp === before + prizeWorth);
+
+  // Losing it takes the VP away again — the part a banked model could not do.
+  grabFor(gD, rival || gD.turnOrder.find((f) => f !== dPid), prize, CONFIG.loyalty.ceiling);
+  recomputeVp(gD);
+  check("held VP: losing the city loses the VP", gD.players[dPid].vp === before);
+
+  // Your own homeland counts now — dominion's "never your own land" rule went
+  // with the faucet. A faction opens holding something, so it opens above zero.
+  check("held VP: a faction's own homeland is worth VP, so nobody opens on 0",
+    gD.turnOrder.filter((f) => factionDef(f)?.tier === "major")
+      .every((f) => gD.players[f].vp > 0));
 
   // -- content invariant: the rail-incompatibility flag matches the rule.
   // The rule (2-slot unit chips can't use rail) is the source of truth; the
@@ -4204,39 +4259,9 @@ line("\n  [Phase 11] text-token resolver");
   check("rail-incompatible chips are exactly the 2-slot unit chips",
     railMismatch.length === 0, railMismatch.map((c) => c.id));
 
-  // -- vassal dominion: a vassal's qualifying city ticks for the overlord.
-  const gV = createGame({ seed: 142 });
-  startTurn(gV);
-  const lord = gV.turnOrder[gV.activeIndex];
-  ensureDiplomacy(gV);
-  const vassal = gV.turnOrder.find((f) => f !== lord);
-  gV.diplomacy.vassals[vassal] = lord;
-  // pre-mark the summit dividend as paid so this check measures ONLY the
-  // dominion faucet (summit VP has its own Phase 19 checks).
-  gV.diplomacy.recognizedEver = { [lord]: [vassal] };
-  const fief = foreignCity(gV, lord);
-  grabFor(gV, vassal, fief, 8);
-  const vGuard = Object.values(gV.units).find((u) => u.owner === vassal);
-  vGuard.node = fief.hexId;
-  const lordVp = gV.players[lord].vp;
-  // Count what the vassal actually holds that qualifies FOR THE LORD rather
-  // than asserting a bare +1: the vassal's own capital is a high city and is
-  // not the lord's homeland, so it legitimately ticks too. Hardcoding 1 made
-  // this fixture depend on the content table (it broke the day a capital was
-  // promoted from medium to high), when what it means to test is that vassal
-  // holdings pay the overlord per qualifying city.
-  const RUNG_V = CONFIG.victory.dominionLoyaltyMin;
-  const qualifyingForLord = Object.values(gV.locations).filter((l) => {
-    const d = LOCATIONS[l.locationId];
-    if (!d || holderOf(l) !== vassal) return false;
-    if (d.strategicValue !== "high" && d.strategicValue !== "veryHigh") return false;
-    if (d.affiliation === lord) return false; // the lord's homeland never ticks
-    return (l.loyalty == null ? CONFIG.loyalty.ceiling : l.loyalty) >= RUNG_V;
-  }).length;
-  cycleTo(gV, lord);
-  check("vassal dominion: a vassal's qualifying cities tick for the overlord",
-    qualifyingForLord >= 1 &&
-    gV.players[lord].vp === lordVp + qualifyingForLord * CONFIG.victory.dominionPerCity);
+  // Vassal dominion went with the faucet: a vassal's cities are the VASSAL's
+  // holdings and score for the vassal. An overlord's reward is tribute and the
+  // recognition summit, not a share of ground it does not hold.
 
   // -- alliance trickle: a majority of the other MAJORS unlocks it, and
   // past that bar it pays PER allied major (breadth scales, as Dominion
@@ -4641,8 +4666,17 @@ line("\n  [Phase 11] text-token resolver");
   const g2 = createGame({ seed: 192, humanFactionId: "versari", minors: ["croppers"] });
   ensureDiplomacy(g2);
   const lord = "goldgrass", minor = "croppers";
-  // make the minor clearly weaker than the lord (patronage keeps the power gate)
+  // Make the minor clearly weaker than the lord (patronage keeps the power
+  // gate). Land now counts twice over — territory AND the VP it is worth, since
+  // VP is held — so a client with no army but a fat city is not weak. Strip
+  // both: no units, no holdings.
   for (const u of Object.values(g2.units)) if (u.owner === minor) delete g2.units[u.uid];
+  for (const l of Object.values(g2.locations)) {
+    if (holderOf(l) !== minor) continue;
+    l.controller = null; l.loyaltyOwner = null; l.loyalty = null;
+    l.sections = l.sections.map(() => "neutral");
+  }
+  recomputeVp(g2);
   setStanding(g2, minor, lord, CONFIG.diplomacy.tiers.friendly + 1, "test");
   for (const o of factionIds(g2)) {
     if (o !== minor && o !== lord) setStanding(g2, minor, o, 0, "test");
@@ -4771,7 +4805,15 @@ line("\n  [Phase 11] text-token resolver");
   // --- rebellion cooldown: no same-round re-vassalizing ---
   const g4 = createGame({ seed: 204, humanFactionId: "versari", minors: ["tempest"] });
   ensureDiplomacy(g4);
+  // Same as the patronage fixture: a client with no army but a rich seat is not
+  // weak now that VP is held, so strip its holdings too before the power gate.
   for (const u of Object.values(g4.units)) if (u.owner === "tempest") delete g4.units[u.uid];
+  for (const l of Object.values(g4.locations)) {
+    if (holderOf(l) !== "tempest") continue;
+    l.controller = null; l.loyaltyOwner = null; l.loyalty = null;
+    l.sections = l.sections.map(() => "neutral");
+  }
+  recomputeVp(g4);
   vassalize(g4, "lakers", "tempest", "test");
   g4.diplomacy.resentment.tempest = 99;
   runDiplomacyRound(g4);

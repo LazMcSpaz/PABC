@@ -68,6 +68,18 @@ export const LOCATIONS = {
   erport: { id: "erport", name: "Erport", value: "medium", vp: 2, garrison: 4, chipSlots: 2, production: 2, ability: "Airfield — once per turn, redeploy a unit you control to any location you fully hold." },
   concordan: { id: "concordan", name: "Concordan", value: "medium", vp: 2, garrison: 5, chipSlots: 2, production: 2, ability: null },
   tinTown: { id: "tinTown", name: "Tin Town", value: "high", vp: 3, garrison: 6, chipSlots: 3, production: 3, ability: null },
+  // 2026-08-16 content pass. Numeric fields are re-derived from the engine at
+  // load (ensureUiConstantsSynced), so these are placeholders for anything the
+  // engine does not own — the name is the part that matters here.
+  runaway: { id: "runaway", name: "Runaway", value: "high", vp: 2, garrison: 8, chipSlots: 3, production: 3, ability: null },
+  witcha: { id: "witcha", name: "Witcha", value: "high", vp: 2, garrison: 8, chipSlots: 3, production: 3, ability: null },
+  dulut: { id: "dulut", name: "Dulut", value: "high", vp: 2, garrison: 8, chipSlots: 3, production: 3, ability: null },
+  linkin: { id: "linkin", name: "Linkin", value: "high", vp: 2, garrison: 8, chipSlots: 3, production: 3, ability: null },
+  restaria: { id: "restaria", name: "Restaria", value: "medium", vp: 1, garrison: 6, chipSlots: 2, production: 2, ability: null },
+  lastgas: { id: "lastgas", name: "Lastgas", value: "medium", vp: 1, garrison: 6, chipSlots: 2, production: 2, ability: null },
+  overlook: { id: "overlook", name: "Overlook", value: "medium", vp: 1, garrison: 6, chipSlots: 2, production: 2, ability: null },
+  nosservis: { id: "nosservis", name: "Nosservis", value: "low", vp: 1, garrison: 4, chipSlots: 1, production: 1, ability: null },
+  detor: { id: "detor", name: "Detor", value: "low", vp: 1, garrison: 4, chipSlots: 1, production: 1, ability: null },
 };
 
 // Chip family tints — orange = unit upgrade, teal = location upgrade.
