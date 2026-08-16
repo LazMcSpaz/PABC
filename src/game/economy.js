@@ -163,9 +163,36 @@ export function stationedUnitWithBay(state, loc, slots, statType) {
   return null;
 }
 
+// Rail doc §2.2 — where this Location's idle build throughput is being sent, or
+// null. Four gates, all from the doc:
+//
+//   * opt-in: `poolTarget` is set by the player, never inferred;
+//   * DIRECT pairs only — A↔B and B↔C both railed does not let A feed C. Rail
+//     would otherwise make every build in a large empire instant, and the
+//     mechanic stops being legible as "these two cities share";
+//   * §2.3 access — you may use a link only if you hold BOTH its stations;
+//   * per-hex interruption — a line is track, so anyone parked on it cuts it.
+//
+// Returns `{ dest, cut }`; `cut` names the hex that severed it, so the caller
+// can say what happened rather than silently pooling nothing.
+function railPoolRecipient(state, loc) {
+  const target = loc.poolTarget;
+  if (!target || target === loc.hexId) return null;
+  const dest = state.locations[target];
+  const pid = loc.controller;
+  if (!dest || !pid || dest.controller !== pid) return null;
+  const link = (state.board.rails || []).find(
+    (l) => (l.a === loc.hexId && l.b === target) || (l.b === loc.hexId && l.a === target),
+  );
+  if (!link) return null;
+  const isCut = supplyCutter(state, pid);
+  return { dest, cut: link.path.find((h) => isCut(h)) || null };
+}
+
 // Apply the guns/butter split for one Location at Upkeep (§20.3), advance /
-// complete its active build (§20.4 / §20.5), and pay for any blockade drawing
-// on it (rail doc §3.4). Returns the scrap banked.
+// complete its active build (§20.4 / §20.5), pay for any blockade drawing on it
+// (rail doc §3.4), and pool anything left down its rail link (§2.2). Returns
+// the scrap banked.
 //
 // `sites` are the construction sites this Location funds — already filtered to
 // ones with a live builder and an uncut road (blockades.js).
@@ -176,9 +203,21 @@ function processLocationEconomy(state, loc, { partial = false, sites = [] } = {}
   if (partial) output = Math.floor(output * CONFIG.economy.partialOutputScale);
   loc.output = output; // cache the derived value for the HUD
   const ab = loc.activeBuild;
-  // Nothing to build, here or down the road → the whole Output banks as liquid
-  // scrap (construction throughput has nowhere to go, so it is never wasted).
-  if (!ab && !sites.length) return output;
+
+  // §2.2 — a settlement only pools while it has nothing of its own under
+  // construction; its own build always claims its output first.
+  const pool = railPoolRecipient(state, loc);
+  if (pool?.cut) {
+    // "no partial credit": a cut line pools NOTHING this turn, and the output
+    // banks exactly as it would with no pact at all. Emitted because a build
+    // that quietly stops arriving is indistinguishable from a bug.
+    emit(state, "pool_interrupted", { from: loc.hexId, to: pool.dest.hexId, at: pool.cut });
+  }
+  const pooling = !!pool && !pool.cut && !ab;
+
+  // Nothing to build, here or down the road or down the line → the whole Output
+  // banks as liquid scrap (throughput has nowhere to go, so it is never wasted).
+  if (!ab && !sites.length && !pooling) return output;
 
   const f = Math.max(0, Math.min(1, loc.buildSlider ?? CONFIG.economy.defaultSlider));
   const scrapGain = Math.floor((1 - f) * output);
@@ -208,6 +247,18 @@ function processLocationEconomy(state, loc, { partial = false, sites = [] } = {}
       if (buildGain <= 0) break;
       buildGain = creditBlockade(state, s.blockade, buildGain);
     }
+  }
+
+  // §2.2 — whatever the blockades did not take goes down the rail. After
+  // blockade funding by the same reasoning as §3.4: a structure answering
+  // something on the map outranks a gift to a neighbour.
+  if (pooling && buildGain > 0) {
+    pool.dest.buildProgress = (pool.dest.buildProgress || 0) + buildGain;
+    emit(state, "production_pooled", {
+      from: loc.hexId, to: pool.dest.hexId, amount: buildGain,
+    });
+    completeBuildIfDone(state, pool.dest);
+    buildGain = 0;
   }
 
   loc.buildProgress = (loc.buildProgress || 0) + buildGain;

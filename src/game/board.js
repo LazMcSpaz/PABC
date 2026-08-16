@@ -395,20 +395,39 @@ export function generateLayout(rng, grid, factions, locations, { locationBudget 
     anchors.push(best);
   }
 
-  // Which named Locations are in play at this board size. The order is
-  // deliberate and faction-symmetric: every capital, then the unaffiliated
-  // prizes, then every faction's second home. Truncating anywhere in that
-  // sequence leaves the factions equal to each other, which truncating a
-  // shuffled list would not.
+  // Which named Locations are in play at this board size.
+  //
+  // These come in FAIRNESS GROUPS, and a group is all-or-nothing. Every capital
+  // is one Location per faction; every second home is one Location per faction;
+  // the unaffiliated prizes belong to nobody. Take part of a group and the
+  // factions stop being equal — which is exactly what used to happen: the list
+  // was concatenated and truncated flat, so a budget of 8 took all 4 capitals,
+  // both prizes, and then the FIRST TWO second homes. Versari and Goldgrass got
+  // a homeland pair and Lakers and Plainers got one city each, on every seed
+  // (docs/playtest-2026-08-15-findings.md).
+  //
+  // So groups are now admitted whole or not at all, in priority order. Second
+  // homes outrank the neutral prizes because a homeland pair is what makes two
+  // factions comparable, while a prize belongs to whoever reaches it first.
+  //
+  // Budgets land as: 6 → capitals + prizes; 8 → capitals + second homes;
+  // 10 → everything. Only the 8 case changes, and it is the one that was unfair.
   const fids = Object.keys(factions);
   const capitals = fids.map((f) => factions[f].capital).filter(Boolean);
   const seconds = fids
     .map((f) => (factions[f].affiliatedLocations || []).find((l) => l !== factions[f].capital))
     .filter(Boolean);
   const unaffiliated = Object.values(locations).filter((l) => !l.affiliation).map((l) => l.id);
-  const order = [...capitals, ...unaffiliated, ...seconds];
-  const budget = Math.max(capitals.length, Math.min(locationBudget ?? order.length, order.length));
-  const inPlay = new Set(order.slice(0, budget));
+  const total = capitals.length + seconds.length + unaffiliated.length;
+  const budget = Math.max(capitals.length, Math.min(locationBudget ?? total, total));
+
+  const inPlay = new Set(capitals); // capitals are never optional
+  let room = budget - capitals.length;
+  for (const group of [seconds, unaffiliated]) {
+    if (group.length === 0 || group.length > room) continue;
+    for (const id of group) inPlay.add(id);
+    room -= group.length;
+  }
 
   const placement = {}; // hexId -> locationId
   const factionStart = {}; // factionId -> hexId

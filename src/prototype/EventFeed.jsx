@@ -125,7 +125,15 @@ function formatEvent(ev, engineState) {
     case "build_started":
     case "slider_changed":
     case "build_priority_changed":
+    case "pool_target_changed":
       return null; // directives, not noteworthy outcomes
+    // Rail doc §2.2. The transfer itself is routine once set up, so only the
+    // INTERRUPTION is news — production that quietly stops arriving is exactly
+    // the kind of thing that reads as a bug.
+    case "production_pooled":
+      return null;
+    case "pool_interrupted":
+      return { color: theme.accent2, text: `rail pooling cut at ${p.at} — nothing shipped this turn` };
     // Rail doc §3 — blockade lifecycle. `blockade_progressed` is deliberately
     // silent: a bar creeping up every turn is not news.
     case "blockade_started":

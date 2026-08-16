@@ -702,6 +702,42 @@ line("\n  [Blockade] non-passing units and enemy Locations stop a move");
 }
 
 // --- §16.2 route — the move arrow follows the actual least-cost path ---
+// Location budgets are handed out in whole FAIRNESS GROUPS. Splitting one — as
+// a flat truncation did — hands some factions a homeland pair and others a
+// single city, which is what let the 2026-08-15 playtest's human take an
+// uncontested corner while the AI ground itself down in another.
+line("\n  [Setup] every faction gets the same number of home Locations");
+{
+  const homes = (g) => {
+    const per = {};
+    for (const loc of Object.values(g.locations)) {
+      const aff = LOCATIONS[loc.locationId]?.affiliation;
+      if (aff) per[aff] = (per[aff] || 0) + 1;
+    }
+    return per;
+  };
+  const majors = ["versari", "goldgrass", "lakers", "plainers"];
+  let fair = true;
+  let sizes = [];
+  for (const size of ["small", "medium", "large", "huge"]) {
+    for (const s of [1, 2, 3, 7, 42]) {
+      const g = createGame({ seed: s, mapSize: size });
+      const per = homes(g);
+      const counts = majors.map((f) => per[f] || 0);
+      if (new Set(counts).size !== 1) fair = false;
+      if (s === 1) sizes.push(`${size}:${counts[0]}`);
+    }
+  }
+  check(`every faction holds the same number of affiliated Locations at every size (${sizes.join(" ")})`, fair);
+
+  // The budget is still spent in full — fairness must not cost Locations.
+  const placed = ["small", "medium", "large", "huge"].map((size) =>
+    Object.keys(createGame({ seed: 5, mapSize: size }).locations).length);
+  const wanted = ["small", "medium", "large", "huge"].map((size) => CONFIG.mapSizes[size].locations);
+  check(`the Location budget is spent in full at every size (${placed.join("/")} of ${wanted.join("/")})`,
+    placed.every((n, i) => n === wanted[i]));
+}
+
 line("\n  [Route] the move path follows real movement rules");
 {
   // Diamond: A→{B forest, X plains}→D. The cheaper lane is A→X→D.
@@ -1921,6 +1957,104 @@ line("\n  [§16.2] Halted by something you could not see");
     while (activePlayerId(g) !== me) endTurn(g);
     check("Ambush: the next Upkeep clears it",
       u.checked === false && u.turnStartNode === u.node);
+  }
+}
+
+// =====================================================================
+// RAIL PRODUCTION POOLING (docs/rail-road-blockade-design.md §2.2) — an idle
+// settlement routes its build throughput down a DIRECT rail link.
+// =====================================================================
+line("\n  [Rail doc §2.2] Production pooling");
+{
+  // Two capitals joined by a rail link, both held by `me`, both idle.
+  const stage = () => {
+    const g = createGame({ seed }); startTurn(g);
+    const me = g.turnOrder[0];
+    const link = (g.board.rails || [])[0];
+    if (!link) return null;
+    const from = g.locations[link.a], to = g.locations[link.b];
+    if (!from || !to) return null;
+    for (const l of [from, to]) {
+      l.controller = me; l.sections = [me, me, me];
+      l.production = 6; l.buildSlider = 1; l.activeBuild = null; l.buildProgress = 0;
+      l.poolTarget = null;
+    }
+    // Both endpoints were somebody else's capital, and their garrisons are
+    // still standing on them — which genuinely cuts the line. Clear the whole
+    // path so each case below controls the interruption it is testing.
+    const path = new Set(link.path);
+    for (const u of Object.values(g.units)) {
+      if (u.owner !== me && path.has(u.node)) delete g.units[u.uid];
+    }
+    recomputeStats(g);
+    g.players[me].actions.remaining = 9;
+    return { g, me, from, to, link };
+  };
+
+  const st0 = stage();
+  check("Pooling: the test board has a rail link between two Locations", !!st0);
+
+  if (st0) {
+    // Opt-in, direct pairs, both stations held.
+    {
+      const { g, me, from, to } = stage();
+      const set = performAction(g, "set-pool-target", { at: from.hexId, to: to.hexId });
+      const self = performAction(g, "set-pool-target", { at: from.hexId, to: from.hexId });
+      const unlinked = Object.values(g.locations)
+        .find((l) => l.hexId !== from.hexId && l.hexId !== to.hexId);
+      unlinked.controller = me;
+      const far = performAction(g, "set-pool-target", { at: from.hexId, to: unlinked.hexId });
+      check("Pooling: opt-in only, never into itself, and only down a DIRECT link",
+        set.ok && !self.ok && !far.ok && from.poolTarget === to.hexId);
+    }
+
+    // The transfer itself.
+    {
+      const { g, me, from, to } = stage();
+      performAction(g, "set-pool-target", { at: from.hexId, to: to.hexId });
+      const output = locationOutput(g, from);
+      applyOutputAndBuilds(g, me);
+      check("Pooling: an idle settlement's build output arrives at the recipient",
+        to.buildProgress === output && from.buildProgress === 0 && output > 0);
+    }
+
+    // The donor's own build always comes first.
+    {
+      const { g, me, from, to } = stage();
+      performAction(g, "set-pool-target", { at: from.hexId, to: to.hexId });
+      from.activeBuild = { kind: "build", chipId: "scrapworks", cost: 99 };
+      const output = locationOutput(g, from);
+      applyOutputAndBuilds(g, me);
+      check("Pooling: a settlement building something of its own pools nothing",
+        from.buildProgress === output && to.buildProgress === 0);
+    }
+
+    // §2.2 mid-turn interruption — no partial credit, and it banks instead.
+    {
+      const { g, me, from, to, link } = stage();
+      performAction(g, "set-pool-target", { at: from.hexId, to: to.hexId });
+      const foe = g.turnOrder[1];
+      const cutAt = link.path.find((h) => h !== from.hexId && h !== to.hexId) || link.path[1];
+      const fu = Object.values(g.units).find((x) => x.owner === foe);
+      fu.node = cutAt; recomputeStats(g);
+      const banked = g.players[me].resource;
+      applyOutputAndBuilds(g, me);
+      check("Pooling: a cut line pools NOTHING — no partial credit",
+        to.buildProgress === 0 && from.buildProgress === 0 &&
+        g.log.some((e) => e.name === "pool_interrupted"));
+      check("Pooling: a cut line banks the output instead of losing it",
+        g.players[me].resource > banked);
+    }
+
+    // §2.3 — losing a station closes the link.
+    {
+      const { g, me, from, to } = stage();
+      performAction(g, "set-pool-target", { at: from.hexId, to: to.hexId });
+      to.controller = g.turnOrder[1];
+      applyOutputAndBuilds(g, me);
+      check("Pooling: you must hold BOTH stations — a lost recipient pools nothing",
+        to.buildProgress === 0);
+    }
   }
 }
 

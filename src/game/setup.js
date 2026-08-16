@@ -183,6 +183,9 @@ export function createGame({
       // chip AND funding a blockade. "blockade" (the default) answers the map;
       // "chips" says the building matters more and makes the blockade wait.
       buildPriority: "blockade",
+      // Rail doc §2.2 — hexId of a directly rail-linked settlement this one
+      // pools its idle build output into, or null. Opt-in, never inferred.
+      poolTarget: null,
     };
   }
 

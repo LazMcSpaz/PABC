@@ -436,6 +436,33 @@ function runSetBuildPriority(state, { params }) {
   return { hex: loc.hexId, value: loc.buildPriority };
 }
 
+// Rail doc §2.2 — choose which rail-linked settlement this one pools its idle
+// build output into (null clears it). Persists until changed and costs no
+// Action, like the slider: it is a standing policy, not a move.
+function validateSetPoolTarget(state, { pid, params }) {
+  const loc = state.locations[params.at];
+  if (!loc) return fail("no such location");
+  if (loc.controller !== pid) return fail("you do not fully control that location");
+  if (params.to == null) return { ok: true };            // clearing is always legal
+  if (params.to === params.at) return fail("a settlement cannot pool into itself");
+  const dest = state.locations[params.to];
+  if (!dest) return fail("no such location");
+  if (dest.controller !== pid) return fail("you do not fully control the recipient");
+  // §2.2 direct pairs only, §2.3 you must hold both stations (checked above).
+  const linked = (state.board.rails || []).some(
+    (l) => (l.a === params.at && l.b === params.to) || (l.b === params.at && l.a === params.to),
+  );
+  if (!linked) return fail("those settlements are not directly rail-linked");
+  return { ok: true };
+}
+
+function runSetPoolTarget(state, { params }) {
+  const loc = state.locations[params.at];
+  loc.poolTarget = params.to ?? null;
+  emit(state, "pool_target_changed", { hex: loc.hexId, to: loc.poolTarget });
+  return { hex: loc.hexId, to: loc.poolTarget };
+}
+
 // --- Activate --------------------------------------------------------
 // Invoke a location ability (§13.2). The dispatcher charges the
 // ability's own `cost.action`; the ability also pays any `cost.resource`
@@ -735,6 +762,7 @@ const ACTIONS = {
   rush: { payer: payLoc("at"), validate: validateRush, run: runRush },
   "set-slider": { validate: validateSetSlider, run: runSetSlider },
   "set-build-priority": { validate: validateSetBuildPriority, run: runSetBuildPriority },
+  "set-pool-target": { validate: validateSetPoolTarget, run: runSetPoolTarget },
   activate: { payer: payLoc("location"), validate: validateActivate, run: runActivate },
   // §17.7 / §17.5 Intelligence A2 + B2 — deploy a Listening Post, run a Saboteur.
   "build-post": { payer: buildPostPayer, validate: validateBuildPost, run: runBuildPost },

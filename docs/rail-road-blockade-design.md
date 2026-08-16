@@ -13,7 +13,7 @@ aren't.
 |---|---|---|
 | 1 — Blockade vision-gating | **deferred, decision pending** | `movementBlockers` is still ground truth (but see *Ambush halts* below) |
 | 2.1 Rail transport | built | `board.js assignRails`, `movement.js unitRailEdges` |
-| 2.2 Rail production pooling | **deferred** | shares a mechanism with 3.4 — build once |
+| 2.2 Rail production pooling | built | `economy.js railPoolRecipient` |
 | Rail as a trade route | built | `diplomacy.js tradeRouteOpen` |
 | 2.3 Rail access | built (endpoints-only) | `movement.js unitRailEdges` |
 | 2.4 Rail generation | built (capital spanning tree) | `board.js assignRails` |
@@ -22,9 +22,30 @@ aren't.
 | 3.3 Combat and destruction | built | `contest.js` |
 | 3.4 Blockade funding | built | `economy.js`, `blockades.js` |
 
-Rail's production pooling (2.2) is the one piece of the "route output to a
-connected recipient" idea still outstanding. §3.4 landed first and its
-allocator (`processLocationEconomy`) is where 2.2 should join it.
+Both halves of the "route output to a connected recipient" idea now share one
+allocator in `processLocationEconomy`: blockade funding (§3.4) takes what it is
+allowed first, and whatever survives goes down the rail (§2.2). A structure
+answering something happening on the map outranks a gift to a neighbour.
+
+### §2.2 as built — pooling
+
+A settlement pools only while it has **nothing of its own under construction**;
+its own build always claims its output first. Beyond that, four gates:
+
+- **Opt-in.** `poolTarget` is set with the free `set-pool-target` action and is
+  never inferred.
+- **Direct pairs only.** A↔B and B↔C both railed does not let A feed C. Without
+  this a large rail network would make every build in the empire instant, and
+  the mechanic would stop reading as "these two cities share".
+- **You must hold both stations** (§2.3), checked when the target is set and
+  again every Upkeep — losing the recipient closes the line.
+- **Per-hex interruption.** A line is track: anyone parked on it cuts it, and a
+  cut line pools *nothing* that turn. No partial credit; the output banks
+  exactly as it would with no arrangement at all, and `pool_interrupted` fires
+  so the player can see why the shipment stopped.
+
+Neither `set-pool-target` nor `set-build-priority` has a control in the
+settlement window yet — both are engine-side only.
 
 "Cut" has one definition across all four systems that ask the question —
 rail's line-cut check, blockade construction supply, blockade funding, and

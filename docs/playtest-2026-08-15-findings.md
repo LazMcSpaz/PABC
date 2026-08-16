@@ -50,7 +50,7 @@ hexes from its capital by design, and a seeded minor took it. So the one
 faction that got a second city had it parked next door, contested by everyone,
 while two factions had no second city to fight over at all.
 
-### The fix, when you want it
+### The fix
 
 Build the in-play set from **whole fairness groups** rather than a flat
 truncation: capitals always, then add `seconds` (4) or `unaffiliated` (2) only
@@ -58,8 +58,16 @@ if the whole group fits. At budget 8 that yields 4 capitals + 4 seconds — stil
 eight Locations, every faction with a homeland pair, no free neutral prizes.
 Small (6) and large/huge (10) come out exactly as they do now.
 
-Not applied: it changes what every medium game looks like, and medium is the
-board being playtested.
+**Applied.** `generateLayout` now admits Locations in whole fairness groups —
+capitals always, then second homes, then the neutral prizes, each all-or-nothing
+— so medium is 4 capitals + 4 second homes. Every faction holds a homeland pair
+at every board size, and the budget is still spent in full (6 / 8 / 10 / 10).
+Small and large/huge are byte-for-byte what they were.
+
+The visible change for medium: Concordan and Erport are gone from it, and
+Chigan and The Shelf take their place. There are no neutral prizes on a medium
+board any more — every objective is somebody's homeland, which is the point.
+Both invariants are locked by harness checks.
 
 ## 3. Things worth a second look
 
