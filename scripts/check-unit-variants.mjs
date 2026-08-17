@@ -11,6 +11,7 @@
 
 import { spriteFor, variantFor, unitKeyFor, hasSprite, spriteScale, hitBoxStyle, drawnBox } from "../src/prototype/unitSprites.js";
 import { UNIT_UPGRADES, FACTIONS } from "../src/prototype/data.js";
+import { engineChipIdToUi } from "../src/prototype/engineAdapter.js";
 
 let failures = 0;
 function check(name, pass, detail) {
@@ -103,6 +104,33 @@ for (const f of ["versari"]) {
   check("scale is one figure for every model",
     new Set(["infantry", "vehicle_t1", "vehicle_t2"].map((k) => spriteScale(spriteFor(f, k)).toFixed(6))).size === 1,
     spriteScale(spriteFor(f, "infantry")).toFixed(4));
+}
+
+console.log("\n--- engine chip ids survive the trip to the UI table ---");
+// The engine names chips in kebab-case and the UI table is camelCase, so every
+// installed chip passes through engineChipIdToUi before the sprite code sees it.
+// If that mapping ever loses one, the symptom is silent and confusing: the unit
+// panel still shows the chip and the stat still applies (both read the engine),
+// but the sprite never promotes. Assert the round trip for all six unit chips.
+for (const [engineId, wantStr, wantMov] of [
+  ["navigator", 0, 1],
+  ["troop-carrier", 0, 2],
+  ["landship", 0, 3],
+  ["drilled-troops", 1, 0],
+  ["sharpened-blades", 2, 0],
+  ["bombard", 3, 0],
+]) {
+  const uiId = engineChipIdToUi(engineId);
+  const def = UNIT_UPGRADES[uiId];
+  check(`${engineId} -> ${uiId}`,
+    !!def && (def.str || 0) === wantStr && (def.mov || 0) === wantMov,
+    def ? `str=${def.str} mov=${def.mov}` : "not in UNIT_UPGRADES — sprite would never promote");
+}
+// And end to end: an engine-named movement chip must reach the vehicle sheet.
+{
+  const u = { uid: "e2e", owner: "versari", veteran: false, chips: [engineChipIdToUi("navigator")] };
+  check("engine 'navigator' promotes to vehicle_t1", unitKeyFor("versari", u) === "vehicle_t1",
+    `${unitKeyFor("versari", u)} / ${variantFor(u, spriteFor("versari", u))}`);
 }
 
 console.log("\n--- chip table sanity ---");
