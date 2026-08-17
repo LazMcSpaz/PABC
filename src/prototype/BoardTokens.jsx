@@ -38,9 +38,10 @@ export { slotPos, chooseSlots } from "./boardSlots.js";
 function SpriteToken({ unit, spec, faction, selected, pos, onClick, dim }) {
   ensureIdleKeyframes(spec);
   const s = spriteScale(spec);
-  const style = spriteStyle(spec, variantFor(unit), { uid: unit.uid });
+  const style = spriteStyle(spec, variantFor(unit, spec), { uid: unit.uid });
   // Ground ellipse, squashed to the projection. §6 of the pipeline doc keeps
-  // shadows out of the render precisely so this can scale with the board.
+  // shadows out of the render precisely so this can scale with the board. It
+  // tracks the unit's footprint, so a vehicle's contact patch is wider.
   const shadowW = spec.footprintMetres * spec.pixelsPerMetre * s * 0.82;
   return (
     <div
@@ -111,7 +112,9 @@ function SpriteToken({ unit, spec, faction, selected, pos, onClick, dim }) {
 export function UnitToken({ unit, selected, slot = 0, count = 1, pos: posIn, onClick, dim = false }) {
   const faction = FACTIONS[unit.owner] || { name: unit.owner || "Unknown", color: "#888" };
   const pos = posIn || slotPos(slot, count);
-  const spec = spriteFor(unit.owner);
+  // The unit itself picks the model: movement chips promote it from infantry to
+  // a vehicle, so this cannot be resolved from the faction alone.
+  const spec = spriteFor(unit.owner, unit);
   if (spec) {
     return (
       <SpriteToken
@@ -215,9 +218,17 @@ export function GhostToken({ ghost, slot = 0, count = 1, pos: posIn }) {
 // A token's board-space box, used only for the radial-occlusion test. Sprites
 // know their own drawn extent; the fallback disc is a 27 px circle sitting on
 // its slot point.
-function tokenBox(faction) {
-  const spec = spriteFor(faction);
-  if (spec) return (x, y) => drawnBox(spec, x, y);
+//
+// One hex can hold a mix of models — a walking squad beside a landship — and the
+// slot chooser takes a single box for the group, so use the largest present.
+// Overstating it only makes the group avoid radials a little more eagerly.
+function tokenBox(occupants) {
+  let widest = null;
+  for (const u of occupants || []) {
+    const spec = u && spriteFor(u.owner, u);
+    if (spec && (!widest || spec.footprintMetres > widest.footprintMetres)) widest = spec;
+  }
+  if (widest) return (x, y) => drawnBox(widest, x, y);
   return (x, y) => ({ x0: x - 15, x1: x + 15, y0: y - 30, y1: y + 3 });
 }
 
@@ -249,8 +260,10 @@ export default function BoardTokens({ order, hexes, units, centers, selectedUnit
         const here = (hex.unitIds || []).map((id) => units[id]).filter(Boolean);
         const ghosts = hex.ghosts || [];
         if (!here.length && !ghosts.length) return null;
-        const unitSlots = chooseSlots(here.length, c, occluders, tokenBox(here[0]?.owner));
-        const ghostSlots = chooseSlots(ghosts.length, c, occluders, tokenBox(ghosts[0]?.owner));
+        const unitSlots = chooseSlots(here.length, c, occluders, tokenBox(here));
+        // Ghosts are remembered enemies, drawn as discs — there is no model to
+        // size them from, so tokenBox falls through to the disc box.
+        const ghostSlots = chooseSlots(ghosts.length, c, occluders, tokenBox(null));
         return (
           <div key={`tok-${hexId}`} style={{ position: "absolute", left: c.x, top: c.y }}>
             {here.map((u, i) => (
