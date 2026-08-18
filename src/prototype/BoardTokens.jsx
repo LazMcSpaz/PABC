@@ -15,15 +15,9 @@ import {
   spriteFor, variantFor, spriteStyle, spriteScale, hitBoxStyle, drawnBox, ensureIdleKeyframes,
 } from "./unitSprites.js";
 
-// Tokens stand on the near apron of the top face, not out on the terrain.
-// Baked art carries no depth buffer, so nothing knows how tall the ground is
-// under an arbitrary point — a token over a summit would float or sink. The
-// apron is the one region that is the ground plane on every tile in the set.
-//
-// Slots are laid out symmetrically about the centre for however many tokens
-// are actually present, so a lone unit stands in the middle of its tile
-// instead of clinging to one edge. `y` bows inward with `x` to follow the
-// apron's near boundary.
+// Tokens stand in a ring on the top face — see boardSlots.js for why, and for
+// the geometry. Positions come back ordered back to front, and they are painted
+// in that order, so a nearer unit overlaps a farther one the way the tiles do.
 export { slotPos, chooseSlots } from "./boardSlots.js";
 
 // Sprite-sheet token. Drawn for any faction that has unit art built into

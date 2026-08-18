@@ -244,30 +244,36 @@ collapsing the rest into a count badge — but it is worth knowing that **the
 footprint numbers above assume a unit is seen with neighbours**, so a design
 that only reads in isolation will not survive on a contested hex.
 
-### 10.1 Measured, once all three tiers existed
+### 10.1 Solved by standing them in a ring
 
-Still unsolved, and now quantified. `scripts/check-unit-sprites.mjs` measures
-pairwise overlap at the shipped footprints against the live 33.5 px slot
-spacing (216 px hex at rest):
+This was measured once all three tiers existed, and the row lost badly. At the
+shipped footprints against the old 33.5 px row pitch (216 px hex at rest):
 
 | Tier | Footprint | On screen | Pairwise overlap | Visible |
 |---|---|---|---|---|
-| Infantry | 7.4 m | 43.3 px | 23% | **77%** |
+| Infantry | 7.4 m | 43.3 px | 23% | 77% |
 | Vehicle T1 | 9.6 m | 56.1 px | 40% | 60% |
-| Vehicle T2 | 12.6 m | 73.7 px | 55% | **45%** |
+| Vehicle T2 | 12.6 m | 73.7 px | 55% | 45% |
 
-Only infantry clears the ≥70%-visible bar. The spacing was derived for a
-20%-of-hex footprint and the vehicles are 26% and 34%, so this is arithmetic,
-not an art fault — nothing about the sheets can fix it.
+Only infantry cleared the bar, and six infantry on one hex were an unreadable
+smear regardless — the row simply ran out of width.
 
-Two ways out, neither free:
+The fix was not a count badge. Tokens now stand in a **ring** on the top face
+(`src/prototype/boardSlots.js`), which spends the tile's depth as well as its
+width. Units at different depths may overlap vertically — that reads as depth,
+and painting back to front makes it correct — so the rule only has to hold for
+units sharing a rank, and there it holds with room to spare: at six per hex no
+two tiers share a rank at all, infantry through T2.
 
-- **Widen the spacing per tier.** T2 needs 25.3% of hex width to clear the bar,
-  but five slots at that pitch reach ±50% of hex width and leave the tile
-  (`boardSlots.js` caps a stance at 34%). So widening implies fewer abreast.
-- **Cap at 3 abreast and badge the remainder**, as this section originally
-  guessed. T2 at three abreast fits inside the cap.
+Three things fall out of the ring and are worth knowing:
 
-The second is still the answer. Until it exists, a hex holding several vehicles
-draws them heavily overlapped; the slot chooser keeps them ordered and clear of
-the radials, which is as much as it can do.
+- **The radius adapts to the widest unit present.** A T2 vehicle is 74 px
+  across, and at the infantry radius its flanks hang off onto the next tile, so
+  the ring pulls in. A hex full of landships is tighter than one full of
+  infantry, which is honest.
+- **The whole ring rotates to dodge a floating radial**, keeping its spacing
+  rather than bunching up on one side.
+- **`chooseSlots` returns exactly as many positions as there are units.** It
+  used to cap at five, and the sixth unit fell through to the lone-unit slot and
+  stood on top of the first — which is what made a crowded hex look even worse
+  than the spacing alone explains.

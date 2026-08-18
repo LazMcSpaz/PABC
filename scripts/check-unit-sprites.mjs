@@ -13,6 +13,7 @@
 import { chromium } from "playwright";
 import { mkdir } from "node:fs/promises";
 import { readFile } from "node:fs/promises";
+import { chooseSlots } from "../src/prototype/boardSlots.js";
 
 const BASE = (process.env.SHOT_BASE || "http://localhost:5173/PABC").replace(/\/$/, "");
 const OUT = "screenshots";
@@ -211,86 +212,99 @@ if (overlap) {
     `worst pair overlaps ${(overlap.frac * 100).toFixed(1)}% -> ${((1 - overlap.frac) * 100).toFixed(1)}% visible (${overlap.n} on a hex)`);
 }
 
-// A fresh game only starts two units, and rarely on one hex. Rather than leave
-// the worst case untested, build the full five-unit stack for real: clone the
-// live token into the same layer at the exact offsets slotPos() would produce
-// for count=5, measure the rendered rects, then tear it down. Same sprite, same
-// scale, same spacing the renderer uses — only the occupancy is synthetic.
-const stack = await page.evaluate((cellPx) => {
-  const MAX_SLOTS = 5, SLOT_SPACING = 0.155, HEX_W = 216;
+// A fresh game rarely puts a crowd on one hex, so build one: clone the live
+// token into the same layer at the exact positions chooseSlots() would produce,
+// measure the rendered rects, then tear it down. The positions come from the
+// real layout code imported here rather than being re-derived, so this cannot
+// drift from what the board actually does. Only the occupancy is synthetic.
+const CROWD = 6;
+const boardScale = HEX_W / HEX_VV / spec.pixelsPerMetre;
+const halfW = (spec.footprintMetres * spec.pixelsPerMetre * boardScale) / 2;
+const crowdBox = (x, y) => ({ x0: x - halfW, x1: x + halfW, y0: y - spec.anchor[1] * boardScale, y1: y + halfW * Math.sin((34.18 * Math.PI) / 180) });
+const crowdSlots = chooseSlots(CROWD, { x: 0, y: 0 }, [], crowdBox);
+
+const stack = await page.evaluate(({ cellPx, slots }) => {
   const el = document.querySelector("[data-unit-sprite]");
   const wrap = el.parentElement;
-  // Recover the board's live zoom from the rendered sprite so the clones sit
-  // at the same scale as everything else on screen. Cell size comes from the
+  // Recover the board's live zoom from the rendered sprite so the clones sit at
+  // the same scale as everything else on screen. Cell size comes from the
   // resolved spec, since infantry and the two vehicle tiers all differ.
   const zoom = el.getBoundingClientRect().width / cellPx;
   const host = wrap.parentElement;
+  const baseL = parseFloat(wrap.style.left || 0);
+  const baseT = parseFloat(wrap.style.top || 0);
   const made = [];
-  for (let i = 0; i < MAX_SLOTS; i++) {
+  for (const s of slots) {
     const c = wrap.cloneNode(true);
-    const x = (i - (MAX_SLOTS - 1) / 2) * SLOT_SPACING * HEX_W;
-    c.style.left = `${parseFloat(wrap.style.left || 0) + x}px`;
+    c.style.left = `${baseL + s.left}px`;
+    c.style.top = `${baseT + s.top}px`;
     c.dataset.stackTest = "1";
     host.appendChild(c);
     made.push(c);
   }
-  const worstOf = (sel) => {
-    const rects = made.map((c) => c.querySelector(sel).getBoundingClientRect());
-    rects.sort((a, b) => a.left - b.left);
+  const rectsOf = (sel) => made.map((c) => c.querySelector(sel).getBoundingClientRect());
+  // Vertical separation between ranks reads as depth and is fine. What ruins
+  // legibility is two units at the same depth overlapping sideways, so only
+  // same-rank pairs are scored.
+  const sameRankWorst = (rects) => {
     let worst = 0;
-    for (let i = 1; i < rects.length; i++) {
-      worst = Math.max(worst, (rects[i - 1].right - rects[i].left) / rects[i].width);
+    for (let i = 0; i < rects.length; i++) {
+      for (let j = i + 1; j < rects.length; j++) {
+        if (Math.abs(rects[i].top - rects[j].top) > rects[i].height * 0.25) continue;
+        const ov = Math.min(rects[i].right, rects[j].right) - Math.max(rects[i].left, rects[j].left);
+        if (ov > 0) worst = Math.max(worst, ov / rects[i].width);
+      }
     }
-    return { worst, width: rects[0].width, spacing: rects[1].left - rects[0].left };
+    return worst;
   };
-  // The canvas box and the click target are different questions: the first is
-  // mostly transparent headroom, the second is what a player has to hit.
-  const canvas = worstOf("[data-unit-sprite]");
-  const hit = worstOf("[data-unit-uid]");
+  const hits = rectsOf("[data-unit-uid]");
+  const out = {
+    zoom,
+    worst: sameRankWorst(hits),
+    width: hits[0].width,
+    ySpread: Math.max(...hits.map((r) => r.top)) - Math.min(...hits.map((r) => r.top)),
+    distinct: new Set(hits.map((r) => `${Math.round(r.left)},${Math.round(r.top)}`)).size,
+  };
   made.forEach((c) => c.remove());
-  return { canvas, hit, zoom };
-}, spec.frameWidth * (HEX_W / HEX_VV / spec.pixelsPerMetre));
-// The ">=70% visible" rule is about the drawn figure, so measure it against the
-// footprint-sized target rather than the canvas the art is padded into.
-check(`5-unit stack keeps >=70% visible (${resolved.key})`, 1 - stack.hit.worst >= 0.70,
-  `footprint ${stack.hit.width.toFixed(1)}px at ${stack.hit.spacing.toFixed(1)}px spacing -> ` +
-  `${(stack.hit.worst * 100).toFixed(1)}% overlap, ${((1 - stack.hit.worst) * 100).toFixed(1)}% visible`);
-check("click targets do not swallow neighbours", stack.hit.worst < 0.30,
-  `hit box ${stack.hit.width.toFixed(1)}px vs full canvas ${stack.canvas.width.toFixed(1)}px ` +
-  `(canvas boxes would overlap ${(stack.canvas.worst * 100).toFixed(1)}%)`);
+  return out;
+}, { cellPx: spec.frameWidth * boardScale, slots: crowdSlots });
 
-// The slot spacing was set for a 20%-of-hex infantry footprint. Vehicles are
-// wider, so report how many of each tier can share a hex inside the 70% rule —
-// this is the renderer-side constraint §10 flagged and never resolved.
+check(`${CROWD}-unit hex: every unit gets its own spot`, stack.distinct === CROWD,
+  `${stack.distinct} distinct positions`);
+check(`${CROWD}-unit hex: spread through the tile's depth`, stack.ySpread > stack.width * 0.8,
+  `${stack.ySpread.toFixed(0)}px of depth vs ${stack.width.toFixed(0)}px unit width`);
+// The ">=70% visible" rule is about units drawn shoulder to shoulder; with the
+// ring, that only applies to units sharing a rank.
+check(`${CROWD}-unit hex: same-rank units keep >=70% visible (${resolved.key})`, 1 - stack.worst >= 0.70,
+  stack.worst === 0 ? "no two share a rank" : `${(stack.worst * 100).toFixed(1)}% overlap`);
+
+// Report the ring's spread for each tier — vehicles are wider and pull the ring
+// in to stay on the tile, so their crowding is worth seeing.
 {
-  const SLOT_SPACING = 0.155;
-  const spacing = SLOT_SPACING * HEX_W;
   const rows = Object.entries(MANIFEST.units[resolved.faction]).map(([key, sp]) => {
-    const w = sp.footprintMetres * sp.pixelsPerMetre * (HEX_W / HEX_VV / sp.pixelsPerMetre);
-    // n units overlap pairwise by (w - spacing)/w; that is independent of n once
-    // n >= 2, so capacity is simply "does a pair fit" -> 1 or MAX.
-    const overlap = Math.max(0, (w - spacing) / w);
-    return { key, w, overlap };
+    const s = HEX_W / HEX_VV / sp.pixelsPerMetre;
+    const w = sp.footprintMetres * sp.pixelsPerMetre * s;
+    const hb = (x, y) => ({ x0: x - w / 2, x1: x + w / 2, y0: y - sp.anchor[1] * s, y1: y + (w / 2) * Math.sin((34.18 * Math.PI) / 180) });
+    const ps = chooseSlots(CROWD, { x: 0, y: 0 }, [], hb);
+    let worst = 0;
+    for (let i = 0; i < ps.length; i++) {
+      for (let j = i + 1; j < ps.length; j++) {
+        if (Math.abs(ps[i].top - ps[j].top) > 12) continue;
+        const ov = w - Math.abs(ps[i].left - ps[j].left);
+        if (ov > 0) worst = Math.max(worst, ov / w);
+      }
+    }
+    return { key, w, worst };
   });
   for (const r of rows) {
-    console.log(`  ..    ${r.key.padEnd(11)} ${r.w.toFixed(1)}px wide, ${(r.overlap * 100).toFixed(0)}% pairwise overlap ` +
-      `-> ${(100 - r.overlap * 100).toFixed(0)}% visible ${r.overlap <= 0.30 ? "(within rule)" : "(EXCEEDS 70% rule)"}`);
+    console.log(`  ..    ${r.key.padEnd(11)} ${r.w.toFixed(1)}px wide, ${CROWD} on a hex -> ` +
+      `${(r.worst * 100).toFixed(0)}% same-rank overlap, ${(100 - r.worst * 100).toFixed(0)}% visible ` +
+      `${r.worst <= 0.30 ? "(within rule)" : "(EXCEEDS 70% rule)"}`);
   }
-  // Reported, not asserted. Vehicles genuinely do not fit the rule at this
-  // spacing, and the fix is §10's "3 abreast plus a count badge", which is a
-  // renderer feature rather than a sprite problem. Recorded in
-  // docs/unit-model-pipeline.md §10 so it is not rediscovered from scratch.
-  const bad = rows.filter((r) => r.overlap > 0.30).map((r) => r.key);
-  if (bad.length) {
-    console.log(`  ..    NOTE ${bad.join(", ")} exceed the 70% rule at ${spacing.toFixed(1)}px spacing ` +
-      "— see docs/unit-model-pipeline.md §10");
-  }
-  // What must not regress: the tier actually drawn stays inside the rule.
-  check("drawn tier fits the 70% rule",
-    (rows.find((r) => r.key === resolved.key)?.overlap ?? 1) <= 0.30,
-    `${resolved.key} at ${spacing.toFixed(1)}px spacing`);
+  const bad = rows.filter((r) => r.worst > 0.30).map((r) => r.key);
+  check("every tier fits the 70% rule in the ring", bad.length === 0,
+    bad.length ? `${bad.join(", ")} still crowd at ${CROWD} per hex` : `all tiers clear at ${CROWD} per hex`);
 }
-
 // --- 9. no unit hidden behind a floating radial --------------------------
 // Radials paint above the token layer, so any overlap is a unit the player
 // simply cannot see. Measured in screen space against what is actually drawn:
