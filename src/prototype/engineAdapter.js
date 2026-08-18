@@ -14,9 +14,12 @@ import {
   chipDisplayName,
 } from "../game/content.js";
 import {
-  buildableChips, upgradeOption, slotCapacity, slotsUsed, locationOutput,
+  buildableChips, upgradeOption, slotCapacity, slotsUsed, locationOutput, meetsTech,
 } from "../game/economy.js";
 import { recruitCapBonus } from "../game/actions.js";
+import { blockadeAt, supplyStatus, blockadeSlotsUsed } from "../game/blockades.js";
+import { supplyCutter } from "../game/movement.js";
+import { postAt } from "../game/posts.js";
 import { isUnitVisibleTo } from "../game/visibility.js";
 import { factionDef } from "../game/content.js";
 import {
@@ -1141,6 +1144,138 @@ function hasStationedUnitWithBay(state, loc, slots) {
 // v0.2 §16.5 — what a Reinforce action would cost/look like for `unitUid`
 // right now: the scrap to top it up, whether an instant top-up is legal
 // (unit on a fully-held Location), and the field-supply ETA in turns.
+// Rail doc §3 — everything a selected unit can do about a blockade where it
+// stands, as one view-model for the UnitPanel.
+//
+// A blockade lives on a plain road hex, and a plain hex opens no window, so
+// the unit that is standing there is the only handle a player has on it. That
+// makes the UnitPanel the home for the whole lifecycle: raise one, then fit
+// its chips. Fitting is therefore gated on your unit being present, which is
+// tighter than the engine requires — the engine only asks that you own the
+// blockade and its supply road is open.
+//
+// Every refusal mirrors validateBuildBlockade / validateUpgradeBlockade so the
+// button explains itself instead of failing on click.
+export function blockadeActions(state, unitUid) {
+  const unit = state.units?.[unitUid];
+  if (!unit) return null;
+  const pid = unit.owner;
+  const player = state.players?.[pid];
+  const hex = unit.node;
+  const cell = state.board.hexes[hex];
+  if (!player || !cell) return null;
+
+  const existing = blockadeAt(state, hex);
+  const cut = supplyCutter(state, pid);
+  const supply = supplyStatus(state, pid, hex, cut);
+
+  // --- raise one ---------------------------------------------------------
+  let buildReason = null;
+  if (!cell.road) buildReason = "needs a road hex";
+  else if (state.locations[hex]) buildReason = "not on a settlement";
+  else if (existing) buildReason = "a blockade already stands here";
+  else if (postAt(state, hex)) buildReason = "a listening post occupies this hex";
+  else if (!supply.path) buildReason = "no road back to a settlement you hold";
+  else if (!supply.ok) buildReason = "that road connection is cut";
+  else if (player.resource < CONFIG.blockades.buildCost) buildReason = "not enough scrap";
+
+  const build = {
+    can: !buildReason,
+    reason: buildReason,
+    cost: CONFIG.blockades.buildCost,
+    turns: CONFIG.blockades.minTurns,
+  };
+
+  // --- the site or structure standing here -------------------------------
+  const mine = existing && existing.owner === pid ? existing : null;
+  const site = existing
+    ? {
+        mine: !!mine,
+        done: !!existing.done,
+        paid: existing.paid !== false,
+        progress: existing.progress || 0,
+        cost: existing.cost || 0,
+        upkeep: CONFIG.blockades.upkeep,
+      }
+    : null;
+
+  // --- fit its chips -----------------------------------------------------
+  const installed = [];
+  const chips = [];
+  if (mine && mine.done) {
+    for (const c of mine.chips || []) {
+      installed.push({
+        uid: c,
+        chipId: state.chips[c]?.chipId,
+        name: chipDisplayName(state.chips[c]?.chipId, pid),
+        disabled: !!state.chips[c]?.disabled,
+      });
+    }
+    const used = blockadeSlotsUsed(state, mine);
+    const cap = CONFIG.blockades.chipSlots;
+    for (const def of Object.values(ENGINE_CHIPS)) {
+      if (def.kind !== "blockade") continue;
+      // Tech-forbidden chips are omitted entirely, matching the §20.6 display
+      // contract the city build menu follows.
+      if (!meetsTech(player, def)) continue;
+      let reason = null;
+      if (mine.build) reason = "already building something";
+      else if (mine.chips.some((c) => state.chips[c]?.chipId === def.id)) reason = "already installed";
+      else if (used + (def.slots || 1) > cap) reason = "no free slot";
+      else if (!supply.path) reason = "no road back to a settlement you hold";
+      else if (!supply.ok) reason = "that road connection is cut";
+      chips.push({
+        chipId: def.id,
+        name: chipDisplayName(def.id, pid),
+        desc: def.desc || "",
+        cost: def.buildCost ?? def.cost ?? 0,
+        slots: def.slots || 1,
+        buildable: !reason,
+        reason,
+      });
+    }
+    site.slotsUsed = used;
+    site.slotCap = cap;
+  }
+
+  return { hex, build, site, installed, chips };
+}
+
+// §17.7 — can this unit dig in a listening post where it stands? Same shape
+// and same home as the blockade controls above, and for the same reason: a
+// post goes on a plain hex, and a plain hex opens no window.
+export function postAction(state, unitUid) {
+  const unit = state.units?.[unitUid];
+  if (!unit) return null;
+  const pid = unit.owner;
+  const player = state.players?.[pid];
+  const hex = unit.node;
+  if (!player || !state.board.hexes[hex]) return null;
+
+  const here = postAt(state, hex);
+  // Relay Kit (chip `postsWithoutTech`): the artifact IS the know-how, so a
+  // carrier stands in for the Intelligence A2 assignment.
+  const kitted = unit.chips.some(
+    (c) => !state.chips[c]?.disabled && ENGINE_CHIPS[state.chips[c]?.chipId]?.postsWithoutTech,
+  );
+
+  let reason = null;
+  if (state.locations[hex]) reason = "not on a settlement";
+  else if (here) reason = here.owner === pid ? "you already have a post here" : "a post already occupies this hex";
+  else if (blockadeAt(state, hex)) reason = "a blockade occupies this hex";
+  else if (!hasTechNode(state, pid, "int-a2") && !kitted) reason = "needs Intelligence A2 (Listening Post)";
+  else if (player.resource < CONFIG.posts.buildCost) reason = "not enough scrap";
+
+  return {
+    can: !reason,
+    reason,
+    cost: CONFIG.posts.buildCost,
+    upkeep: CONFIG.posts.upkeep,
+    range: CONFIG.posts.range,
+    mine: !!here && here.owner === pid,
+  };
+}
+
 export function reinforcePreview(state, unitUid) {
   const unit = state.units[unitUid];
   if (!unit) return null;

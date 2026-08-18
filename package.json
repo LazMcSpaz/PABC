@@ -16,7 +16,8 @@
     "motion": "node scripts/motion.mjs",
     "check:pooling": "node scripts/check-pooling-ui.mjs",
     "check:layers": "node scripts/check-board-layers.mjs",
-    "check:settlement": "node scripts/check-settlement-ui.mjs"
+    "check:settlement": "node scripts/check-settlement-ui.mjs",
+    "check:blockade": "node scripts/check-blockade-ui.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.30.1",

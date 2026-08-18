@@ -29,7 +29,7 @@ import { NEUTRAL } from "./data.js";
 import { getEncounter } from "../game/encounters.js";
 import { encounterRedrawBudget } from "../game/encounters.js";
 import { evalCond } from "../game/dsl.js";
-import { adaptState, reinforcePreview, engineChipIdToUi, previewLocationContest, previewAttackerStrength } from "./engineAdapter.js";
+import { adaptState, reinforcePreview, engineChipIdToUi, previewLocationContest, previewAttackerStrength, blockadeActions, postAction } from "./engineAdapter.js";
 import { resolveSalvage } from "../game/contest.js";
 import { assignTechNode } from "../game/stats.js";
 import { performDiplomacy } from "../game/diplomacy.js";
@@ -787,6 +787,18 @@ export default function Prototype({ config, onNewGame }) {
     return runAction("build", { at: hexId, chipId, ...(into ? { into } : {}) },
       null, "Build queued.");
   }
+  // Rail doc §3 — raise a blockade on the hex this unit stands on, and fit
+  // chips to one already standing there.
+  function onBuildBlockade(hexId) {
+    return runAction("build-blockade", { hex: hexId }, null, "Blockade started.");
+  }
+  function onUpgradeBlockade(hexId, chipId) {
+    return runAction("upgrade-blockade", { hex: hexId, chipId }, null, "Blockade upgrade queued.");
+  }
+  // §17.7 — dig a listening post in where this unit stands.
+  function onBuildPost(unitUid, hexId) {
+    return runAction("build-post", { unit: unitUid, hex: hexId }, null, "Listening post built.");
+  }
   function onUpgrade(hexId, chipUid) {
     return runAction("upgrade", { at: hexId, chip: chipUid }, null, "Upgrade queued.");
   }
@@ -988,8 +1000,13 @@ export default function Prototype({ config, onNewGame }) {
             reinforce={reinforcePreview(gameRef.current, selectedUnitId)}
             scrap={you.scrap}
             raidTargets={raidTargets}
+            blockade={blockadeActions(gameRef.current, selectedUnitId)}
+            post={postAction(gameRef.current, selectedUnitId)}
             onReinforce={onReinforce}
             onContest={onContest}
+            onBuildBlockade={() => onBuildBlockade(state.units[selectedUnitId].node)}
+            onUpgradeBlockade={(chipId) => onUpgradeBlockade(state.units[selectedUnitId].node, chipId)}
+            onBuildPost={() => onBuildPost(selectedUnitId, state.units[selectedUnitId].node)}
             onClose={() => setSelectedUnitId(null)}
           />
         )}
