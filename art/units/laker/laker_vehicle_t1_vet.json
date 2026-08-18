@@ -1,0 +1,26 @@
+{
+  "name": "laker_vehicle_t1_vet",
+  "frameWidth": 256,
+  "frameHeight": 224,
+  "frames": 10,
+  "fps": 3,
+  "loop": true,
+  "anchor": [
+    128,
+    164
+  ],
+  "rows": [
+    "s",
+    "se",
+    "e",
+    "ne",
+    "n",
+    "nw",
+    "w",
+    "sw"
+  ],
+  "sheetWidth": 2560,
+  "sheetHeight": 1792,
+  "footprintMetres": 9.6,
+  "pixelsPerMetre": 18.3
+}

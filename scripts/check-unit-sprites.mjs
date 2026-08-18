@@ -19,7 +19,22 @@ const OUT = "screenshots";
 const VIEWPORT = { width: Number(process.env.SHOT_W) || 1600, height: Number(process.env.SHOT_H) || 1000 };
 const SEED = "424242";
 
-const spec = JSON.parse(await readFile("src/prototype/unitSprites.json", "utf8")).units.versari.infantry;
+const MANIFEST = JSON.parse(await readFile("src/prototype/unitSprites.json", "utf8"));
+
+// Resolve whatever the board actually drew, rather than assuming a faction or a
+// tier: the player's faction comes from the setup screen and the model comes
+// from the unit's movement chips, so both are discovered, not hardcoded.
+function specFromSheetUrl(url) {
+  const file = decodeURIComponent(url).split("/").pop().replace(/_sheet\.webp$/, "");
+  for (const [faction, units] of Object.entries(MANIFEST.units)) {
+    for (const [key, spec] of Object.entries(units)) {
+      for (const [variant, v] of Object.entries(spec.variants)) {
+        if (v.sheet.endsWith(`${file}_sheet.webp`)) return { faction, key, variant, spec };
+      }
+    }
+  }
+  return null;
+}
 
 const results = [];
 function check(name, pass, detail) {
@@ -57,7 +72,7 @@ await enterGame(page);
 const n = await page.locator("[data-unit-sprite]").count();
 check("sprite tokens rendered", n > 0, `${n} on board`);
 if (n === 0) {
-  console.log("\nNo sprite tokens — is the player faction Versari?");
+  console.log("\nNo sprite tokens — does the player's faction have art built?");
   await page.screenshot({ path: `${OUT}/unit-sprites-NONE.png` });
   await browser.close();
   process.exit(1);
@@ -73,6 +88,13 @@ const loaded = await page.evaluate(async () => {
   return { ok: r.ok, url, status: r.status, bytes: b.size, type: b.type };
 });
 check("sheet fetches 200", loaded.ok, `${loaded.status} ${loaded.bytes} bytes ${loaded.type}`);
+
+// Everything below is measured against whichever sheet the board chose.
+const resolved = loaded.url ? specFromSheetUrl(loaded.url) : null;
+check("drawn sheet is one the manifest knows", !!resolved,
+  resolved ? `${resolved.faction}/${resolved.key}/${resolved.variant}` : loaded.url);
+if (!resolved) { await browser.close(); process.exit(1); }
+const spec = resolved.spec;
 
 // Decode it to confirm the browser accepts the WebP + alpha.
 const decoded = await page.evaluate((url) => new Promise((res) => {
@@ -125,11 +147,13 @@ check("cell bottom hangs below ground (not flush)",
 
 // --- 5. animation is running at the declared rate ------------------------
 const animDur = parseFloat(geom.anim.match(/([\d.]+)s/)?.[1] || "0");
+// One keyframe per sheet width, so the three tiers stay in register.
+const wantAnim = `unit-idle-${spec.sheetWidth}`;
 check("idle animation wired",
-  geom.anim.includes("unit-idle-cycle")
+  geom.anim.includes(wantAnim)
     && geom.anim.includes(`steps(${spec.frames})`)
     && Math.abs(animDur - spec.frames / spec.fps) < 0.01,
-  `${animDur}s steps(${spec.frames}) = ${spec.fps} fps`);
+  `${wantAnim} ${animDur}s steps(${spec.frames}) = ${spec.fps} fps`);
 
 // Frames actually advance: sample background-position-x over time.
 const frames = await page.evaluate(() => new Promise((res) => {
@@ -145,7 +169,9 @@ check("frames advance over one loop", frames.length >= spec.frames - 1,
 const variants = await page.evaluate(() => {
   const out = {};
   for (const el of document.querySelectorAll("[data-unit-sprite]")) {
-    const u = getComputedStyle(el).backgroundImage.match(/versari_infantry_(\w+?)_sheet/)?.[1];
+    // Report the whole stem, so a tier promotion is as visible as a variant swap.
+    const u = getComputedStyle(el).backgroundImage
+      .match(/\/([^/]+)_sheet\.webp/)?.[1] || "unknown";
     out[u] = (out[u] || 0) + 1;
   }
   return out;
@@ -190,13 +216,14 @@ if (overlap) {
 // live token into the same layer at the exact offsets slotPos() would produce
 // for count=5, measure the rendered rects, then tear it down. Same sprite, same
 // scale, same spacing the renderer uses — only the occupancy is synthetic.
-const stack = await page.evaluate(() => {
+const stack = await page.evaluate((cellPx) => {
   const MAX_SLOTS = 5, SLOT_SPACING = 0.155, HEX_W = 216;
   const el = document.querySelector("[data-unit-sprite]");
   const wrap = el.parentElement;
   // Recover the board's live zoom from the rendered sprite so the clones sit
-  // at the same scale as everything else on screen.
-  const zoom = el.getBoundingClientRect().width / (192 * (HEX_W / 36.95 / 18.3));
+  // at the same scale as everything else on screen. Cell size comes from the
+  // resolved spec, since infantry and the two vehicle tiers all differ.
+  const zoom = el.getBoundingClientRect().width / cellPx;
   const host = wrap.parentElement;
   const made = [];
   for (let i = 0; i < MAX_SLOTS; i++) {
@@ -222,15 +249,47 @@ const stack = await page.evaluate(() => {
   const hit = worstOf("[data-unit-uid]");
   made.forEach((c) => c.remove());
   return { canvas, hit, zoom };
-});
+}, spec.frameWidth * (HEX_W / HEX_VV / spec.pixelsPerMetre));
 // The ">=70% visible" rule is about the drawn figure, so measure it against the
-// footprint-sized target rather than the 192 px canvas the art is padded into.
-check("5-unit stack keeps >=70% visible", 1 - stack.hit.worst >= 0.70,
+// footprint-sized target rather than the canvas the art is padded into.
+check(`5-unit stack keeps >=70% visible (${resolved.key})`, 1 - stack.hit.worst >= 0.70,
   `footprint ${stack.hit.width.toFixed(1)}px at ${stack.hit.spacing.toFixed(1)}px spacing -> ` +
   `${(stack.hit.worst * 100).toFixed(1)}% overlap, ${((1 - stack.hit.worst) * 100).toFixed(1)}% visible`);
 check("click targets do not swallow neighbours", stack.hit.worst < 0.30,
   `hit box ${stack.hit.width.toFixed(1)}px vs full canvas ${stack.canvas.width.toFixed(1)}px ` +
   `(canvas boxes would overlap ${(stack.canvas.worst * 100).toFixed(1)}%)`);
+
+// The slot spacing was set for a 20%-of-hex infantry footprint. Vehicles are
+// wider, so report how many of each tier can share a hex inside the 70% rule —
+// this is the renderer-side constraint §10 flagged and never resolved.
+{
+  const SLOT_SPACING = 0.155;
+  const spacing = SLOT_SPACING * HEX_W;
+  const rows = Object.entries(MANIFEST.units[resolved.faction]).map(([key, sp]) => {
+    const w = sp.footprintMetres * sp.pixelsPerMetre * (HEX_W / HEX_VV / sp.pixelsPerMetre);
+    // n units overlap pairwise by (w - spacing)/w; that is independent of n once
+    // n >= 2, so capacity is simply "does a pair fit" -> 1 or MAX.
+    const overlap = Math.max(0, (w - spacing) / w);
+    return { key, w, overlap };
+  });
+  for (const r of rows) {
+    console.log(`  ..    ${r.key.padEnd(11)} ${r.w.toFixed(1)}px wide, ${(r.overlap * 100).toFixed(0)}% pairwise overlap ` +
+      `-> ${(100 - r.overlap * 100).toFixed(0)}% visible ${r.overlap <= 0.30 ? "(within rule)" : "(EXCEEDS 70% rule)"}`);
+  }
+  // Reported, not asserted. Vehicles genuinely do not fit the rule at this
+  // spacing, and the fix is §10's "3 abreast plus a count badge", which is a
+  // renderer feature rather than a sprite problem. Recorded in
+  // docs/unit-model-pipeline.md §10 so it is not rediscovered from scratch.
+  const bad = rows.filter((r) => r.overlap > 0.30).map((r) => r.key);
+  if (bad.length) {
+    console.log(`  ..    NOTE ${bad.join(", ")} exceed the 70% rule at ${spacing.toFixed(1)}px spacing ` +
+      "— see docs/unit-model-pipeline.md §10");
+  }
+  // What must not regress: the tier actually drawn stays inside the rule.
+  check("drawn tier fits the 70% rule",
+    (rows.find((r) => r.key === resolved.key)?.overlap ?? 1) <= 0.30,
+    `${resolved.key} at ${spacing.toFixed(1)}px spacing`);
+}
 
 // --- 9. no unit hidden behind a floating radial --------------------------
 // Radials paint above the token layer, so any overlap is a unit the player
@@ -262,6 +321,41 @@ const hidden = await page.evaluate(() => {
 check("no unit hidden behind a radial", hidden.hits.length === 0,
   hidden.radials === 0 ? "no radials on screen this seed"
     : `${hidden.radials} radials, ${hidden.hits.length} overlapping units${hidden.hits.length ? ` (${hidden.hits.join("%, ")}%)` : ""}`);
+
+// --- 10. every sheet and mask in the manifest actually serves ------------
+// A fresh game starts with no chips, so only infantry ever appears on screen.
+// The vehicle tiers are reachable in play, and a 404 there would show up as an
+// invisible unit mid-game, so fetch and decode the whole set now.
+const allAssets = [];
+for (const [faction, units] of Object.entries(MANIFEST.units)) {
+  for (const [key, sp] of Object.entries(units)) {
+    for (const [variant, v] of Object.entries(sp.variants)) {
+      allAssets.push({ id: `${faction}/${key}/${variant}`, sheet: v.sheet, mask: v.mask, w: sp.sheetWidth, h: sp.sheetHeight });
+    }
+  }
+}
+const served = await page.evaluate(async ({ base, assets }) => {
+  const decode = (url) => new Promise((res) => {
+    const im = new Image();
+    im.onload = () => res({ ok: true, w: im.naturalWidth, h: im.naturalHeight });
+    im.onerror = () => res({ ok: false });
+    im.src = url;
+  });
+  const bad = [];
+  for (const a of assets) {
+    for (const [kind, rel] of [["sheet", a.sheet], ["mask", a.mask]]) {
+      const url = `${base}/${rel}`;
+      const r = await fetch(url).catch(() => null);
+      if (!r || !r.ok) { bad.push(`${a.id} ${kind}: HTTP ${r ? r.status : "failed"}`); continue; }
+      const d = await decode(url);
+      if (!d.ok) bad.push(`${a.id} ${kind}: will not decode`);
+      else if (d.w !== a.w || d.h !== a.h) bad.push(`${a.id} ${kind}: ${d.w}x${d.h}, expected ${a.w}x${a.h}`);
+    }
+  }
+  return bad;
+}, { base: await page.evaluate(() => new URL(document.baseURI).origin + new URL(document.baseURI).pathname.replace(/\/$/, "") + "/assets/units"), assets: allAssets });
+check("every sheet and mask serves and decodes", served.length === 0,
+  served.length ? served.slice(0, 3).join(" | ") : `${allAssets.length * 2} files across ${Object.keys(MANIFEST.units).length} factions`);
 
 check("no console/page errors", errors.length === 0, errors.slice(0, 2).join(" | ") || "clean");
 

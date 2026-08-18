@@ -243,3 +243,31 @@ modelling agent's — the likely answer is drawing at most 3 abreast and
 collapsing the rest into a count badge — but it is worth knowing that **the
 footprint numbers above assume a unit is seen with neighbours**, so a design
 that only reads in isolation will not survive on a contested hex.
+
+### 10.1 Measured, once all three tiers existed
+
+Still unsolved, and now quantified. `scripts/check-unit-sprites.mjs` measures
+pairwise overlap at the shipped footprints against the live 33.5 px slot
+spacing (216 px hex at rest):
+
+| Tier | Footprint | On screen | Pairwise overlap | Visible |
+|---|---|---|---|---|
+| Infantry | 7.4 m | 43.3 px | 23% | **77%** |
+| Vehicle T1 | 9.6 m | 56.1 px | 40% | 60% |
+| Vehicle T2 | 12.6 m | 73.7 px | 55% | **45%** |
+
+Only infantry clears the ≥70%-visible bar. The spacing was derived for a
+20%-of-hex footprint and the vehicles are 26% and 34%, so this is arithmetic,
+not an art fault — nothing about the sheets can fix it.
+
+Two ways out, neither free:
+
+- **Widen the spacing per tier.** T2 needs 25.3% of hex width to clear the bar,
+  but five slots at that pitch reach ±50% of hex width and leave the tile
+  (`boardSlots.js` caps a stance at 34%). So widening implies fewer abreast.
+- **Cap at 3 abreast and badge the remainder**, as this section originally
+  guessed. T2 at three abreast fits inside the cap.
+
+The second is still the answer. Until it exists, a hex holding several vehicles
+draws them heavily overlapped; the slot chooser keeps them ordered and clear of
+the radials, which is as much as it can do.
