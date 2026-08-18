@@ -12,7 +12,7 @@ import { CHIPS, ABILITIES, chipBlocksRail } from "./content.js";
 // re-exported here, where every mover already looks for them.
 export { passesFreely, supplyCutter, hasRailAccess } from "./diplomacy.js";
 import { passesFreely, hasRailAccess } from "./diplomacy.js";
-import { ensureVisibility, isHexVisible, isUnitVisibleTo } from "./visibility.js";
+import { ensureVisibility, isHexVisible, isUnitVisibleTo, canSeeUnitAt } from "./visibility.js";
 
 const BIG_BUDGET = 999; // budget-agnostic routing for display
 
@@ -29,7 +29,7 @@ const BIG_BUDGET = 999; // budget-agnostic routing for display
 // ambush (board.js `surprise`). Note it is a strict subset: a hex holding both
 // a visible and a hidden blocker is NOT a surprise — you could see a reason to
 // stop there, so stopping costs you the advance as usual.
-function blockerScan(state, ownerId, { ignoreUnits } = {}) {
+function blockerScan(state, ownerId, { ignoreUnits, mover } = {}) {
   const blocked = new Set();
   const hidden = new Set();
   const visible = new Set();
@@ -71,6 +71,18 @@ function blockerScan(state, ownerId, { ignoreUnits } = {}) {
     // road is open through it until its owner clears the arrears.
     if (!b.done || b.paid === false || b.owner === ownerId) continue;
     if (!passesFreely(state, ownerId, b.owner)) {
+      // Rail doc Part 1 — a blockade is a GARRISON, not a wall. It only halts
+      // a mover its owner can actually SEE arriving, asked at the blockade's
+      // own hex (the position being entered, not wherever the mover is
+      // standing while the field is computed). A stealthed unit therefore
+      // walks straight through unless the owner has Detection covering that
+      // hex — Signal Mast is what buys it.
+      //
+      // With no `mover` this stays ground truth: `movementBlockers(state, fid)`
+      // is a "what would stop this faction" query with no particular unit in
+      // hand, and answering it with a guess would be worse than answering it
+      // with the map.
+      if (mover && !canSeeUnitAt(state, b.owner, mover, b.hex)) continue;
       // Unlike a city, a blockade can go up (or come down) behind your back, so
       // it takes LIVE sight rather than memory to count as seen.
       note(b.hex, isHexVisible(state, ownerId, b.hex));
@@ -191,7 +203,7 @@ function restrictToFallback(state, unit, field) {
 export function unitReach(state, unit) {
   if (!unit) return {};
   const budget = unit.moveRemaining ?? unit.movement ?? 0;
-  const opts = { ignoreUnits: unitPassesThroughUnits(state, unit) };
+  const opts = { ignoreUnits: unitPassesThroughUnits(state, unit), mover: unit };
   const scan = blockerScan(state, unit.owner, opts);
   const field = movementField(state, unit.node, budget, {
     blockedThrough: scan.blocked,
@@ -210,7 +222,9 @@ export function unitMovePath(state, unit, dest) {
   if (!unit) return null;
   const budget = unit.moveRemaining ?? unit.movement ?? 0;
   return movementRoute(state, unit.node, budget, dest, {
-    blockedThrough: movementBlockers(state, unit.owner, { ignoreUnits: unitPassesThroughUnits(state, unit) }),
+    blockedThrough: movementBlockers(state, unit.owner, {
+      ignoreUnits: unitPassesThroughUnits(state, unit), mover: unit,
+    }),
     ignoreTerrain: unitIgnoresTerrain(state, unit),
     extraCost: tollTaxedHexes(state, unit.owner),
     railEdges: unitRailEdges(state, unit),

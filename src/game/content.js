@@ -194,7 +194,7 @@ export const CHIPS = {
   // unit, and is funded by the same settlement draw that raised the structure
   // (§3.4). Excluded from the Location build menu by that kind.
   palisade: { id: "palisade", name: "Palisade", kind: "blockade", slots: 1, techLevel: 1, cost: 4, blockadeDefense: 3, buildCost: 4, loyaltyReq: 0, desc: "+3 blockade defense" },
-  "signal-mast": { id: "signal-mast", name: "Signal Mast", kind: "blockade", slots: 1, techLevel: 1, cost: 3, blockadeVision: 1, buildCost: 3, loyaltyReq: 0, desc: "+1 Vision from this blockade" },
+  "signal-mast": { id: "signal-mast", name: "Signal Mast", kind: "blockade", slots: 1, techLevel: 1, cost: 3, blockadeVision: 1, blockadeDetection: 1, buildCost: 3, loyaltyReq: 0, desc: "+1 Vision and +1 Detection from this blockade — an unmasted blockade cannot stop what it cannot see" },
   "toll-booth": { id: "toll-booth", name: "Toll Booth", kind: "blockade", slots: 1, techLevel: 2, cost: 4, output: 2, buildCost: 4, loyaltyReq: 0, desc: "+2 scrap each Upkeep — a fortified chokepoint taxing what passes" },
   // --- special unit chips: buildable (docs/chip-set-v0.1.md) ---
   // No statType — specials compete for bay slots but not stat families.

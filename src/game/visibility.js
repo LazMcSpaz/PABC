@@ -348,6 +348,28 @@ function viewerHasUnitOn(state, fid, hex) {
   return false;
 }
 
+// A blockade's own Detection radius — 0 unless it carries a chip granting one
+// (Signal Mast). This is what makes the garrison-model blockade (rail doc
+// Part 1) answerable: without a mast a blockade cannot stop what sneaks past
+// it, and with one it can.
+//
+// Only manned positions detect: dormant (unpaid) and unfinished ones do not.
+function blockadeDetection(state, b) {
+  if (!b.done || b.paid === false) return 0;
+  let n = 0;
+  for (const c of b.chips || []) {
+    if (state.chips[c]?.disabled) continue;
+    n += CHIPS[state.chips[c]?.chipId]?.blockadeDetection || 0;
+  }
+  return n;
+}
+
+function ownedBlockadesFor(state, fid) {
+  const out = [];
+  for (const b of Object.values(state.world?.blockades || {})) if (b.owner === fid) out.push(b);
+  return out;
+}
+
 // Does `fid` have a Detection source within range of `hex`?
 function hasDetectionAt(state, fid, hex) {
   const adj = state.board.adjacency;
@@ -358,6 +380,7 @@ function hasDetectionAt(state, fid, hex) {
   // find the largest detection radius fid fields, to bound the BFS
   for (const u of Object.values(state.units)) if (u.owner === fid) maxR = Math.max(maxR, unitDetection(state, u));
   for (const loc of Object.values(state.locations)) if (loc.controller === fid) maxR = Math.max(maxR, locationDetection(state, loc));
+  for (const b of ownedBlockadesFor(state, fid)) maxR = Math.max(maxR, blockadeDetection(state, b));
   if (maxR <= 0) {
     // detection range 0 still covers the hex itself (point-blank recon).
     for (const u of Object.values(state.units)) if (u.owner === fid && u.node === hex && unitDetection(state, u) >= 0 && hasAnyDetection(state, u)) return true;
@@ -379,6 +402,11 @@ function hasDetectionAt(state, fid, hex) {
     const d = dist[loc.hexId];
     if (dr > 0 && d !== undefined && d <= dr) return true;
   }
+  for (const b of ownedBlockadesFor(state, fid)) {
+    const dr = blockadeDetection(state, b);
+    const d = dist[b.hex];
+    if (dr > 0 && d !== undefined && d <= dr) return true;
+  }
   return false;
 }
 
@@ -393,8 +421,19 @@ function hasAnyDetection(state, unit) {
 // a STEALTH chip stays hidden even in contact until detected. Cover hides
 // only from distant eyes (the hidden-army case), not in contact.
 export function canSee(state, fid, unit, contactReveals = true) {
+  return canSeeUnitAt(state, fid, unit, unit.node, contactReveals);
+}
+
+// The same question asked about a hex the unit is not standing on yet: would
+// `fid` see `unit` if it were on `hex`?
+//
+// This exists for the garrison-model blockade (rail doc Part 1). A blockade may
+// only halt a mover it can see, and the position that matters is the hex being
+// ENTERED, not wherever the mover happens to be standing when the reachability
+// field is computed — a unit hidden in a forest two hexes away is still walking
+// into plain view when it steps onto the blockade's own road hex.
+export function canSeeUnitAt(state, fid, unit, hex, contactReveals = true) {
   if (unit.owner === fid) return true;
-  const hex = unit.node;
   const stealth = unitHasStealth(state, unit);
   if (contactReveals && !stealth && viewerHasUnitOn(state, fid, hex)) return true;
   const vis = state.visibility?.[fid];

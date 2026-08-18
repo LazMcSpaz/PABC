@@ -11,7 +11,7 @@ aren't.
 
 | Part | | Where |
 |---|---|---|
-| 1 — Blockade vision-gating | **deferred, decision pending** | `movementBlockers` is still ground truth (but see *Ambush halts* below) |
+| 1 — Blockade vision-gating | built (garrison model) | `movement.js blockerScan`, `visibility.js canSeeUnitAt` |
 | 2.1 Rail transport | built | `board.js assignRails`, `movement.js unitRailEdges` |
 | 2.2 Rail production pooling | built | `economy.js railPoolRecipient` |
 | Rail as a trade route | built | `diplomacy.js tradeRouteOpen` |
@@ -65,8 +65,9 @@ letting an ally's station receive (today §2.2 requires you hold both).
 
 "Cut" has one definition across all four systems that ask the question —
 rail's line-cut check, blockade construction supply, blockade funding, and
-trading-pact routes — in `diplomacy.js routeCutter`, and that is the single
-place Part 1 would change. It takes the *parties* to a line rather than one
+trading-pact routes — in `diplomacy.js routeCutter`. Part 1 deliberately did
+NOT touch it: a line is cut by the *existence* of a hostile position on it,
+which is a supply question rather than a perception one. It takes the *parties* to a line rather than one
 faction: a trading pact has two, and neither of them cuts its own route.
 `supplyCutter` is the one-party case. Both live in diplomacy.js (who may pass
 whom is a diplomacy question, not a movement one) and are re-exported from
@@ -275,6 +276,39 @@ everything below:
   effect today. The new Blockade structure below is a wholly new mechanic,
   not an extension of `fortified`.
 
+### Part 1 as built — the blockade is a garrison, not a wall
+
+Design call, 2026-08-18, settling the question this doc left open from the
+start. A blockade stops what it **detects**; it does not stop what it cannot
+see. Sneaking past one works, so long as it has no Detection covering its hex.
+
+`blockerScan` now takes the MOVER, and a blockade halts it only if
+`canSeeUnitAt(state, blockadeOwner, mover, blockadeHex)` — a new reader in
+visibility.js that asks the ordinary concealment question about a hex the unit
+has not reached yet. The position that matters is the one being ENTERED, not
+wherever the mover happens to be standing when the reachability field is
+computed: a unit hidden in a forest two hexes away is still walking into plain
+view when it steps onto the blockade's own road hex.
+
+What that means in play:
+
+- An ordinary unit is seen and halted, exactly as before. A blockade's own hex
+  is always inside its owner's Vision, so nothing leaks by accident.
+- A **stealthed** unit (Night March, Cold Camp) walks straight through.
+- **Signal Mast** is the answer, and gained `blockadeDetection: 1` in the same
+  pass to be one — a blockade is now a Detection source in its own right.
+  Without a mast a blockade cannot stop what sneaks past it; with one it can.
+  This was a hole, not a nerf: before the change no blockade chip granted
+  Detection at all, so the garrison model would have had no counter.
+- A **dormant** (unpaid) blockade detects nothing, mast or not. Nobody is up
+  there.
+- With no mover in hand — `movementBlockers(state, fid)` as a "what would stop
+  this faction" query — the answer stays ground truth. Guessing would be worse
+  than answering with the map.
+
+`routeCutter` is deliberately NOT gated: a line is cut by the *existence* of a
+hostile position on it, which is a supply question, not a perception one.
+
 ## Part 1 — Blockade vision-gating (closes the Part 0 gap)
 
 A hex only halts a mover if whatever's blocking it can actually detect that
@@ -460,8 +494,8 @@ already works rather than as a new parallel system.
 ## Open questions (explicitly unresolved, not defaults to silently assume)
 
 - ~~**Trespass penalty consistency**~~ — *resolved*: `onTrespass` is
-  vision-gated (Part 0 above). Part 1 proper, gating the movement HALT itself,
-  is still open.
+  vision-gated (Part 0 above), and Part 1 proper — gating the movement HALT
+  itself — shipped 2026-08-18 as the garrison model. See *Part 1 as built*.
 - ~~**Exact numbers**~~ — *set 2026-08-16*: blockade build cost **8** scrap,
   defense **4**, vision range **1**, upkeep **1**/turn; Toll Booth costs **4**
   and pays **+2**/turn; units cost **1**/turn, **2** with a full chip bay.

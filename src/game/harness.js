@@ -10,7 +10,7 @@ import { recomputeStats, recomputeResearch, assignTechNode, effectiveVeteran } f
 import { recomputeInfluence, zocOwner, inZoC } from "./influence.js";
 import { reinforcementRoute, bfsDistances, movementField, movementRoute } from "./board.js";
 import { passesFreely, movementBlockers, unitReach, unitIgnoresTerrain, supplyCutter, unitRailEdges } from "./movement.js";
-import { recomputeVisibility, isUnitVisibleTo, revealRegion, unitVision, isHexVisible } from "./visibility.js";
+import { recomputeVisibility, isUnitVisibleTo, revealRegion, unitVision, isHexVisible, ensureAllVisibility } from "./visibility.js";
 import {
   ensureDiplomacy, menaceFromAttack, onAttack,
   formPact, declareWar, vassalize, runDiplomacyRound,
@@ -2287,6 +2287,64 @@ line("\n  [Rail doc §3] Blockade structures");
     recomputeVisibility(g, me, { emitEvents: false });
     check("Blockade: a completed blockade is a Vision source for its owner",
       isHexVisible(g, me, hex));
+  }
+
+  // Rail doc Part 1 — a blockade is a GARRISON, not a wall: it halts only what
+  // it can see, so stealth walks through and a Signal Mast closes the gap.
+  {
+    const { g, me, hex, u } = stage();
+    const foe = g.turnOrder[1];
+    performAction(g, "build-blockade", { hex });
+    upkeep(g, me); upkeep(g, me);
+    const b = blockadeAt(g, hex);
+    u.node = g.board.adjacency[hex][0]; recomputeStats(g); // builder steps off
+    ensureAllVisibility(g);
+    recomputeVisibility(g, me, { emitEvents: false });
+
+    // An ordinary enemy walking up to it is seen and stopped.
+    const mover = Object.values(g.units).find((x) => x.owner === foe);
+    mover.node = g.board.adjacency[hex].find((h) => h !== u.node) || g.board.adjacency[hex][0];
+    recomputeStats(g);
+    check("Blockade garrison: an unconcealed mover is seen and halted",
+      movementBlockers(g, foe, { mover }).has(hex));
+
+    // Now the mover sneaks. Stealth is exactly the "if you are sneaking" case.
+    mover.stealth = true;
+    check("Blockade garrison: a stealthed mover slips past an unmasted blockade",
+      !movementBlockers(g, foe, { mover }).has(hex));
+    check("Blockade garrison: ground truth is unchanged — only the mover's view of it",
+      movementBlockers(g, foe).has(hex));
+
+    // A Signal Mast gives the blockade Detection, and the road shuts again.
+    const mast = g.nextId("chip");
+    g.chips[mast] = { uid: mast, chipId: "signal-mast" };
+    b.chips = [...(b.chips || []), mast];
+    recomputeVisibility(g, me, { emitEvents: false });
+    check("Blockade garrison: a Signal Mast detects the sneak and halts it again",
+      movementBlockers(g, foe, { mover }).has(hex));
+
+    // A dormant blockade detects nothing, mast or not — nobody is up there.
+    b.paid = false;
+    check("Blockade garrison: a dormant masted blockade stops nobody",
+      !movementBlockers(g, foe, { mover }).has(hex));
+    b.paid = true;
+
+    // And the unit's own reachability agrees with the scan — the field is what
+    // the player actually acts on.
+    mover.stealth = false;
+    b.chips = [];
+    recomputeVisibility(g, me, { emitEvents: false });
+    mover.moveRemaining = 4; recomputeStats(g);
+    const seenField = unitReach(g, mover);
+    mover.stealth = true;
+    const sneakField = unitReach(g, mover);
+    // Past the blockade means: some hex beyond it that only opens when the
+    // blockade stops halting you.
+    const beyond = (g.board.adjacency[hex] || []).filter((h) => h !== mover.node);
+    const opensUp = beyond.some((h) => !(h in seenField) && h in sneakField)
+      || (seenField[hex] === 0 && sneakField[hex] > 0);
+    check("Blockade garrison: sneaking actually widens the reachable field",
+      opensUp);
   }
 
   // Standing armies eat — 1 scrap a unit, 2 with a full bay, and an unpaid

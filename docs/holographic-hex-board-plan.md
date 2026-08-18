@@ -499,6 +499,70 @@ Two things fell out of measuring rather than being planned:
   Content-capped at 10, so it is not urgent, and dropping the glow when zoomed
   out is a look decision rather than a perf one.
 
+## 9. Routes as part of the hologram (2026-08-18)
+
+Roads and railways read as clip-art laid over the board: one flat opaque
+stroke each, on terrain that is otherwise a glowing translucent wireframe. The
+lines had no relationship to the thing they crossed.
+
+They are now a STACK of strokes rather than a single line, and the stack has
+three jobs that pull against each other:
+
+- **trough** — three wide, progressively darker strokes. This is the
+  legibility guarantee, and it is why the original was stark: a route crosses
+  hexes glowing in whatever colour their owner is, so without something dark
+  underneath the bright core has no reliable contrast. Widened and given a soft
+  falloff so it reads as ground worn into the terrain rather than an outline
+  drawn around a line.
+- **halo** — a wide, faint wash in the route's own colour.
+- **core** — the thin bright line, no longer at full opacity.
+
+The halo and core are painted with `mix-blend-mode: screen` so they ADD light
+like everything else on this board instead of covering what is beneath.
+
+That forces a **two-layer split**, and it is load-bearing rather than
+tidiness: `mix-blend-mode` only blends within its own stacking context, and a
+positioned, z-indexed layer creates one — so a screened stroke inside a single
+SVG would blend against that SVG's own transparent backdrop and change
+nothing. The light lives in its own element with the blend mode on the
+element. The trough has to stay out of it: screening something dark is a no-op.
+
+**LOD.** The soft falloff and the screened glow are invisible below the
+threshold, where a hex is under ~130 px and a route is a few pixels wide — so
+zoomed out, routes collapse to one casing plus one core in a single
+normally-composited layer. This keeps §7's flat-LOD promise of **zero blend
+layers** intact, and the flat path is now slightly CHEAPER than what it
+replaced (huge, explored, flat: 977 → 949 nodes) because both route kinds draw
+two strokes where rail used to draw three.
+
+At full detail the effect costs one full-screen blend layer (254 → 255 on a
+huge board — all the others are per-hex) and about 15% more DOM nodes, all of
+them plain `<line>`s.
+
+### Paint order, and where a blockade sprite goes
+
+Measured rather than assumed, and locked by `scripts/check-board-layers.mjs`:
+
+| layer | z-index |
+|---|---|
+| route trough | 7990 |
+| route light (screened) | 8000 |
+| blockades | 8010 |
+| hex hit targets | 8200 |
+| radials | 9000 |
+| unit sprites | 9200 |
+
+So unit sprites draw above roads and railways, and a blockade draws above the
+road it sits on but below the units standing on it — a unit at a blockade
+reads in front of it, which is what you want.
+
+Blockades moved into their own normally-composited layer in the same pass.
+They were previously drawn inside the single route SVG, which would have put a
+future blockade sprite *inside the screened light layer* and made it glow like
+a road instead of sitting on one. A blockade is a solid object, not more
+light. When real sprite art arrives it drops into that layer with the ordering
+already correct.
+
 ## 8. What this does not change
 
 Worth stating plainly, because it bounds the blast radius: no engine file, no
