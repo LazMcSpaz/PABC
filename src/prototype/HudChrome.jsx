@@ -157,15 +157,15 @@ const RES = {
 };
 
 // A compact resource readout: glowing colour-coded icon node + value + label.
-function ResourceCell({ icon, value, label, color }) {
+function ResourceCell({ icon, value, label, color, labelColor, title }) {
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+    <div style={{ display: "flex", alignItems: "center", gap: 7 }} title={title}>
       <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 30, height: 30, borderRadius: "50%", background: "radial-gradient(circle at 50% 40%, rgba(19,42,44,0.95), rgba(4,10,11,0.96))", border: `1px solid ${color}`, boxShadow: `0 0 8px ${color}77, inset 0 0 6px rgba(0,0,0,0.5)`, flexShrink: 0 }}>
         <img src={icon} alt="" style={{ width: 18, height: 18, objectFit: "contain", filter: "brightness(1.12)" }} />
       </span>
       <div style={{ display: "flex", flexDirection: "column", lineHeight: 1 }}>
         <span style={{ fontFamily: C.font, fontWeight: 700, fontSize: 16, color: "#f4efe2", textShadow: `0 0 8px ${color}` }}>{value}</span>
-        <span style={{ fontFamily: C.font, fontSize: 8, letterSpacing: 1.4, textTransform: "uppercase", color, fontWeight: 600, marginTop: 2 }}>{label}</span>
+        <span style={{ fontFamily: C.font, fontSize: 8, letterSpacing: 1.4, textTransform: "uppercase", color: labelColor || color, fontWeight: 600, marginTop: 2 }}>{label}</span>
       </div>
     </div>
   );
@@ -200,7 +200,7 @@ function CompactStat({ icon, value, color }) {
 // name, VP/Actions dials); at phone width those clusters collide. This
 // swaps to a plain three-row rectangular bar: faction/settings, a row of
 // icon+value stats, then a full-width End Turn button underneath.
-function CompactTopBar({ scrap, units, tech, name, color = C.red, vp, vpGoal, actions, round, onEndTurn, endDisabled, onSettings }) {
+function CompactTopBar({ scrap, upkeep, units, tech, name, color = C.red, vp, vpGoal, actions, round, onEndTurn, endDisabled, onSettings }) {
   return (
     <div style={{
       position: "absolute", top: 0, left: 0, right: 0, height: COMPACT_HUD_H, zIndex: 30,
@@ -220,7 +220,11 @@ function CompactTopBar({ scrap, units, tech, name, color = C.red, vp, vpGoal, ac
         <span style={{ fontFamily: C.font, fontSize: 8, letterSpacing: 1.4, textTransform: "uppercase", color: C.textFaint, flexShrink: 0 }}>Rnd {round}</span>
       </div>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 4, height: 26, marginBottom: 8 }}>
-        <CompactStat icon={ICON.scrap} value={scrap} color={RES.scrap.color} />
+        <CompactStat
+          icon={ICON.scrap}
+          value={upkeep ? `${scrap} (${upkeep.net >= 0 ? "+" : ""}${upkeep.net})` : scrap}
+          color={upkeep && upkeep.net < 0 ? C.red : RES.scrap.color}
+        />
         <CompactStat icon={ICON.units} value={`${units.n}/${units.cap}`} color={RES.units.color} />
         <CompactStat icon={ICON.research} value={`L${tech.level}`} color={RES.tech.color} />
         <CompactStat icon={ICON.vp} value={`${vp}/${vpGoal}`} color={C.gold} />
@@ -248,7 +252,7 @@ export function TopBar(props) {
   return <DesktopTopBar {...props} />;
 }
 
-function DesktopTopBar({ scrap, units, tech, name, color = C.red, vp, vpGoal, actions, round, onEndTurn, endDisabled, onSettings }) {
+function DesktopTopBar({ scrap, upkeep, units, tech, name, color = C.red, vp, vpGoal, actions, round, onEndTurn, endDisabled, onSettings }) {
   const H = 60;
   const clip = "polygon(0 0, 100% 0, 100% 60px, 78% 60px, 72% 28px, 28% 28px, 22% 60px, 0 60px)";
   const outline = "M0 0 L100 0 L100 60 L78 60 L72 28 L28 28 L22 60 L0 60 Z";
@@ -267,7 +271,16 @@ function DesktopTopBar({ scrap, units, tech, name, color = C.red, vp, vpGoal, ac
           style={{ width: 28, height: 28, borderRadius: "50%", border: `1px solid ${C.holo}`, background: "radial-gradient(circle at 40% 34%, rgba(86,211,198,0.16), rgba(8,16,16,0.9) 78%)", boxShadow: `0 0 8px ${C.holo}55`, display: "flex", alignItems: "center", justifyContent: "center", padding: 0, color: C.holoHi, cursor: "pointer", flexShrink: 0 }}>
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3.2" /><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5 5l2.1 2.1M16.9 16.9L19 19M19 5l-2.1 2.1M7.1 16.9L5 19" strokeLinecap="round" /></svg>
         </button>
-        <ResourceCell {...RES.scrap} value={`${scrap}`} label="Scrap" />
+        {/* The label carries the NET per turn. Units, blockades, posts and
+            some chips all bill every Upkeep, and without a running total a
+            player only discovers they overspent when the army starves. */}
+        <ResourceCell
+          {...RES.scrap}
+          value={`${scrap}`}
+          label={upkeep ? `Scrap ${upkeep.net >= 0 ? "+" : ""}${upkeep.net}/turn` : "Scrap"}
+          labelColor={upkeep && upkeep.net < 0 ? C.red : undefined}
+          title={upkeep ? `+${upkeep.income} output · −${upkeep.army} army · −${upkeep.structures} structures · −${upkeep.chips} chips` : undefined}
+        />
         <ResourceCell {...RES.units} value={`${units.n}/${units.cap}`} label="Units" />
         <ResourceCell {...RES.tech} value={`L${tech.level}`} label={tech.label} />
       </div>
@@ -760,7 +773,11 @@ function ChipButton({ chip, can, onClick }) {
       title={chip.upgrade ? `Upgrade → ${chip.upgrade.name}` : "No upgrade"}
       style={{ fontFamily: C.font, fontSize: 11, fontWeight: 700, padding: "6px 9px", borderRadius: 6, border: `1px solid ${chip.disabled ? C.red : "rgba(86,211,198,0.4)"}`, background: "rgba(0,0,0,0.3)", color: chip.disabled ? C.red : C.text, cursor: live ? "pointer" : "default" }}
     >
-      {chip.name}{chip.disabled ? " (dormant)" : ""}{chip.upgrade ? " ▲" : ""}
+      {chip.name}{chip.disabled ? " (dormant)" : ""}
+      {chip.upkeep > 0 && (
+        <span style={{ color: chip.disabled ? C.red : C.textFaint, fontWeight: 600 }}> −{chip.upkeep}/t</span>
+      )}
+      {chip.upgrade ? " ▲" : ""}
     </button>
   );
 }
@@ -787,6 +804,12 @@ function BuildList({ items, can, empty, onPick }) {
             <span style={{ display: "inline-flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
               <img src={ICON.scrap} alt="" style={{ width: 13, height: 13 }} />
               <span style={{ fontFamily: C.font, fontWeight: 700 }}>{b.cost}</span>
+              {/* A chip's price is one payment; its upkeep is every turn after,
+                  which is the number that actually decides whether you can
+                  afford it. */}
+              {b.upkeep > 0 && (
+                <span style={{ fontSize: 9, color: C.gold, fontWeight: 700 }}>−{b.upkeep}/t</span>
+              )}
             </span>
           </button>
         );
@@ -904,6 +927,9 @@ function EconomyPanel({ hexId, eco, onBuild, onUpgrade, onRush, onSetSlider, onS
                   </span>
                   <span style={{ fontSize: 9.5, color: C.textFaint }}>
                     bay {u.bayUsed}/{u.baySlots}
+                  </span>
+                  <span style={{ fontSize: 9.5, color: u.unsupplied ? C.red : C.gold, fontWeight: 700 }}>
+                    −{u.upkeep}/turn{u.unsupplied ? " · UNSUPPLIED" : ""}
                   </span>
                 </div>
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>

@@ -24,7 +24,8 @@ aren't.
 | 3.4 Blockade funding | built | `economy.js`, `blockades.js` |
 | 2.3 Rail access agreement | built | `diplomacy.js hasRailAccess`, verb `set-rail-access` |
 | Pooling / priority UI | built | `HudChrome.jsx EconomyPanel`, `scripts/check-pooling-ui.mjs` |
-| Blockade UI (build + fit) | built | `UnitPanel.jsx`, `scripts/check-blockade-ui.mjs` |
+| Blockade UI (own window) | built | `HudChrome.jsx BlockadeWindow`, `scripts/check-blockade-ui.mjs` |
+| Upkeep visibility | built | top bar, unit panel, settlement, blockade · `scripts/check-upkeep-ui.mjs` |
 | Blockade upkeep | built | `blockades.js chargeBlockadeUpkeep` |
 | Unit upkeep | built | `economy.js chargeUnitUpkeep` |
 
@@ -126,31 +127,54 @@ Three things read `hasRailAccess`:
   stations. Sharing a rival's track is commerce; pooling your industrial output
   into their city is not the same promise.
 
-### The blockade UI — where it lives, and why there
+### The blockade UI — a place, not a unit ability
 
-Until 2026-08-18 the whole blockade system was engine-only: `build-blockade`
-and `upgrade-blockade` had no control anywhere in the interface, so a human
-could neither raise one nor fit the Signal Mast that Part 1 made the counter to
-sneaking past one. Everything above was reachable by the AI alone.
+A blockade is selected on the map like a settlement and opens **its own
+window**: ownership, manned or dormant, defense, upkeep per turn, slots, its
+fitted upgrades and the menu to fit more. A dormant one says plainly that
+nobody is manning it, which is the difference between a road that is shut and
+one that only looks shut. A foreign blockade reports only what is visible from
+outside, and a blockade you cannot see is not selectable at all.
 
-Both now live in the **UnitPanel**, and that placement is forced rather than
-chosen: a blockade sits on a plain road hex, and a plain hex opens no window of
-its own (only Locations do). The unit standing there is the only handle a
-player has on it, so the whole lifecycle — raise it, watch it build, then fit
-its chips — belongs to the selected unit.
+That replaces an earlier pass that put the whole lifecycle in the UnitPanel.
+A blockade outlives the unit that raised it, so reaching it through whichever
+soldier happened to be parked on it made a structure feel like a unit ability
+and meant keeping a unit standing there just to manage one.
 
-One consequence worth knowing: **fitting chips is gated on your unit being
-present**, which is tighter than the engine requires. `validateUpgradeBlockade`
-only asks that you own the blockade and its supply road is open. Loosening it
-would mean giving a blockade its own window.
+**Breaking ground stays a unit action** in the UnitPanel — there is nothing to
+select until a blockade exists — and quotes the upkeep it commits you to.
+`build-post` (§17.7) stays there too: a listening post is concealed, so unlike
+a blockade there is nothing on the map to click.
 
-Every refusal is mirrored from the validator, so the button explains itself
-("needs a road hex", "that road connection is cut", "no free slot") rather than
-failing on click. `build-post` (§17.7) rides in the same panel for the same
-reason and is only rendered once Intelligence A2 is in hand.
+Adapter split accordingly: `blockadeView(state, hex, viewer)` for the
+structure, `blockadeBuildOffer(state, unit)` for the offer to raise one. Every
+refusal is mirrored from the validator, so a button explains itself rather than
+failing on click.
 
 `scripts/check-blockade-ui.mjs` drives a real browser through raise → finish →
-fit → post and asserts each click changed engine state.
+select-with-no-unit-present → fit → dormant → post.
+
+### Upkeep is visible wherever it is charged
+
+Units, blockades, listening posts and five chips all bill every Upkeep, and
+none of it appeared anywhere: a player recruited a fifth unit and found out
+when the army starved. Now:
+
+- the **top bar** carries the running net (`Scrap +3/turn`, red when negative),
+  with the breakdown on hover;
+- the **unit panel** states that unit's own bill — including both halves, so a
+  Bombard carrier reads −3 (2 for the full bay, 1 for the chip) — and says
+  UNSUPPLIED when it is unpaid;
+- the **garrison rows** in a settlement state each unit's;
+- **installed chips** carry `−N/t`, and the **build menus** quote the upkeep a
+  chip commits you to next to its one-off price;
+- the **blockade window** and the **build-post button** state theirs.
+
+The risk in five separate readouts is that they drift from the engine, so
+`scripts/check-upkeep-ui.mjs` compares the top bar's promise against a real
+Upkeep tick rather than reimplementing the sum. Note the bar's income is what
+actually REACHES the treasury — a settlement mid-build banks only the butter
+half of its slider — not gross Output.
 
 ### Upkeep — blockades and standing armies
 

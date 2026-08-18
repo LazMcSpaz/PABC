@@ -539,6 +539,23 @@ At full detail the effect costs one full-screen blend layer (254 → 255 on a
 huge board — all the others are per-hex) and about 15% more DOM nodes, all of
 them plain `<line>`s.
 
+### Road and rail on the same ground
+
+A settlement served by both looked rail-only: the two were drawn on the same
+centre line and whichever painted last won. Segments carried by both kinds are
+detected up front, and each steps half the separation off the line so the pair
+straddles the route a single line would have taken — neither looks displaced,
+and both read.
+
+The normal is measured in a fixed direction (low hex id to high) rather than
+from whichever end the enumeration happened to start at, so both kinds resolve
+the same perpendicular and reliably land on opposite sides instead of
+occasionally stacking.
+
+`check-board-layers.mjs` asserts no two route strokes of the same width ever
+share endpoints, which is exactly what collapsing back onto one line looks
+like.
+
 ### Paint order, and where a blockade sprite goes
 
 Measured rather than assumed, and locked by `scripts/check-board-layers.mjs`:

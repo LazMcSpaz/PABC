@@ -6,7 +6,7 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
 import { FACTIONS as UI_FACTIONS, UNIT_UPGRADES, CHIP_COLOR } from "./data.js";
-import { C, CornerBrackets } from "./HudChrome.jsx";
+import { C, CornerBrackets, useEscClose } from "./HudChrome.jsx";
 import { useIsPhone } from "./useViewport.js";
 
 const BAY_SLOTS = 2;
@@ -238,6 +238,10 @@ function BlockadeOffer({ offer, canAct, onBuild }) {
 
 export default function UnitPanel({ unit, hex, owned = true, canAct, reinforce, scrap, raidTargets = [], blockade, post, onReinforce, onContest, onBuildBlockade, onBuildPost, onClose }) {
   const isPhone = useIsPhone();
+  // Escape closes it, like every other panel. Without this the only way to
+  // deselect a unit was to find its token again, which is fiddly once the
+  // panel is covering the part of the board the unit is on.
+  useEscClose(onClose);
   if (!unit) return null;
   const faction = UI_FACTIONS[unit.owner];
   const factionColor = faction?.color || C.holo;
@@ -381,10 +385,10 @@ export default function UnitPanel({ unit, hex, owned = true, canAct, reinforce, 
               value={`${unit.moveRemaining ?? eff.movement}/${eff.movement}`}
             />
             <StatCell
-              color={unit.immobilized ? STOPPED : READY}
-              icon={<StatusGlyph color={unit.immobilized ? STOPPED : READY} blocked={unit.immobilized} size={22} />}
+              color={unit.unsupplied ? STOPPED : unit.immobilized ? STOPPED : READY}
+              icon={<StatusGlyph color={unit.unsupplied || unit.immobilized ? STOPPED : READY} blocked={unit.unsupplied || unit.immobilized} size={22} />}
               label="Status"
-              value={unit.immobilized ? "Held" : "Ready"}
+              value={unit.unsupplied ? "Unsupplied" : unit.immobilized ? "Held" : "Ready"}
             />
           </div>
         )}
@@ -396,6 +400,31 @@ export default function UnitPanel({ unit, hex, owned = true, canAct, reinforce, 
         <div style={{
           width: isPhone ? "auto" : 158, display: "flex", flexDirection: "column", gap: isPhone ? 4 : 7, minWidth: 0,
         }}>
+          {/* Standing armies eat. Shown on the unit itself so the bill is
+              legible where the decision is made — recruiting a fifth unit or
+              filling a bay is a commitment every turn, not a one-off price.
+              An unsupplied unit says so plainly: it holds ground and still
+              defends, but it cannot move or act until it is paid. */}
+          {owned && unit.upkeep != null && (
+            <div style={{
+              display: "flex", alignItems: "baseline", gap: 5,
+              fontSize: 9.5, letterSpacing: 0.6,
+              color: unit.unsupplied ? STOPPED : C.textDim,
+            }}>
+              <span style={{ fontFamily: C.font, fontWeight: 700, fontSize: 11, color: unit.unsupplied ? STOPPED : C.gold }}>
+                −{unit.upkeep}
+              </span>
+              <span style={{ textTransform: "uppercase", letterSpacing: 1.1 }}>
+                scrap / turn
+              </span>
+              {unit.unsupplied && (
+                <span style={{ textTransform: "uppercase", letterSpacing: 1.1, fontWeight: 700 }}>
+                  · unpaid
+                </span>
+              )}
+            </div>
+          )}
+
           {(unit.veteran || unit.fortified) && (
             <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
               {unit.veteran && <Tag color={C.gold}>Veteran</Tag>}

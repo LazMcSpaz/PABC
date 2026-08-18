@@ -15,9 +15,10 @@ import {
 } from "../game/content.js";
 import {
   buildableChips, upgradeOption, slotCapacity, slotsUsed, locationOutput, meetsTech,
+  unitUpkeepFor,
 } from "../game/economy.js";
 import { recruitCapBonus } from "../game/actions.js";
-import { blockadeAt, supplyStatus, blockadeSlotsUsed } from "../game/blockades.js";
+import { blockadeAt, supplyStatus, blockadeSlotsUsed, blockadeIncome } from "../game/blockades.js";
 import { supplyCutter } from "../game/movement.js";
 import { postAt } from "../game/posts.js";
 import { isUnitVisibleTo } from "../game/visibility.js";
@@ -32,6 +33,7 @@ import {
   hasRailAccess,
 } from "../game/diplomacy.js";
 import { hasTechNode } from "../game/tech.js";
+import { holderOf } from "../game/control.js";
 import {
   LOCATIONS as UI_LOCATIONS,
   UNIT_UPGRADES,
@@ -177,6 +179,21 @@ function buildRows(state) {
     .map((r) => byRow[r].sort((a, b) => a.col - b.col).map((h) => h.id));
 }
 
+// What a chip list costs its owner each Upkeep (§20.9). One reader, so every
+// place the UI quotes an upkeep quotes the same number the engine charges.
+function chipUpkeep(state, chipUids) {
+  let n = 0;
+  for (const c of chipUids || []) n += ENGINE_CHIPS[state.chips[c]?.chipId]?.upkeep || 0;
+  return n;
+}
+
+// A unit's FULL per-turn bill: its own keep (1, doubled once the bay is full)
+// plus whatever its chips charge on top. A Landship-carrying unit pays for
+// both the bay being full AND the chip, and the panel should say so.
+function unitTotalUpkeep(state, u) {
+  return unitUpkeepFor(state, u) + chipUpkeep(state, u.chips);
+}
+
 function adaptChips(state, chipUids) {
   return (chipUids || []).map((uid) => engineChipIdToUi(state.chips[uid]?.chipId));
 }
@@ -299,6 +316,11 @@ export function adaptState(state) {
       chips: adaptChips(state, u.chips),
       chipUids: [...u.chips],
       immobilized: isImmobilized(state, u),
+      // Standing armies eat — surfaced per unit so the bill is legible where
+      // the unit is, not only as a lump sum at Upkeep.
+      upkeep: unitTotalUpkeep(state, u),
+      baseUpkeep: unitUpkeepFor(state, u),
+      unsupplied: !!u.unsupplied,
       node: u.node,
     };
   }
@@ -506,6 +528,7 @@ function adaptEconomy(state, loc) {
       // per-unit outfit menu needs the family to explain a refusal.
       statType: o.def.statType || null,
       cost: o.def.buildCost ?? o.def.cost ?? 0,
+      upkeep: o.def.upkeep || 0,
       slots: o.def.slots || 1,
       desc: o.def.desc || "",
       locked: o.locked,
@@ -523,6 +546,7 @@ function adaptEconomy(state, loc) {
         uiChipId: engineChipIdToUi(opt.chipId),
         name: chipDisplayName(opt.chipId, loc.controller),
         cost: opt.def.buildCost ?? opt.def.cost ?? 0,
+        upkeep: opt.def.upkeep || 0,
         desc: opt.def.desc || "",
         locked: opt.locked,
         reason: opt.reason,
@@ -550,6 +574,8 @@ function adaptEconomy(state, loc) {
       name: u.name || "Unit",
       bayUsed,
       baySlots: CONFIG.unit.baySlots,
+      upkeep: unitTotalUpkeep(state, u),
+      unsupplied: !!u.unsupplied,
       // Each stat family admits one chip — surfaced so the menu can say WHY a
       // second Strength chip is refused rather than just greying out.
       statTypes: u.chips
@@ -561,6 +587,7 @@ function adaptEconomy(state, loc) {
         uiChipId: engineChipIdToUi(state.chips[c]?.chipId),
         name: chipDisplayName(state.chips[c]?.chipId, loc.controller),
         disabled: !!state.chips[c]?.disabled,
+        upkeep: ENGINE_CHIPS[state.chips[c]?.chipId]?.upkeep || 0,
         upgrade: upgrades[c] || null,
       })),
     });
@@ -1144,6 +1171,55 @@ function hasStationedUnitWithBay(state, loc, slots) {
 // v0.2 §16.5 — what a Reinforce action would cost/look like for `unitUid`
 // right now: the scrap to top it up, whether an instant top-up is legal
 // (unit on a fully-held Location), and the field-supply ETA in turns.
+// What a faction earns and owes each Upkeep, as one summary.
+//
+// Units now cost scrap every turn, and without a running total a player has no
+// way to tell whether they can afford the next recruit until their army starts
+// starving. This is the number the top bar quotes.
+//
+// Mirrors the order the engine actually charges in (turn.js): Output and tolls
+// in, then chips, posts, blockades and units out.
+export function upkeepSummary(state, fid) {
+  // INCOME is what actually reaches the treasury, not gross Output. A
+  // settlement with something under construction banks only the butter half of
+  // its slider (economy.js processLocationEconomy); one with nothing to build
+  // banks all of it, because throughput is never wasted.
+  let income = 0;
+  for (const loc of Object.values(state.locations)) {
+    const full = loc.controller === fid;
+    if (!full && holderOf(loc) !== fid) continue;
+    let output = locationOutput(state, loc);
+    if (!full) output = Math.floor(output * CONFIG.economy.partialOutputScale);
+    const diverting = !!loc.activeBuild || !!loc.poolTarget;
+    if (!diverting) { income += output; continue; }
+    const f = Math.max(0, Math.min(1, loc.buildSlider ?? CONFIG.economy.defaultSlider));
+    income += Math.floor((1 - f) * output);
+  }
+  income += blockadeIncome(state, fid);
+
+  let chips = 0;
+  for (const loc of Object.values(state.locations)) {
+    if (loc.controller === fid) chips += chipUpkeep(state, loc.chips);
+  }
+  let army = 0;
+  for (const u of Object.values(state.units)) {
+    if (u.owner === fid) army += unitTotalUpkeep(state, u);
+  }
+  // Unit-chip upkeep is already inside unitTotalUpkeep, so it is not added
+  // again here — double-counting it would quote a bill nobody is charged.
+  let structures = 0;
+  for (const b of Object.values(state.world?.blockades || {})) {
+    if (b.owner === fid && b.done) structures += CONFIG.blockades.upkeep;
+    if (b.owner === fid) structures += chipUpkeep(state, b.chips);
+  }
+  for (const post of Object.values(state.world?.listeningPosts || {})) {
+    if (post.owner === fid) structures += CONFIG.posts.upkeep;
+  }
+
+  const upkeep = chips + army + structures;
+  return { income, upkeep, net: income - upkeep, chips, army, structures };
+}
+
 // Rail doc §3 — the whole state of the blockade on `hex`, for its own window.
 //
 // A blockade is selected like a settlement, not reached through whichever unit

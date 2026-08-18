@@ -18,6 +18,9 @@ import { useIsPhone } from "./useViewport.js";
 import { createGame } from "../game/setup.js";
 import { startTurn, endTurn } from "../game/turn.js";
 import { performAction } from "../game/actions.js";
+import { applyOutputAndBuilds, chargeChipUpkeep, chargeUnitUpkeep } from "../game/economy.js";
+import { chargePostUpkeep } from "../game/posts.js";
+import { chargeBlockadeUpkeep } from "../game/blockades.js";
 import { takeAITurn } from "../game/ai.js";
 import { activePlayerId } from "../game/targeting.js";
 import { bfsDistances } from "../game/board.js";
@@ -29,7 +32,7 @@ import { NEUTRAL } from "./data.js";
 import { getEncounter } from "../game/encounters.js";
 import { encounterRedrawBudget } from "../game/encounters.js";
 import { evalCond } from "../game/dsl.js";
-import { adaptState, reinforcePreview, engineChipIdToUi, previewLocationContest, previewAttackerStrength, blockadeView, blockadeBuildOffer, postAction } from "./engineAdapter.js";
+import { adaptState, reinforcePreview, engineChipIdToUi, previewLocationContest, previewAttackerStrength, blockadeView, blockadeBuildOffer, postAction, upkeepSummary } from "./engineAdapter.js";
 import { resolveSalvage } from "../game/contest.js";
 import { assignTechNode } from "../game/stats.js";
 import { performDiplomacy } from "../game/diplomacy.js";
@@ -41,6 +44,18 @@ import { WikiProvider, TokenProvider } from "./RichText.jsx";
 import WikiModal from "./WikiModal.jsx";
 import { WIKI_ENTRIES } from "../game/content/index.js";
 import { resolveTokens } from "../game/textTokens.js";
+
+// The ECONOMY half of a player's Upkeep, in the order turn.js charges it.
+// Exposed as a dev handle so the upkeep-UI check can compare what the HUD
+// promises against what the engine actually takes, rather than reimplementing
+// the sum inside the test and proving only that two copies of a bug agree.
+function runUpkeepFor(game, pid) {
+  applyOutputAndBuilds(game, pid);
+  chargeChipUpkeep(game, pid);
+  chargePostUpkeep(game, pid);
+  chargeBlockadeUpkeep(game, pid);
+  chargeUnitUpkeep(game, pid);
+}
 
 // Local-storage key for the "Don't ask again" preference on move confirm.
 const SKIP_MOVE_CONFIRM_KEY = "pabc.skipMoveConfirm";
@@ -186,6 +201,7 @@ function buildLocView(state, hex, isYourTurn) {
         chipId: engineId,
         name: chipDisplayName(engineId, ctrl),
         disabled: !!state.engineState.chips[uid]?.disabled,
+        upkeep: ENGINE_CHIPS[engineId]?.upkeep || 0,
         upgrade: e.upgrades[uid] || null,
       };
     });
@@ -286,6 +302,10 @@ export default function Prototype({ config, onNewGame }) {
     gameRef.current = bootGame(config?.seed ?? 42, config?.humanFactionId ?? "versari", config?.mapSize);
     // Dev handle — lets the screenshot harness / console stage scenarios.
     if (typeof window !== "undefined") window.__ashland = gameRef.current;
+    // Dev handle: run the engine's own Upkeep for one player. Exists so the
+    // upkeep-UI check can compare what the HUD promises against what the
+    // engine actually charges, rather than reimplementing the sum in the test.
+    if (typeof window !== "undefined") window.__ashlandUpkeep = runUpkeepFor;
   }
   const [tick, setTick] = useState(0);
   const bumpTick = useCallback(() => setTick((t) => t + 1), []);
@@ -1057,6 +1077,7 @@ export default function Prototype({ config, onNewGame }) {
           top bar and bottom dock. */}
       <TopBar
         scrap={you.scrap}
+        upkeep={upkeepSummary(gameRef.current, state.youId)}
         units={{ n: yourUnits.length, cap: you.unitCap }}
         tech={{ level: you.techLevel, label: techLabel }}
         name={UI_FACTIONS[state.youId]?.name}
