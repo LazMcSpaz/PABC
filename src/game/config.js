@@ -154,15 +154,25 @@ export const CONFIG = {
   // whole or not at all; the unaffiliated prizes then fill whatever room is
   // left. So a budget lands on a band boundary — 4, 8, 12 — plus prizes.
   mapSizes: {
-    small:  { rows: [3, 4, 5, 6, 5, 4, 3], locations: 6 },   //  30 hexes, diameter 6
-    medium: { rows: [5, 6, 7, 8, 9, 8, 7, 6, 5], locations: 8 },  //  61 hexes, diameter 8
+    // `locations` is the DEFAULT budget; `locationTiers` is what the setup
+    // screen's density slider offers (low / medium / high / very high). Density
+    // and size are independent on purpose — a cramped small board and a sparse
+    // huge one are both legitimate games, and tying the two made "small" mean
+    // "few cities" whether or not that is what anyone wanted.
+    //
+    // Ceilings are measured, not guessed: a 30-hex board reliably seats 11
+    // Locations before the placement rules start dropping them, so small stops
+    // at 10. Every larger board can seat the whole 19-Location roster, which is
+    // why the top tiers converge there.
+    small:  { rows: [3, 4, 5, 6, 5, 4, 3], locations: 6, locationTiers: [4, 6, 8, 10] },   //  30 hexes, diameter 6
+    medium: { rows: [5, 6, 7, 8, 9, 8, 7, 6, 5], locations: 8, locationTiers: [6, 9, 13, 17] },  //  61 hexes, diameter 8
     // Raised from 10 with the 2026-08-16 content pass (19 Locations now
     // exist, up from 10). At 10 the big boards could not reach past every
     // faction's SECOND home, so the third-home band never appeared on any map
     // — the new content would have been unreachable. 14/19 keeps roughly the
     // medium board's Location density on a much bigger field.
-    large:  { rows: [6, 7, 8, 9, 10, 11, 10, 9, 8, 7, 6], locations: 14 }, // 91, diameter 10
-    huge:   { rows: [7, 8, 9, 10, 11, 12, 13, 12, 11, 10, 9, 8, 7], locations: 19 }, // 127, d 12
+    large:  { rows: [6, 7, 8, 9, 10, 11, 10, 9, 8, 7, 6], locations: 14, locationTiers: [8, 14, 17, 19] }, // 91, diameter 10
+    huge:   { rows: [7, 8, 9, 10, 11, 12, 13, 12, 11, 10, 9, 8, 7], locations: 19, locationTiers: [10, 15, 19, 19] }, // 127, d 12
   },
 
   // Of the hexes left over after Locations are placed, this share become

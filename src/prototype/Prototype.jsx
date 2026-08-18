@@ -25,7 +25,7 @@ import { takeAITurn } from "../game/ai.js";
 import { activePlayerId } from "../game/targeting.js";
 import { bfsDistances } from "../game/board.js";
 import { unitReach, unitMovePath } from "../game/movement.js";
-import { CHIPS as ENGINE_CHIPS, LOCATIONS as ENGINE_LOCATIONS, ABILITIES as ENGINE_ABILITIES, chipDisplayName } from "../game/content.js";
+import { CHIPS as ENGINE_CHIPS, LOCATIONS as ENGINE_LOCATIONS, ABILITIES as ENGINE_ABILITIES, FACTIONS as ENGINE_FACTIONS, chipDisplayName } from "../game/content.js";
 import { CONFIG } from "../game/config.js";
 import { downloadGameLog } from "./gameLogExport.js";
 import { NEUTRAL } from "./data.js";
@@ -266,9 +266,39 @@ function buildLocView(state, hex, isYourTurn) {
 // §18.4.1 — field a VARIABLE subset of minors per game so no two casts (and
 // therefore no two political webs) recur. Two distinct minors chosen by seed.
 const MINOR_POOL = ["tempest", "croppers", "steeltraders", "dambarans"];
-function bootGame(seed, humanFactionId, mapSize) {
-  const minors = [MINOR_POOL[seed % 4], MINOR_POOL[(seed + 2) % 4]];
-  const game = createGame({ seed, humanFactionId, minors, mapSize });
+
+// Which majors are in play. The human is always seated; the rest fill up to
+// `count` in registry order, so a 2-faction game is you and one rival rather
+// than a random pair that might exclude you.
+function majorsFor(humanFactionId, count) {
+  const all = Object.keys(ENGINE_FACTIONS);
+  const n = Math.max(2, Math.min(all.length, count || all.length));
+  if (n >= all.length) return undefined; // undefined = "all of them", createGame's default
+  const picked = [humanFactionId].filter((f) => all.includes(f));
+  for (const f of all) {
+    if (picked.length >= n) break;
+    if (!picked.includes(f)) picked.push(f);
+  }
+  // Keep registry order, so turn order does not depend on who the human picked.
+  return all.filter((f) => picked.includes(f));
+}
+
+function bootGame(config) {
+  const seed = config?.seed ?? 42;
+  const humanFactionId = config?.humanFactionId ?? "versari";
+  // §18.4.1 — a VARIABLE subset of minors per game so no two political webs
+  // recur. The setup screen can switch them off entirely.
+  const minors = config?.minorFactions === false
+    ? []
+    : [MINOR_POOL[seed % 4], MINOR_POOL[(seed + 2) % 4]];
+  const game = createGame({
+    seed,
+    humanFactionId,
+    minors,
+    mapSize: config?.mapSize,
+    factionIds: majorsFor(humanFactionId, config?.factionCount),
+    locationBudget: config?.locationBudget ?? null,
+  });
   startTurn(game);
   driveAIsThroughHumanTurn(game);
   return game;
@@ -299,7 +329,7 @@ export default function Prototype({ config, onNewGame }) {
   // and bump a tick to trigger a re-adapt + re-render after each mutation.
   const gameRef = useRef(null);
   if (!gameRef.current) {
-    gameRef.current = bootGame(config?.seed ?? 42, config?.humanFactionId ?? "versari", config?.mapSize);
+    gameRef.current = bootGame(config);
     // Dev handle — lets the screenshot harness / console stage scenarios.
     if (typeof window !== "undefined") window.__ashland = gameRef.current;
     // Dev handle: run the engine's own Upkeep for one player. Exists so the

@@ -44,6 +44,11 @@ export function createGame({
   // the legacy testMap board, so headless callers and the harness keep the
   // exact layouts they had before board size became selectable.
   mapSize = null,
+  // How many Locations to seat, overriding the map size's default. The two are
+  // deliberately independent: a small board crowded with settlements and a big
+  // empty one are both legitimate games, and tying density to size made "small"
+  // mean "few cities" whether or not that was what anyone wanted.
+  locationBudget = null,
 } = {}) {
   const rng = makeRng(seed);
   const uid = createIdGen();
@@ -56,7 +61,7 @@ export function createGame({
   const size = (mapSize && CONFIG.mapSizes[mapSize]) || null;
   const grid = buildHexGrid(size ? size.rows : CONFIG.testMap);
   const layout = generateLayout(rng, grid, FACTIONS, LOCATIONS,
-    { locationBudget: size ? size.locations : CONFIG.testMapLocations });
+    { locationBudget: locationBudget ?? (size ? size.locations : CONFIG.testMapLocations) });
 
   // chip-instance registry — every chip in play has a uid
   const chips = {};
