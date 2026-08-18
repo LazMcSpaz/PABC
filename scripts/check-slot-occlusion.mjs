@@ -6,7 +6,7 @@
 //
 //   node scripts/check-slot-occlusion.mjs
 
-import { chooseSlots, ringPos, ringAngles, occlusionOf } from "../src/prototype/boardSlots.js";
+import { chooseSlots, ringPos, ringAngles, occlusionOf, fitRadius, facingFor, capacityFor, MAX_DRAWN } from "../src/prototype/boardSlots.js";
 import { HEX_W, HEX_H, ROW_STEP, topFacePoints } from "../src/prototype/hexProjection.js";
 import { radialBox } from "../src/prototype/radialGeometry.js";
 
@@ -22,7 +22,7 @@ const box = (x, y) => ({ x0: x - 20.1, x1: x + 20.1, y0: y - 41.5, y1: y + 10.5 
 // Widest thing that can stand on a hex: the tier-2 vehicle.
 const bigBox = (x, y) => ({ x0: x - 36.9, x1: x + 36.9, y0: y - 56.2, y1: y + 17.9 });
 
-const GROUPS = [1, 2, 3, 4, 5, 6];
+const GROUPS = [1, 2, 3, 4, 5, 6, 7, 8, 10];
 
 console.log("--- every unit gets its own position ---");
 for (const n of GROUPS) {
@@ -52,8 +52,11 @@ for (const n of GROUPS) {
     }
   }
   const width = 40.2;
-  check(`${n} unit(s): same-rank gap clears the sprite`, worst === Infinity || worst >= width,
-    worst === Infinity ? "no two share a rank" : `${worst.toFixed(0)}px gap vs ${width}px wide`);
+  // Vertical overlap between ranks is depth. Only units at the same depth hide
+  // each other, and there the 70%-visible rule applies.
+  const visible = worst === Infinity ? 1 : Math.min(1, worst / width);
+  check(`${n} unit(s): same-rank units stay >=70% visible`, visible >= 0.70,
+    worst === Infinity ? "no two share a rank" : `${(visible * 100).toFixed(0)}% visible (${worst.toFixed(0)}px gap)`);
 }
 
 console.log("\n--- painted back to front ---");
@@ -92,7 +95,8 @@ const real = radialBox(CENTER.x, CENTER.y + ROW_STEP);
 const coverAt = (p, bx = box) => occlusionOf(bx(CENTER.x + p.left, CENTER.y + p.top), [real]);
 for (const n of GROUPS) {
   const turned = chooseSlots(n, CENTER, [real], box);
-  const straight = ringAngles(n).map((a) => ringPos(a));
+  const rx = fitRadius(20.1);
+  const straight = ringAngles(n).map((a) => ringPos(a.angle, rx * a.scale));
   const sum = (ps) => ps.reduce((s, p) => s + coverAt(p), 0);
   check(`${n} unit(s): rotation does not make it worse`, sum(turned) <= sum(straight) + 1e-9,
     `${(sum(turned) * 100).toFixed(0)}% covered vs ${(sum(straight) * 100).toFixed(0)}% unrotated`);
@@ -115,6 +119,40 @@ check("zero count still yields one position", chooseSlots(0, CENTER, [], box).le
 const everywhere = { x0: -1e6, x1: 1e6, y0: -1e6, y1: 1e6 };
 check("fully blocked hex still places every unit", chooseSlots(6, CENTER, [everywhere], box).length === 6,
   "falls back rather than dropping a unit");
+
+console.log("\n--- capacity and the hard cap ---");
+for (const n of [7, 8, 10]) {
+  const ps = chooseSlots(n, CENTER, [], box);
+  const radii = new Set(ps.map((p) => Math.round(Math.hypot(p.left, (p.top - 0.10 * HEX_H) * (0.27 / 0.32) * (HEX_W / HEX_H)))));
+  check(`${n} unit(s): opens a second rank`, radii.size >= 2, `${radii.size} distinct radii`);
+}
+for (const [label, halfW, want] of [["infantry", 20.1, 10], ["tier-1 vehicle", 28.05, 6], ["tier-2 vehicle", 36.85, 6]]) {
+  check(`${label}: fits ${want} per hex`, capacityFor(halfW) === want, `${capacityFor(halfW)}`);
+}
+for (const n of [MAX_DRAWN, MAX_DRAWN + 1, MAX_DRAWN + 7]) {
+  check(`${n} requested: at most ${MAX_DRAWN} drawn`, chooseSlots(n, CENTER, [], box).length === MAX_DRAWN,
+    `${chooseSlots(n, CENTER, [], box).length} positions`);
+}
+
+console.log("\n--- units face the middle of their hex ---");
+// The bearing of a stance and the way it looks are opposites: a unit at the
+// front of the ring is below the centre, so it must face away from the camera.
+for (const [deg, want] of [[90, "n"], [270, "s"], [0, "w"], [180, "e"], [45, "nw"], [225, "se"]]) {
+  const got = facingFor((deg * Math.PI) / 180);
+  check(`stance at ${deg}deg faces ${want}`, got === want, got);
+}
+for (const n of GROUPS) {
+  const ps = chooseSlots(n, CENTER, [], box);
+  check(`${n} unit(s): every stance has a facing`, ps.every((p) => typeof p.facing === "string" && p.facing.length),
+    [...new Set(ps.map((p) => p.facing))].join(","));
+  // Whoever is nearest the camera must be looking away from it, and vice versa.
+  const front = ps[ps.length - 1];
+  const back = ps[0];
+  if (n >= 3) {
+    check(`${n} unit(s): front rank looks inward`, front.facing.includes("n"), front.facing);
+    check(`${n} unit(s): back rank looks inward`, back.facing.includes("s"), back.facing);
+  }
+}
 
 console.log(`\n${failures ? `${failures} FAILED` : "all ring-layout tests passed"}`);
 process.exit(failures ? 1 : 0);

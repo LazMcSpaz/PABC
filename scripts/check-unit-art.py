@@ -17,12 +17,10 @@ What it checks, and why each one matters:
                   non-premultiplied alpha; premultiplied would dark-fringe the
                   glow edges. RGB > A anywhere proves straight.
   clipping        art touching a cell edge has been cut off
-  row-0 register  row 0 is the only row the board draws, so its art must sit on
-                  the anchor — that is what lines the unit up with its contact
-                  ellipse and its slot
-  row drift       how far the art wanders off the anchor in the other seven
-                  rows. Harmless today (they are never drawn) but it is what
-                  would break if facing is ever added
+  registration    every row's art must sit on the anchor. All eight rows are
+                  drawn now — units turn to face the middle of their hex — so a
+                  row that wanders off the anchor visibly slides sideways as a
+                  unit takes up a different stance
   footprint       the drawn art should sit inside the footprint it declares,
                   since the slot chooser and hit target are sized from it
   livery share    masked fraction of the silhouette, against §8's 25% floor
@@ -41,8 +39,8 @@ ASSETS = os.path.join(ROOT, "public", "assets", "units")
 
 SIN_ELEVATION = math.sin(math.radians(34.18))
 LIVERY_FLOOR = 25.0        # §8: masked area wants to be a quarter of the silhouette or more
-ROW0_TOLERANCE = 4.0       # px; row 0 must sit on the anchor
-DRIFT_TOLERANCE = 12.0     # px; other rows, advisory only
+ROW0_TOLERANCE = 4.0       # px; the front-facing row must sit on the anchor
+DRIFT_TOLERANCE = 12.0     # px; how far any other row may wander from it
 
 problems = []
 warnings = []
@@ -129,13 +127,13 @@ def check_one(name, spec, files):
     worst = rows[max(range(len(row_off)), key=lambda i: abs(row_off[i] - row0))]
 
     if abs(row0) > ROW0_TOLERANCE:
-        problems.append(f"{name}: row 0 art sits {row0:+.1f}px off the anchor — it is the row the board "
-                        f"draws, so the unit will not line up with its contact ellipse")
+        problems.append(f"{name}: row 0 art sits {row0:+.1f}px off the anchor, so the unit will not line "
+                        f"up with its contact ellipse")
     if clipped:
         problems.append(f"{name}: {clipped} of {len(rows) * nf} cells have art touching the cell edge (clipped)")
     if drift > DRIFT_TOLERANCE:
-        warnings.append(f"{name}: art drifts {drift:.0f}px off the anchor by row '{worst}'. Harmless while only "
-                        f"row 0 is drawn, but it would break facing support")
+        problems.append(f"{name}: art drifts {drift:.0f}px off the anchor by row '{worst}' — every row is "
+                        f"drawn now, so the unit slides sideways when it turns to face the hex centre")
 
     # The slot chooser and click target are sized from the declared footprint.
     half_w = spec["footprintMetres"] * spec["pixelsPerMetre"] / 2.0

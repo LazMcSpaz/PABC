@@ -31,6 +31,19 @@ const RING_RX = 0.27;
 const RING_RY = 0.32;
 const RING_CY = 0.10;
 
+// How many stand on one ring before a second, inner ring opens. Past this the
+// outer ring's neighbours close to within a sprite width of each other.
+const PER_RING = 6;
+
+// Inner ring radius, as a fraction of the outer. Its angles sit in the gaps
+// between the outer ring's, so the two read as concentric ranks rather than a
+// blur — "the spaces in between", one step closer to the middle.
+const INNER_SCALE = 0.5;
+
+// A hex draws at most this many units. Beyond it the tile has no room left that
+// keeps anyone legible, so the rest become a count badge.
+export const MAX_DRAWN = 10;
+
 // Rotations tried when a radial is in the way. The ring keeps its even spacing
 // and turns as a whole, so units dodge the radial without bunching up.
 const ROTATIONS = 24;
@@ -85,11 +98,53 @@ export function fitRadius(halfW) {
 
 const FRONT = Math.PI / 2;
 
-// The evenly spaced angles a group of `n` wants, before any rotation.
+// The stances a group of `n` wants, before any rotation: an angle and which
+// ring it stands on. Up to PER_RING they share one ring; beyond that the
+// remainder forms an inner ring, offset half a step so nobody is directly in
+// front of anybody.
 export function ringAngles(n) {
-  if (n <= 1) return [FRONT];
-  if (n === 2) return [FRONT - PAIR_ARC / 2, FRONT + PAIR_ARC / 2];
-  return Array.from({ length: n }, (_, i) => FRONT + (i * 2 * Math.PI) / n);
+  const total = Math.min(Math.max(1, n), MAX_DRAWN);
+  if (total === 1) return [{ angle: FRONT, scale: 1 }];
+  if (total === 2) {
+    return [
+      { angle: FRONT - PAIR_ARC / 2, scale: 1 },
+      { angle: FRONT + PAIR_ARC / 2, scale: 1 },
+    ];
+  }
+  const outerCount = Math.min(total, PER_RING);
+  const innerCount = total - outerCount;
+  const step = (2 * Math.PI) / outerCount;
+  const out = Array.from({ length: outerCount }, (_, i) => ({
+    angle: FRONT + i * step,
+    scale: 1,
+  }));
+  // The inner rank stands in the GAPS between the outer stances, not on its own
+  // even division. Dividing 2*PI by the inner count independently lets an inner
+  // unit land on the same bearing as an outer one — directly behind it — which
+  // is exactly what the second rank exists to avoid.
+  const mids = Array.from({ length: outerCount }, (_, i) => FRONT + (i + 0.5) * step);
+  for (let i = 0; i < innerCount; i++) {
+    out.push({
+      angle: mids[Math.round((i * outerCount) / innerCount) % outerCount],
+      scale: INNER_SCALE,
+    });
+  }
+  return out;
+}
+
+// Which of the sheet's eight orientation rows a unit at `angle` should draw, so
+// it faces the middle of its own hex rather than the camera. The objective is
+// the tile, so a ring of units looks inward at it.
+//
+// `angle` is the stance's bearing from the hex centre, in the same frame
+// ringPos uses: 0 is screen-right, and it increases clockwise on screen through
+// screen-down. Facing the centre is the reverse bearing.
+const FACING_BY_SECTOR = ["e", "se", "s", "sw", "w", "nw", "n", "ne"];
+
+export function facingFor(angle) {
+  const inward = angle + Math.PI;
+  const sector = Math.round(inward / (Math.PI / 4)) & 7;
+  return FACING_BY_SECTOR[sector];
 }
 
 // How much of `box` the worst occluder covers, 0..1.
@@ -123,6 +178,37 @@ function nearbyOccluders(center, occluders) {
   return near.length ? near : null;
 }
 
+// The most units of a given size a hex can show while every one of them stays
+// at least 70% visible — the readability bar the footprint figures in
+// docs/unit-model-pipeline.md are set against.
+//
+// Vertical overlap between ranks is depth and does not count; only units at the
+// same depth hide each other. Infantry reach the MAX_DRAWN ceiling; a hex full
+// of landships does not, because they are nearly twice as wide, so the overflow
+// becomes a badge instead of an unreadable heap.
+const capacityCache = new Map();
+export function capacityFor(halfW) {
+  const key = Math.round(halfW);
+  if (capacityCache.has(key)) return capacityCache.get(key);
+  const width = halfW * 2;
+  let fits = 1;
+  for (let n = MAX_DRAWN; n >= 1; n--) {
+    const rx = fitRadius(halfW);
+    const stances = ringAngles(n).map((a) => ringPos(a.angle, rx * a.scale));
+    let worst = 0;
+    for (let i = 0; i < stances.length; i++) {
+      for (let j = i + 1; j < stances.length; j++) {
+        if (Math.abs(stances[i].top - stances[j].top) >= 12) continue;
+        const gap = Math.abs(stances[i].left - stances[j].left);
+        if (gap < width) worst = Math.max(worst, (width - gap) / width);
+      }
+    }
+    if (worst <= 0.30) { fits = n; break; }
+  }
+  capacityCache.set(key, fits);
+  return fits;
+}
+
 // Positions for `count` tokens on one hex.
 //
 // Returns exactly `count` positions — never fewer. Handing back a short list
@@ -150,7 +236,7 @@ export function chooseSlots(count, center, occluders, boxFor) {
       const turn = (r * 2 * Math.PI) / ROTATIONS;
       let score = 0;
       for (const a of angles) {
-        const p = ringPos(a + turn, rx);
+        const p = ringPos(a.angle + turn, rx * a.scale);
         score += occlusionOf(boxFor(center.x + p.left, center.y + p.top), near);
       }
       if (score < bestScore - 1e-9) { bestScore = score; best = turn; }
@@ -159,14 +245,14 @@ export function chooseSlots(count, center, occluders, boxFor) {
   }
 
   return angles
-    .map((a) => ringPos(a + best, rx))
+    .map((a) => ({ ...ringPos(a.angle + best, rx * a.scale), facing: facingFor(a.angle + best) }))
     .sort((p, q) => p.top - q.top);
 }
 
 // Kept for callers that want a position without the occlusion pass (the token
 // components' own fallback). Same ring, no rotation.
 export function slotPos(i, count) {
-  const n = Math.max(1, count || 1);
-  const angles = ringAngles(n);
-  return ringPos(angles[Math.min(i, angles.length - 1)]);
+  const angles = ringAngles(Math.max(1, count || 1));
+  const a = angles[Math.min(i, angles.length - 1)];
+  return { ...ringPos(a.angle, RING_RX * HEX_W * a.scale), facing: facingFor(a.angle) };
 }

@@ -19,10 +19,13 @@
 //     vehicle has none at all. So a unit asks for what it wants and takes the
 //     closest thing that exists — see variantFor.
 //
-//   * They carry 8 orientation rows, and the game has no facing to select one
-//     with — `makeUnit` has no such field, src/game/movement.js is explicit that
-//     the rules do not need one, and the board camera never rotates. So row 0
-//     ("s", facing the camera) is the only row drawn. See FACING_ROW.
+//   * They carry 8 orientation rows, and all eight are drawn. The unit model
+//     still has no facing — `makeUnit` has no such field and src/game/movement.js
+//     is explicit that the rules do not need one — so facing is a property of
+//     where a unit stands, not of its state: everyone on a hex turns to look at
+//     the middle of that hex. boardSlots.js works out the bearing; this file
+//     just picks the row.
+//
 // The import attribute is required by Node (Vite does not need it); this module
 // is imported headless by scripts/check-unit-variants.mjs.
 import manifest from "./unitSprites.json" with { type: "json" };
@@ -38,9 +41,12 @@ const HEX_VERTEX_TO_VERTEX_M = 36.95;
 // The camera's tilt, which is what compresses ground depth on screen (§2).
 const SIN_ELEVATION = Math.sin((34.18 * Math.PI) / 180);
 
-// Row 0. There is no facing in the unit model, so every unit faces the camera.
-// If facing is ever added, this becomes a lookup into `spec.rows`.
-const FACING_ROW = 0;
+// Row index for a screen-relative facing name, falling back to the first row
+// (which every sheet ships as "s") if a sheet ever omits one.
+function rowFor(spec, facing) {
+  const i = facing ? spec.rows.indexOf(facing) : -1;
+  return i >= 0 ? i : 0;
+}
 
 // Movement chips promote a unit's model: the squad walks, then rides, then
 // crews a landship. Keyed off installed chips rather than effective Movement,
@@ -122,8 +128,9 @@ function footprintPx(spec) {
 }
 
 // Everything the token needs to paint one unit, in board px.
-export function spriteStyle(spec, variant, { uid = "" } = {}) {
+export function spriteStyle(spec, variant, { uid = "", facing = null } = {}) {
   const s = spriteScale(spec);
+  const row = rowFor(spec, facing);
   const v = spec.variants[variant] || Object.values(spec.variants)[0];
   const [ax, ay] = spec.anchor;
   return {
@@ -131,8 +138,9 @@ export function spriteStyle(spec, variant, { uid = "" } = {}) {
     height: spec.frameHeight * s,
     backgroundImage: `url(${SPRITE_BASE_URL}/${v.sheet})`,
     backgroundSize: `${spec.sheetWidth * s}px ${spec.sheetHeight * s}px`,
-    // Row is fixed; the keyframe animates the column.
-    backgroundPositionY: `${-FACING_ROW * spec.frameHeight * s}px`,
+    // The row picks the orientation and stays put; the keyframe animates only
+    // the column, so the two compose without fighting each other.
+    backgroundPositionY: `${-row * spec.frameHeight * s}px`,
     backgroundRepeat: "no-repeat",
     // Put the anchor pixel on the token's origin. The cell is not centred on
     // the anchor vertically, so this is not translate(-50%, -100%).

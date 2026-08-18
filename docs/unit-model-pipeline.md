@@ -265,6 +265,23 @@ and painting back to front makes it correct — so the rule only has to hold for
 units sharing a rank, and there it holds with room to spare: at six per hex no
 two tiers share a rank at all, infantry through T2.
 
+Units also **turn to face the middle of their own hex** rather than the camera.
+The objective is the tile, so a ring of units looks inward at it. Facing is a
+property of where a unit stands, not of its state — the unit model still has no
+facing field — and `boardSlots.js` derives the bearing from the stance.
+
+This is what finally puts the eight orientation rows to work, and it raises the
+bar on them: a row whose art does not sit on the anchor now visibly slides
+sideways as a unit takes up a different stance. `scripts/check-unit-art.py`
+treats that as a failure rather than a note.
+
+**Capacity is derived, not chosen.** A hex draws as many units as it can while
+every one of them stays at least 70% visible, capped at ten. Vertical overlap
+between ranks is depth and does not count against that; only units at the same
+depth hide each other. In practice: **ten infantry, six of either vehicle**.
+Beyond that the overflow becomes a `+N` badge — §10's count badge, arrived at
+from the other direction.
+
 Three things fall out of the ring and are worth knowing:
 
 - **The radius adapts to the widest unit present.** A T2 vehicle is 74 px

@@ -10,7 +10,7 @@ import { useMemo } from "react";
 import { FACTIONS, ownerColor, theme } from "./data.js";
 import { HEX_W, HEX_H } from "./hexProjection.js";
 import { radialBox, hasRadial } from "./radialGeometry.js";
-import { slotPos, chooseSlots } from "./boardSlots.js";
+import { slotPos, chooseSlots, capacityFor } from "./boardSlots.js";
 import {
   spriteFor, variantFor, spriteStyle, spriteScale, hitBoxStyle, drawnBox, ensureIdleKeyframes,
 } from "./unitSprites.js";
@@ -32,7 +32,7 @@ export { slotPos, chooseSlots } from "./boardSlots.js";
 function SpriteToken({ unit, spec, faction, selected, pos, onClick, dim }) {
   ensureIdleKeyframes(spec);
   const s = spriteScale(spec);
-  const style = spriteStyle(spec, variantFor(unit, spec), { uid: unit.uid });
+  const style = spriteStyle(spec, variantFor(unit, spec), { uid: unit.uid, facing: pos.facing });
   // Ground ellipse, squashed to the projection. §6 of the pipeline doc keeps
   // shadows out of the render precisely so this can scale with the board. It
   // tracks the unit's footprint, so a vehicle's contact patch is wider.
@@ -226,6 +226,34 @@ function tokenBox(occupants) {
   return (x, y) => ({ x0: x - 15, x1: x + 15, y0: y - 30, y1: y + 3 });
 }
 
+// What a hex shows when it holds more than it can draw. Sits at the front of
+// the ring, where nothing else stands, so it never covers a unit.
+function OverflowBadge({ count }) {
+  return (
+    <div
+      title={`${count} more unit${count === 1 ? "" : "s"} on this hex`}
+      style={{
+        position: "absolute",
+        left: 0,
+        top: HEX_H * 0.46,
+        transform: "translate(-50%, -50%)",
+        padding: "1px 6px",
+        borderRadius: 9,
+        background: "rgba(8,10,12,0.86)",
+        border: `1px solid ${theme.accent}aa`,
+        color: theme.text,
+        fontFamily: theme.fontDisplay,
+        fontSize: 11,
+        fontWeight: 700,
+        whiteSpace: "nowrap",
+        pointerEvents: "none",
+      }}
+    >
+      {`+${count}`}
+    </div>
+  );
+}
+
 // One positioned group per hex, so token slots stay relative to a hex centre.
 export default function BoardTokens({ order, hexes, units, centers, selectedUnitId, dimmedUnitUid, onUnitClick }) {
   // Every radial on the board, in board space. Built once per render rather
@@ -254,13 +282,19 @@ export default function BoardTokens({ order, hexes, units, centers, selectedUnit
         const here = (hex.unitIds || []).map((id) => units[id]).filter(Boolean);
         const ghosts = hex.ghosts || [];
         if (!here.length && !ghosts.length) return null;
-        const unitSlots = chooseSlots(here.length, c, occluders, tokenBox(here));
+        // How many actually fit depends on how wide they are: a hex holds ten
+        // infantry but only six landships before they start hiding each other.
+        // The rest become a count rather than an unreadable heap.
+        const probe = tokenBox(here)(0, 0);
+        const drawn = here.slice(0, capacityFor((probe.x1 - probe.x0) / 2));
+        const overflow = here.length - drawn.length;
+        const unitSlots = chooseSlots(drawn.length, c, occluders, tokenBox(drawn));
         // Ghosts are remembered enemies, drawn as discs — there is no model to
         // size them from, so tokenBox falls through to the disc box.
         const ghostSlots = chooseSlots(ghosts.length, c, occluders, tokenBox(null));
         return (
-          <div key={`tok-${hexId}`} style={{ position: "absolute", left: c.x, top: c.y }}>
-            {here.map((u, i) => (
+          <div key={`tok-${hexId}`} data-hex-tokens={hexId} style={{ position: "absolute", left: c.x, top: c.y }}>
+            {drawn.map((u, i) => (
               <UnitToken
                 key={u.uid}
                 unit={u}
@@ -273,6 +307,7 @@ export default function BoardTokens({ order, hexes, units, centers, selectedUnit
             {ghosts.map((g, i) => (
               <GhostToken key={`ghost-${i}`} ghost={g} pos={ghostSlots[i]} />
             ))}
+            {overflow > 0 && <OverflowBadge count={overflow} />}
           </div>
         );
       })}
