@@ -22,7 +22,7 @@ import {
 } from "./blockades.js";
 import {
   meetsTech, meetsLoyalty, slotCapacity, slotsUsed, stationedUnitWithBay,
-  techLevelReqFor, upgradeOption, completeBuildIfDone, effectiveBuildCost,
+  techLevelReqFor, upgradeOption, completeBuildIfDone, bankBuildSurplus, effectiveBuildCost,
 } from "./economy.js";
 
 const fail = (reason) => ({ ok: false, reason });
@@ -329,7 +329,9 @@ function runBuild(state, { params }) {
     targetSlot: loc.chips.length, targetUnit,
   };
   emit(state, "build_started", { hex: loc.hexId, chipId: def.id, kind: "build", cost: loc.activeBuild.cost });
-  completeBuildIfDone(state, loc); // carried-over progress may finish it at once
+  // Carried-over progress may finish it at once; anything past the cost is
+  // scrap rather than a pile sitting on the Location.
+  bankBuildSurplus(state, loc.controller, completeBuildIfDone(state, loc));
   return { hex: loc.hexId, chipId: def.id };
 }
 
@@ -359,7 +361,7 @@ function runUpgrade(state, { pid, params }) {
     targetUnit: holder.kind === "unit" ? holder.uid : null,
   };
   emit(state, "build_started", { hex: loc.hexId, chipId: opt.chipId, kind: "upgrade", cost: loc.activeBuild.cost });
-  completeBuildIfDone(state, loc);
+  bankBuildSurplus(state, loc.controller, completeBuildIfDone(state, loc));
   return { hex: loc.hexId, chipId: opt.chipId };
 }
 
@@ -400,7 +402,8 @@ function runRush(state, { pid, player, params }) {
   player.resource -= spend;
   emit(state, "resource_spent", { player: pid, resource: "Resource", amount: -spend, source: "rush" });
   loc.buildProgress = (loc.buildProgress || 0) + points;
-  completeBuildIfDone(state, loc);
+  // Rushing past the cost refunds the overshoot as scrap.
+  bankBuildSurplus(state, loc.controller, completeBuildIfDone(state, loc));
   return { hex: loc.hexId, points, spent: spend };
 }
 

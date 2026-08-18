@@ -499,6 +499,9 @@ function adaptEconomy(state, loc) {
       uiChipId: engineChipIdToUi(o.chipId),
       name: chipDisplayName(o.chipId, loc.controller),
       kind: o.def.kind,
+      // The one-chip-per-stat-family rule is a UNIT constraint, so the
+      // per-unit outfit menu needs the family to explain a refusal.
+      statType: o.def.statType || null,
       cost: o.def.buildCost ?? o.def.cost ?? 0,
       slots: o.def.slots || 1,
       desc: o.def.desc || "",
@@ -526,6 +529,38 @@ function adaptEconomy(state, loc) {
   for (const c of loc.chips) collect(c);
   for (const u of Object.values(state.units)) {
     if (u.owner === loc.controller && u.node === loc.hexId) for (const c of u.chips) collect(c);
+  }
+
+  // The GARRISON's own bays, kept separate from the Location's chip slots.
+  //
+  // Unit chips never consumed a Location slot in the engine — but the build
+  // menu was only reachable by clicking an EMPTY Location slot, so once a city
+  // filled up its stationed units could no longer be outfitted at all, and a
+  // unit chip's upgrade never rendered anywhere. The two economies are
+  // genuinely separate and now read that way.
+  const garrison = [];
+  for (const u of Object.values(state.units)) {
+    if (u.owner !== loc.controller || u.node !== loc.hexId) continue;
+    const bayUsed = slotsUsed(state, u.chips);
+    garrison.push({
+      uid: u.uid,
+      name: u.name || "Unit",
+      bayUsed,
+      baySlots: CONFIG.unit.baySlots,
+      // Each stat family admits one chip — surfaced so the menu can say WHY a
+      // second Strength chip is refused rather than just greying out.
+      statTypes: u.chips
+        .map((c) => ENGINE_CHIPS[state.chips[c]?.chipId]?.statType)
+        .filter(Boolean),
+      chips: u.chips.map((c) => ({
+        uid: c,
+        chipId: state.chips[c]?.chipId,
+        uiChipId: engineChipIdToUi(state.chips[c]?.chipId),
+        name: chipDisplayName(state.chips[c]?.chipId, loc.controller),
+        disabled: !!state.chips[c]?.disabled,
+        upgrade: upgrades[c] || null,
+      })),
+    });
   }
 
   // Rail doc §2.2 — the settlements this one may pool into. Mirrors
@@ -557,6 +592,7 @@ function adaptEconomy(state, loc) {
     slotsUsed: used,
     // Pooling (§2.2) + funding priority (§3.4) — engine actions that had no
     // control anywhere in the UI until now.
+    garrison,
     poolTarget: loc.poolTarget ?? null,
     poolTargetName: loc.poolTarget
       ? (ENGINE_LOCATIONS[state.locations[loc.poolTarget]?.locationId]?.name || loc.poolTarget)

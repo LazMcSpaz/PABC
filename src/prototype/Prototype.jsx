@@ -201,6 +201,7 @@ function buildLocView(state, hex, isYourTurn) {
       canManage: isYourTurn,
       scrap: you.scrap,
       // Rail doc §2.2 pooling + §3.4 funding priority.
+      garrison: e.garrison,
       poolTarget: e.poolTarget,
       poolTargetName: e.poolTargetName,
       poolTargets: e.poolTargets,
@@ -779,8 +780,12 @@ export default function Prototype({ config, onNewGame }) {
   }
   // §20.4–20.7 — economy directives (all free of Actions). Construction
   // advances at Upkeep off the city's Output via its guns/butter slider.
-  function onBuild(hexId, chipId) {
-    return runAction("build", { at: hexId, chipId }, null, "Build queued.");
+  // `into` names which stationed unit a UNIT chip is destined for, so a city
+  // with two units in it does not silently arm whichever the engine happens to
+  // scan first. Omitted for city chips, where it means nothing.
+  function onBuild(hexId, chipId, into) {
+    return runAction("build", { at: hexId, chipId, ...(into ? { into } : {}) },
+      null, "Build queued.");
   }
   function onUpgrade(hexId, chipUid) {
     return runAction("upgrade", { at: hexId, chip: chipUid }, null, "Upgrade queued.");

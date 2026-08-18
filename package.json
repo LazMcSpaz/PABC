@@ -15,7 +15,8 @@
     "board-perf": "node scripts/board-perf.mjs",
     "motion": "node scripts/motion.mjs",
     "check:pooling": "node scripts/check-pooling-ui.mjs",
-    "check:layers": "node scripts/check-board-layers.mjs"
+    "check:layers": "node scripts/check-board-layers.mjs",
+    "check:settlement": "node scripts/check-settlement-ui.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.30.1",
