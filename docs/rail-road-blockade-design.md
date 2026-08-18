@@ -26,6 +26,7 @@ aren't.
 | Pooling / priority UI | built | `HudChrome.jsx EconomyPanel`, `scripts/check-pooling-ui.mjs` |
 | Blockade UI (own window) | built | `HudChrome.jsx BlockadeWindow`, `scripts/check-blockade-ui.mjs` |
 | Upkeep visibility | built | top bar, unit panel, settlement, blockade · `scripts/check-upkeep-ui.mjs` |
+| Economy ledger (radial) | built | `HudChrome.jsx EconomyLedger`, `engineAdapter.js economyReport` |
 | Blockade upkeep | built | `blockades.js chargeBlockadeUpkeep` |
 | Unit upkeep | built | `economy.js chargeUnitUpkeep` |
 
@@ -170,11 +171,24 @@ when the army starved. Now:
   chip commits you to next to its one-off price;
 - the **blockade window** and the **build-post button** state theirs.
 
-The risk in five separate readouts is that they drift from the engine, so
+The radial's **Locations** tab is now **Economy**: a full ledger rather than a
+roster. It names every holding with what it banks (and its Output, when the
+two differ because the settlement is building or pooling), then itemises the
+standing army, the structures and the chip upkeep, each row opening the thing
+it names. A roster answered the wrong question once everything started billing
+per turn; the one a player actually has is "where is my scrap going".
+
+All of it comes from ONE computation — `economyReport` in the adapter, of
+which `upkeepSummary` is just the totals — so the top bar's running net and
+the panel's itemisation cannot disagree. A HUD promising +3/turn over a list
+that visibly sums to −1 would be worse than showing neither.
+
+The risk in six separate readouts is that they drift from the engine, so
 `scripts/check-upkeep-ui.mjs` compares the top bar's promise against a real
-Upkeep tick rather than reimplementing the sum. Note the bar's income is what
-actually REACHES the treasury — a settlement mid-build banks only the butter
-half of its slider — not gross Output.
+Upkeep tick rather than reimplementing the sum, and separately checks the
+ledger's section totals add up to that same net. Note income is what actually
+REACHES the treasury — a settlement mid-build banks only the butter half of
+its slider — not gross Output.
 
 ### Upkeep — blockades and standing armies
 

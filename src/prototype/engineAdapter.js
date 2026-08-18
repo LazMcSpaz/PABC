@@ -1171,53 +1171,124 @@ function hasStationedUnitWithBay(state, loc, slots) {
 // v0.2 §16.5 — what a Reinforce action would cost/look like for `unitUid`
 // right now: the scrap to top it up, whether an instant top-up is legal
 // (unit on a fully-held Location), and the field-supply ETA in turns.
-// What a faction earns and owes each Upkeep, as one summary.
+// The full economic ledger for a faction: what each holding earns, what each
+// standing asset costs, and the net.
 //
-// Units now cost scrap every turn, and without a running total a player has no
-// way to tell whether they can afford the next recruit until their army starts
-// starving. This is the number the top bar quotes.
+// ONE computation, because the top bar's running total and the Economy panel's
+// itemisation must never disagree — a HUD that says +3/turn over a list that
+// visibly adds to −1 is worse than showing neither. `upkeepSummary` below is
+// just this report's totals.
 //
-// Mirrors the order the engine actually charges in (turn.js): Output and tolls
-// in, then chips, posts, blockades and units out.
-export function upkeepSummary(state, fid) {
-  // INCOME is what actually reaches the treasury, not gross Output. A
-  // settlement with something under construction banks only the butter half of
-  // its slider (economy.js processLocationEconomy); one with nothing to build
-  // banks all of it, because throughput is never wasted.
+// Mirrors the order the engine charges in (turn.js): Output and tolls in, then
+// chips, posts, blockades and units out.
+export function economyReport(state, fid) {
+  const locations = [];
   let income = 0;
+  let chipCost = 0;
+
   for (const loc of Object.values(state.locations)) {
     const full = loc.controller === fid;
     if (!full && holderOf(loc) !== fid) continue;
+
+    // A besieged city (majority-held, not outright) still works, at reduced
+    // capacity — control.js.
     let output = locationOutput(state, loc);
     if (!full) output = Math.floor(output * CONFIG.economy.partialOutputScale);
-    const diverting = !!loc.activeBuild || !!loc.poolTarget;
-    if (!diverting) { income += output; continue; }
-    const f = Math.max(0, Math.min(1, loc.buildSlider ?? CONFIG.economy.defaultSlider));
-    income += Math.floor((1 - f) * output);
-  }
-  income += blockadeIncome(state, fid);
 
-  let chips = 0;
-  for (const loc of Object.values(state.locations)) {
-    if (loc.controller === fid) chips += chipUpkeep(state, loc.chips);
+    // BANKED is what actually reaches the treasury. A settlement with
+    // something under construction keeps only the butter half of its slider;
+    // one with nothing to build banks all of it, because throughput is never
+    // wasted (economy.js processLocationEconomy).
+    const diverting = !!loc.activeBuild || !!loc.poolTarget;
+    const f = Math.max(0, Math.min(1, loc.buildSlider ?? CONFIG.economy.defaultSlider));
+    const banked = diverting ? Math.floor((1 - f) * output) : output;
+    income += banked;
+
+    const chips = [];
+    for (const c of loc.chips) {
+      const def = ENGINE_CHIPS[state.chips[c]?.chipId];
+      if (!def?.upkeep) continue;
+      chips.push({
+        uid: c,
+        name: chipDisplayName(state.chips[c]?.chipId, fid),
+        upkeep: def.upkeep,
+        dormant: !!state.chips[c]?.disabled,
+      });
+      chipCost += def.upkeep;
+    }
+
+    locations.push({
+      hexId: loc.hexId,
+      name: ENGINE_LOCATIONS[loc.locationId]?.name || loc.locationId,
+      besieged: !full,
+      output,
+      banked,
+      // Why banked is short of output, when it is — so a player reading a low
+      // number can see it is a choice they made, not a loss.
+      diverting: diverting ? (loc.activeBuild ? "building" : "pooling") : null,
+      chips,
+      chipUpkeep: chips.reduce((n, c) => n + c.upkeep, 0),
+    });
   }
+  locations.sort((a, b) => b.banked - a.banked || a.name.localeCompare(b.name));
+
+  const tolls = blockadeIncome(state, fid);
+  income += tolls;
+
+  const units = [];
   let army = 0;
   for (const u of Object.values(state.units)) {
-    if (u.owner === fid) army += unitTotalUpkeep(state, u);
+    if (u.owner !== fid) continue;
+    const cost = unitTotalUpkeep(state, u);
+    army += cost;
+    units.push({
+      uid: u.uid,
+      name: u.name || "Unit",
+      hexId: u.node,
+      at: ENGINE_LOCATIONS[state.locations[u.node]?.locationId]?.name || u.node,
+      upkeep: cost,
+      unsupplied: !!u.unsupplied,
+    });
   }
-  // Unit-chip upkeep is already inside unitTotalUpkeep, so it is not added
-  // again here — double-counting it would quote a bill nobody is charged.
-  let structures = 0;
+  units.sort((a, b) => b.upkeep - a.upkeep || a.name.localeCompare(b.name));
+
+  const structures = [];
+  let structureCost = 0;
   for (const b of Object.values(state.world?.blockades || {})) {
-    if (b.owner === fid && b.done) structures += CONFIG.blockades.upkeep;
-    if (b.owner === fid) structures += chipUpkeep(state, b.chips);
+    if (b.owner !== fid) continue;
+    // An unfinished site costs nothing yet — it is paid for out of a
+    // settlement's build output, not from the treasury.
+    const cost = (b.done ? CONFIG.blockades.upkeep : 0) + chipUpkeep(state, b.chips);
+    if (!b.done && cost === 0) continue;
+    structureCost += cost;
+    structures.push({
+      kind: "blockade", hexId: b.hex, name: "Blockade",
+      upkeep: cost, dormant: b.done && b.paid === false,
+    });
   }
   for (const post of Object.values(state.world?.listeningPosts || {})) {
-    if (post.owner === fid) structures += CONFIG.posts.upkeep;
+    if (post.owner !== fid) continue;
+    structureCost += CONFIG.posts.upkeep;
+    structures.push({
+      kind: "post", hexId: post.hex, name: "Listening post",
+      upkeep: CONFIG.posts.upkeep, dormant: post.paid === false,
+    });
   }
+  structures.sort((a, b) => b.upkeep - a.upkeep || String(a.hexId).localeCompare(String(b.hexId)));
 
-  const upkeep = chips + army + structures;
-  return { income, upkeep, net: income - upkeep, chips, army, structures };
+  const upkeep = chipCost + army + structureCost;
+  return {
+    income, tolls, upkeep, net: income - upkeep,
+    chips: chipCost, army, structures: structureCost,
+    locations, units, structureList: structures,
+  };
+}
+
+// Just the totals, for the top bar. Derived from the same report the Economy
+// panel itemises, so the two can never drift.
+export function upkeepSummary(state, fid) {
+  const r = economyReport(state, fid);
+  return { income: r.income, upkeep: r.upkeep, net: r.net, chips: r.chips, army: r.army, structures: r.structures };
 }
 
 // Rail doc §3 — the whole state of the blockade on `hex`, for its own window.

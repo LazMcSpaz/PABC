@@ -34,7 +34,7 @@ const MOCK_PLAYER = {
 const MENU_ITEMS = [
   { key: "research", icon: ICON.research, label: "Research" },
   { key: "units", icon: ICON.units, label: "Units" },
-  { key: "locations", icon: ICON.shield, label: "Locations" },
+  { key: "economy", icon: ICON.scrap, label: "Economy" },
   { key: "diplomacy", icon: ICON.diplomacy, label: "Diplomacy" },
 ];
 

@@ -144,6 +144,50 @@ if (at) { await page.mouse.click(at.x, at.y); await page.waitForTimeout(700); }
 check("the blockade window states its per-turn cost",
   (await page.getByText("Upkeep / turn").count()) > 0);
 
+// --- 4. the Economy ledger ------------------------------------------------
+// The radial's old Locations tab named your cities and said nothing about
+// them. It is now a ledger, and its itemisation has to add up to the same net
+// the top bar quotes — a HUD promising +3 over a list that visibly sums to −1
+// is worse than showing neither.
+{
+  await page.locator("button").filter({ hasText: /^MENU$/ }).first().click();
+  await page.waitForTimeout(500);
+  const tab = page.locator("*").filter({ hasText: /^Economy$/ }).last();
+  await tab.click({ timeout: 8000 }).catch(() => {});
+  await page.waitForTimeout(600);
+
+  const body = await page.evaluate(() => document.body.innerText);
+  check("the radial opens an Economy panel", /NET \/ TURN/i.test(body));
+  check("it itemises settlements, army and structures",
+    /SETTLEMENTS/i.test(body) && /STANDING ARMY/i.test(body) && /STRUCTURES/i.test(body));
+
+  // The panel's own net must equal the engine-checked figure from above.
+  const panelNet = await page.evaluate(() => {
+    const m = document.body.innerText.match(/([+-]\d+)\s*\n\s*NET \/ TURN/i);
+    return m ? Number(m[1]) : null;
+  });
+  check("the ledger's net matches the engine-verified figure",
+    panelNet === promised, `panel ${panelNet}, verified ${promised}`);
+
+  // And the sections themselves have to add up to it.
+  const sums = await page.evaluate(() => {
+    const t = document.body.innerText;
+    // The section totals are rendered with a typographic MINUS (U+2212), not
+    // an ASCII hyphen — accept either, and normalise before parsing.
+    const grab = (label) => {
+      const m = t.match(new RegExp(label + "\\s*\\n\\s*([+\\-\u2212]\\d+)", "i"));
+      return m ? Number(m[1].replace("\u2212", "-")) : null;
+    };
+    return { settlements: grab("SETTLEMENTS"), army: grab("STANDING ARMY"), structures: grab("STRUCTURES") };
+  });
+  const total = (sums.settlements ?? 0) + (sums.army ?? 0) + (sums.structures ?? 0);
+  check("the section totals add up to the net",
+    total === panelNet,
+    `${sums.settlements} ${sums.army} ${sums.structures} = ${total}, net ${panelNet}`);
+
+  await page.screenshot({ path: `${OUT}/economy-ledger.png` });
+}
+
 check("no console/page errors", errors.length === 0, errors.slice(0, 2).join(" | ") || "clean");
 
 await browser.close();

@@ -12,7 +12,7 @@ import BoardViewport from "./BoardViewport.jsx";
 import UnitCard from "./UnitCard.jsx";
 import ControlMeter from "./ControlMeter.jsx";
 import {
-  TopBar, MenuOrb, RadialMenu, LocationWindow, BlockadeWindow, TitledWindow, ICON, C as HUD, COMPACT_HUD_H,
+  TopBar, MenuOrb, RadialMenu, LocationWindow, BlockadeWindow, EconomyLedger, TitledWindow, ICON, C as HUD, COMPACT_HUD_H,
 } from "./HudChrome.jsx";
 import { useIsPhone } from "./useViewport.js";
 import { createGame } from "../game/setup.js";
@@ -32,7 +32,7 @@ import { NEUTRAL } from "./data.js";
 import { getEncounter } from "../game/encounters.js";
 import { encounterRedrawBudget } from "../game/encounters.js";
 import { evalCond } from "../game/dsl.js";
-import { adaptState, reinforcePreview, engineChipIdToUi, previewLocationContest, previewAttackerStrength, blockadeView, blockadeBuildOffer, postAction, upkeepSummary } from "./engineAdapter.js";
+import { adaptState, reinforcePreview, engineChipIdToUi, previewLocationContest, previewAttackerStrength, blockadeView, blockadeBuildOffer, postAction, upkeepSummary, economyReport } from "./engineAdapter.js";
 import { resolveSalvage } from "../game/contest.js";
 import { assignTechNode } from "../game/stats.js";
 import { performDiplomacy } from "../game/diplomacy.js";
@@ -150,7 +150,7 @@ function contestMods(r) {
 const MENU_ITEMS = [
   { key: "research", icon: ICON.research, label: "Research" },
   { key: "units", icon: ICON.units, label: "Units" },
-  { key: "locations", icon: ICON.shield, label: "Locations" },
+  { key: "economy", icon: ICON.scrap, label: "Economy" },
   { key: "diplomacy", icon: ICON.diplomacy, label: "Diplomacy" },
 ];
 
@@ -371,16 +371,13 @@ export default function Prototype({ config, onNewGame }) {
   // its detail view is open. `null` means no highlight.
   const [highlightedFactionId, setHighlightedFactionId] = useState(null);
   const [menuOpen, setMenuOpen] = useState(false); // radial menu visible
-  const [menuPanel, setMenuPanel] = useState(null); // "units"|"market"|"locations"|"settings"
+  const [menuPanel, setMenuPanel] = useState(null); // "units"|"market"|"economy"|"settings"
   const [aiSpeed, setAiSpeed] = useState(getAiTurnSpeed()); // §AI replay speed (persisted)
   const you = state.players[state.youId];
   // During an AI replay the engine has already advanced (often to the human),
   // but the player must not act until the cinematics finish — gate on it too.
   const isYourTurn = state.activeId === state.youId && !state.winnerId && !replay.isReplaying;
   const yourUnits = Object.values(state.units).filter((u) => u.owner === state.youId);
-  const yourLocationHexes = Object.values(state.hexes).filter(
-    (h) => h.type === "location" && h.control?.sections?.some((s) => s === state.youId),
-  );
   const techLabel = (() => {
     const research = you.research || 0;
     const thresholds = state.techThresholds || [];
@@ -1119,36 +1116,13 @@ export default function Prototype({ config, onNewGame }) {
         </TitledWindow>
       )}
 
-      {menuPanel === "locations" && (
-        <TitledWindow key="locations" title="Locations" icon={ICON.shield} onClose={() => setMenuPanel(null)}>
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {yourLocationHexes.length === 0 && (
-              <span style={{ color: HUD.textDim, fontSize: 13 }}>
-                You hold no sections yet. Move a unit onto a location and contest it.
-              </span>
-            )}
-            {yourLocationHexes.map((h) => {
-              const ctrl = fullController(h.control.sections);
-              return (
-                <button
-                  key={h.id}
-                  className="hud-int"
-                  onClick={() => { setMenuPanel(null); setSelectedHexId(h.id); }}
-                  style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 10px", borderRadius: 8, border: "1px solid rgba(86,211,198,0.3)", background: "rgba(0,0,0,0.25)", color: HUD.text, cursor: "pointer", textAlign: "left" }}
-                >
-                  <ControlMeter sections={h.control.sections} loyalty={h.control.loyalty} danger={h.control.loyaltyDanger} size={40} />
-                  <div style={{ display: "flex", flexDirection: "column" }}>
-                    <span style={{ fontFamily: HUD.font, fontSize: 16, fontWeight: 700 }}>
-                      {UI_LOCATIONS[h.locationId]?.name || h.locationId}
-                    </span>
-                    <span style={{ fontSize: 10, letterSpacing: 1, textTransform: "uppercase", color: HUD.textFaint }}>
-                      {ctrl === state.youId ? "Held" : ctrl ? `Held — ${UI_FACTIONS[ctrl]?.short}` : "Contested"}
-                    </span>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
+      {menuPanel === "economy" && (
+        <TitledWindow key="economy" title="Economy" icon={ICON.scrap} onClose={() => setMenuPanel(null)}>
+          <EconomyLedger
+            report={economyReport(gameRef.current, state.youId)}
+            onOpenHex={(h) => { setMenuPanel(null); setSelectedHexId(h); }}
+            onOpenUnit={(uid) => { setMenuPanel(null); setSelectedUnitId(uid); }}
+          />
         </TitledWindow>
       )}
 

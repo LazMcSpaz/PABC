@@ -653,6 +653,133 @@ export function BlockadeWindow({ view, canAct, onClose, onFit }) {
   );
 }
 
+// The Economy ledger — what everything you hold earns, what everything you
+// keep costs, and the net.
+//
+// This replaces the old Locations list, which named your cities but said
+// nothing about them. Since units, blockades, posts and some chips all bill
+// every Upkeep, a bare roster answered the wrong question: the one a player
+// actually has is "where is my scrap going, and can I afford the next thing".
+// Rows still open the thing they name, so it is a list AND a ledger.
+export function EconomyLedger({ report, onOpenHex, onOpenUnit }) {
+  const r = report;
+  const hair = "1px solid rgba(86,211,198,0.22)";
+  const row = {
+    display: "flex", alignItems: "center", gap: 10, width: "100%",
+    padding: "7px 9px", borderRadius: 7, border: "1px solid rgba(86,211,198,0.22)",
+    background: "rgba(0,0,0,0.25)", color: C.text, textAlign: "left",
+  };
+  const num = (n, good) => ({
+    fontFamily: C.font, fontWeight: 700, fontSize: 14, flexShrink: 0,
+    color: n === 0 ? C.textFaint : good ? C.holoHi : C.gold,
+  });
+  const sub = { fontSize: 9.5, letterSpacing: 0.8, color: C.textFaint };
+
+  const Section = ({ label, total, children }) => (
+    <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+        <SectionLabel>{label}</SectionLabel>
+        <span style={{ fontFamily: C.font, fontWeight: 700, fontSize: 12, color: C.textDim }}>{total}</span>
+      </div>
+      {children}
+    </div>
+  );
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      {/* The bottom line first — it is the thing you opened this for. */}
+      <div style={{ display: "flex", gap: 18, padding: "10px 0", borderTop: hair, borderBottom: hair }}>
+        <Stat icon={ICON.scrap} value={`+${r.income}`} label="Income / turn" />
+        <Stat icon={ICON.units} value={`−${r.upkeep}`} label="Upkeep / turn" />
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginLeft: "auto" }}>
+          <div style={{ display: "flex", flexDirection: "column", lineHeight: 1, alignItems: "flex-end" }}>
+            <span style={{ fontFamily: C.font, fontSize: 22, fontWeight: 800, color: r.net < 0 ? C.red : C.holoHi }}>
+              {r.net >= 0 ? "+" : ""}{r.net}
+            </span>
+            <span style={{ fontFamily: C.font, fontSize: 8, letterSpacing: 1.4, textTransform: "uppercase", color: r.net < 0 ? C.red : C.holoHi, fontWeight: 600, marginTop: 2 }}>
+              Net / turn
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <Section label="Settlements" total={`+${r.income - r.tolls}`}>
+        {r.locations.length === 0 && (
+          <span style={{ color: C.textDim, fontSize: 12 }}>
+            You hold no sections yet. Move a unit onto a location and contest it.
+          </span>
+        )}
+        {r.locations.map((l) => (
+          <button key={l.hexId} className="hud-int" style={{ ...row, cursor: "pointer" }}
+            onClick={() => onOpenHex?.(l.hexId)}>
+            <span style={{ flex: 1, minWidth: 0 }}>
+              <span style={{ fontFamily: C.font, fontSize: 14, fontWeight: 700 }}>{l.name}</span>
+              <span style={{ ...sub, display: "block", marginTop: 2 }}>
+                {/* Output vs banked: a settlement mid-build keeps only its
+                    butter half, and a player reading a low number should see
+                    it is a choice, not a loss. */}
+                {l.diverting
+                  ? `output ${l.output} · ${l.diverting === "building" ? "building" : "pooling"} the rest`
+                  : `output ${l.output}`}
+                {l.besieged ? " · besieged" : ""}
+                {l.chipUpkeep > 0 ? ` · chips −${l.chipUpkeep}` : ""}
+              </span>
+            </span>
+            <span style={num(l.banked, true)}>+{l.banked}</span>
+            {l.chipUpkeep > 0 && <span style={num(-l.chipUpkeep, false)}>−{l.chipUpkeep}</span>}
+          </button>
+        ))}
+        {r.tolls > 0 && (
+          <div style={{ ...row, cursor: "default" }}>
+            <span style={{ flex: 1 }}>
+              <span style={{ fontFamily: C.font, fontSize: 14, fontWeight: 700 }}>Tolls</span>
+              <span style={{ ...sub, display: "block", marginTop: 2 }}>Toll Booths on your blockades</span>
+            </span>
+            <span style={num(r.tolls, true)}>+{r.tolls}</span>
+          </div>
+        )}
+      </Section>
+
+      <Section label="Standing army" total={`−${r.army}`}>
+        {r.units.length === 0 && <span style={{ color: C.textDim, fontSize: 12 }}>No units in the field.</span>}
+        {r.units.map((u) => (
+          <button key={u.uid} className="hud-int" style={{ ...row, cursor: "pointer" }}
+            onClick={() => onOpenUnit?.(u.uid)}>
+            <span style={{ flex: 1, minWidth: 0 }}>
+              <span style={{ fontFamily: C.font, fontSize: 14, fontWeight: 700, color: u.unsupplied ? C.red : C.text }}>
+                {u.name}
+              </span>
+              <span style={{ ...sub, display: "block", marginTop: 2, color: u.unsupplied ? C.red : C.textFaint }}>
+                {u.at}{u.unsupplied ? " · UNSUPPLIED — cannot move or act" : ""}
+              </span>
+            </span>
+            <span style={num(-u.upkeep, false)}>−{u.upkeep}</span>
+          </button>
+        ))}
+      </Section>
+
+      {r.structureList.length > 0 && (
+        <Section label="Structures" total={`−${r.structures}`}>
+          {r.structureList.map((st) => (
+            <button key={`${st.kind}-${st.hexId}`} className="hud-int" style={{ ...row, cursor: "pointer" }}
+              onClick={() => onOpenHex?.(st.hexId)}>
+              <span style={{ flex: 1, minWidth: 0 }}>
+                <span style={{ fontFamily: C.font, fontSize: 14, fontWeight: 700, color: st.dormant ? C.red : C.text }}>
+                  {st.name}
+                </span>
+                <span style={{ ...sub, display: "block", marginTop: 2, color: st.dormant ? C.red : C.textFaint }}>
+                  {st.hexId}{st.dormant ? " · DORMANT — unpaid, so it does nothing" : ""}
+                </span>
+              </span>
+              <span style={num(-st.upkeep, false)}>−{st.upkeep}</span>
+            </button>
+          ))}
+        </Section>
+      )}
+    </div>
+  );
+}
+
 export function LocationWindow({ view, onClose, onActivate, onContest, onRecruit, onBuild, onUpgrade, onRush, onSetSlider, onSetPoolTarget, onSetBuildPriority }) {
   const v = view;
   // On desktop a city is a panel you consult while still working the map, not a
