@@ -48,13 +48,13 @@ function rowFor(spec, facing) {
   return i >= 0 ? i : 0;
 }
 
-// Movement chips promote a unit's model: the squad walks, then rides, then
-// crews a landship. Keyed off installed chips rather than effective Movement,
+// Movement chips promote a unit's model: the squad walks, then rides a tier-1
+// vehicle, then a tier-2. Keyed off installed chips rather than effective Movement,
 // for the same reason the strength flag is — see variantFor.
 //
-// `landship` is +3 and has no model of its own, so it clamps onto the tier-2
-// vehicle rather than falling back to infantry, which would read as a
-// demotion.
+// The Landship chip is +3 and has no model of its own — the tier-2 art is a
+// canopied troop carrier, not a landship — so it clamps onto tier 2 rather than
+// falling back to infantry, which would read as a demotion.
 const MOVEMENT_TIERS = ["infantry", "vehicle_t1", "vehicle_t2"];
 
 function chipTotals(unit) {

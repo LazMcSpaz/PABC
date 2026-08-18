@@ -213,7 +213,7 @@ export function GhostToken({ ghost, slot = 0, count = 1, pos: posIn }) {
 // know their own drawn extent; the fallback disc is a 27 px circle sitting on
 // its slot point.
 //
-// One hex can hold a mix of models — a walking squad beside a landship — and the
+// One hex can hold a mix of models — a walking squad beside a vehicle — and the
 // slot chooser takes a single box for the group, so use the largest present.
 // Overstating it only makes the group avoid radials a little more eagerly.
 function tokenBox(occupants) {
@@ -283,7 +283,7 @@ export default function BoardTokens({ order, hexes, units, centers, selectedUnit
         const ghosts = hex.ghosts || [];
         if (!here.length && !ghosts.length) return null;
         // How many actually fit depends on how wide they are: a hex holds ten
-        // infantry but only six landships before they start hiding each other.
+        // infantry but only six tier-2 vehicles before they start hiding each other.
         // The rest become a count rather than an unreadable heap.
         const probe = tokenBox(here)(0, 0);
         const drawn = here.slice(0, capacityFor((probe.x1 - probe.x0) / 2));

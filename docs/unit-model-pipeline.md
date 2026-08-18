@@ -99,7 +99,11 @@ The board is 216 px per hex at rest and zooms from 0.45× to 2.4×, so a hex is
 |---|---|---|---|---|
 | Infantry group (4–5 soldiers) | 20% of hex width | 43 px | 104 px | **7.4 m** |
 | Vehicle, tier 1 (vehicle + escort) | 26% | 56 px | 135 px | **9.6 m** |
-| Landship, tier 2 (all units aboard) | 34% | 73 px | 176 px | **12.6 m** |
+| Vehicle, tier 2 (all units aboard) | 34% | 73 px | 176 px | **12.6 m** |
+
+The tier-2 name in earlier drafts of this table was "Landship". The art that
+shipped is a canopied troop carrier, and the Landship chip has no model of its
+own, so the tier is named for its tier and nothing else.
 
 World scale follows the existing tile pipeline: hex flat-to-flat = 32 m, so
 vertex-to-vertex = 36.95 m.
@@ -133,9 +137,9 @@ footprint *plus headroom*. Set `ortho_scale = canvas_width_px / 18.30`.
 |---|---|---|---|---|
 | Infantry group | 7.4 m = 135 px | 192 × 192 | (96, 150) | 10.49 |
 | Vehicle T1 | 9.6 m = 176 px | 256 × **224** | (128, **164**) | 13.99 |
-| Landship T2 | 12.6 m = 231 px | 320 × **256** | (160, 176) | 17.49 |
+| Vehicle T2 | 12.6 m = 231 px | 320 × **256** | (160, 176) | 17.49 |
 
-The vehicle and landship canvases grew from the first draft: the near half of
+The tier-1 and tier-2 canvases grew from the first draft: the near half of
 a footprint projects **below** the anchor by `(footprint/2) × 0.562 × 18.30`,
 which is 49 px and 65 px respectively, and the original 192/224-tall canvases
 only left 42 px and 48 px of room. They would have clipped the front of the
@@ -286,7 +290,7 @@ Three things fall out of the ring and are worth knowing:
 
 - **The radius adapts to the widest unit present.** A T2 vehicle is 74 px
   across, and at the infantry radius its flanks hang off onto the next tile, so
-  the ring pulls in. A hex full of landships is tighter than one full of
+  the ring pulls in. A hex full of tier-2 vehicles is tighter than one full of
   infantry, which is honest.
 - **The whole ring rotates to dodge a floating radial**, keeping its spacing
   rather than bunching up on one side.

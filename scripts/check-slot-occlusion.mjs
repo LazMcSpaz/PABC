@@ -135,9 +135,11 @@ for (const n of [MAX_DRAWN, MAX_DRAWN + 1, MAX_DRAWN + 7]) {
 }
 
 console.log("\n--- units face the middle of their hex ---");
-// The bearing of a stance and the way it looks are opposites: a unit at the
-// front of the ring is below the centre, so it must face away from the camera.
-for (const [deg, want] of [[90, "n"], [270, "s"], [0, "w"], [180, "e"], [45, "nw"], [225, "se"]]) {
+// The row for a stance is its own bearing, not the reverse. That is the
+// counter-intuitive part and the one worth pinning: reversing it turns every
+// unit outward. These expectations were read off the art (see
+// screenshots/facing-*.png), not derived from the row names.
+for (const [deg, want] of [[0, "e"], [90, "s"], [180, "w"], [270, "n"], [45, "se"], [225, "nw"]]) {
   const got = facingFor((deg * Math.PI) / 180);
   check(`stance at ${deg}deg faces ${want}`, got === want, got);
 }
@@ -149,8 +151,10 @@ for (const n of GROUPS) {
   const front = ps[ps.length - 1];
   const back = ps[0];
   if (n >= 3) {
-    check(`${n} unit(s): front rank looks inward`, front.facing.includes("n"), front.facing);
-    check(`${n} unit(s): back rank looks inward`, back.facing.includes("s"), back.facing);
+    // Nearest the camera stands at the front of the ring and takes the "s"
+    // aspect; farthest takes "n". Swap these and everyone faces outward.
+    check(`${n} unit(s): front rank looks inward`, front.facing.includes("s"), front.facing);
+    check(`${n} unit(s): back rank looks inward`, back.facing.includes("n"), back.facing);
   }
 }
 

@@ -76,7 +76,7 @@ export function ringPos(angle, rx = RING_RX * HEX_W) {
 // Infantry never hits this — the default radius already clears — but a tier-2
 // vehicle is 74 px across, and at full radius its flanks hang off the tile onto
 // the neighbouring one. Pulling the ring in is the right trade: a hex crowded
-// with landships has less room to spread, and saying so with the layout beats
+// with tier-2 vehicles has less room to spread, and saying so with the layout beats
 // drawing them over the wrong tile.
 const radiusCache = new Map();
 export function fitRadius(halfW) {
@@ -136,15 +136,20 @@ export function ringAngles(n) {
 // it faces the middle of its own hex rather than the camera. The objective is
 // the tile, so a ring of units looks inward at it.
 //
-// `angle` is the stance's bearing from the hex centre, in the same frame
-// ringPos uses: 0 is screen-right, and it increases clockwise on screen through
-// screen-down. Facing the centre is the reverse bearing.
+// `angle` is the stance's bearing from the hex centre, in the frame ringPos
+// uses: 0 is screen-right, increasing through screen-down.
+//
+// The row is that bearing directly, NOT its reverse. Reversing it is the
+// intuitive reading of "faces the centre" and it is wrong — it turns every unit
+// to face outward. The row names describe the aspect the camera sees, so the
+// sheet named for a bearing is the one that shows a unit standing there and
+// looking back at the middle. Verified against the art rather than reasoned
+// from the names: at 180 degrees, west of the centre, the "w" row is the one
+// whose vehicle points right, toward the middle.
 const FACING_BY_SECTOR = ["e", "se", "s", "sw", "w", "nw", "n", "ne"];
 
 export function facingFor(angle) {
-  const inward = angle + Math.PI;
-  const sector = Math.round(inward / (Math.PI / 4)) & 7;
-  return FACING_BY_SECTOR[sector];
+  return FACING_BY_SECTOR[Math.round(angle / (Math.PI / 4)) & 7];
 }
 
 // How much of `box` the worst occluder covers, 0..1.
@@ -184,7 +189,7 @@ function nearbyOccluders(center, occluders) {
 //
 // Vertical overlap between ranks is depth and does not count; only units at the
 // same depth hide each other. Infantry reach the MAX_DRAWN ceiling; a hex full
-// of landships does not, because they are nearly twice as wide, so the overflow
+// of tier-2 vehicles does not, because they are nearly twice as wide, so the overflow
 // becomes a badge instead of an unreadable heap.
 const capacityCache = new Map();
 export function capacityFor(halfW) {
