@@ -131,7 +131,8 @@ if (staged) {
     }
   }
 
-  // Finish it, then check the chip-fitting half.
+  // Finish it, then check the OTHER half: the structure's own window, reached
+  // by selecting the blockade on the map rather than through the unit.
   await page.evaluate((h) => {
     const g = window.__ashland;
     const b = g.world.blockades[h];
@@ -139,10 +140,43 @@ if (staged) {
     window.__ashlandBump?.();
   }, staged.hex);
   await page.waitForTimeout(500);
-  await selectUnit();
+
+  // Move the unit AWAY first — the whole point is that you no longer need a
+  // soldier standing there to manage the structure.
+  await page.evaluate((st) => {
+    const g = window.__ashland;
+    const u = g.units[st.unit];
+    const away = (g.board.adjacency[st.hex] || [])[0];
+    if (away) u.node = away;
+    window.__ashlandBump?.();
+  }, staged);
+  await page.waitForTimeout(400);
+  // Deselect the unit first. With a unit selected, clicking a hex is a MOVE
+  // order, not an inspect — so leaving it selected would never open the
+  // window. Clicking its own token toggles the selection off.
+  const token = await page.evaluate((uid) => {
+    const el = document.querySelector(`[data-unit-uid="${uid}"]`);
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+  }, staged.unit);
+  if (token) { await page.mouse.click(token.x, token.y); await page.waitForTimeout(400); }
+
+  const at = await page.evaluate((h) => {
+    const el = document.querySelector(`[data-hex="${h}"]`);
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+  }, staged.hex);
+  if (at) { await page.mouse.click(at.x, at.y); await page.waitForTimeout(700); }
+
+  check("selecting the blockade opens its own window, with no unit on it",
+    (await page.getByText("Upgrades", { exact: true }).count()) > 0);
+  check("the window states its upkeep",
+    (await page.getByText("Upkeep / turn").count()) > 0);
 
   const fit = page.locator("button").filter({ hasText: /^\+ Fit$/ }).first();
-  check("a finished blockade offers a Fit button", (await fit.count()) > 0);
+  check("the blockade window offers a Fit button", (await fit.count()) > 0);
   if (await fit.count()) {
     await fit.click();
     await page.waitForTimeout(400);
@@ -159,27 +193,52 @@ if (staged) {
       check("clicking a chip queues it onto the blockade",
         !!queued, queued ? `${queued.chipId} (${queued.cost})` : "nothing queued");
     }
-    await page.screenshot({ path: `${OUT}/blockade-ui-fit.png` });
+    await page.screenshot({ path: `${OUT}/blockade-window.png` });
   }
+
+  // A dormant blockade has to say so — it is the difference between a road
+  // that is shut and one that only looks shut.
+  await page.evaluate((h) => {
+    window.__ashland.world.blockades[h].paid = false;
+    window.__ashlandBump?.();
+  }, staged.hex);
+  await page.waitForTimeout(500);
+  check("a dormant blockade says it is unmanned",
+    (await page.getByText(/Dormant — upkeep unpaid/).count()) > 0);
+  await page.evaluate((h) => {
+    window.__ashland.world.blockades[h].paid = true;
+    window.__ashlandBump?.();
+  }, staged.hex);
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(300);
 }
 
-// §17.7 — the listening post shares the panel and the same reasoning.
+// §17.7 — the listening post is still a unit action and stays in the panel:
+// unlike a blockade it is concealed, and there is nothing on the map to select.
 {
-  await page.evaluate(() => {
+  const where = await page.evaluate(() => {
     const g = window.__ashland;
     const me = g.turnOrder[g.activeIndex];
-    // Grant the tech that unlocks posts, and clear the blockade off the hex so
-    // the post has somewhere legal to go.
     g.players[me].techWheel = ["int-entry", "int-a2"];
+    g.players[me].resource = 200;
     const u = Object.values(g.units).find((x) => x.owner === me);
+    // Clear blockades off the board so the post has legal ground, and park the
+    // unit somewhere that is neither a Location nor a blockade.
     for (const h of Object.keys(g.world?.blockades || {})) delete g.world.blockades[h];
     const plain = (g.board.adjacency[u.node] || []).find((h) => !g.locations[h]);
     if (plain) u.node = plain;
-    g.players[me].resource = 200;
     window.__ashlandBump?.();
+    return { unit: u.uid, hex: u.node };
   });
   await page.waitForTimeout(500);
-  await selectUnit();
+  const tok = await page.evaluate((uid) => {
+    const el = document.querySelector(`[data-unit-uid="${uid}"]`);
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+  }, where.unit);
+  if (tok) { await page.mouse.click(tok.x, tok.y); await page.waitForTimeout(600); }
+
   const btn = page.locator("button").filter({ hasText: /Build post/ }).first();
   check("a Build post button is offered once the tech is in hand",
     (await btn.count()) > 0);
@@ -187,13 +246,12 @@ if (staged) {
     check("the post button is live", await btn.isEnabled());
     await btn.click();
     await page.waitForTimeout(600);
-    const built = await page.evaluate(() => {
+    const built = await page.evaluate((h) => {
       const g = window.__ashland;
       const me = g.turnOrder[g.activeIndex];
-      const u = Object.values(g.units).find((x) => x.owner === me);
-      const posts = g.world?.listeningPosts || {};
-      return Object.values(posts).some((p) => p.hex === u.node && p.owner === me);
-    });
+      return Object.values(g.world?.listeningPosts || {})
+        .some((p) => p.hex === h && p.owner === me);
+    }, where.hex);
     check("clicking it builds a real listening post in the engine", built);
   }
 }

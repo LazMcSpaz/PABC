@@ -7,6 +7,7 @@ import { CONFIG } from "../game/config.js";
 import { motion, useDragControls } from "framer-motion";
 import ControlMeter from "./ControlMeter.jsx";
 import { useIsPhone, useViewportSize } from "./useViewport.js";
+import { ownerColor } from "./data.js";
 
 // Close the active modal on Escape.
 export function useEscClose(onClose) {
@@ -525,6 +526,120 @@ function Stat({ icon, value, label }) {
 }
 
 // Single-window Location view. `view` is a plain object built by the host.
+// Rail doc §3 — a blockade's own window, opened by selecting it on the map the
+// way a settlement is.
+//
+// A blockade outlives the unit that raised it, so reaching it through whichever
+// unit happens to be parked on it made a structure feel like a unit ability and
+// meant you had to keep a soldier standing there to manage one. It is a place.
+export function BlockadeWindow({ view, canAct, onClose, onFit }) {
+  const v = view;
+  const [open, setOpen] = useState(false);
+  const floating = !useIsPhone();
+  const hair = "1px solid rgba(86,211,198,0.22)";
+  const owner = ownerColor(v.owner);
+  const note = { fontSize: 10.5, color: C.textFaint, lineHeight: 1.5 };
+
+  const status = !v.done
+    ? "Under construction"
+    : v.paid ? "Manned" : "Dormant — upkeep unpaid";
+
+  return (
+    <FrameWindow
+      onClose={onClose}
+      floating={floating}
+      footer={
+        <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+          <span style={{ fontFamily: C.font, fontWeight: 800, fontSize: 22, color: v.done && !v.paid ? C.red : C.gold, lineHeight: 1 }}>
+            {v.done ? `${v.upkeep}` : `${Math.floor(v.progress)}/${v.cost}`}
+          </span>
+          <span style={{ fontSize: 9, letterSpacing: 1.8, textTransform: "uppercase", color: C.holoHi }}>
+            {v.done ? "Scrap / turn" : "Built"}
+          </span>
+        </div>
+      }
+    >
+      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        <div>
+          <div style={{ fontFamily: C.font, fontSize: 28, fontWeight: 700, letterSpacing: 1.5, textTransform: "uppercase", color: C.text, lineHeight: 1, textShadow: `0 0 12px ${C.holo}44` }}>
+            Blockade
+          </div>
+          <div style={{ display: "flex", gap: 6, marginTop: 8, alignItems: "center" }}>
+            <span style={{ fontFamily: C.font, fontSize: 10.5, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", color: "#08100f", background: owner, padding: "2px 8px", borderRadius: 3 }}>
+              {v.mine ? "Yours" : "Foreign"}
+            </span>
+            <span style={{ fontSize: 10, letterSpacing: 1.4, textTransform: "uppercase", color: v.done && !v.paid ? C.red : C.textDim }}>
+              {status}
+            </span>
+          </div>
+        </div>
+
+        <div style={{ display: "flex", gap: 18, padding: "10px 0", borderTop: hair, borderBottom: hair }}>
+          <Stat icon={ICON.shield} value={v.defense} label="Defense" />
+          <Stat icon={ICON.scrap} value={`−${v.upkeep}`} label="Upkeep / turn" />
+          {v.mine && <Stat icon={ICON.units} value={`${v.slotsUsed}/${v.slotCap}`} label="Slots" />}
+        </div>
+
+        {!v.done && (
+          <div style={note}>
+            {v.mine
+              ? `Building — ${Math.floor(v.progress)}/${v.cost}. Its builder is pinned here until it lands, and it halts nobody until then.`
+              : "Someone else is building here."}
+          </div>
+        )}
+
+        {v.done && !v.paid && (
+          <div style={{ ...note, color: C.red }}>
+            Nobody is manning it. It halts no one, sees nothing, collects no toll
+            and adds no defense until the arrears are paid.
+          </div>
+        )}
+
+        {v.mine && v.done && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            <SectionLabel>Upgrades</SectionLabel>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+              {v.installed.map((c) => (
+                <span key={c.uid} title={c.desc}
+                  style={{ fontFamily: C.font, fontSize: 11, fontWeight: 700, padding: "5px 9px", borderRadius: 5, border: `1px solid ${c.disabled ? C.red : "rgba(86,211,198,0.4)"}`, color: c.disabled ? C.red : C.text }}>
+                  {c.name}{c.disabled ? " (dormant)" : ""}
+                  {c.upkeep > 0 && <span style={{ color: C.textFaint, fontWeight: 600 }}> · −{c.upkeep}/turn</span>}
+                </span>
+              ))}
+              {v.slotsUsed < v.slotCap && !v.building && (
+                <button className="hud-int" disabled={!canAct}
+                  onClick={canAct ? () => setOpen((o) => !o) : undefined}
+                  style={{ fontFamily: C.font, fontSize: 11, fontWeight: 700, padding: "5px 11px", borderRadius: 5, border: "1px dashed rgba(86,211,198,0.5)", background: "rgba(86,211,198,0.06)", color: C.holoHi, cursor: canAct ? "pointer" : "default" }}>
+                  + Fit
+                </button>
+              )}
+            </div>
+            {v.building && (
+              <div style={note}>
+                Fitting {v.building.name} — {Math.floor(v.building.progress)}/{v.building.cost},
+                paid out of the settlement down the road.
+              </div>
+            )}
+            {v.supply && !v.supply.ok && (
+              <div style={{ ...note, color: C.red }}>
+                {v.supply.path ? "Its supply road is cut — nothing reaches it." : "No road back to a settlement you hold."}
+              </div>
+            )}
+            {open && (
+              <BuildList
+                items={v.chips}
+                can={canAct}
+                empty="Nothing your Tech Level can fit yet."
+                onPick={(chipId) => { onFit?.(chipId); setOpen(false); }}
+              />
+            )}
+          </div>
+        )}
+      </div>
+    </FrameWindow>
+  );
+}
+
 export function LocationWindow({ view, onClose, onActivate, onContest, onRecruit, onBuild, onUpgrade, onRush, onSetSlider, onSetPoolTarget, onSetBuildPriority }) {
   const v = view;
   // On desktop a city is a panel you consult while still working the map, not a

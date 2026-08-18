@@ -1144,19 +1144,99 @@ function hasStationedUnitWithBay(state, loc, slots) {
 // v0.2 §16.5 — what a Reinforce action would cost/look like for `unitUid`
 // right now: the scrap to top it up, whether an instant top-up is legal
 // (unit on a fully-held Location), and the field-supply ETA in turns.
-// Rail doc §3 — everything a selected unit can do about a blockade where it
-// stands, as one view-model for the UnitPanel.
+// Rail doc §3 — the whole state of the blockade on `hex`, for its own window.
 //
-// A blockade lives on a plain road hex, and a plain hex opens no window, so
-// the unit that is standing there is the only handle a player has on it. That
-// makes the UnitPanel the home for the whole lifecycle: raise one, then fit
-// its chips. Fitting is therefore gated on your unit being present, which is
-// tighter than the engine requires — the engine only asks that you own the
-// blockade and its supply road is open.
+// A blockade is selected like a settlement, not reached through whichever unit
+// happens to be standing on it: it is a structure that outlives the unit that
+// raised it, and asking a player to keep a unit parked there to manage it made
+// it feel like a unit ability rather than a place on the map.
 //
-// Every refusal mirrors validateBuildBlockade / validateUpgradeBlockade so the
-// button explains itself instead of failing on click.
-export function blockadeActions(state, unitUid) {
+// Returns null on a hex with no blockade. `viewer` is the faction looking:
+// everything actionable is gated on owning it, and a foreign blockade reports
+// only what is visible from outside.
+export function blockadeView(state, hex, viewer) {
+  const b = blockadeAt(state, hex);
+  if (!b) return null;
+  const mine = b.owner === viewer;
+  const player = state.players?.[viewer];
+  const cut = mine ? supplyCutter(state, viewer) : null;
+  const supply = mine ? supplyStatus(state, viewer, hex, cut) : null;
+
+  const view = {
+    hex,
+    owner: b.owner,
+    mine,
+    done: !!b.done,
+    paid: b.paid !== false,
+    progress: b.progress || 0,
+    cost: b.cost || 0,
+    upkeep: CONFIG.blockades.upkeep,
+    defense: CONFIG.blockades.defense,
+    vision: CONFIG.blockades.vision,
+    builder: b.builder || null,
+    installed: [],
+    chips: [],
+    slotsUsed: 0,
+    slotCap: CONFIG.blockades.chipSlots,
+    building: null,
+    supply: supply ? { path: !!supply.path, ok: !!supply.ok } : null,
+  };
+  if (!mine) return view;
+
+  for (const c of b.chips || []) {
+    view.installed.push({
+      uid: c,
+      chipId: state.chips[c]?.chipId,
+      name: chipDisplayName(state.chips[c]?.chipId, viewer),
+      desc: ENGINE_CHIPS[state.chips[c]?.chipId]?.desc || "",
+      disabled: !!state.chips[c]?.disabled,
+      upkeep: ENGINE_CHIPS[state.chips[c]?.chipId]?.upkeep || 0,
+    });
+  }
+  view.slotsUsed = blockadeSlotsUsed(state, b);
+  if (b.build) {
+    view.building = {
+      chipId: b.build.chipId,
+      name: chipDisplayName(b.build.chipId, viewer),
+      cost: b.build.cost,
+      progress: b.progress || 0,
+    };
+  }
+
+  // What may be fitted, mirroring validateUpgradeBlockade so the menu never
+  // offers something the engine will refuse.
+  if (b.done && player) {
+    for (const def of Object.values(ENGINE_CHIPS)) {
+      if (def.kind !== "blockade") continue;
+      if (!meetsTech(player, def)) continue; // Tech-forbidden → not shown at all
+      let reason = null;
+      if (b.build) reason = "already building something";
+      else if ((b.chips || []).some((c) => state.chips[c]?.chipId === def.id)) reason = "already installed";
+      else if (view.slotsUsed + (def.slots || 1) > view.slotCap) reason = "no free slot";
+      else if (!supply?.path) reason = "no road back to a settlement you hold";
+      else if (!supply?.ok) reason = "that road connection is cut";
+      view.chips.push({
+        chipId: def.id,
+        name: chipDisplayName(def.id, viewer),
+        desc: def.desc || "",
+        cost: def.buildCost ?? def.cost ?? 0,
+        slots: def.slots || 1,
+        upkeep: def.upkeep || 0,
+        buildable: !reason,
+        reason,
+      });
+    }
+  }
+  return view;
+}
+
+// Can this unit BREAK GROUND on a blockade where it stands? This half stays a
+// unit action and stays in the UnitPanel: there is no blockade to select until
+// one exists, so it has nowhere else to live.
+//
+// Every refusal mirrors validateBuildBlockade so the button explains itself
+// rather than failing on click.
+export function blockadeBuildOffer(state, unitUid) {
   const unit = state.units?.[unitUid];
   if (!unit) return null;
   const pid = unit.owner;
@@ -1164,81 +1244,25 @@ export function blockadeActions(state, unitUid) {
   const hex = unit.node;
   const cell = state.board.hexes[hex];
   if (!player || !cell) return null;
+  // Nothing to offer on ground a blockade could never go on — most of the
+  // board — so the panel does not grow a permanently-dead section.
+  if (!cell.road || state.locations[hex]) return null;
+  if (blockadeAt(state, hex)) return null; // one stands here; its own window has it
 
-  const existing = blockadeAt(state, hex);
-  const cut = supplyCutter(state, pid);
-  const supply = supplyStatus(state, pid, hex, cut);
+  const supply = supplyStatus(state, pid, hex, supplyCutter(state, pid));
+  let reason = null;
+  if (postAt(state, hex)) reason = "a listening post occupies this hex";
+  else if (!supply.path) reason = "no road back to a settlement you hold";
+  else if (!supply.ok) reason = "that road connection is cut";
+  else if (player.resource < CONFIG.blockades.buildCost) reason = "not enough scrap";
 
-  // --- raise one ---------------------------------------------------------
-  let buildReason = null;
-  if (!cell.road) buildReason = "needs a road hex";
-  else if (state.locations[hex]) buildReason = "not on a settlement";
-  else if (existing) buildReason = "a blockade already stands here";
-  else if (postAt(state, hex)) buildReason = "a listening post occupies this hex";
-  else if (!supply.path) buildReason = "no road back to a settlement you hold";
-  else if (!supply.ok) buildReason = "that road connection is cut";
-  else if (player.resource < CONFIG.blockades.buildCost) buildReason = "not enough scrap";
-
-  const build = {
-    can: !buildReason,
-    reason: buildReason,
+  return {
+    can: !reason,
+    reason,
     cost: CONFIG.blockades.buildCost,
     turns: CONFIG.blockades.minTurns,
+    upkeep: CONFIG.blockades.upkeep,
   };
-
-  // --- the site or structure standing here -------------------------------
-  const mine = existing && existing.owner === pid ? existing : null;
-  const site = existing
-    ? {
-        mine: !!mine,
-        done: !!existing.done,
-        paid: existing.paid !== false,
-        progress: existing.progress || 0,
-        cost: existing.cost || 0,
-        upkeep: CONFIG.blockades.upkeep,
-      }
-    : null;
-
-  // --- fit its chips -----------------------------------------------------
-  const installed = [];
-  const chips = [];
-  if (mine && mine.done) {
-    for (const c of mine.chips || []) {
-      installed.push({
-        uid: c,
-        chipId: state.chips[c]?.chipId,
-        name: chipDisplayName(state.chips[c]?.chipId, pid),
-        disabled: !!state.chips[c]?.disabled,
-      });
-    }
-    const used = blockadeSlotsUsed(state, mine);
-    const cap = CONFIG.blockades.chipSlots;
-    for (const def of Object.values(ENGINE_CHIPS)) {
-      if (def.kind !== "blockade") continue;
-      // Tech-forbidden chips are omitted entirely, matching the §20.6 display
-      // contract the city build menu follows.
-      if (!meetsTech(player, def)) continue;
-      let reason = null;
-      if (mine.build) reason = "already building something";
-      else if (mine.chips.some((c) => state.chips[c]?.chipId === def.id)) reason = "already installed";
-      else if (used + (def.slots || 1) > cap) reason = "no free slot";
-      else if (!supply.path) reason = "no road back to a settlement you hold";
-      else if (!supply.ok) reason = "that road connection is cut";
-      chips.push({
-        chipId: def.id,
-        name: chipDisplayName(def.id, pid),
-        desc: def.desc || "",
-        cost: def.buildCost ?? def.cost ?? 0,
-        slots: def.slots || 1,
-        buildable: !reason,
-        reason,
-      });
-    }
-    site.slotsUsed = used;
-    site.slotCap = cap;
-  }
-
-  return { hex, build, site, installed, chips };
 }
 
 // §17.7 — can this unit dig in a listening post where it stands? Same shape

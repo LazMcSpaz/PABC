@@ -194,109 +194,49 @@ function ChipBay({ chips, compact }) {
   );
 }
 
-// Rail doc §3 — the blockade controls for the hex a selected unit stands on.
-// Renders one of three states: nothing worth showing, an offer to raise one
-// (with the engine's own refusal quoted when it cannot), or the structure
-// standing here plus its chip bay.
-function BlockadeSection({ blockade, canAct, onBuild, onFit }) {
-  const [open, setOpen] = useState(false);
-  const { build, site, installed, chips } = blockade;
-  // Nothing to say on a hex that is not a road and holds no blockade — most
-  // hexes — so the panel does not grow a permanently-dead section.
-  if (!site && build.reason === "needs a road hex") return null;
-
-  const label = { fontSize: 9, letterSpacing: 1.4, textTransform: "uppercase", color: C.textDim, fontWeight: 700 };
-  const note = { fontSize: 9.5, color: C.textFaint, lineHeight: 1.4 };
-
+// Rail doc §3 — the offer to BREAK GROUND on a blockade where this unit stands.
+//
+// Only this half is a unit action. Everything about a blockade that already
+// exists — its chips, its upkeep, its supply — lives in the blockade's own
+// window, because a structure that outlives its builder should be selected
+// like a place rather than reached through whichever soldier is parked on it.
+//
+// `offer` is null on ground a blockade could never go on, so the panel does
+// not grow a permanently-dead section.
+function BlockadeOffer({ offer, canAct, onBuild }) {
+  const live = canAct && offer.can;
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 5, borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: 7 }}>
-      <div style={label}>Blockade</div>
-
-      {!site && (
-        <>
-          <button
-            className="hud-int"
-            disabled={!canAct || !build.can}
-            onClick={canAct && build.can ? () => onBuild?.() : undefined}
-            style={{
-              fontFamily: C.font, fontSize: 10, fontWeight: 700, letterSpacing: 1.2,
-              textTransform: "uppercase", color: "#08100f", padding: "6px 8px", borderRadius: 4,
-              border: `1px solid ${C.holo}`,
-              background: `linear-gradient(180deg, ${C.holoHi}, ${C.holo})`,
-              boxShadow: `0 0 10px ${C.holo}55`,
-              cursor: canAct && build.can ? "pointer" : "not-allowed",
-              opacity: canAct && build.can ? 1 : 0.5,
-              textAlign: "center", lineHeight: 1.2,
-            }}
-          >
-            Raise blockade · {build.cost} scrap
-          </button>
-          <div style={note}>
-            {build.reason
-              ? build.reason
-              : `Pins this unit for ~${build.turns} turns while it is built, then holds the road on its own.`}
-          </div>
-        </>
-      )}
-
-      {site && !site.done && (
-        <div style={note}>
-          {site.mine
-            ? `Under construction — ${Math.floor(site.progress)}/${site.cost}. The builder is pinned until it lands.`
-            : "Someone else is building here."}
-        </div>
-      )}
-
-      {site && site.done && !site.mine && <div style={note}>This blockade is not yours.</div>}
-
-      {site && site.done && site.mine && (
-        <>
-          <div style={note}>
-            {site.paid
-              ? `Manned · ${site.upkeep} scrap each turn · slots ${site.slotsUsed}/${site.slotCap}`
-              : `DORMANT — upkeep unpaid, so it halts nobody and sees nothing.`}
-          </div>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
-            {installed.map((c) => (
-              <span key={c.uid} style={{ fontFamily: C.font, fontSize: 10, fontWeight: 700, padding: "4px 7px", borderRadius: 4, border: `1px solid ${c.disabled ? STOPPED : "rgba(86,211,198,0.4)"}`, color: c.disabled ? STOPPED : C.text }}>
-                {c.name}{c.disabled ? " (dormant)" : ""}
-              </span>
-            ))}
-            {site.slotsUsed < site.slotCap && (
-              <button className="hud-int" disabled={!canAct}
-                onClick={canAct ? () => setOpen((o) => !o) : undefined}
-                style={{ fontFamily: C.font, fontSize: 10, fontWeight: 700, padding: "4px 9px", borderRadius: 4, border: "1px dashed rgba(86,211,198,0.5)", background: "rgba(86,211,198,0.06)", color: C.holoHi, cursor: canAct ? "pointer" : "default" }}>
-                + Fit
-              </button>
-            )}
-          </div>
-          {open && (
-            <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-              {chips.length === 0 && <div style={note}>Nothing your Tech Level can fit yet.</div>}
-              {chips.map((c) => {
-                const enabled = canAct && c.buildable;
-                return (
-                  <button key={c.chipId} className="hud-int" disabled={!enabled}
-                    onClick={enabled ? () => { onFit?.(c.chipId); setOpen(false); } : undefined}
-                    style={{ display: "flex", justifyContent: "space-between", gap: 6, textAlign: "left", padding: "5px 7px", borderRadius: 4, border: "1px solid rgba(86,211,198,0.25)", background: enabled ? "rgba(0,0,0,0.2)" : "rgba(0,0,0,0.35)", color: enabled ? C.text : C.textFaint, cursor: enabled ? "pointer" : "not-allowed" }}>
-                    <span style={{ fontSize: 10 }}>
-                      <b>{c.name}</b>
-                      <span style={{ color: C.textFaint }}> · {c.desc}</span>
-                      {c.reason && <span style={{ color: STOPPED }}> · {c.reason}</span>}
-                    </span>
-                    <span style={{ fontFamily: C.font, fontWeight: 700, fontSize: 10, flexShrink: 0 }}>{c.cost}</span>
-                  </button>
-                );
-              })}
-            </div>
-          )}
-        </>
-      )}
+      <div style={{ fontSize: 9, letterSpacing: 1.4, textTransform: "uppercase", color: C.textDim, fontWeight: 700 }}>
+        Blockade
+      </div>
+      <button
+        className="hud-int"
+        disabled={!live}
+        onClick={live ? () => onBuild?.() : undefined}
+        style={{
+          fontFamily: C.font, fontSize: 10, fontWeight: 700, letterSpacing: 1.2,
+          textTransform: "uppercase", color: "#08100f", padding: "6px 8px", borderRadius: 4,
+          border: `1px solid ${C.holo}`,
+          background: `linear-gradient(180deg, ${C.holoHi}, ${C.holo})`,
+          boxShadow: `0 0 10px ${C.holo}55`,
+          cursor: live ? "pointer" : "not-allowed",
+          opacity: live ? 1 : 0.5,
+          textAlign: "center", lineHeight: 1.2,
+        }}
+      >
+        Raise blockade · {offer.cost} scrap
+      </button>
+      <div style={{ fontSize: 9.5, color: C.textFaint, lineHeight: 1.4 }}>
+        {offer.reason
+          ? offer.reason
+          : `Pins this unit ~${offer.turns} turns, then holds the road alone · −${offer.upkeep} scrap/turn.`}
+      </div>
     </div>
   );
 }
 
-export default function UnitPanel({ unit, hex, owned = true, canAct, reinforce, scrap, raidTargets = [], blockade, post, onReinforce, onContest, onBuildBlockade, onUpgradeBlockade, onBuildPost, onClose }) {
+export default function UnitPanel({ unit, hex, owned = true, canAct, reinforce, scrap, raidTargets = [], blockade, post, onReinforce, onContest, onBuildBlockade, onBuildPost, onClose }) {
   const isPhone = useIsPhone();
   if (!unit) return null;
   const faction = UI_FACTIONS[unit.owner];
@@ -517,12 +457,7 @@ export default function UnitPanel({ unit, hex, owned = true, canAct, reinforce, 
               window of its own, so the unit standing there is the only handle
               the player has on it: the whole lifecycle lives here. */}
           {owned && blockade && (
-            <BlockadeSection
-              blockade={blockade}
-              canAct={canAct}
-              onBuild={onBuildBlockade}
-              onFit={onUpgradeBlockade}
-            />
+            <BlockadeOffer blockade={blockade} offer={blockade} canAct={canAct} onBuild={onBuildBlockade} />
           )}
 
           {/* §17.7 — dig in a listening post. Same reasoning as the blockade

@@ -12,7 +12,7 @@ import BoardViewport from "./BoardViewport.jsx";
 import UnitCard from "./UnitCard.jsx";
 import ControlMeter from "./ControlMeter.jsx";
 import {
-  TopBar, MenuOrb, RadialMenu, LocationWindow, TitledWindow, ICON, C as HUD, COMPACT_HUD_H,
+  TopBar, MenuOrb, RadialMenu, LocationWindow, BlockadeWindow, TitledWindow, ICON, C as HUD, COMPACT_HUD_H,
 } from "./HudChrome.jsx";
 import { useIsPhone } from "./useViewport.js";
 import { createGame } from "../game/setup.js";
@@ -29,7 +29,7 @@ import { NEUTRAL } from "./data.js";
 import { getEncounter } from "../game/encounters.js";
 import { encounterRedrawBudget } from "../game/encounters.js";
 import { evalCond } from "../game/dsl.js";
-import { adaptState, reinforcePreview, engineChipIdToUi, previewLocationContest, previewAttackerStrength, blockadeActions, postAction } from "./engineAdapter.js";
+import { adaptState, reinforcePreview, engineChipIdToUi, previewLocationContest, previewAttackerStrength, blockadeView, blockadeBuildOffer, postAction } from "./engineAdapter.js";
 import { resolveSalvage } from "../game/contest.js";
 import { assignTechNode } from "../game/stats.js";
 import { performDiplomacy } from "../game/diplomacy.js";
@@ -513,8 +513,12 @@ export default function Prototype({ config, onNewGame }) {
   // encounter hex has nothing to say either until you actually move onto it and
   // draw the card — the board's own `?` mark already tells you it is there, so
   // a panel that repeats it is a click you have to dismiss for nothing.
+  // What opens a window on click. A Location always has, and a blockade now
+  // does too: it is a structure that outlives the unit that raised it, so it
+  // gets selected like a place rather than reached through a passing soldier.
   function isInspectableHex(hexId) {
-    return state.hexes[hexId]?.type === "location";
+    const h = state.hexes[hexId];
+    return h?.type === "location" || (!!h?.blockade && h.fog === "visible");
   }
   function inspectHex(hexId) {
     if (!isInspectableHex(hexId)) {
@@ -1000,12 +1004,11 @@ export default function Prototype({ config, onNewGame }) {
             reinforce={reinforcePreview(gameRef.current, selectedUnitId)}
             scrap={you.scrap}
             raidTargets={raidTargets}
-            blockade={blockadeActions(gameRef.current, selectedUnitId)}
+            blockade={blockadeBuildOffer(gameRef.current, selectedUnitId)}
             post={postAction(gameRef.current, selectedUnitId)}
             onReinforce={onReinforce}
             onContest={onContest}
             onBuildBlockade={() => onBuildBlockade(state.units[selectedUnitId].node)}
-            onUpgradeBlockade={(chipId) => onUpgradeBlockade(state.units[selectedUnitId].node, chipId)}
             onBuildPost={() => onBuildPost(selectedUnitId, state.units[selectedUnitId].node)}
             onClose={() => setSelectedUnitId(null)}
           />
@@ -1035,6 +1038,17 @@ export default function Prototype({ config, onNewGame }) {
               onContest(p);
               setSelectedHexId(null);
             }}
+          />
+        )}
+        {selectedHexId && state.hexes[selectedHexId]?.type !== "location" &&
+          state.hexes[selectedHexId]?.blockade &&
+          state.hexes[selectedHexId]?.fog === "visible" && (
+          <BlockadeWindow
+            key="blockade-window"
+            view={blockadeView(gameRef.current, selectedHexId, state.youId)}
+            canAct={isYourTurn}
+            onClose={() => setSelectedHexId(null)}
+            onFit={(chipId) => onUpgradeBlockade(selectedHexId, chipId)}
           />
         )}
       </AnimatePresence>
