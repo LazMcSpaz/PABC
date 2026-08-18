@@ -252,27 +252,42 @@ function processLocationEconomy(state, loc, { partial = false, sites = [] } = {}
   // §2.2 — whatever the blockades did not take goes down the rail. After
   // blockade funding by the same reasoning as §3.4: a structure answering
   // something on the map outranks a gift to a neighbour.
+  let surplus = 0;
   if (pooling && buildGain > 0) {
     pool.dest.buildProgress = (pool.dest.buildProgress || 0) + buildGain;
     emit(state, "production_pooled", {
       from: loc.hexId, to: pool.dest.hexId, amount: buildGain,
     });
-    completeBuildIfDone(state, pool.dest);
+    // The recipient is held by the same faction (§2.2 requires both stations),
+    // so its surplus banks to the same player.
+    surplus += completeBuildIfDone(state, pool.dest);
     buildGain = 0;
   }
 
   loc.buildProgress = (loc.buildProgress || 0) + buildGain;
-  completeBuildIfDone(state, loc);
-  return scrapGain;
+  surplus += completeBuildIfDone(state, loc);
+  // Surplus rides home with the butter half rather than as its own emit: at
+  // Upkeep every Location's scrap is summed into one `resource_gained`.
+  return scrapGain + surplus;
 }
 
 // §20.4 / §20.5 — install / upgrade once buildProgress clears the cost.
-// Overflow carries to the next build (the active build is then cleared, so
-// the carry sits as progress with no target until a new one is chosen).
+//
+// RETURNS the number of build points left with nowhere to go, which the caller
+// banks as scrap. Surplus used to carry on the Location as untargeted
+// `buildProgress`: a settlement set to BUILD keeps producing after its build
+// lands, and that surplus then sat invisible and worth nothing until the
+// player happened to queue something else. Throughput is never wasted anywhere
+// else in the economy — an idle settlement banks its whole Output — so it is
+// not wasted here either.
+//
+// Two paths produce leftovers: overflow past a finished build, and a forfeited
+// unit-chip build (no friendly unit on the hex to arm), which used to destroy
+// every point sunk into it.
 export function completeBuildIfDone(state, loc) {
   const ab = loc.activeBuild;
-  if (!ab) return false;
-  if ((loc.buildProgress || 0) < ab.cost) return false;
+  if (!ab) return 0;
+  if ((loc.buildProgress || 0) < ab.cost) return 0;
 
   const overflow = (loc.buildProgress || 0) - ab.cost;
   const def = CHIPS[ab.chipId];
@@ -282,7 +297,13 @@ export function completeBuildIfDone(state, loc) {
     // slot/uid are preserved, then re-stamp it "newest" (move to the end of
     // its holder's list) so §6.3.3 capture destroys the freshest gear.
     const inst = state.chips[ab.targetChipUid];
-    if (!inst) { loc.activeBuild = null; loc.buildProgress = 0; return false; }
+    if (!inst) {
+      // The chip being upgraded is gone (destroyed, ejected, captured). Nothing
+      // to install into, so the whole pile becomes scrap.
+      const stranded = loc.buildProgress || 0;
+      loc.activeBuild = null; loc.buildProgress = 0;
+      return stranded;
+    }
     inst.chipId = ab.chipId;
     if (ab.targetUnit && state.units[ab.targetUnit]) {
       const u = state.units[ab.targetUnit];
@@ -305,11 +326,13 @@ export function completeBuildIfDone(state, loc) {
         ? u
         : stationedUnitWithBay(state, loc, def.slots || 1, def.statType);
       if (!target) {
-        // No friendly unit to arm — forfeit (the chip never lands).
+        // No friendly unit to arm — the chip never lands. The work still
+        // happened though, so it comes back as scrap rather than evaporating.
         delete state.chips[uid];
+        const stranded = loc.buildProgress || 0;
         loc.activeBuild = null;
         loc.buildProgress = 0;
-        return false;
+        return stranded;
       }
       target.chips.push(uid);
       recomputeStats(state);
@@ -323,8 +346,19 @@ export function completeBuildIfDone(state, loc) {
   }
 
   loc.activeBuild = null;
-  loc.buildProgress = overflow; // carry surplus toward the next build
-  return true;
+  loc.buildProgress = 0;
+  return overflow; // banked as scrap by the caller
+}
+
+// Credit build points that had nowhere to go to `pid` as scrap. Its own event
+// source so the feed says where the surplus came from rather than folding it
+// into ordinary Output.
+export function bankBuildSurplus(state, pid, amount) {
+  if (!(amount > 0) || !state.players[pid]) return;
+  state.players[pid].resource += amount;
+  emit(state, "resource_gained", {
+    player: pid, resource: "Resource", amount, source: "build-surplus",
+  });
 }
 
 function restamp(list, uid) {

@@ -24,6 +24,7 @@ aren't.
 | 3.4 Blockade funding | built | `economy.js`, `blockades.js` |
 | 2.3 Rail access agreement | built | `diplomacy.js hasRailAccess`, verb `set-rail-access` |
 | Pooling / priority UI | built | `HudChrome.jsx EconomyPanel`, `scripts/check-pooling-ui.mjs` |
+| Blockade UI (build + fit) | built | `UnitPanel.jsx`, `scripts/check-blockade-ui.mjs` |
 | Blockade upkeep | built | `blockades.js chargeBlockadeUpkeep` |
 | Unit upkeep | built | `economy.js chargeUnitUpkeep` |
 
@@ -124,6 +125,32 @@ Three things read `hasRailAccess`:
 - **Pooling is deliberately NOT included** — §2.2 still requires you hold both
   stations. Sharing a rival's track is commerce; pooling your industrial output
   into their city is not the same promise.
+
+### The blockade UI — where it lives, and why there
+
+Until 2026-08-18 the whole blockade system was engine-only: `build-blockade`
+and `upgrade-blockade` had no control anywhere in the interface, so a human
+could neither raise one nor fit the Signal Mast that Part 1 made the counter to
+sneaking past one. Everything above was reachable by the AI alone.
+
+Both now live in the **UnitPanel**, and that placement is forced rather than
+chosen: a blockade sits on a plain road hex, and a plain hex opens no window of
+its own (only Locations do). The unit standing there is the only handle a
+player has on it, so the whole lifecycle — raise it, watch it build, then fit
+its chips — belongs to the selected unit.
+
+One consequence worth knowing: **fitting chips is gated on your unit being
+present**, which is tighter than the engine requires. `validateUpgradeBlockade`
+only asks that you own the blockade and its supply road is open. Loosening it
+would mean giving a blockade its own window.
+
+Every refusal is mirrored from the validator, so the button explains itself
+("needs a road hex", "that road connection is cut", "no free slot") rather than
+failing on click. `build-post` (§17.7) rides in the same panel for the same
+reason and is only rendered once Intelligence A2 is in hand.
+
+`scripts/check-blockade-ui.mjs` drives a real browser through raise → finish →
+fit → post and asserts each click changed engine state.
 
 ### Upkeep — blockades and standing armies
 

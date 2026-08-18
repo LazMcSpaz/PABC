@@ -2289,6 +2289,63 @@ line("\n  [Rail doc §3] Blockade structures");
       isHexVisible(g, me, hex));
   }
 
+  // Build points with nowhere to go become scrap rather than sitting on the
+  // Location as an untargeted pile.
+  {
+    const g = createGame({ seed }); startTurn(g);
+    const me = g.turnOrder[0];
+    const home = Object.values(g.locations).find((l) => l.controller === me);
+    home.buildSlider = 1;              // all Output to BUILD
+    home.production = 20;              // far more than the cheapest chip costs
+    home.activeBuild = null; home.buildProgress = 0;
+    g.players[me].techLevel = 5;
+
+    // Queue something cheap so the Output massively overshoots it.
+    const opt = buildableChips(g, home).find((o) => !o.locked && o.def.kind === "location");
+    const cost = effectiveBuildCost(g, me, opt.def);
+    g.players[me].actions.remaining = 5;
+    const queued = performAction(g, "build", { at: home.hexId, chipId: opt.chipId });
+
+    const before = g.players[me].resource;
+    // Snapshot Output BEFORE the tick: the chip that lands may itself add
+    // Output, so reading it afterwards measures a different settlement.
+    const outputs = Object.values(g.locations)
+      .filter((l) => l.controller === me)
+      .reduce((n, l) => n + locationOutput(g, l), 0);
+    applyOutputAndBuilds(g, me);
+    check("Build surplus: the overshoot banks as scrap, not stranded progress",
+      queued.ok && home.activeBuild === null && (home.buildProgress || 0) === 0 &&
+      g.players[me].resource > before);
+    check("Build surplus: nothing is lost — output is conserved end to end",
+      g.players[me].resource - before === outputs - cost);
+  }
+
+  // A unit chip with no unit to arm used to destroy every point sunk into it.
+  {
+    const g = createGame({ seed }); startTurn(g);
+    const me = g.turnOrder[0];
+    const home = Object.values(g.locations).find((l) => l.controller === me);
+    g.players[me].techLevel = 5; g.players[me].actions.remaining = 5;
+    home.buildSlider = 1; home.production = 20;
+    const unitOpt = buildableChips(g, home).find((o) => !o.locked && o.def.kind === "unit");
+    // Stage a unit so the build is legal to QUEUE, then march it off before the
+    // chip lands — the forfeit path.
+    const u = Object.values(g.units).find((x) => x.owner === me);
+    u.node = home.hexId; recomputeStats(g);
+    const queuedUnit = performAction(g, "build", { at: home.hexId, chipId: unitOpt.chipId });
+    u.node = (g.board.adjacency[home.hexId] || [])[0]; recomputeStats(g);
+    const before = g.players[me].resource;
+    const outputs = Object.values(g.locations)
+      .filter((l) => l.controller === me)
+      .reduce((n, l) => n + locationOutput(g, l), 0);
+    applyOutputAndBuilds(g, me);
+    check("Build surplus: a forfeited unit chip refunds its work as scrap",
+      queuedUnit.ok && home.activeBuild === null && (home.buildProgress || 0) === 0 &&
+      // The chip never landed, so the ENTIRE build half comes back rather than
+      // evaporating: nothing is deducted for a chip that was never installed.
+      g.players[me].resource - before === outputs);
+  }
+
   // Rail doc Part 1 — a blockade is a GARRISON, not a wall: it halts only what
   // it can see, so stealth walks through and a Signal Mast closes the gap.
   {

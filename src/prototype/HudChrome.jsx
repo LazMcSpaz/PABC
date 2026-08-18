@@ -632,6 +632,54 @@ export function LocationWindow({ view, onClose, onActivate, onContest, onRecruit
 // installed chip opens its upgrade view (always shows the next tier, greyed
 // if Tech or Loyalty is short). Construction advances at Upkeep; Rush spends
 // banked scrap to finish now.
+// One installed chip, in a city slot or a unit bay. Clicking a chip that has
+// a next tier opens its upgrade view; one with none is inert but still shown,
+// because "what is fitted here" is worth reading on its own.
+function ChipButton({ chip, can, onClick }) {
+  const live = can && !!chip.upgrade;
+  return (
+    <button
+      className="hud-int"
+      disabled={!live}
+      onClick={live ? onClick : undefined}
+      title={chip.upgrade ? `Upgrade → ${chip.upgrade.name}` : "No upgrade"}
+      style={{ fontFamily: C.font, fontSize: 11, fontWeight: 700, padding: "6px 9px", borderRadius: 6, border: `1px solid ${chip.disabled ? C.red : "rgba(86,211,198,0.4)"}`, background: "rgba(0,0,0,0.3)", color: chip.disabled ? C.red : C.text, cursor: live ? "pointer" : "default" }}
+    >
+      {chip.name}{chip.disabled ? " (dormant)" : ""}{chip.upgrade ? " ▲" : ""}
+    </button>
+  );
+}
+
+// §20.6 display contract, shared by the city build menu and the per-unit
+// outfit menu: only Tech-allowed chips appear at all, and anything otherwise
+// gated is greyed with the reason rather than hidden — you should be able to
+// see what you are working toward.
+function BuildList({ items, can, empty, onPick }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 4, background: "rgba(0,0,0,0.3)", border: "1px solid rgba(86,211,198,0.3)", borderRadius: 7, padding: 8 }}>
+      {items.length === 0 && <div style={{ fontSize: 11, color: C.textFaint }}>{empty}</div>}
+      {items.map((b) => {
+        const enabled = can && b.buildable;
+        return (
+          <button key={b.chipId} className="hud-int" disabled={!enabled}
+            onClick={enabled ? () => onPick(b.chipId) : undefined}
+            style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, textAlign: "left", padding: "6px 9px", borderRadius: 5, border: "1px solid rgba(86,211,198,0.25)", background: enabled ? "rgba(0,0,0,0.2)" : "rgba(0,0,0,0.35)", color: enabled ? C.text : C.textFaint, cursor: enabled ? "pointer" : "not-allowed", opacity: b.locked ? 0.55 : 1 }}>
+            <span>
+              <b style={{ color: enabled ? C.text : C.textFaint }}>{b.name}</b>
+              <span style={{ fontSize: 10, color: C.textFaint }}> · {b.desc}</span>
+              {b.reason && <span style={{ fontSize: 9.5, color: C.red }}> · {b.reason}</span>}
+            </span>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
+              <img src={ICON.scrap} alt="" style={{ width: 13, height: 13 }} />
+              <span style={{ fontFamily: C.font, fontWeight: 700 }}>{b.cost}</span>
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 function EconomyPanel({ hexId, eco, onBuild, onUpgrade, onRush, onSetSlider, onSetPoolTarget, onSetBuildPriority }) {
   const [open, setOpen] = useState(null); // null | "build" | { upgrade: chipUid }
   const can = eco.canManage;
@@ -658,6 +706,11 @@ function EconomyPanel({ hexId, eco, onBuild, onUpgrade, onRush, onSetSlider, onS
     slotButton(label, active, can, () => onSetSlider?.(hexId, val));
   const f = eco.slider ?? 0;
   const emptySlots = Math.max(0, eco.slotCapacity - eco.slotsUsed);
+  // The two economies are split at the menu as well as the grid: a city slot
+  // can never hold a unit chip and a unit bay can never hold a city chip, so
+  // offering both in one list only ever produced a greyed-out half.
+  const cityMenu = (eco.buildMenu || []).filter((b) => b.kind !== "unit");
+  const unitMenu = (eco.buildMenu || []).filter((b) => b.kind === "unit");
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -696,15 +749,13 @@ function EconomyPanel({ hexId, eco, onBuild, onUpgrade, onRush, onSetSlider, onS
         <div style={{ fontSize: 11, color: C.textFaint }}>No active build — click an empty slot below.</div>
       )}
 
-      {/* slot grid: installed chips (click → upgrade) + empty slots (click → build) */}
+      {/* City slot grid: installed Location chips (click → upgrade) + empty
+          slots (click → build). Location chips only — the garrison's bays are
+          a separate economy and live in their own section below. */}
       <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
         {eco.chips.map((c) => (
-          <button key={c.uid} className="hud-int" disabled={!can || !c.upgrade}
-            onClick={can && c.upgrade ? () => setOpen((o) => (o && o.upgrade === c.uid ? null : { upgrade: c.uid })) : undefined}
-            title={c.upgrade ? `Upgrade → ${c.upgrade.name}` : "No upgrade"}
-            style={{ fontFamily: C.font, fontSize: 11, fontWeight: 700, padding: "6px 9px", borderRadius: 6, border: `1px solid ${c.disabled ? C.red : "rgba(86,211,198,0.4)"}`, background: "rgba(0,0,0,0.3)", color: c.disabled ? C.red : C.text, cursor: can && c.upgrade ? "pointer" : "default" }}>
-            {c.name}{c.disabled ? " (dormant)" : ""}{c.upgrade ? " ▲" : ""}
-          </button>
+          <ChipButton key={c.uid} chip={c} can={can}
+            onClick={() => setOpen((o) => (o && o.upgrade === c.uid ? null : { upgrade: c.uid }))} />
         ))}
         {Array.from({ length: emptySlots }).map((_, i) => (
           <button key={`empty-${i}`} className="hud-int" disabled={!can}
@@ -713,7 +764,75 @@ function EconomyPanel({ hexId, eco, onBuild, onUpgrade, onRush, onSetSlider, onS
             + Build
           </button>
         ))}
+        {emptySlots === 0 && (
+          <div style={{ fontSize: 10, color: C.textFaint, alignSelf: "center" }}>
+            All city slots full.
+          </div>
+        )}
       </div>
+
+      {/* Garrison bays — a SEPARATE economy from the city's slots.
+          Unit chips never consumed a Location slot in the engine, but the
+          build menu used to be reachable only by clicking an empty Location
+          slot, so a full city could no longer outfit its own troops, and a
+          unit chip's upgrade had nowhere to render at all. */}
+      {(eco.garrison?.length > 0) && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <SectionLabel>Garrison · unit bays</SectionLabel>
+          {eco.garrison.map((u) => {
+            const free = u.baySlots - u.bayUsed;
+            return (
+              <div key={u.uid} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ fontFamily: C.font, fontSize: 11.5, fontWeight: 700, color: C.text }}>
+                    {u.name}
+                  </span>
+                  <span style={{ fontSize: 9.5, color: C.textFaint }}>
+                    bay {u.bayUsed}/{u.baySlots}
+                  </span>
+                </div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                  {u.chips.map((c) => (
+                    <ChipButton key={c.uid} chip={c} can={can}
+                      onClick={() => setOpen((o) => (o && o.upgrade === c.uid ? null : { upgrade: c.uid }))} />
+                  ))}
+                  {free > 0 ? (
+                    <button className="hud-int" disabled={!can}
+                      onClick={can ? () => setOpen((o) => (o && o.outfit === u.uid ? null : { outfit: u.uid })) : undefined}
+                      style={{ fontFamily: C.font, fontSize: 11, fontWeight: 700, padding: "6px 12px", borderRadius: 6, border: "1px dashed rgba(86,211,198,0.5)", background: "rgba(86,211,198,0.06)", color: C.holoHi, cursor: can ? "pointer" : "default" }}>
+                      + Outfit
+                    </button>
+                  ) : (
+                    <span style={{ fontSize: 10, color: C.textFaint, alignSelf: "center" }}>Bay full.</span>
+                  )}
+                </div>
+                {open?.outfit === u.uid && (
+                  <BuildList
+                    items={unitMenu.map((b) => {
+                      // Per-unit eligibility. The adapter's `buildable` asks
+                      // whether ANY stationed unit could take the chip; here the
+                      // player has named one, so the answer has to be about it.
+                      const fits = (b.slots || 1) <= free;
+                      const clash = b.statType && u.statTypes.includes(b.statType);
+                      return {
+                        ...b,
+                        buildable: !b.locked && fits && !clash,
+                        reason: b.locked ? b.reason
+                          : !fits ? "no bay space on this unit"
+                          : clash ? `already carries a ${b.statType} chip`
+                          : null,
+                      };
+                    })}
+                    can={can}
+                    empty="Nothing your Tech Level can fit yet."
+                    onPick={(chipId) => { onBuild?.(hexId, chipId, { unit: u.uid }); setOpen(null); }}
+                  />
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       {/* Rail doc §2.2 — pool this settlement's build output down a rail link.
           Only rendered when a legal recipient exists, so a settlement with no
@@ -757,30 +876,14 @@ function EconomyPanel({ hexId, eco, onBuild, onUpgrade, onRush, onSetSlider, onS
         </div>
       )}
 
-      {/* build menu — §20.6: only Tech-allowed chips; Loyalty-locked greyed */}
+      {/* City build menu — Location chips only. */}
       {open === "build" && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 4, background: "rgba(0,0,0,0.3)", border: "1px solid rgba(86,211,198,0.3)", borderRadius: 7, padding: 8 }}>
-          <SectionLabel>Build menu</SectionLabel>
-          {eco.buildMenu.length === 0 && <div style={{ fontSize: 11, color: C.textFaint }}>Nothing your Tech Level can build yet.</div>}
-          {eco.buildMenu.map((b) => {
-            const enabled = can && b.buildable;
-            return (
-              <button key={b.chipId} className="hud-int" disabled={!enabled}
-                onClick={enabled ? () => { onBuild?.(hexId, b.chipId); setOpen(null); } : undefined}
-                style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, textAlign: "left", padding: "6px 9px", borderRadius: 5, border: "1px solid rgba(86,211,198,0.25)", background: enabled ? "rgba(0,0,0,0.2)" : "rgba(0,0,0,0.35)", color: enabled ? C.text : C.textFaint, cursor: enabled ? "pointer" : "not-allowed", opacity: b.locked ? 0.55 : 1 }}>
-                <span>
-                  <b style={{ color: enabled ? C.text : C.textFaint }}>{b.name}</b>
-                  <span style={{ fontSize: 10, color: C.textFaint }}> · {b.desc}</span>
-                  {b.reason && <span style={{ fontSize: 9.5, color: C.red }}> · {b.reason}</span>}
-                </span>
-                <span style={{ display: "inline-flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
-                  <img src={ICON.scrap} alt="" style={{ width: 13, height: 13 }} />
-                  <span style={{ fontFamily: C.font, fontWeight: 700 }}>{b.cost}</span>
-                </span>
-              </button>
-            );
-          })}
-        </div>
+        <BuildList
+          items={cityMenu}
+          can={can}
+          empty="Nothing your Tech Level can build yet."
+          onPick={(chipId) => { onBuild?.(hexId, chipId); setOpen(null); }}
+        />
       )}
 
       {/* upgrade view — §20.6: always shows the next tier, greyed if gated */}
