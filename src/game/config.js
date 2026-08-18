@@ -180,6 +180,15 @@ export const CONFIG = {
   // silently stopped scaling the moment the board could grow.
   hexSplit: { encounterShare: 0.65 },
 
+  // Encounter cadence, both settable from the setup screen.
+  //   fieldShare      the share of spare hexes that become encounter sites.
+  //                   Overrides hexSplit.encounterShare when the screen sends
+  //                   one; the default IS hexSplit.encounterShare.
+  //   worldPerRound   how many world triggers fire at each round end
+  //                   (triggers.js). 0 switches world encounters off without
+  //                   removing the content.
+  encounters: { worldPerRound: 2 },
+
   // Capital chip bonuses (content/config.csv).
   capital: { garrisonBonus: 2, productionBonus: 2 },
 

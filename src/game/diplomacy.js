@@ -1261,6 +1261,11 @@ export function recognitionMet(state, pid) {
 // module, so awardVp can't be imported here without a cycle.
 export function checkRecognitionVictory(state) {
   if (state.winnerId) return;
+  // Recognition can be switched off at setup. The score still moves and the
+  // Hall of Powers still shows the path — it just no longer ends the game,
+  // and the summit VP below keeps paying, since that is scoring rather than
+  // winning.
+  const recognitionWins = state.rules?.victory?.recognition !== false;
   const rc = D().recognition;
   for (const pid of factionIds(state)) {
     const sc = recognitionScore(state, pid);
@@ -1281,7 +1286,7 @@ export function checkRecognitionVictory(state) {
         if (state.winnerId) return;
       }
     }
-    if (sc.total >= rc.threshold) { state.winnerId = pid; return; }
+    if (recognitionWins && sc.total >= rc.threshold) { state.winnerId = pid; return; }
   }
 }
 

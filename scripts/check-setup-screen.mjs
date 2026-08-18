@@ -34,7 +34,7 @@ const EXTERNAL = /fonts\.(googleapis|gstatic)\.com/;
 
 // Walk the setup screen with a given set of slider positions, start the game,
 // and report what the engine actually built.
-async function play({ sizeIndex, densityIndex, factions }) {
+async function play({ sizeIndex, densityIndex, factions, toggleOff = [] }) {
   const page = await ctx.newPage();
   page.on("pageerror", (e) => errors.push(e.message));
   page.on("console", (m) => {
@@ -68,6 +68,20 @@ async function play({ sizeIndex, densityIndex, factions }) {
     await page.waitForTimeout(200);
   }
 
+  // Switch off any named toggle (Fog of War, Conquest, …). Each Toggle is a
+  // pill button sitting immediately before its label, so find the label and
+  // walk back to the control.
+  for (const label of toggleOff) {
+    await page.evaluate((want) => {
+      const row = [...document.querySelectorAll("div")].find((d) => {
+        const b = d.querySelector(":scope > button");
+        return b && d.textContent.trim().startsWith(want);
+      });
+      row?.querySelector(":scope > button")?.click();
+    }, label);
+    await page.waitForTimeout(200);
+  }
+
   const summary = await page.evaluate(() => document.body.innerText);
   await page.locator("button").filter({ hasText: "BEGIN" }).first().click();
   await page.getByText("End Turn").waitFor({ timeout: 30000 });
@@ -82,6 +96,11 @@ async function play({ sizeIndex, densityIndex, factions }) {
       // majors are exactly the ids in the major registry.
       majors: g.turnOrder.filter((f) => MAJOR_IDS.includes(f)).length,
       turnOrder: [...g.turnOrder],
+      rules: JSON.parse(JSON.stringify(g.rules || null)),
+      // Fog OFF is the ABSENCE of per-faction records, so measure that rather
+      // than a flag the screen could set without the engine honouring it.
+      fogRecords: Object.keys(g.visibility || {}).length,
+      encounterHexes: Object.values(g.board.hexes).filter((h) => h.type === "encounter").length,
     };
   }, MAJOR_IDS);
   await page.close();
@@ -112,6 +131,30 @@ check("asking for 2 major factions gives 2",
   two.built.majors === 2, `${two.built.majors} majors: ${two.built.turnOrder.join(", ")}`);
 check("the human's faction is always seated",
   two.built.turnOrder.includes("versari"), two.built.turnOrder.join(", "));
+
+// --- 3. the rule switches reach the engine -------------------------------
+// Every one of these was a control that looked live and changed nothing, so
+// each check reads the BUILT GAME rather than the screen's own state.
+{
+  const on = small;
+  check("fog on by default — the engine builds per-faction visibility",
+    on.built.fogRecords > 0, `${on.built.fogRecords} record(s)`);
+
+  const noFog = await play({ sizeIndex: 0, densityIndex: 0, factions: 4, toggleOff: ["Fog of War"] });
+  check("fog off — no visibility records are built at all",
+    noFog.built.fogRecords === 0 && noFog.built.rules?.fogOfWar === false,
+    `${noFog.built.fogRecords} record(s)`);
+
+  const noConquest = await play({ sizeIndex: 0, densityIndex: 0, factions: 4, toggleOff: ["Conquest"] });
+  check("a victory condition switched off reaches the engine's rules",
+    noConquest.built.rules?.victory?.conquest === false &&
+    noConquest.built.rules?.victory?.elimination === true);
+
+  check("encounter cadence lands on the board and the rules",
+    on.built.encounterHexes > 0 &&
+    typeof on.built.rules?.worldEncountersPerRound === "number",
+    `${on.built.encounterHexes} encounter hexes, world ${on.built.rules?.worldEncountersPerRound}/round`);
+}
 
 check("no console/page errors", errors.length === 0, errors.slice(0, 2).join(" | ") || "clean");
 

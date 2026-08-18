@@ -96,6 +96,19 @@ const VICTORY_CONDITIONS = [
 ];
 
 const FREQ_LABELS = ["None", "Low", "Normal", "High"];
+// Which of the four bands a 0..1 slider sits in. One definition, so the label
+// a player reads and the number the engine is handed can never disagree.
+function freqTier(v) {
+  if (v <= 0.05) return 0;
+  if (v <= 0.35) return 1;
+  if (v <= 0.69) return 2;
+  return 3;
+}
+// Engine units per band. Field is the SHARE of spare hexes that become
+// encounter sites (the engine's own default is 0.65, which is "Normal"),
+// world is how many world triggers fire each round.
+const FIELD_SHARE = [0, 0.35, 0.65, 0.9];
+const WORLD_PER_ROUND = [0, 1, 2, 4];
 function freqLabel(v) {
   if (v <= 0.05) return "None";
   if (v <= 0.35) return "Low";
@@ -520,7 +533,12 @@ export default function SetupScreen({ onStart, onBack }) {
       locationBudget: settlementCount,
       factionCount,
       victory: { ...victory },
-      encounters: { field: fieldFreq, world: worldFreq },
+      // Resolved to engine units here, like the settlement budget above, so
+      // the engine is handed shares and counts rather than UI slider values.
+      encounters: {
+        field: FIELD_SHARE[freqTier(fieldFreq)],
+        world: WORLD_PER_ROUND[freqTier(worldFreq)],
+      },
       minorFactions,
       fogOfWar,
     });

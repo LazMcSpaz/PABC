@@ -15,9 +15,15 @@
 import { WORLD_ENCOUNTERS } from "./content/index.js";
 import { evalCond, evalStrength } from "./dsl.js";
 import { emit } from "./events.js";
+import { CONFIG } from "./config.js";
 import { deliverEncounter } from "./encounters.js";
 
-const FIRE_PER_ROUND = 2;
+// How many world triggers fire at each round end. The default lives in
+// CONFIG; a game may lower it (or set 0 to switch world encounters off
+// entirely) from the setup screen without the content going anywhere.
+const FIRE_PER_ROUND = CONFIG.encounters.worldPerRound;
+const firePerRound = (state) =>
+  state.rules?.worldEncountersPerRound ?? FIRE_PER_ROUND;
 
 function getTriggers() {
   const out = [];
@@ -55,7 +61,7 @@ export function evaluateTriggers(state, ctx = {}) {
   }
 
   eligible.sort((a, b) => b.score - a.score);
-  const fired = pickTopK(state, eligible, FIRE_PER_ROUND);
+  const fired = pickTopK(state, eligible, firePerRound(state));
 
   for (const { trigger, strength, score } of fired) {
     state.triggerCooldowns[trigger.id] = state.round + trigger.cooldown;
