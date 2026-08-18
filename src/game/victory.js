@@ -77,6 +77,10 @@ export function recomputeVp(state, { emitEvents = true } = {}) {
     for (const pid of state.turnOrder) {
       const p = state.players[pid];
       if (!p || factionDef(pid)?.tier !== "major") continue; // minors never win
+      // Conquest can be switched off at setup. Doing so removes a way to END
+      // the game, never a way to score — VP keeps accruing and the scoreboard
+      // still reads, there is just no line to cross.
+      if (state.rules?.victory?.conquest === false) break;
       if (p.vp >= CONFIG.vpThreshold) { state.winnerId = pid; break; }
     }
   }

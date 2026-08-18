@@ -12,7 +12,7 @@ import { CHIPS, ABILITIES, chipBlocksRail } from "./content.js";
 // re-exported here, where every mover already looks for them.
 export { passesFreely, supplyCutter, hasRailAccess } from "./diplomacy.js";
 import { passesFreely, hasRailAccess } from "./diplomacy.js";
-import { ensureVisibility, isHexVisible, isUnitVisibleTo, canSeeUnitAt } from "./visibility.js";
+import { isHexExplored, isHexVisible, isUnitVisibleTo, canSeeUnitAt } from "./visibility.js";
 
 const BIG_BUDGET = 999; // budget-agnostic routing for display
 
@@ -55,7 +55,7 @@ function blockerScan(state, ownerId, { ignoreUnits, mover } = {}) {
     if (loc.controller && loc.controller !== ownerId && !passesFreely(state, ownerId, loc.controller)) {
       // A city is remembered once explored — you do not forget where it is or
       // roughly whose it is — so an explored Location never ambushes anyone.
-      note(loc.hexId, ensureVisibility(state, ownerId).explored.has(loc.hexId));
+      note(loc.hexId, isHexExplored(state, ownerId, loc.hexId));
     }
   }
   // Rail doc §3 — a COMPLETED enemy blockade halts a mover the same way a unit

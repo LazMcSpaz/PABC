@@ -752,6 +752,88 @@ line("\n  [Setup] every faction gets the same number of home Locations");
     placed.every((n, i) => n === wanted[i]));
 }
 
+// Setup-screen rule switches. Each of these was, at some point, a control that
+// looked live and changed nothing — so each gets a check that the SWITCH does
+// something, not merely that the default still works.
+line("\n  [Setup] Rule switches from the start screen");
+{
+  // Victory: turning a condition off removes a way to END the game, never a
+  // way to score.
+  {
+    const g = createGame({ seed, rules: { victory: { conquest: false } } });
+    const me = g.turnOrder[0];
+    g.players[me].bankedVp = CONFIG.vpThreshold * 2;
+    recomputeVp(g);
+    check("victory: conquest off — VP still accrues but nobody wins on it",
+      g.players[me].vp >= CONFIG.vpThreshold && !g.winnerId);
+
+    const on = createGame({ seed });
+    on.players[on.turnOrder[0]].bankedVp = CONFIG.vpThreshold * 2;
+    recomputeVp(on);
+    check("victory: conquest on — the same VP does win",
+      on.winnerId === on.turnOrder[0]);
+  }
+
+  // Elimination: last-standing stops ending the game, but eliminations still
+  // happen.
+  {
+    const stage = (rules) => {
+      const g = createGame({ seed, rules });
+      // Wipe everyone but the first player off the board.
+      for (const pid of g.turnOrder.slice(1)) {
+        for (const uid of Object.keys(g.units)) if (g.units[uid].owner === pid) delete g.units[uid];
+        for (const loc of Object.values(g.locations)) {
+          if (loc.controller === pid) { loc.controller = null; loc.sections = ["neutral", "neutral", "neutral"]; }
+          if (loc.loyaltyOwner === pid) { loc.loyaltyOwner = null; loc.loyalty = null; }
+        }
+      }
+      startTurn(g); endTurn(g);
+      return g;
+    };
+    check("victory: elimination on — outliving everyone ends it",
+      !!stage(undefined).winnerId);
+    check("victory: elimination off — the board empties but the game runs on",
+      !stage({ victory: { elimination: false } }).winnerId);
+  }
+
+  // Fog: OFF leaves the per-faction records empty, which every reader already
+  // treats as full sight — so there is no second code path to keep in step.
+  {
+    const dark = createGame({ seed });
+    const lit = createGame({ seed, rules: { fogOfWar: false } });
+    const me = lit.turnOrder[0];
+    const someHex = Object.keys(lit.board.hexes)[0];
+    check("fog: on — a faction has a visibility record and cannot see everything",
+      !!dark.visibility?.[me] && dark.visibility[me].visible.size < Object.keys(dark.board.hexes).length);
+    check("fog: off — no record is built, and every hex reads as visible",
+      !lit.visibility?.[me] && isHexVisible(lit, me, someHex));
+  }
+
+  // Encounters: both dials reach real engine numbers.
+  {
+    const none = createGame({ seed, rules: { encounters: { field: 0 } } });
+    const many = createGame({ seed, rules: { encounters: { field: 0.9 } } });
+    const count = (g) => Object.values(g.board.hexes).filter((h) => h.type === "encounter").length;
+    check(`encounters: the field share sets how many encounter hexes exist (${count(none)} vs ${count(many)})`,
+      count(none) === 0 && count(many) > count(none));
+
+    const off = createGame({ seed, rules: { encounters: { world: 0 } } });
+    check("encounters: world 0 is carried onto the state for the trigger loop",
+      off.rules.worldEncountersPerRound === 0 &&
+      createGame({ seed }).rules.worldEncountersPerRound === CONFIG.encounters.worldPerRound);
+  }
+
+  // The defaults must be exactly what the engine did before rules existed —
+  // otherwise every headless caller and the rest of this harness shifts.
+  {
+    const g = createGame({ seed });
+    check("defaults: every condition live, fog on, world cadence at the config default",
+      g.rules.victory.conquest && g.rules.victory.recognition && g.rules.victory.elimination &&
+      g.rules.fogOfWar === true &&
+      g.rules.worldEncountersPerRound === CONFIG.encounters.worldPerRound);
+  }
+}
+
 // Content rules that are easy to break by adding a Location and forgetting.
 line("\n  [Content] Location rules that must hold at every board size");
 {

@@ -207,6 +207,10 @@ function sweepEliminations(state) {
     }
   }
   const survivors = state.turnOrder.filter((f) => !state.players[f]?.eliminated);
+  // Last-faction-standing is a win condition like any other, and switchable.
+  // Eliminations still happen either way; with it off, outliving everyone
+  // simply does not end the game by itself.
+  if (state.rules?.victory?.elimination === false) return;
   if (survivors.length === 1 && !state.winnerId) state.winnerId = survivors[0];
 }
 

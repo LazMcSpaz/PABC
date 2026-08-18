@@ -298,6 +298,14 @@ function bootGame(config) {
     mapSize: config?.mapSize,
     factionIds: majorsFor(humanFactionId, config?.factionCount),
     locationBudget: config?.locationBudget ?? null,
+    // Victory conditions, encounter cadence and fog all come straight from
+    // the setup screen. Anything the screen omits falls back to the engine's
+    // own defaults inside createGame.
+    rules: {
+      victory: config?.victory,
+      fogOfWar: config?.fogOfWar,
+      encounters: config?.encounters,
+    },
   });
   startTurn(game);
   driveAIsThroughHumanTurn(game);

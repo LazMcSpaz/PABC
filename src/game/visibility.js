@@ -227,6 +227,10 @@ function rememberStatic(state, fid, hex) {
 // Called incrementally — per acting faction on a move, per involved
 // factions on capture — NOT all-factions-every-event (the scale guard).
 export function recomputeVisibility(state, fid, { emitEvents = true } = {}) {
+  // Fog OFF: build nothing. An ABSENT record is what the readers already treat
+  // as full sight, so switching fog off is the absence of this work rather
+  // than a parallel "reveal everything" path that could drift from it.
+  if (state.rules?.fogOfWar === false) return;
   const vis = ensureVisibility(state, fid);
   const next = new Set();
 
@@ -453,6 +457,19 @@ export function isUnitVisibleTo(state, fid, unit) {
 export function isHexVisible(state, fid, hex) {
   const vis = state.visibility?.[fid];
   return vis ? vis.visible.has(hex) : true;
+}
+
+// Has `fid` ever SEEN this hex? Static facts persist once discovered (§19.2),
+// so this is the question anything remembering terrain or a city asks.
+//
+// Mirrors isHexVisible's contract, including the fog-off case: with fog
+// disabled nothing is ever hidden, so everything counts as explored. Reading
+// `ensureVisibility(...).explored` directly would instead CREATE an empty
+// record and report the whole map as unknown.
+export function isHexExplored(state, fid, hex) {
+  if (state.rules?.fogOfWar === false) return true;
+  const vis = state.visibility?.[fid];
+  return vis ? vis.explored.has(hex) : true;
 }
 
 // --- §19 effect helpers (REVEAL_REGION / GRANT_VISION / PLANT_FALSE_INTEL) ---

@@ -374,7 +374,7 @@ export function assignRails(adjacency, hexes, capitalHexes) {
 // Constrained-random layout: place the 10 Locations, then fill the rest
 // with encounter / terrain tiles. Each faction's two affiliated Locations
 // land within 2 hexes of each other; the four start areas are spread.
-export function generateLayout(rng, grid, factions, locations, { locationBudget } = {}) {
+export function generateLayout(rng, grid, factions, locations, { locationBudget, encounterShare } = {}) {
   const hexIds = Object.keys(grid.hexes);
   const distFrom = {};
   for (const id of hexIds) distFrom[id] = bfsDistances(grid.adjacency, id);
@@ -511,7 +511,11 @@ export function generateLayout(rng, grid, factions, locations, { locationBudget 
   // Encounters are a SHARE of what's left, not a fixed count — a fixed count
   // meant every hex added to a bigger board became plain terrain.
   const spare = hexIds.filter((id) => !used.has(id));
-  const nEncounter = Math.round(spare.length * CONFIG.hexSplit.encounterShare);
+  // The share is settable per game (setup screen) — 0 leaves a board of pure
+  // terrain, which is a legitimate way to play even though nothing in the
+  // engine depends on encounters existing.
+  const share = encounterShare ?? CONFIG.hexSplit.encounterShare;
+  const nEncounter = Math.round(spare.length * Math.max(0, Math.min(1, share)));
   rng.shuffle(spare).forEach((id, i) => {
     type[id] = i < nEncounter ? "encounter" : "terrain";
   });

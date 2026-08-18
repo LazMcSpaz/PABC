@@ -49,6 +49,19 @@ export function createGame({
   // empty one are both legitimate games, and tying density to size made "small"
   // mean "few cities" whether or not that was what anyone wanted.
   locationBudget = null,
+  // Optional rule switches from the setup screen. Every one defaults to the
+  // behaviour the engine has always had, so headless callers and the harness
+  // are untouched by their existence.
+  //
+  //   victory   which win conditions are live. Turning one off removes a way
+  //             to end the game, never a way to score — VP is still tracked.
+  //   fogOfWar  false leaves state.visibility EMPTY, which the whole
+  //             visibility layer already reads as "everything is visible"
+  //             (isHexVisible / canSee both fall through when a faction has
+  //             no fog record). No second code path to keep in step.
+  //   encounters  field = the share of spare hexes that become encounter
+  //             sites; world = how many world triggers fire each round.
+  rules = null,
 } = {}) {
   const rng = makeRng(seed);
   const uid = createIdGen();
@@ -61,7 +74,10 @@ export function createGame({
   const size = (mapSize && CONFIG.mapSizes[mapSize]) || null;
   const grid = buildHexGrid(size ? size.rows : CONFIG.testMap);
   const layout = generateLayout(rng, grid, FACTIONS, LOCATIONS,
-    { locationBudget: locationBudget ?? (size ? size.locations : CONFIG.testMapLocations) });
+    {
+      locationBudget: locationBudget ?? (size ? size.locations : CONFIG.testMapLocations),
+      encounterShare: rules?.encounters?.field,
+    });
 
   // chip-instance registry — every chip in play has a uid
   const chips = {};
@@ -294,6 +310,17 @@ export function createGame({
 
   const state = {
     seed,
+    // Rule switches, normalised once here so every reader gets a complete
+    // object and no site has to cope with a partial or missing `rules`.
+    rules: {
+      victory: {
+        conquest: rules?.victory?.conquest !== false,
+        recognition: rules?.victory?.recognition !== false,
+        elimination: rules?.victory?.elimination !== false,
+      },
+      fogOfWar: rules?.fogOfWar !== false,
+      worldEncountersPerRound: rules?.encounters?.world ?? CONFIG.encounters.worldPerRound,
+    },
     rng, // live seeded generator — contest dice draw from it
     nextId: uid, // shared instance id generator — used by runtime Recruit
     humanFactionId,
@@ -356,7 +383,12 @@ export function createGame({
   // §19 — seed each faction's fog from its starting sources (units + its
   // Capital + ZoC). Quietly: no spot/explore events at game creation.
   state.visibility = {};
-  for (const fid of playing) recomputeVisibility(state, fid, { emitEvents: false });
+  // Fog OFF means never building the per-faction records at all. Leaving them
+  // empty is what the readers already treat as full sight, so "no fog" needs
+  // no special case anywhere downstream.
+  if (state.rules.fogOfWar) {
+    for (const fid of playing) recomputeVisibility(state, fid, { emitEvents: false });
+  }
   // §18.4–§18.5 — init the diplomacy layer + global reputations, then seed
   // faction↔faction Standing from temperament compatibility + relationship
   // + a PER-SEED jitter (alliance variety). The jitter uses an ISOLATED rng
