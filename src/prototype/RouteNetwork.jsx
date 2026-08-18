@@ -72,7 +72,25 @@ const STYLES = {
   },
 };
 
-function buildPaths(rows, hexes, centers, carries) {
+// Segment identity, direction-independent, so the road pass and the rail pass
+// agree on which stretch of ground they are both crossing.
+const segKey = (a, b) => (a < b ? `${a}~${b}` : `${b}~${a}`);
+
+// How far each route slides off the centre line where a road and a railway run
+// between the SAME two hexes. Half the separation each, so the pair straddles
+// the line the single route would have taken and neither looks displaced.
+//
+// Sized to clear both troughs: the widest strokes are 14 (road) and 15 (rail),
+// so ~7.5 each way puts a visible gap of ground between them at every zoom.
+const PARALLEL_OFFSET = 7.5;
+
+// `shared` is the set of segment keys carried by BOTH kinds; `side` is which
+// way this kind steps off the line there (-1 / +1).
+//
+// Without this the two draw on top of each other and only the one painted last
+// survives — a settlement served by road AND rail looked rail-only, which is a
+// lie about how you can reach it.
+function buildPaths(rows, hexes, centers, carries, shared, side = 0) {
   const out = [];
   for (const [a, b] of routeSegments(rows, hexes, carries)) {
     const ca = centers[a];
@@ -82,7 +100,24 @@ function buildPaths(rows, hexes, centers, carries) {
     let pa = hexes[a]?.type === "location" ? trimToEllipse(cb, ca, LOCATION_CLEARANCE) : ca;
     let pb = hexes[b]?.type === "location" ? trimToEllipse(ca, cb, LOCATION_CLEARANCE) : cb;
     if (!pa || !pb) continue;
-    out.push({ key: `${a}~${b}`, x1: pa.x, y1: pa.y, x2: pb.x, y2: pb.y });
+
+    let dx = 0, dy = 0;
+    if (side && shared?.has(segKey(a, b))) {
+      // Perpendicular to the segment, measured in a FIXED direction (low hex id
+      // to high) so both kinds resolve the same normal and reliably step to
+      // opposite sides rather than landing on each other.
+      const [from, to] = a < b ? [ca, cb] : [cb, ca];
+      const vx = to.x - from.x;
+      const vy = to.y - from.y;
+      const len = Math.hypot(vx, vy) || 1;
+      dx = (-vy / len) * PARALLEL_OFFSET * side;
+      dy = (vx / len) * PARALLEL_OFFSET * side;
+    }
+    out.push({
+      key: `${a}~${b}`,
+      x1: pa.x + dx, y1: pa.y + dy,
+      x2: pb.x + dx, y2: pb.y + dy,
+    });
   }
   return out;
 }
@@ -113,10 +148,22 @@ export default function RouteNetwork({ rows, hexes, centers, width, height }) {
   // A route is only drawn where the viewer has seen the ground. Fog hides the
   // road network the same way it hides everything else.
   const known = (h) => h && h.fog !== "unexplored";
-  const roads = buildPaths(rows, hexes, centers, (h) => known(h) && h.road);
+  // Which stretches carry both? Computed once from the unoffset segment lists,
+  // then fed back so each kind knows where to step aside.
+  const roadCarries = (h) => known(h) && h.road;
+  const railCarries = (h) => known(h) && h.rail;
+  const railKeys = new Set(
+    routeSegments(rows, hexes, railCarries).map(([a, b]) => segKey(a, b)),
+  );
+  const shared = new Set(
+    routeSegments(rows, hexes, roadCarries)
+      .map(([a, b]) => segKey(a, b))
+      .filter((k) => railKeys.has(k)),
+  );
+  const roads = buildPaths(rows, hexes, centers, roadCarries, shared, -1);
   // Rail is generated as a capital-to-capital trunk line (board.js
   // assignRails) and stamped per hex, so this draws whatever that laid down.
-  const rails = buildPaths(rows, hexes, centers, (h) => known(h) && h.rail);
+  const rails = buildPaths(rows, hexes, centers, railCarries, shared, +1);
   // Blockades sit ON the road network, so they are drawn with it rather than in
   // the tile layer — which also means they survive the zoom-out unchanged
   // instead of needing a second implementation at the flat level of detail.

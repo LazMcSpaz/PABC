@@ -99,6 +99,69 @@ check("unit sprites draw ABOVE every route layer",
   stack.tokenZ != null && stack.tokenZ > routeMaxZ,
   `sprites z${stack.tokenZ} vs highest route z${routeMaxZ}`);
 
+// --- 1b. a road and a rail on the same ground must both be visible -------
+const parallel = await page.evaluate(() => {
+  const g = window.__ashland;
+  // Segments carried by BOTH, straight off the board data.
+  const both = [];
+  for (const [id, h] of Object.entries(g.board.hexes)) {
+    if (!h.road || !h.rail) continue;
+    for (const nb of g.board.adjacency[id] || []) {
+      const n = g.board.hexes[nb];
+      if (n?.road && n?.rail) both.push([id, nb]);
+    }
+  }
+  if (!both.length) return { shared: 0 };
+
+  // Every route stroke on screen, keyed by its endpoints rounded to the pixel.
+  const lines = [];
+  for (const svg of document.querySelectorAll("svg")) {
+    const z = getComputedStyle(svg).zIndex;
+    if (z === "auto" || Number(z) < 7000 || Number(z) >= 9000) continue;
+    const blend = getComputedStyle(svg).mixBlendMode;
+    for (const l of svg.querySelectorAll("line")) {
+      lines.push({
+        blend,
+        x1: +l.getAttribute("x1"), y1: +l.getAttribute("y1"),
+        x2: +l.getAttribute("x2"), y2: +l.getAttribute("y2"),
+      });
+    }
+  }
+  // The rail carries cross-ties (a dashed stroke), the road never does — so
+  // the two kinds are separable on screen without reading colour.
+  return { shared: both.length, lines: lines.length };
+});
+check("the board has ground carrying both a road and a rail",
+  parallel.shared > 0, `${parallel.shared} shared segment(s)`);
+
+// The real assertion: no two route strokes may sit exactly on top of each
+// other. If the offset is lost, the road and rail collapse onto one line and a
+// settlement served by both looks rail-only.
+const overlap = await page.evaluate(() => {
+  const seen = new Map();
+  let collisions = 0;
+  for (const svg of document.querySelectorAll("svg")) {
+    const z = getComputedStyle(svg).zIndex;
+    if (z === "auto" || Number(z) < 7000 || Number(z) >= 9000) continue;
+    for (const l of svg.querySelectorAll("line")) {
+      const k = [l.getAttribute("x1"), l.getAttribute("y1"),
+                 l.getAttribute("x2"), l.getAttribute("y2")].map(Number)
+        .map((n) => Math.round(n)).join(",");
+      const w = Math.round(Number(l.getAttribute("stroke-width")) * 10);
+      const key = `${k}`;
+      const widths = seen.get(key) || new Set();
+      // Strokes of the SAME width at the same place are the road and rail
+      // collapsed; different widths are the trough/halo/core of one route.
+      if (widths.has(w)) collisions += 1;
+      widths.add(w);
+      seen.set(key, widths);
+    }
+  }
+  return collisions;
+});
+check("road and rail never collapse onto the same line",
+  overlap === 0, `${overlap} colliding stroke pair(s)`);
+
 // --- 2. blockades: above the road, below the units -----------------------
 const blockade = await page.evaluate(() => {
   const g = window.__ashland;
