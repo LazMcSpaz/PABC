@@ -61,12 +61,22 @@ const SHOTS = [
     async go(page) {
       await page.goto(`${BASE}/`, { waitUntil: "domcontentloaded" });
       await page.getByText("New Game", { exact: true }).waitFor({ timeout: 15000 });
-      await page.waitForTimeout(400);
+      // The menu items stagger in; 400ms caught them mid-fade.
+      await page.waitForTimeout(1600);
     },
   },
   {
     name: "01-setup",
     go: openSetup,
+  },
+  {
+    name: "06-lore",
+    async go(page) {
+      await page.goto(`${BASE}/`, { waitUntil: "domcontentloaded" });
+      await page.getByText("Lore", { exact: true }).click({ timeout: 15000 });
+      await page.getByText(/Archive/i).first().waitFor({ timeout: 15000 });
+      await page.waitForTimeout(500);
+    },
   },
   {
     name: "02-hud-showcase",

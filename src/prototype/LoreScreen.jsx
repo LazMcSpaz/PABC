@@ -427,8 +427,7 @@ function EmptySidebarNote() {
           fontFamily: "'Inter', system-ui, sans-serif",
         }}
       >
-        Categories appear here as entries are authored in the Encounter
-        Builder.
+        Nothing filed under any heading yet.
       </div>
     </div>
   );
@@ -722,7 +721,7 @@ function ReaderPane({ entry, isEmpty, backStack, onBack, onSelectEntry }) {
                   color: C.textDim,
                 }}
               >
-                ◇ No Lore Entries Yet ◇
+                ◇ The Archive Is Empty ◇
               </div>
               <div
                 style={{
@@ -734,13 +733,9 @@ function ReaderPane({ entry, isEmpty, backStack, onBack, onSelectEntry }) {
                   letterSpacing: 0.3,
                 }}
               >
-                Entries are authored in the{" "}
-                <span style={{ color: C.textDim }}>
-                  Encounter Builder
-                </span>{" "}
-                and will appear here once published. The archive is
-                skeleton-ready — add entries and they will populate the
-                sidebar and reader automatically.
+                Nothing has been recovered and filed here yet. What the
+                Ashlands remember of itself is still out on the map, in
+                the hands of people who have no reason to share it.
               </div>
 
               {/* decorative rule */}
@@ -763,7 +758,7 @@ function ReaderPane({ entry, isEmpty, backStack, onBack, onSelectEntry }) {
                   opacity: 0.6,
                 }}
               >
-                ▸ Archive awaiting content ingestion
+                ▸ No records on file
               </div>
             </motion.div>
           ) : entry ? (
