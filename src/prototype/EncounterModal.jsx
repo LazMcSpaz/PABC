@@ -114,7 +114,9 @@ function ImageFrame({ imageUrl }) {
   );
 }
 
-function displayName(id) {
+// Exported so the event feed titles an encounter exactly the way the modal
+// that showed it did — the feed used to print the raw `fe_grain_silo` id.
+export function displayName(id) {
   if (!id) return "Encounter";
   return id.replace(/^fe_/, "").replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase());
 }

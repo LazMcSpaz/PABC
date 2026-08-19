@@ -23,7 +23,7 @@
 // follow unit_moved's pattern if you add one. Static lookups (location
 // names, chip names, tech descriptions) are fine to resolve here since
 // they never change mid-game.
-import { FACTIONS as UI_FACTIONS } from "./data.js";
+import { FACTIONS as UI_FACTIONS, resourceLabel } from "./data.js";
 import { FACTIONS as ENGINE_FACTIONS, CHIPS as ENGINE_CHIPS, LOCATIONS as ENGINE_LOCATIONS } from "../game/content.js";
 import { TECH_NODES, TECH_PATHS } from "../game/tech.js";
 import { CONFIG } from "../game/config.js";
@@ -150,8 +150,8 @@ function formatLine(ev, state) {
     case "tech_node_assigned": return `${factionName(p.player)} assigned tech node "${p.node}" — ${techNodeDesc(p.node)}`;
     case "tech_node_lost": return `${factionName(p.player)} LOST tech node "${p.node}" (Tech Level dropped) — was: ${techNodeDesc(p.node)}`;
 
-    case "resource_gained": return `${factionName(p.player)} +${p.amount} ${p.resource}${p.source ? ` (${p.source})` : ""}`;
-    case "resource_spent": return `${factionName(p.player)} −${Math.abs(p.amount)} ${p.resource}${p.source ? ` (${p.source})` : ""}`;
+    case "resource_gained": return `${factionName(p.player)} +${p.amount} ${resourceLabel(p.resource)}${p.source ? ` (${p.source})` : ""}`;
+    case "resource_spent": return `${factionName(p.player)} −${Math.abs(p.amount)} ${resourceLabel(p.resource)}${p.source ? ` (${p.source})` : ""}`;
     case "action_spent": return `${factionName(p.player)} spent an Action on ${p.action} (cost ${p.cost ?? 0})`;
     case "stat_modified": return `Stat modifier: ${p.target} ${p.stat} ${p.amount >= 0 ? "+" : ""}${p.amount}`;
 

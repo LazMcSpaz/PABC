@@ -2,8 +2,10 @@
 // human-readable lines. It's the demo's window into the AI's turn —
 // without it, AI moves and contests happen invisibly.
 import { useEffect, useMemo, useRef, useState } from "react";
-import { FACTIONS as UI_FACTIONS, theme } from "./data.js";
-import { engineLocationIdToUi } from "./engineAdapter.js";
+import { FACTIONS as UI_FACTIONS, resourceLabel, theme } from "./data.js";
+import { describeHex } from "./engineAdapter.js";
+import { CHIPS as ENGINE_CHIPS } from "../game/content.js";
+import { displayName as encounterName } from "./EncounterModal.jsx";
 import { useIsPhone } from "./useViewport.js";
 
 const MAX_ROWS = 14;
@@ -14,15 +16,30 @@ function factionName(pid) {
 function factionColor(pid) {
   return UI_FACTIONS[pid]?.color || theme.textDim;
 }
+// Half the faction short names end in s (Grand Lakers, Free Plainers), and
+// `${who(x)}'s` rendered those as "Plainers's".
+function possessive(name) {
+  return /s$/i.test(name) ? `${name}'` : `${name}'s`;
+}
 
 function formatEvent(ev, engineState) {
   const p = ev.payload || {};
   const who = (id) => factionName(id);
+  // The seat this feed is written for. Several §18 events are emitted for
+  // every faction pair on the board, and only the ones the player is a party
+  // to are news to them — the rest is the Diplomacy drawer's job.
+  const you = engineState.humanFactionId;
+  const youIn = (a, b) => you && (a === you || b === you);
+  const other = (a, b) => (a === you ? b : a);
+  const place = (hexId) => describeHex(engineState, hexId);
+  const chipName = (chipId) => ENGINE_CHIPS[chipId]?.name || "a chip";
   switch (ev.name) {
     case "turn_started":
       return { color: factionColor(p.player), text: `${who(p.player)} — turn start` };
     case "unit_moved":
-      return { color: factionColor(p.player), text: `${who(p.player)} moved ${p.from} → ${p.to}` };
+      // `p.from`/`p.to` are board-generation keys (h2-0). Same leak the
+      // Economy ledger had: name the place, or describe the ground.
+      return { color: factionColor(p.player), text: `${who(p.player)} moved to ${place(p.to)}` };
     case "unit_recruited":
       return { color: factionColor(p.player), text: `${who(p.player)} recruited a unit` };
     case "unit_retreated": {
@@ -42,27 +59,21 @@ function formatEvent(ev, engineState) {
         text: `${who(p.player)} lost contest ${p.initiatorTotal} vs ${p.defenderTotal}`,
       };
     case "section_flipped":
-      return { color: factionColor(p.to), text: `Section flipped at ${p.hex}${p.to ? ` to ${who(p.to)}` : ""}` };
-    case "location_captured": {
-      const hex = engineState.locations[p.hex];
-      const locName = hex
-        ? engineLocationIdToUi(hex.locationId).replace(/[A-Z]/g, (c) => " " + c)
-        : p.hex;
+      return { color: factionColor(p.to), text: `Section flipped at ${place(p.hex)}${p.to ? ` to ${who(p.to)}` : ""}` };
+    case "location_captured":
+      // Was re-deriving a display name by camel-splitting the UI id, which
+      // printed "dambar" for Dambar. `place()` reads the same authored name
+      // the Location window and the map label use.
       return {
         color: factionColor(p.controller),
-        text: `${who(p.controller)} captured ${locName.trim()}`,
+        text: `${who(p.controller)} captured ${place(p.hex)}`,
       };
-    }
     case "location_decayed":
-      return { color: theme.accent2, text: `Location fell to neutral at ${p.hex}` };
+      return { color: theme.accent2, text: `${place(p.hex)} fell to neutral` };
     // §18.2 — the loyalty-failing alert path. Fires before any Control peel
     // so the player has an Upkeep to garrison and halt the bleed.
     case "loyalty_failing": {
-      const hex = engineState.locations[p.hex];
-      const locName = (hex
-        ? engineLocationIdToUi(hex.locationId).replace(/[A-Z]/g, (c) => " " + c)
-        : p.hex
-      ).trim();
+      const locName = place(p.hex);
       return {
         color: "#d2453f",
         text: p.peeling
@@ -70,20 +81,14 @@ function formatEvent(ev, engineState) {
           : `Loyalty failing at ${locName} (${p.loyalty}) — garrison it before Control peels`,
       };
     }
-    case "control_peeled": {
-      const hex = engineState.locations[p.hex];
-      const locName = (hex
-        ? engineLocationIdToUi(hex.locationId).replace(/[A-Z]/g, (c) => " " + c)
-        : p.hex
-      ).trim();
-      return { color: theme.accent2, text: `Control peeled to neutral at ${locName}` };
-    }
+    case "control_peeled":
+      return { color: theme.accent2, text: `Control peeled to neutral at ${place(p.hex)}` };
     case "loyalty_changed":
       return null; // routine per-Upkeep tick — too chatty for the feed
     case "unit_destroyed":
       return { color: theme.accent2, text: `${who(p.owner)} lost a unit` };
     case "loot_dropped":
-      return { color: theme.accent, text: `${(p.chips || []).length} chip(s) dropped at ${p.hex}` };
+      return { color: theme.accent, text: `${(p.chips || []).length} chip(s) dropped at ${place(p.hex)}` };
     case "loot_claimed": {
       const u = engineState.units[p.killer];
       return { color: theme.good, text: `${who(u?.owner)} claimed loot (${(p.chips || []).length})` };
@@ -165,7 +170,7 @@ function formatEvent(ev, engineState) {
     case "encounter_delivered":
       return {
         color: factionColor(p.recipient),
-        text: `${who(p.recipient)} encounter: ${p.encounter} → ${p.choiceLabel}`,
+        text: `${who(p.recipient)}: ${encounterName(p.encounter)} → ${p.choiceLabel}`,
       };
     case "encounter_resolved":
       return null; // already implied by encounter_delivered
@@ -180,7 +185,7 @@ function formatEvent(ev, engineState) {
       }
       if (p.amount >= 5) {
         const label = p.source ? ` (${p.source})` : "";
-        return { color: theme.textDim, text: `${who(p.player)} +${p.amount} ${p.resource.toLowerCase()}${label}` };
+        return { color: theme.textDim, text: `${who(p.player)} +${p.amount} ${resourceLabel(p.resource)}${label}` };
       }
       return null;
     case "resource_spent":
@@ -193,11 +198,34 @@ function formatEvent(ev, engineState) {
       return { color: theme.accent2, text: `${who(p.player)} lost tech node ${p.node}` };
     case "research_changed":
       return null; // too granular for the feed; the bar shows it
-    case "standing_changed":
+    case "standing_changed": {
+      // `faction` is the one whose opinion moved, `player` is who it moved
+      // about (standing.js emits `{ faction: a, player: b }` for "a toward
+      // b"). The old line read those the wrong way round AND printed the
+      // second one as a raw id, so it named the wrong faction in lowercase.
+      const holder = p.faction;
+      const toward = p.player;
+      // Every round driftStanding() nudges EVERY ordered faction pair one
+      // step toward its baseline — with 4 majors and 4 minors that is up to
+      // 56 lines of pure bookkeeping per round, and it is what buried the
+      // first turn of a new game under a dump of pairwise integers between
+      // factions the player has not met. It is not news: nobody did
+      // anything, the number is just settling.
+      if (p.cause === "drift") return null;
+      // Politics is public (§18.5) so rival-to-rival shifts aren't hidden —
+      // but the feed is the player's own turn narration, not a wire service.
+      // Someone else's opinion of a third party belongs in the Diplomacy
+      // drawer, which shows the full matrix.
+      const you = engineState.humanFactionId;
+      if (you && holder !== you && toward !== you) return null;
+      const arrow = p.delta > 0 ? "▲" : p.delta < 0 ? "▼" : "→";
       return {
-        color: theme.textDim,
-        text: `${who(p.player)} standing w/ ${p.faction} → ${p.value}`,
+        color: p.delta > 0 ? theme.good : p.delta < 0 ? theme.accent2 : theme.textDim,
+        text: holder === you
+          ? `Your standing with ${who(toward)} ${arrow} ${p.value}`
+          : `${who(holder)}'s standing with you ${arrow} ${p.value}`,
       };
+    }
     case "track_changed":
       return {
         color: theme.textDim,
@@ -213,6 +241,135 @@ function formatEvent(ev, engineState) {
       return { color: theme.textFaint, text: `— round ${p.round} ended —` };
     case "turn_ended":
       return null;
+    // --- §18 diplomacy ------------------------------------------------
+    // Everything from here down used to fall through to `default` and print
+    // its raw engine id — `war_declared`, `peace_made`, `vassal_rebelled` and
+    // 55 others, straight into the player's feed as snake_case. The whole
+    // diplomacy layer narrated itself as debug output.
+    case "war_declared":
+      return {
+        color: theme.accent2,
+        text: youIn(p.a, p.b)
+          ? `${who(other(p.a, p.b))} DECLARED WAR on you`
+          : `${who(p.a)} declared war on ${who(p.b)}`,
+      };
+    case "peace_made":
+      return { color: theme.good, text: `${who(p.a)} and ${who(p.b)} made peace` };
+    case "truce_broken":
+      return { color: theme.accent2, text: `${who(p.breaker)} broke the truce with ${who(p.victim)}` };
+    case "surprise_attack_honor_lost":
+      return { color: theme.accent2, text: `${who(p.attacker)} struck ${who(p.target)} undeclared — ${p.amount} Honor` };
+    case "pact_formed":
+      return { color: theme.good, text: `${who(p.a)} and ${who(p.b)} formed a pact` };
+    case "pact_broken":
+      return { color: theme.accent2, text: `${who(p.a)} broke the pact with ${who(p.b)}` };
+    case "pact_called":
+      return {
+        color: p.honored ? theme.good : theme.accent2,
+        text: `${who(p.caller)} called ${who(p.ally)} against ${who(p.target)} — ${p.honored ? "honored" : "refused"}`,
+      };
+    case "pact_call_honored":
+      return { color: theme.good, text: `${who(p.ally)} answered ${possessive(who(p.caller))} call` };
+    case "pact_call_declined":
+      return { color: theme.accent2, text: `${who(p.ally)} refused ${possessive(who(p.caller))} call` };
+    case "trading_pact_formed":
+      return { color: theme.good, text: `${who(p.partyA)} and ${who(p.partyB)} opened a trading pact` };
+    case "trading_pact_suspended":
+      return { color: theme.textDim, text: `A trading pact is suspended — ${p.reason}` };
+    case "trading_pact_resumed":
+      return { color: theme.good, text: "A trading pact is running again" };
+    case "trading_pact_dissolved":
+      return { color: theme.accent2, text: `A trading pact collapsed — ${p.reason}` };
+    case "coalition_formed":
+      return {
+        color: theme.accent2,
+        text: p.target === you
+          ? `A coalition has formed AGAINST YOU: ${(p.members || []).map(who).join(", ")}`
+          : `A coalition formed against ${who(p.target)}`,
+      };
+    case "coalition_dissolved":
+      return { color: theme.textDim, text: `The coalition against ${who(p.target)} dissolved` };
+    case "denounced":
+      return { color: theme.accent2, text: `${who(p.denouncer)} denounced ${who(p.target)}` };
+    case "mediated":
+      return { color: theme.good, text: `${who(p.mediator)} brokered peace between ${who(p.a)} and ${who(p.b)}` };
+    case "vassal_established":
+      return { color: theme.accent, text: `${who(p.vassal)} bent the knee to ${who(p.lord)}` };
+    case "vassal_rebelled":
+      return { color: theme.accent2, text: `${who(p.vassal)} rebelled against ${who(p.lord)}` };
+    case "vassal_freed":
+      return { color: theme.textDim, text: `${who(p.vassal)} is free of ${who(p.lord)}` };
+    case "tribute_demanded":
+      return { color: theme.accent2, text: `${who(p.demander)} demanded tribute from ${who(p.target)}` };
+    case "tribute_refused":
+      return { color: theme.accent2, text: `${who(p.target)} refused ${who(p.demander)}` };
+    case "tribute_caved":
+      return { color: theme.textDim, text: `${who(p.target)} caved to ${who(p.demander)}` };
+    case "tribute_paid":
+      return { color: theme.textDim, text: `${who(p.vassal)} paid ${p.amount} scrap to ${who(p.lord)}` };
+    case "open_borders_toggled":
+      return { color: theme.textDim, text: `Open borders ${p.on ? "granted" : "revoked"}` };
+    case "rail_access_toggled":
+      return { color: theme.textDim, text: `${who(p.grantor)} ${p.on ? "granted" : "revoked"} ${who(p.rider)} running rights` };
+    case "allied_vision_toggled":
+      return { color: theme.textDim, text: `Shared vision ${p.on ? "on" : "off"}` };
+    case "territory_trespassed":
+      // The warning-only variant is the free first step, and it fires on
+      // routine border-brushing; only the version that actually costs
+      // something is worth a line.
+      if (p.warning) return null;
+      return { color: theme.accent2, text: `${who(p.mover)} trespassed into ${possessive(who(p.owner))} territory` };
+    case "honor_changed":
+      if (p.player !== you) return null; // rivals' books are for the Diplomacy drawer
+      return { color: p.delta > 0 ? theme.good : theme.accent2, text: `Your Honor ${p.delta > 0 ? "▲" : "▼"} ${p.value}` };
+    case "menace_changed":
+      if (p.player !== you) return null;
+      return { color: p.delta > 0 ? theme.accent2 : theme.good, text: `Your Menace ${p.delta > 0 ? "▲" : "▼"} ${p.value}` };
+    case "recognition_changed":
+      return { color: theme.accent, text: `${who(p.player)} Recognition → ${p.value}` };
+    case "recognition_summit":
+      return { color: theme.accent, text: `${who(p.player)} was recognised — +${p.vp} VP` };
+    case "faction_eliminated":
+      return { color: theme.accent2, text: `${who(p.player)} has been eliminated` };
+
+    // --- structures, supply, chips -------------------------------------
+    case "post_built":
+      return { color: factionColor(p.owner), text: `${who(p.owner)} built a listening post` };
+    case "post_destroyed":
+      return { color: theme.accent2, text: `A listening post was destroyed${p.by ? ` by ${who(p.by)}` : ""}` };
+    case "post_revealed":
+      return { color: theme.accent, text: `${who(p.faction)} uncovered ${possessive(who(p.owner))} listening post` };
+    case "post_dormant":
+      return { color: theme.accent2, text: `${possessive(who(p.owner))} listening post went dark — upkeep unpaid` };
+    case "blockade_dormant":
+      return { color: theme.accent2, text: `${possessive(who(p.owner))} blockade went dormant — upkeep unpaid` };
+    case "unit_unsupplied":
+      return { color: theme.accent2, text: `${who(p.owner)} has a unit out of supply` };
+    case "chip_activated":
+      return { color: factionColor(p.player), text: `${who(p.player)} activated ${chipName(p.chipId)}` };
+    case "chip_granted":
+      if (p.player !== you) return null;
+      return { color: theme.good, text: `You gained ${chipName(p.chipId)}` };
+    case "chip_removed":
+      return {
+        color: p.stripped ? theme.accent2 : theme.textDim,
+        text: `${chipName(p.chipId)} ${p.stripped ? "was stripped" : "was removed"}`,
+      };
+
+    // --- combat / map --------------------------------------------------
+    case "ambush_triggered":
+      return { color: theme.accent2, text: `Ambush — the ${p.side} was concealed` };
+    case "garrison_erosion":
+      return { color: theme.textDim, text: `${who(p.player)} ground down a garrison by ${p.amount}` };
+    case "influence_pressure":
+      return { color: theme.accent2, text: `${who(p.owner)} is losing Loyalty to a rival's influence` };
+    case "unit_spotted":
+      if (p.faction !== you) return null; // you don't get told what rivals can see
+      return { color: theme.accent, text: `Spotted ${possessive(who(p.owner))} unit at ${place(p.hex)}` };
+    case "unit_lost_sight":
+      if (p.faction !== you) return null;
+      return { color: theme.textFaint, text: "Lost sight of an enemy unit" };
+
     case "stat_modified":
     case "action_spent":
     case "reward_granted":
@@ -223,6 +380,30 @@ function formatEvent(ev, engineState) {
     case "trigger_fired":
     case "location_spawned":
       return null; // too noisy for the demo feed
+    // Bookkeeping the engine has to emit but nobody chose and nobody can
+    // act on. Each of these fires per-hex or per-pair every single round —
+    // `zone_changed` and `hex_explored` alone can run to dozens of lines a
+    // turn — so they belong in the exported playtest log (which keeps every
+    // one of them) rather than in a 14-row live ticker.
+    case "zone_changed":
+    case "hex_explored":
+    case "gift_counter_decayed":
+    case "standing_baseline_changed":
+    case "blockade_paid":
+    case "post_paid":
+    case "unit_supplied":
+    case "encounter_delivery_skipped":
+      return null;
+    // Deliberately silent: the player already sees these as their own UI.
+    // A diplomatic warning arrives as the Envoy audience modal, a pending
+    // pact call sits in the Diplomacy drawer's inbox, and an AI's proposal
+    // is only news once it is struck.
+    case "diplomatic_warning":
+    case "pact_call_requested":
+    case "deal_proposed":
+      return null;
+    case "deal_struck":
+      return { color: theme.good, text: `${who(p.proposer)} and ${who(p.recipient)} struck a deal` };
     default:
       return { color: theme.textFaint, text: ev.name };
   }

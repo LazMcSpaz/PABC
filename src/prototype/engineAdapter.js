@@ -39,6 +39,7 @@ import {
   UNIT_UPGRADES,
   LOCATION_UPGRADES,
   ALL_UPGRADES,
+  resourceLabel,
 } from "./data.js";
 
 // --- id translation (engine kebab-case ↔ UI camelCase) --------------
@@ -208,8 +209,7 @@ function describeEffectShort(e) {
         e.when === "next_turn" ? " next turn" : ""
       }`;
     case "ADJUST_RESOURCE": {
-      const res = e.resource === "Resource" ? "scrap" : e.resource;
-      return `${e.amount >= 0 ? "gain" : "lose"} ${Math.abs(e.amount)} ${res}`;
+      return `${e.amount >= 0 ? "gain" : "lose"} ${Math.abs(e.amount)} ${resourceLabel(e.resource)}`;
     }
     case "ADJUST_TRACK":
       return `${e.amount >= 0 ? "+" : ""}${e.amount} ${e.track}`;
@@ -1245,7 +1245,7 @@ export function economyReport(state, fid) {
       uid: u.uid,
       name: u.name || "Unit",
       hexId: u.node,
-      at: ENGINE_LOCATIONS[state.locations[u.node]?.locationId]?.name || u.node,
+      at: describeHex(state, u.node),
       upkeep: cost,
       unsupplied: !!u.unsupplied,
     });
@@ -1262,7 +1262,7 @@ export function economyReport(state, fid) {
     if (!b.done && cost === 0) continue;
     structureCost += cost;
     structures.push({
-      kind: "blockade", hexId: b.hex, name: "Blockade",
+      kind: "blockade", hexId: b.hex, name: "Blockade", at: describeHex(state, b.hex),
       upkeep: cost, dormant: b.done && b.paid === false,
     });
   }
@@ -1270,7 +1270,7 @@ export function economyReport(state, fid) {
     if (post.owner !== fid) continue;
     structureCost += CONFIG.posts.upkeep;
     structures.push({
-      kind: "post", hexId: post.hex, name: "Listening post",
+      kind: "post", hexId: post.hex, name: "Listening post", at: describeHex(state, post.hex),
       upkeep: CONFIG.posts.upkeep, dormant: post.paid === false,
     });
   }
@@ -1282,6 +1282,26 @@ export function economyReport(state, fid) {
     chips: chipCost, army, structures: structureCost,
     locations, units, structureList: structures,
   };
+}
+
+// Where something is, in words. `h2-0` is a board-generation key, not a place
+// a player has any way to find — it was reaching the Economy ledger as the
+// stated position of any unit not standing on a Location, and as the only
+// caption on every blockade and listening post. A Location has a name; open
+// ground doesn't, so describe the ground itself by the same features that
+// actually matter to a unit standing on it (§16.6 elevation/cover, §16.2
+// road/rail), which is also the only reason a player parks a unit out there.
+export function describeHex(state, hexId) {
+  const named = ENGINE_LOCATIONS[state.locations?.[hexId]?.locationId]?.name;
+  if (named) return named;
+  const hex = state.board?.hexes?.[hexId];
+  if (!hex) return "In the field";
+  const features = [];
+  if (hex.elevation) features.push("high ground");
+  if (hex.cover) features.push("cover");
+  if (hex.rail) features.push("on the rail");
+  else if (hex.road) features.push("on the road");
+  return features.length ? `In the field · ${features.join(" · ")}` : "In the field";
 }
 
 // Just the totals, for the top bar. Derived from the same report the Economy

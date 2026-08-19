@@ -144,6 +144,21 @@ export function ownerColor(ownerId) {
   return FACTIONS[ownerId]?.color || NEUTRAL;
 }
 
+// The engine is deliberately theme-free, so every resource event carries the
+// generic key ("Resource", "Research", "VP") rather than the Ashlands name for
+// it. That key is an engine identifier, not player-facing copy — printing it
+// raw is how the turn feed ended up saying "+5 resource (output)" for what the
+// rest of the UI, down to the icon beside it, calls scrap. Translate here, at
+// the one seam that is allowed to know the theme.
+const RESOURCE_LABEL = {
+  Resource: "scrap",
+  Research: "research",
+  VP: "VP",
+};
+export function resourceLabel(key) {
+  return RESOURCE_LABEL[key] || String(key || "").toLowerCase();
+}
+
 // Board hologram tints. A separate palette from the UI colours above, and it
 // has to be: the tile hologram is recoloured by ADDING a flat colour over a
 // white-hot glow, and the mid-tone UI colours come out of that muddy and

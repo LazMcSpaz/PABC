@@ -321,17 +321,6 @@ function driveAIsThroughHumanTurn(game) {
   }
 }
 
-function Bracket({ corner }) {
-  const c = theme.accent;
-  const map = {
-    tl: { top: 0, left: 0, borderTop: `2px solid ${c}`, borderLeft: `2px solid ${c}` },
-    tr: { top: 0, right: 0, borderTop: `2px solid ${c}`, borderRight: `2px solid ${c}` },
-    bl: { bottom: 0, left: 0, borderBottom: `2px solid ${c}`, borderLeft: `2px solid ${c}` },
-    br: { bottom: 0, right: 0, borderBottom: `2px solid ${c}`, borderRight: `2px solid ${c}` },
-  };
-  return <div className="pc-bracket" style={map[corner]} />;
-}
-
 export default function Prototype({ config, onNewGame }) {
   // The engine mutates a single GameState in place; we hold a ref to it
   // and bump a tick to trigger a re-adapt + re-render after each mutation.
@@ -1022,11 +1011,18 @@ export default function Prototype({ config, onNewGame }) {
           over it as absolute overlays — see below. */}
       <div style={{ position: "relative", flex: 1, display: "flex", minHeight: 0 }}>
         <BoardViewport cameraTarget={replay.cameraTarget} cameraPanMs={replay.cameraPanMs} controlsTop={hudOffset + 10}>
+          {/* No corner brackets here. They used to sit on this element —
+              the pan/zoom CONTENT layer — which put them at the corners of
+              the MAP, not of the screen: the top pair rendered underneath
+              the HUD bar and was never visible, and the moment you panned
+              or zoomed the bottom pair drifted across the board as two
+              stray gold Ls with nothing attached to them. Promoting them
+              to the viewport layer doesn't work either — the board's four
+              screen corners are already occupied by the zoom cluster, the
+              event feed and the menu orb, so a frame drawn there lands on
+              top of live controls. The board is the one surface in this UI
+              that is framed by its own HUD rather than by panel chrome. */}
           <div style={{ position: "relative", padding: 30 }}>
-            <Bracket corner="tl" />
-            <Bracket corner="tr" />
-            <Bracket corner="bl" />
-            <Bracket corner="br" />
             <Board
               state={boardState}
               selectedHexId={selectedHexId}

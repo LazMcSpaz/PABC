@@ -772,7 +772,7 @@ export function EconomyLedger({ report, onOpenHex, onOpenUnit }) {
                   {st.name}
                 </span>
                 <span style={{ ...sub, display: "block", marginTop: 2, color: st.dormant ? C.red : C.textFaint }}>
-                  {st.hexId}{st.dormant ? " · DORMANT — unpaid, so it does nothing" : ""}
+                  {st.at || st.hexId}{st.dormant ? " · DORMANT — unpaid, so it does nothing" : ""}
                 </span>
               </span>
               <span style={num(-st.upkeep, false)}>−{st.upkeep}</span>

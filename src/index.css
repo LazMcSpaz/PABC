@@ -2,6 +2,29 @@
  * use this file for things media queries handle better than JS:
  * responsive layout, touch targets, modal sizing. */
 
+/* Oswald — the display face every HUD heading, dial, label and title asks
+ * for via `theme.fontDisplay`. Nothing was ever loading it: with no
+ * @font-face and no stylesheet link, all 235 `fontFamily: "'Oswald',..."`
+ * declarations silently fell through to the Arial Narrow / system-sans
+ * fallback, so the whole game rendered in a face it was never designed in.
+ *
+ * Self-hosted rather than linked from fonts.googleapis.com: the app ships
+ * as a static bundle with no other external requests, and one 28 KB file
+ * is not worth a third-party connection, an extra DNS round trip, or a
+ * dependency that fails offline. This is the `latin` subset of the
+ * variable font, so the single file covers the whole 200-700 weight axis
+ * the UI uses (400/600/700/800 — 800 clamps to the 700 ceiling).
+ *
+ * Oswald is licensed under the SIL Open Font License 1.1; see
+ * public/assets/fonts/OFL.txt. */
+@font-face {
+  font-family: "Oswald";
+  font-style: normal;
+  font-weight: 200 700;
+  font-display: swap;
+  src: url("/assets/fonts/oswald-latin-var.woff2") format("woff2");
+}
+
 *,
 *::before,
 *::after {
