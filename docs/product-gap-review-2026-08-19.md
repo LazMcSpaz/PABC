@@ -285,6 +285,35 @@ Known behavioural debts worth a look, from the playtest findings:
 
 ---
 
+## 9. Fixed since this review (2026-08-19)
+
+Working down the "cheap, high-visibility" list below. Struck through =
+done and on the branch.
+
+- ~~Event-feed formatters (§3)~~ — all 121 engine event types now have one;
+  roughly a third are deliberately silent (per-hex bookkeeping) rather than
+  printed. Raw ids for chips, reactions, tech nodes, encounters, Locations
+  and units went with them.
+- ~~Tech node names (§6.8)~~ — the wheel labels every node, wrapping inside
+  its wedge.
+- ~~Camera-on-capital (§6.1)~~ — the board opens on your Capital at a scale
+  that frames its neighbourhood, with a narrower span on phones.
+- ~~Round-label contrast (§6.3)~~, ~~MOVEMENT clip (§6.4)~~,
+  ~~faction-card badge collision (§6.5)~~, ~~board brackets (§6.6)~~.
+- ~~Unit names from `unit-names.csv` (§3)~~ — rosters moved into the engine
+  registry; units muster through them deterministically.
+- ~~`npm run shots` (§8)~~ — walks the real title → New Game → setup → Begin
+  flow again, plus new title and tech-wheel shots.
+- ~~Roadmap out of date (§8)~~ — re-grounded and pointed here.
+- **Also found and fixed while in there:** the Oswald display font was never
+  loading at all (no `@font-face`, no link — every heading fell back to
+  system sans); `standing_changed` named the wrong faction of the pair; and
+  the first turn of every game opened with a dozen lines of diplomacy-drift
+  bookkeeping.
+
+Still open from the list below: hide-or-fill the Lore menu item, and
+everything under the product shell, content, art and engineering headings.
+
 ## 9. If it were mine to sequence
 
 **Cheap, high-visibility, no design risk — do first:**
