@@ -14,30 +14,42 @@
 // side effect of strategicValue ordering. All four capitals are deliberately
 // the same tier (see LOCATIONS below), so nobody opens ahead on garrison,
 // chip slots, production or VP.
+//
+// `unitNames` is the formation roster a faction musters from — setup.js walks
+// it in order, so a faction's units come up named rather than as
+// "<Faction> unit", which is what every unit in the game was called. The four
+// major rosters are the authored ones from content/unit-names.csv (that sheet
+// is legacy and was wired to nothing); the minors' are written to the same
+// brief. Cycling past the end suffixes a numeral rather than repeating a name
+// outright.
 export const FACTIONS = {
   versari: {
     id: "versari", name: "Versari Korad", color: "#3a7d44", affiliatedLocations: ["korad", "dambar", "runaway"], capital: "korad",
     tier: "major", scope: "global", playable: true,
     temperament: "schemer", aggression: 0.4, trust: 0.55, grudge: 0.4, sociability: 0.8,
     victoryLean: "diplomacy", expansion: 0.5,
+    unitNames: ["Adjunct Corps", "Retrieval Units", "Dambaran Blades", "Korad Envoys"],
   },
   goldgrass: {
     id: "goldgrass", name: "Goldgrass Coalition", color: "#d8a72b", affiliatedLocations: ["kansit", "omara", "witcha"], capital: "kansit",
     tier: "major", scope: "global", playable: true,
     temperament: "pacifist", aggression: 0.1, trust: 0.9, grudge: 0.25, sociability: 0.95,
     victoryLean: "diplomacy", expansion: 0.3,
+    unitNames: ["Grain Guard", "Silo Watch", "Coalition Levies", "Flatland Riders"],
   },
   lakers: {
     id: "lakers", name: "Grand Lakers", color: "#21406e", affiliatedLocations: ["droit", "chigan", "dulut"], capital: "droit",
     tier: "major", scope: "global", playable: true,
     temperament: "warlord", aggression: 0.9, trust: 0.6, grudge: 0.7, sociability: 0.2,
     victoryLean: "conquest", expansion: 0.9,
+    unitNames: ["Shore Crew", "Lake Wardens", "Rekoner Guard", "Iron Fleet Marines"],
   },
   plainers: {
     id: "plainers", name: "Free Plainers", color: "#c43b35", affiliatedLocations: ["tin-town", "the-shelf", "linkin"], capital: "tin-town",
     tier: "major", scope: "global", playable: true,
     temperament: "opportunist", aggression: 0.5, trust: 0.3, grudge: 0.3, sociability: 0.65,
     victoryLean: "opportunist", expansion: 0.6,
+    unitNames: ["Dustriders", "Scrap Runners", "Flatwind Raiders", "Ashland Rovers"],
   },
 };
 
@@ -55,6 +67,7 @@ export const MINOR_FACTIONS = {
     associatedMajor: "lakers", relationship: "rival",
     temperament: "warlord", aggression: 0.8, trust: 0.6, grudge: 0.7, sociability: 0.2,
     victoryLean: "conquest", expansion: 0.55,
+    unitNames: ["Storm Crew", "Tempest Outriders", "Squall Wardens", "Breakwater Hands"],
   },
   croppers: {
     id: "croppers", name: "The Croppers", color: "#c9b24e",
@@ -62,6 +75,7 @@ export const MINOR_FACTIONS = {
     associatedMajor: "goldgrass", relationship: "kin",
     temperament: "pacifist", aggression: 0.12, trust: 0.85, grudge: 0.25, sociability: 0.8,
     victoryLean: "economy", expansion: 0.3,
+    unitNames: ["Threshers", "Field Hands", "Harvest Guard", "Furrow Watch"],
   },
   steeltraders: {
     id: "steeltraders", name: "The Steel Traders", color: "#a8584f",
@@ -69,6 +83,7 @@ export const MINOR_FACTIONS = {
     associatedMajor: "plainers", relationship: "rival",
     temperament: "opportunist", aggression: 0.55, trust: 0.3, grudge: 0.35, sociability: 0.5,
     victoryLean: "conquest", expansion: 0.5,
+    unitNames: ["Caravan Guard", "Ledger Men", "Tariff Enforcers", "Road Factors"],
   },
   dambarans: {
     id: "dambarans", name: "The Dambarans", color: "#5fa06e",
@@ -76,6 +91,7 @@ export const MINOR_FACTIONS = {
     associatedMajor: "versari", relationship: "foil",
     temperament: "honorable", aggression: 0.45, trust: 0.92, grudge: 0.5, sociability: 0.5,
     victoryLean: "conquest", expansion: 0.4,
+    unitNames: ["Old Dambar Line", "Archive Guard", "Terrace Watch", "Signal Corps"],
   },
 };
 

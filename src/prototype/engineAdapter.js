@@ -94,6 +94,25 @@ function capitalLocOf(state, fid) {
   }
   return null;
 }
+// The hex a faction's Capital sits on — where the camera should open the
+// game. Same live derivation as capitalLocOf, but returning the board key the
+// geometry is indexed by rather than a UI location id. Falls back to the
+// faction's first unit so a faction that has already lost its Capital (or a
+// scenario that starts without one) still gets a sensible home view.
+export function homeHexFor(state, fid) {
+  for (const loc of Object.values(state.locations || {})) {
+    if (loc.controller !== fid) continue;
+    if ((loc.chips || []).some((c) => state.chips[c]?.chipId === "capital")) return loc.hexId;
+  }
+  for (const loc of Object.values(state.locations || {})) {
+    if (loc.controller === fid) return loc.hexId;
+  }
+  for (const u of Object.values(state.units || {})) {
+    if (u.owner === fid) return u.node;
+  }
+  return null;
+}
+
 export function engineChipIdToUi(engineId) {
   return ENGINE_TO_UI_CHIP[engineId] || engineId;
 }

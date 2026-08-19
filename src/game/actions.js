@@ -14,7 +14,7 @@ import { recomputeInfluence } from "./influence.js";
 import { recomputeVisibility } from "./visibility.js";
 import { applyEffects } from "./effects.js";
 import { drawFieldEncounter, resolveMarkerOnHex } from "./encounters.js";
-import { makeUnit } from "./setup.js";
+import { makeUnit, nextMusterIndex } from "./setup.js";
 import { hasTechNode } from "./tech.js";
 import { postAt, buildPost, revealPost } from "./posts.js";
 import {
@@ -198,7 +198,7 @@ function runRecruit(state, { pid, player, params }) {
 
   const loc = state.locations[params.at];
   const u = state.nextId("unit");
-  state.units[u] = makeUnit(u, pid, loc.hexId, factionDef(pid)?.name || pid);
+  state.units[u] = makeUnit(u, pid, loc.hexId, factionDef(pid)?.name || pid, nextMusterIndex(state, pid));
   emit(state, "unit_recruited", { unit: u, player: pid, hex: loc.hexId });
   recomputeVisibility(state, pid); // §19 — a new unit is a new Vision source
   return { unit: u };

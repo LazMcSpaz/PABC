@@ -32,7 +32,7 @@ import { NEUTRAL } from "./data.js";
 import { getEncounter } from "../game/encounters.js";
 import { encounterRedrawBudget } from "../game/encounters.js";
 import { evalCond } from "../game/dsl.js";
-import { adaptState, reinforcePreview, engineChipIdToUi, previewLocationContest, previewAttackerStrength, blockadeView, blockadeBuildOffer, postAction, upkeepSummary, economyReport } from "./engineAdapter.js";
+import { adaptState, reinforcePreview, engineChipIdToUi, previewLocationContest, previewAttackerStrength, blockadeView, blockadeBuildOffer, postAction, upkeepSummary, economyReport, homeHexFor } from "./engineAdapter.js";
 import { resolveSalvage } from "../game/contest.js";
 import { assignTechNode } from "../game/stats.js";
 import { performDiplomacy } from "../game/diplomacy.js";
@@ -358,6 +358,16 @@ export default function Prototype({ config, onNewGame }) {
     [state.rows, holoBoard],
   );
   const replay = useAIReplay({ gameRef, geomRef, bumpTick });
+
+  // Where the camera opens the game: your Capital, in the same content-space
+  // coordinates the replay camera pans to. Computed once — BoardViewport only
+  // reads it on mount, and re-deriving it every render would recompute a
+  // constant on every tick.
+  const openingFocus = useMemo(
+    () => geomRef.current?.centers?.[homeHexFor(gameRef.current, state.youId)] || null,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
 
   const [selectedHexId, setSelectedHexId] = useState(null);
   const [selectedUnitId, setSelectedUnitId] = useState(null);
@@ -1010,7 +1020,7 @@ export default function Prototype({ config, onNewGame }) {
           HUD chrome (resource wheel, faction readout, menu orb) floats
           over it as absolute overlays — see below. */}
       <div style={{ position: "relative", flex: 1, display: "flex", minHeight: 0 }}>
-        <BoardViewport cameraTarget={replay.cameraTarget} cameraPanMs={replay.cameraPanMs} controlsTop={hudOffset + 10}>
+        <BoardViewport cameraTarget={replay.cameraTarget} cameraPanMs={replay.cameraPanMs} controlsTop={hudOffset + 10} initialFocus={openingFocus}>
           {/* No corner brackets here. They used to sit on this element —
               the pan/zoom CONTENT layer — which put them at the corners of
               the MAP, not of the screen: the top pair rendered underneath

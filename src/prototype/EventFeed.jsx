@@ -4,7 +4,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { FACTIONS as UI_FACTIONS, resourceLabel, theme } from "./data.js";
 import { describeHex } from "./engineAdapter.js";
-import { CHIPS as ENGINE_CHIPS } from "../game/content.js";
+import { CHIPS as ENGINE_CHIPS, REACTIVES as ENGINE_REACTIVES } from "../game/content.js";
+import { TECH_NODES, TECH_PATHS } from "../game/tech.js";
 import { displayName as encounterName } from "./EncounterModal.jsx";
 import { useIsPhone } from "./useViewport.js";
 
@@ -33,6 +34,19 @@ function formatEvent(ev, engineState) {
   const other = (a, b) => (a === you ? b : a);
   const place = (hexId) => describeHex(engineState, hexId);
   const chipName = (chipId) => ENGINE_CHIPS[chipId]?.name || "a chip";
+  // Units carry an authored formation name now. A destroyed one is already
+  // gone from state by the time the feed formats its death, so fall back
+  // rather than assume it is still there.
+  const unitName = (uid) => engineState.units?.[uid]?.name || "a unit";
+  // Tech nodes are stored as ids (mil-a1); the authored names live on the
+  // path, keyed by the id's last two characters — same lookup TechWheel does.
+  const techName = (id) => {
+    const node = TECH_NODES[id];
+    if (!node) return id;
+    const path = TECH_PATHS[node.path];
+    if (node.layer === 1) return path?.entryName || id;
+    return path?.nodes?.[id.slice(-2)]?.name || id;
+  };
   switch (ev.name) {
     case "turn_started":
       return { color: factionColor(p.player), text: `${who(p.player)} — turn start` };
@@ -41,7 +55,7 @@ function formatEvent(ev, engineState) {
       // Economy ledger had: name the place, or describe the ground.
       return { color: factionColor(p.player), text: `${who(p.player)} moved to ${place(p.to)}` };
     case "unit_recruited":
-      return { color: factionColor(p.player), text: `${who(p.player)} recruited a unit` };
+      return { color: factionColor(p.player), text: `${who(p.player)} mustered ${unitName(p.unit)}` };
     case "unit_retreated": {
       const u = engineState.units[p.unit];
       return { color: factionColor(u?.owner), text: `${who(u?.owner)} retreated` };
@@ -86,7 +100,7 @@ function formatEvent(ev, engineState) {
     case "loyalty_changed":
       return null; // routine per-Upkeep tick — too chatty for the feed
     case "unit_destroyed":
-      return { color: theme.accent2, text: `${who(p.owner)} lost a unit` };
+      return { color: theme.accent2, text: `${who(p.owner)} lost ${unitName(p.unit)}` };
     case "loot_dropped":
       return { color: theme.accent, text: `${(p.chips || []).length} chip(s) dropped at ${place(p.hex)}` };
     case "loot_claimed": {
@@ -112,21 +126,21 @@ function formatEvent(ev, engineState) {
     case "card_played":
       return {
         color: factionColor(p.player),
-        text: `${who(p.player)} played ${p.cardId}`,
+        text: `${who(p.player)} played ${ENGINE_REACTIVES[p.cardId]?.name || "a reaction"}`,
       };
     // §20 Economy & City Development
     case "build_completed": {
       const ctrl = engineState.locations[p.hex]?.controller;
-      return { color: factionColor(ctrl), text: `${who(ctrl)} built ${p.chipId}` };
+      return { color: factionColor(ctrl), text: `${who(ctrl)} built ${chipName(p.chipId)} at ${place(p.hex)}` };
     }
     case "chip_upgraded": {
       const ctrl = engineState.locations[p.hex]?.controller;
-      return { color: theme.good, text: `${who(ctrl)} upgraded → ${p.chipId}` };
+      return { color: theme.good, text: `${who(ctrl)} upgraded to ${chipName(p.chipId)}` };
     }
     case "chip_dormant":
-      return { color: theme.accent2, text: `${p.chipId} ${p.ejected ? "ejected (Loyalty)" : "went dormant (upkeep)"}` };
+      return { color: theme.accent2, text: `${chipName(p.chipId)} ${p.ejected ? "ejected (Loyalty)" : "went dormant (upkeep)"}` };
     case "chip_reactivated":
-      return { color: theme.good, text: `${p.chipId} reactivated` };
+      return { color: theme.good, text: `${chipName(p.chipId)} reactivated` };
     case "build_started":
     case "slider_changed":
     case "build_priority_changed":
@@ -193,9 +207,9 @@ function formatEvent(ev, engineState) {
     case "tech_level_changed":
       return { color: theme.accent, text: `${who(p.player)} reached Tech Level ${p.techLevel}` };
     case "tech_node_assigned":
-      return { color: theme.good, text: `${who(p.player)} unlocked ${p.node}` };
+      return { color: theme.good, text: `${who(p.player)} unlocked ${techName(p.node)}` };
     case "tech_node_lost":
-      return { color: theme.accent2, text: `${who(p.player)} lost tech node ${p.node}` };
+      return { color: theme.accent2, text: `${who(p.player)} lost ${techName(p.node)}` };
     case "research_changed":
       return null; // too granular for the feed; the bar shows it
     case "standing_changed": {
@@ -229,7 +243,7 @@ function formatEvent(ev, engineState) {
     case "track_changed":
       return {
         color: theme.textDim,
-        text: `${who(p.player)} ${p.track} → ${p.value}`,
+        text: `${who(p.player)} ${String(p.track || "").replace(/^./, (c) => c.toUpperCase())} → ${p.value}`,
       };
     case "quest_started":
     case "quest_advanced":

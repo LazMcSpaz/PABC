@@ -11,13 +11,42 @@ import { recomputeVisibility } from "./visibility.js";
 import { ensureDiplomacy, seedStanding } from "./diplomacy.js";
 import { recomputeVp } from "./victory.js";
 
+// The name a faction's `seq`-th unit musters under. Walks the faction's
+// authored roster (content.js `unitNames`) in order; past the end it wraps
+// and suffixes a numeral, so a long game reads "Grain Guard II" rather than
+// fielding two formations with the same name. Deterministic in `seq` — no
+// RNG draw — so a seeded game names its units identically every replay.
+const NUMERALS = ["", " II", " III", " IV", " V", " VI", " VII", " VIII"];
+
+// Claim the next roster slot for `owner` and advance the counter. Counts
+// musters rather than living units, so a replacement never inherits a dead
+// formation's name. Takes anything carrying `unitsMustered`, which is how
+// setup can use it while state is still being assembled.
+export function nextMusterIndex(carrier, owner) {
+  carrier.unitsMustered = carrier.unitsMustered || {};
+  const n = carrier.unitsMustered[owner] || 0;
+  carrier.unitsMustered[owner] = n + 1;
+  return n;
+}
+export function unitNameFor(owner, seq) {
+  const roster = factionDef(owner)?.unitNames;
+  if (!roster || !roster.length) return `${factionDef(owner)?.name || owner} unit`;
+  const i = seq % roster.length;
+  const lap = Math.floor(seq / roster.length);
+  return roster[i] + (NUMERALS[lap] ?? ` ${lap + 1}`);
+}
+
 // A fresh unit with the full v0.2 field set (§16.3 / plan). `moveRemaining`
 // seeds to base Movement; the owner's Upkeep refreshes it from effective.
-export function makeUnit(uid, owner, node, factionName) {
+//
+// `seq` is how many units this faction has already mustered this game — the
+// index into its name roster. It counts musters, not living units, so a
+// replacement never inherits a dead formation's name.
+export function makeUnit(uid, owner, node, factionName, seq = 0) {
   return {
     uid,
     owner,
-    name: `${factionName} unit`, // flavor names arrive with content
+    name: unitNameFor(owner, seq),
     node,
     baseStrength: CONFIG.unit.baseStrength,
     baseMovement: CONFIG.unit.baseMovement,
@@ -242,6 +271,10 @@ export function createGame({
 
   // --- units: CONFIG.startingUnits per faction (§16.3), on/near start ---
   const units = {};
+  // How many units each faction has mustered all game — the index into its
+  // name roster. Kept on state (below) so recruits and reinforcements keep
+  // counting from where setup left off.
+  const musterBook = { unitsMustered: {} };
   for (const fid of majors) {
     const start = layout.factionStart[fid];
     for (let i = 0; i < (CONFIG.startingUnits || 1); i++) {
@@ -256,14 +289,14 @@ export function createGame({
         node = adj || start;
       }
       const u = uid("unit");
-      units[u] = makeUnit(u, fid, node, FACTIONS[fid].name);
+      units[u] = makeUnit(u, fid, node, FACTIONS[fid].name, nextMusterIndex(musterBook, fid));
     }
   }
   // §18.4.1 — one defending unit on each seated minor's seat.
   for (const fid of seededMinors) {
     if (!minorSeat[fid]) continue;
     const u = uid("unit");
-    units[u] = makeUnit(u, fid, minorSeat[fid], factionDef(fid).name);
+    units[u] = makeUnit(u, fid, minorSeat[fid], factionDef(fid).name, nextMusterIndex(musterBook, fid));
   }
 
   // §20.2 — the Market is retired. Chips are no longer drawn from a shared
@@ -334,6 +367,7 @@ export function createGame({
     board: { hexes, adjacency: grid.adjacency, rails },
     locations,
     units,
+    unitsMustered: musterBook.unitsMustered,
     chips,
     encounterDeck,
     reactiveDeck,

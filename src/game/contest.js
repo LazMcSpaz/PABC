@@ -13,7 +13,7 @@ import { recomputeInfluence } from "./influence.js";
 import { recomputeVisibility, recomputeVisibilityFor, isUnitVisibleTo } from "./visibility.js";
 import { onLocationCaptured, onRaidWon } from "./standing.js";
 import { onAttack } from "./diplomacy.js";
-import { makeUnit } from "./setup.js";
+import { makeUnit, nextMusterIndex } from "./setup.js";
 import { TECH_NODES, hasTechNode } from "./tech.js";
 import { destroyPost } from "./posts.js";
 import { blockadeAt, blockadeDefense, destroyBlockade } from "./blockades.js";
@@ -407,7 +407,7 @@ function strandReinforcementsFrom(state, capturedHex) {
     const target = state.units[r.targetUnit];
     const node = target ? target.node : capturedHex;
     const u = state.nextId("unit");
-    state.units[u] = makeUnit(u, r.owner, node, factionDef(r.owner)?.name || r.owner);
+    state.units[u] = makeUnit(u, r.owner, node, factionDef(r.owner)?.name || r.owner, nextMusterIndex(state, r.owner));
     state.units[u].baseStrength = Math.min(CONFIG.unit.baseStrengthCap, r.amount);
     recomputeStats(state);
     emit(state, "reinforcement_arrived", { player: r.owner, unit: u, stranded: true });
