@@ -197,7 +197,13 @@ function FactionCard({ fid, picked, onPick }) {
         />
         <div className="hud-scanlines" style={{ position: "absolute", inset: 0 }} />
       </div>
-      <div style={{ padding: "9px 11px 11px" }}>
+      {/* The "◆ Selected" badge below is absolutely positioned bottom-right,
+          so it overlaps whatever the tagline wraps to — a two-line faction
+          name (Versari Korad) pushes the tagline down far enough to run
+          straight under it. The extra bottom padding reserves the badge's
+          strip on EVERY card, selected or not, so the text always clears it
+          and selecting a card causes no layout shift. */}
+      <div style={{ padding: "9px 11px 24px" }}>
         <div style={{
           fontFamily: C.font, fontSize: 13, fontWeight: 700,
           letterSpacing: 1.4, textTransform: "uppercase",

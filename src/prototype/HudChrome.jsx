@@ -289,7 +289,11 @@ function DesktopTopBar({ scrap, upkeep, units, tech, name, color = C.red, vp, vp
       <div style={{ position: "absolute", left: 0, right: 0, top: 3, display: "flex", flexDirection: "column", alignItems: "center", gap: 2, pointerEvents: "none" }}>
         <span style={{ fontFamily: C.font, fontSize: 14, fontWeight: 700, letterSpacing: 2, textTransform: "uppercase", color, textShadow: `0 0 10px ${color}77, 0 1px 2px rgba(0,0,0,0.7)`, lineHeight: 1, whiteSpace: "nowrap" }}>{name}</span>
         <span style={{ width: 70, height: 1.5, background: `linear-gradient(90deg, transparent, ${color}, transparent)` }} />
-        <span style={{ fontFamily: C.font, fontSize: 8.5, letterSpacing: 2.2, textTransform: "uppercase", color: C.textFaint }}>Round {round}</span>
+        {/* Sits directly under the faction name, which throws a wide
+            `0 0 10px <color>77` glow. At textFaint over that halo the round
+            counter was unreadable at every viewport width — lifted to
+            textDim with its own dark shadow to punch back through the glow. */}
+        <span style={{ fontFamily: C.font, fontSize: 9.5, fontWeight: 600, letterSpacing: 2.2, textTransform: "uppercase", color: C.textDim, textShadow: "0 1px 3px rgba(0,0,0,0.9)" }}>Round {round}</span>
       </div>
 
       {/* right flare — VP + Actions dials, End Turn beneath */}
