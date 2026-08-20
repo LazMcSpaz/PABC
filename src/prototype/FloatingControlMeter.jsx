@@ -16,7 +16,7 @@ import { FLOAT_LIFT, HEX_W, HEX_H } from "./hexProjection.js";
 // it without pulling in this component. Re-exported for existing callers.
 export { METER, radialBox, hasRadial } from "./radialGeometry.js";
 
-export default function FloatingControlMeter({ x, y, name, control, locationId, dim }) {
+export default function FloatingControlMeter({ x, y, name, control, locationId, dim, ready = 0 }) {
   const ctrl = fullController(control.sections);
   const col = ctrl ? holoColor(ctrl) : HOLO_NEUTRAL;
   const lift = FLOAT_LIFT;
@@ -78,6 +78,22 @@ export default function FloatingControlMeter({ x, y, name, control, locationId, 
             whiteSpace: "nowrap",
           }}
         >
+          {/* §4 of vp-and-actions-design — this city still has an action, and
+              a Logistics Hub city has two. Same dot as the unit tokens and the
+              HUD's READY strip: one symbol for "this can still do something",
+              wherever you happen to be looking. */}
+          {Array.from({ length: ready }, (_, i) => (
+            <span
+              key={i}
+              style={{
+                display: "inline-block",
+                width: 6, height: 6, borderRadius: "50%",
+                marginRight: 5, verticalAlign: "middle",
+                background: theme.ready,
+                boxShadow: `0 0 5px ${theme.ready}`,
+              }}
+            />
+          ))}
           {name}
         </div>
         <ControlMeter

@@ -27,6 +27,14 @@ import { CHIPS, LOCATIONS, ABILITIES, factionDef } from "./content.js";
 // Sum a numeric chip field across a Location's installed, non-dormant
 // chips — the shared reader for the per-Location behavior chips
 // (loyaltyRise, healBonus, actionBonus, …).
+// How many actions a Location refreshes to at Upkeep — one, plus whatever a
+// Logistics Hub adds. Exported because the HUD has to draw the same number:
+// the action readout used to assume one per city, so a hub city could put the
+// dial at "8/7" and its pip row a pip short of what it actually holds.
+export function locationActionCapacity(state, loc) {
+  return 1 + locChipSum(state, loc, "actionBonus");
+}
+
 function locChipSum(state, loc, field) {
   let n = 0;
   for (const c of loc.chips) {
@@ -303,7 +311,7 @@ export function startTurn(state) {
   }
   for (const loc of Object.values(state.locations)) {
     if (loc.controller !== pid) continue;
-    loc.actionsRemaining = 1 + locChipSum(state, loc, "actionBonus");
+    loc.actionsRemaining = locationActionCapacity(state, loc);
   }
   state.pendingActionGrants = state.pendingActionGrants.filter((g) => {
     if (g.player === pid) {

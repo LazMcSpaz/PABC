@@ -172,6 +172,89 @@ function ResourceCell({ icon, value, label, color, labelColor, title }) {
 }
 
 // A dial paired with a small caption below — the right-side VP / Actions cells.
+// §4 of vp-and-actions-design — the per-entity action roster.
+//
+// The dial's number was always right and always insufficient: "3 actions"
+// while the player still had to click every unit and every city to find out
+// which three. These are the three. Filled = still has its action; hollow =
+// already spent it. Units on the top row, cities beneath, a wildcard row only
+// when the player actually holds one.
+//
+// It marks what is READY rather than what is spent, so the strip empties as
+// the turn does — at Upkeep it is full, and by End Turn a glance says whether
+// anything was left standing about.
+const PIP = 7;
+
+function Pip({ ready, title, color }) {
+  return (
+    <span
+      title={title}
+      style={{
+        width: PIP, height: PIP, borderRadius: "50%", flexShrink: 0,
+        border: `1px solid ${ready ? color : "rgba(207,214,220,0.32)"}`,
+        background: ready ? color : "transparent",
+        boxShadow: ready ? `0 0 4px ${color}bb` : undefined,
+        transition: "background .18s ease, box-shadow .18s ease, border-color .18s ease",
+      }}
+    />
+  );
+}
+
+function PipRow({ icon, glyph, pips }) {
+  if (!pips.length) return null;
+  return (
+    <span style={{ display: "flex", alignItems: "center", gap: 3, maxWidth: 96, flexWrap: "wrap", height: 10 }}>
+      {icon
+        ? <img src={icon} alt="" style={{ width: 9, height: 9, objectFit: "contain", opacity: 0.65, marginRight: 1 }} />
+        : <span style={{ fontFamily: C.font, fontSize: 9, fontWeight: 700, color: C.textFaint, marginRight: 1, lineHeight: 1 }}>{glyph}</span>}
+      {pips}
+    </span>
+  );
+}
+
+function ActionPips({ roster }) {
+  if (!roster) return null;
+  const unitPips = roster.units.map((u) => (
+    <Pip
+      key={u.uid}
+      ready={u.ready && !u.unsupplied}
+      color={C.holo}
+      title={u.unsupplied ? `${u.name} — unsupplied, cannot act` : `${u.name} — ${u.ready ? "has an action" : "already acted"}`}
+    />
+  ));
+  // A Logistics Hub city holds two, so a city contributes a pip per action
+  // rather than one pip that can only be on or off.
+  const locPips = [];
+  for (const l of roster.locations) {
+    const held = Math.max(1, l.capacity || 1);
+    for (let i = 0; i < held; i += 1) {
+      locPips.push(
+        <Pip
+          key={`${l.hexId}-${i}`}
+          ready={i < l.ready}
+          color={C.holo}
+          title={`${l.name} — ${l.ready ? `${l.ready} action${l.ready === 1 ? "" : "s"}` : "already acted"}`}
+        />,
+      );
+    }
+  }
+  const wildPips = Array.from({ length: roster.wildcards }, (_, i) => (
+    <Pip key={`w${i}`} ready color={C.gold} title="A spare action — any unit or city may burn it after its own is gone" />
+  ));
+  if (!unitPips.length && !locPips.length && !wildPips.length) return null;
+  // Its own cell beside the dials rather than a caption beneath one: the top
+  // bar is a fixed 60px and a 46px dial already fills it, so anything stacked
+  // under the dial spilled out over the Event Log below.
+  return (
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 2 }}>
+      <PipRow icon={ICON.units} pips={unitPips} />
+      <PipRow icon={ICON.shield} pips={locPips} />
+      {wildPips.length ? <PipRow glyph="+" pips={wildPips} /> : null}
+      <span style={{ fontFamily: C.font, fontSize: 8, letterSpacing: 1.4, textTransform: "uppercase", color: C.textFaint, fontWeight: 600 }}>Ready</span>
+    </div>
+  );
+}
+
 function DialCell({ label, children }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
@@ -303,6 +386,7 @@ function DesktopTopBar({ scrap, upkeep, units, tech, name, color = C.red, vp, vp
             <DialFace icon={ICON.vp} value={vp} valueColor={C.gold} iconSize={15} valueSize={15} />
           </Dial>
         </DialCell>
+        <ActionPips roster={actions.roster} />
         <DialCell label="Actions">
           <Dial size={46} accent={C.red} progress={actions.max ? actions.remaining / actions.max : 0} glow>
             <DialFace value={`${actions.remaining}/${actions.max}`} valueColor={C.text} valueSize={15} />

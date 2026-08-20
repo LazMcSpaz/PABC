@@ -132,6 +132,7 @@ export default function HexBoard3D({
               name={LOCATIONS[hex.locationId]?.name}
               control={hex.control}
               locationId={hex.locationId}
+              ready={hex.fog === "visible" ? (hex.actionsReady || 0) : 0}
               dim={hex.fog === "explored"}
             />
           );

@@ -5,6 +5,7 @@
 // shape-agnostic.
 
 import { CONFIG } from "../game/config.js";
+import { locationActionCapacity } from "../game/turn.js";
 import { reinforcementRoute } from "../game/board.js";
 import { takeAITurn } from "../game/ai.js";
 import {
@@ -344,6 +345,11 @@ export function adaptState(state) {
       upkeep: unitTotalUpkeep(state, u),
       baseUpkeep: unitUpkeepFor(state, u),
       unsupplied: !!u.unsupplied,
+      // Per-entity actions: does this unit still have its action? Only ever
+      // answered for the viewer's own units — whether a rival has already
+      // committed theirs is their turn's business, not something the board
+      // should quietly hand over.
+      canAct: u.owner === viewer ? (u.actionsRemaining ?? 0) > 0 : null,
       node: u.node,
     };
   }
@@ -426,6 +432,9 @@ export function adaptState(state) {
             loc.abilityActivatedTurn === state.round * state.turnOrder.length + state.activeIndex,
         };
         hex.garrison = loc.garrison;
+        // …and the same question for a city, on the same terms. A count, not
+        // a flag: a Logistics Hub city holds two, and the board says so.
+        hex.actionsReady = loc.controller === viewer ? (loc.actionsRemaining ?? 0) : 0;
         hex.production = loc.production;
         hex.abilityId = loc.abilityId;
         hex.controller = loc.controller;
@@ -467,16 +476,45 @@ export function adaptState(state) {
       techLevel: p.techLevel || 1,
       techWheel: [...(p.techWheel || [])],
       abilityPointsAvailable: (p.techLevel || 1) - 1 - (p.techWheel?.length || 0),
-      // Per-entity actions: the HUD dial aggregates what this faction can
-      // still DO — every unit/Location action left plus wildcards. Max is
-      // the same census at full refresh.
+      // Per-entity actions: the HUD aggregates what this faction can still DO
+      // — every unit/Location action left plus wildcards. Max is the same
+      // census at full refresh.
+      //
+      // The total alone was the whole readout, and it answered the wrong
+      // question: "3 actions" while the player still had to click every unit
+      // and every city to find out WHICH three. The roster below is that
+      // answer, and it is built only for the viewer — a rival's remaining
+      // actions are not the board's to give away.
       actions: (() => {
         const unitActs = Object.values(state.units).filter((u) => u.owner === p.id);
         const locActs = Object.values(state.locations).filter((l) => l.controller === p.id);
         const remaining = p.actions.remaining +
           unitActs.reduce((n, u) => n + (u.actionsRemaining ?? 0), 0) +
           locActs.reduce((n, l) => n + (l.actionsRemaining ?? 0), 0);
-        return { remaining, max: p.actions.remaining + unitActs.length + locActs.length };
+        const roster = p.id !== viewer ? null : {
+          units: unitActs.map((u) => ({
+            uid: u.uid, name: u.name, node: u.node,
+            ready: (u.actionsRemaining ?? 0) > 0,
+            unsupplied: !!u.unsupplied,
+          })),
+          locations: locActs.map((l) => ({
+            hexId: l.hexId,
+            name: ENGINE_LOCATIONS[l.locationId]?.name || l.locationId,
+            // A Logistics Hub city works overtime, so it holds more than one
+            // — the pip row draws each separately rather than rounding the
+            // second away, and `capacity` is the engine's own refresh rule
+            // rather than the UI guessing at it.
+            ready: l.actionsRemaining ?? 0,
+            capacity: locationActionCapacity(state, l),
+          })),
+          wildcards: p.actions.remaining,
+        };
+        // Max counts a hub city's SECOND action too. Assuming one per city
+        // let `remaining` climb past `max` — a full-strength turn reading
+        // "8/7" — because the engine had already handed the hub two.
+        const max = p.actions.remaining + unitActs.length
+          + locActs.reduce((n, l) => n + locationActionCapacity(state, l), 0);
+        return { remaining, max, roster };
       })(),
       unitCap: CONFIG.baseUnitCap + recruitCapBonus(state, pid),
       isAI: !!p.isAI,

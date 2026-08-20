@@ -15,6 +15,11 @@ export const theme = {
   textDim: "#a89d87",
   textFaint: "#776c5b",
   accent: "#e8a93f", // amber lamplight
+  // "This can still act." Deliberately NOT `accent`: amber is already the
+  // selection glow, and a unit that is selected is not the same as a unit
+  // that has an action left. Holo teal is the interface's own voice — it
+  // reads as a readout rather than as a faction or a highlight.
+  ready: "#56d3c6",
   accent2: "#c75d30", // rust
   good: "#86ad52",
   boardBg:

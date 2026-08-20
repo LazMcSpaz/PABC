@@ -2,7 +2,7 @@
 // runs the turn loop, and exercises the effect library so each engine
 // layer can be verified without the UI.
 import { createGame } from "./setup.js";
-import { startTurn, endTurn, tickLoyalty } from "./turn.js";
+import { startTurn, endTurn, tickLoyalty, locationActionCapacity } from "./turn.js";
 import { performAction, recruitCostAt } from "./actions.js";
 import { applyEffect } from "./effects.js";
 import { emit } from "./events.js";
@@ -4861,6 +4861,37 @@ line("\n  [Phase 11] text-token resolver");
   check("Upkeep grants each unit and held Location exactly 1 action",
     Object.values(g16.units).filter((u) => u.owner === pid).every((u) => u.actionsRemaining === 1) &&
     home.actionsRemaining === 1);
+
+  // The refresh rule has one name, because the HUD has to draw the same
+  // number the engine hands out. It used to assume one action per city, so a
+  // Logistics Hub city put the action readout at "8/7" — more remaining than
+  // the maximum — and drew its pip row one pip short of what it held.
+  check("a plain city's action capacity is 1",
+    locationActionCapacity(g16, home) === 1
+    && home.actionsRemaining === locationActionCapacity(g16, home));
+  {
+    const gC = createGame({ seed: 161 });
+    const cPid = gC.turnOrder[gC.activeIndex];
+    const hub = Object.values(gC.locations).find((l) => l.controller === cPid);
+    const uid = gC.nextId("chip");
+    gC.chips[uid] = { uid, chipId: "logistics-hub", owner: cPid };
+    hub.chips.push(uid);
+    startTurn(gC);
+    check("…and a Logistics Hub city's is 2, which is what it refreshes to",
+      locationActionCapacity(gC, hub) === 2 && hub.actionsRemaining === 2);
+    // The readout's own invariant, stated where it can never drift: you can
+    // never have more actions left than you could possibly have had.
+    const total = (l) => Object.values(gC.locations)
+      .filter((x) => x.controller === cPid)
+      .reduce((n, x) => n + locationActionCapacity(gC, x), 0);
+    const remaining = gC.players[cPid].actions.remaining
+      + Object.values(gC.units).filter((u) => u.owner === cPid).reduce((n, u) => n + (u.actionsRemaining ?? 0), 0)
+      + Object.values(gC.locations).filter((x) => x.controller === cPid).reduce((n, x) => n + (x.actionsRemaining ?? 0), 0);
+    const max = gC.players[cPid].actions.remaining
+      + Object.values(gC.units).filter((u) => u.owner === cPid).length + total();
+    check("…so the readout never shows more actions left than its own maximum",
+      remaining <= max);
+  }
 
   // -- a unit acts once: two solo contests from one unit are refused.
   const [uA, uB] = Object.values(g16.units).filter((u) => u.owner === pid);

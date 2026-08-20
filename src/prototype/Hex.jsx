@@ -25,7 +25,7 @@ const TOKEN_SLOTS = [
   { left: "16%", top: "50%" }, // 9:00  (left)
 ];
 
-function UnitToken({ unit, selected, slot = 0, onClick, dim = false }) {
+function UnitToken({ unit, selected, slot = 0, onClick, dim = false, ready = false }) {
   // Fall back for any faction id the UI table doesn't know (so an
   // unexpected owner never blanks the board).
   const faction = FACTIONS[unit.owner] || { name: unit.owner || "Unknown", color: "#888" };
@@ -65,6 +65,19 @@ function UnitToken({ unit, selected, slot = 0, onClick, dim = false }) {
       <span style={{ fontFamily: theme.fontDisplay, fontSize: 13, fontWeight: 700, color: "#fff" }}>
         {unit.name[0]}
       </span>
+      {/* Still has its action — the same dot the HUD's READY strip and the
+          holo board's tokens use. */}
+      {ready && (
+        <span
+          style={{
+            position: "absolute", right: -2, top: -2,
+            width: 8, height: 8, borderRadius: "50%",
+            background: theme.ready,
+            border: "1.5px solid #100d09",
+            boxShadow: `0 0 5px ${theme.ready}`,
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -161,7 +174,21 @@ export default function Hex({ hex, units, selected, reachable, selectedUnitId, d
       >
         {isLocation && (
           <>
-            <Plaque>{loc.name}</Plaque>
+            <Plaque>
+              {/* Still has an action — the same dot the units and the HUD's
+                  READY strip use. */}
+              {Array.from({ length: hex.actionsReady || 0 }, (_, i) => (
+                <span
+                  key={i}
+                  style={{
+                    display: "inline-block", width: 6, height: 6, borderRadius: "50%",
+                    marginRight: 5, verticalAlign: "middle",
+                    background: theme.ready, boxShadow: `0 0 5px ${theme.ready}`,
+                  }}
+                />
+              ))}
+              {loc.name}
+            </Plaque>
             <ControlMeter
               sections={hex.control.sections}
               loyalty={hex.control.loyalty}
@@ -274,6 +301,7 @@ export default function Hex({ hex, units, selected, reachable, selectedUnitId, d
           slot={i}
           selected={u.uid === selectedUnitId}
           dim={u.uid === dimmedUnitUid}
+          ready={!!u.canAct}
           onClick={onUnitClick}
         />
       ))}
