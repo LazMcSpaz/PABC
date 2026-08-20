@@ -77,21 +77,33 @@ function Audience({ who, portrait, title, lines, children }) {
   return (
     <div style={overlay}>
       <div style={{
-        width: "min(96vw, 620px)", borderRadius: 10, overflow: "hidden",
+        width: "min(96vw, 760px)", borderRadius: 10, overflow: "hidden",
         border: `1px solid ${C.holo}66`, background: "linear-gradient(180deg, #10201f, #08120f)",
         boxShadow: "0 12px 50px rgba(0,0,0,0.7), 0 0 30px rgba(86,211,198,0.12)",
         color: C.text, fontFamily: C.font,
       }}>
         {portrait && (
-          <div style={{ position: "relative", height: 190, overflow: "hidden" }}>
+          // The paintings are 16:9 with the figure standing in the middle of
+          // the room, so a short strip cropped away most of what was painted.
+          // Show the frame whole and let it shrink with the viewport instead:
+          // `contain` inside a 16:9 box means nothing is ever cut off, and on
+          // a short screen the box gives up height rather than the picture
+          // giving up its subject.
+          <div style={{
+            position: "relative", width: "100%", aspectRatio: "16 / 9",
+            maxHeight: "52vh", overflow: "hidden", background: "#0b1512",
+          }}>
             <img
               src={portrait.src}
               alt=""
-              style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: portrait.pos, display: "block" }}
+              style={{
+                width: "100%", height: "100%",
+                objectFit: "contain", objectPosition: "50% 0%", display: "block",
+              }}
             />
             <div style={{
               position: "absolute", inset: 0,
-              background: "linear-gradient(180deg, rgba(8,18,15,0) 45%, rgba(8,18,15,0.96) 100%)",
+              background: "linear-gradient(180deg, rgba(8,18,15,0) 62%, rgba(8,18,15,0.94) 100%)",
             }} />
             <div style={{
               position: "absolute", left: 18, bottom: 10,
@@ -213,21 +225,33 @@ function WarningAudience({ warning, onRespond }) {
   return (
     <div style={overlay}>
       <div style={{
-        width: "min(96vw, 620px)", borderRadius: 10, overflow: "hidden",
+        width: "min(96vw, 760px)", borderRadius: 10, overflow: "hidden",
         border: `1px solid ${C.holo}66`, background: "linear-gradient(180deg, #10201f, #08120f)",
         boxShadow: "0 12px 50px rgba(0,0,0,0.7), 0 0 30px rgba(86,211,198,0.12)",
         color: C.text, fontFamily: C.font,
       }}>
         {portrait && (
-          <div style={{ position: "relative", height: 190, overflow: "hidden" }}>
+          // The paintings are 16:9 with the figure standing in the middle of
+          // the room, so a short strip cropped away most of what was painted.
+          // Show the frame whole and let it shrink with the viewport instead:
+          // `contain` inside a 16:9 box means nothing is ever cut off, and on
+          // a short screen the box gives up height rather than the picture
+          // giving up its subject.
+          <div style={{
+            position: "relative", width: "100%", aspectRatio: "16 / 9",
+            maxHeight: "52vh", overflow: "hidden", background: "#0b1512",
+          }}>
             <img
               src={portrait.src}
               alt=""
-              style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: portrait.pos, display: "block" }}
+              style={{
+                width: "100%", height: "100%",
+                objectFit: "contain", objectPosition: "50% 0%", display: "block",
+              }}
             />
             <div style={{
               position: "absolute", inset: 0,
-              background: "linear-gradient(180deg, rgba(8,18,15,0) 45%, rgba(8,18,15,0.96) 100%)",
+              background: "linear-gradient(180deg, rgba(8,18,15,0) 62%, rgba(8,18,15,0.94) 100%)",
             }} />
             <div style={{
               position: "absolute", left: 18, bottom: 10,

@@ -25,8 +25,10 @@ export const LEADER_PORTRAITS = {
   plainers:  { src: `${A}assets/portraits/factions/plainers/plainers_diplomacy_1.webp`, pos: "72% 22%" },
 };
 
-// Drop a faction's envoy art at the path below and it is picked up with no
-// other change. Until then that faction quietly uses its leader.
+// All four envoys are painted to the same brief — one figure, mid-gesture,
+// in a bare room — so they share a crop. The audience box shows the frame
+// whole; `pos` is only consulted by the tighter strips (herald banner,
+// offer cards), where it keeps the face off the bottom edge.
 export const ENVOY_PORTRAITS = {
   versari:   { src: `${A}assets/portraits/factions/versari/versari_envoy_1.webp`, pos: "50% 22%" },
   lakers:    { src: `${A}assets/portraits/factions/lakers/lakers_envoy_1.webp`, pos: "50% 22%" },
@@ -37,7 +39,7 @@ export const ENVOY_PORTRAITS = {
 // Which faces exist on disk. Kept as an explicit list rather than probed at
 // runtime: an <img> that 404s has already flashed an empty frame by the time
 // anything could react to it.
-const ENVOY_ART_AVAILABLE = new Set(["versari"]);
+const ENVOY_ART_AVAILABLE = new Set(["versari", "lakers", "goldgrass", "plainers"]);
 
 // `tone` is "leader" for the irreversible moments and "envoy" for everything
 // else — see the note at the top. Defaults to envoy because most of what the
