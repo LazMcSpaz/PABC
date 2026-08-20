@@ -372,6 +372,10 @@ export default function Prototype({ config, onNewGame }) {
   const [selectedHexId, setSelectedHexId] = useState(null);
   const [selectedUnitId, setSelectedUnitId] = useState(null);
   const [toast, setToast] = useState(null); // { kind: "error"|"info", text }
+  // Things the player has waved off for now. An offer they said "consider it"
+  // to stays live in the drawer; it just stops knocking. Cleared by nothing —
+  // the ids are one-shot and the offer expires on its own.
+  const [deferredAudience, setDeferredAudience] = useState([]);
   const [encounterPrompt, setEncounterPrompt] = useState(null); // pending move + encounter pick
   const [pendingMove, setPendingMove] = useState(null);          // { unitUid, origin, dest } awaiting confirm
   const [skipMoveConfirm, setSkipMoveConfirm] = useState(readSkipMoveConfirm);
@@ -947,8 +951,24 @@ export default function Prototype({ config, onNewGame }) {
   // routes params + surfaces the accept/decline result.
   // Answer an envoy's audience (hear / placate / defy). The engine dequeues
   // the warning, so the modal closes to whatever is next in line.
-  function onEnvoyRespond(warning, answer) {
+  // Everything a faction says to you arrives through the same door. An
+  // offer or a demand is not "open the drawer and look" news — somebody has
+  // come to say it, so they get an audience and an answer.
+  function onEnvoyRespond(item, answer) {
     const game = gameRef.current;
+    if (item?.kind === "offer") {
+      if (answer === "later") { setDeferredAudience((d) => [...d, item.offer.id]); return; }
+      onDiplomacy("answer-offer", { offerId: item.offer.id, accept: answer === "accept" });
+      return;
+    }
+    if (item?.kind === "ultimatum") {
+      onDiplomacy("answer-ultimatum", {
+        ultimatumId: item.ultimatum.id, comply: answer === "comply",
+      });
+      if (answer === "defy") setDeferredAudience((d) => [...d, item.ultimatum.id]);
+      return;
+    }
+    const warning = item;
     const r = performDiplomacy(game, state.youId, "respond-warning", {
       warningId: warning.id,
       answer,
@@ -1003,6 +1023,19 @@ export default function Prototype({ config, onNewGame }) {
     setDiploResult({ ...r, msg });
     bumpTick();
   }
+
+  // Who is at the door, in order of how much it can hurt to ignore them. A
+  // demand with a deadline outranks an offer, which outranks a grumble.
+  const audience = useMemo(() => {
+    const d = state.diplomacy;
+    if (!d) return null;
+    const ult = (d.ultimatums || []).find((u) => !u.defied && !deferredAudience.includes(u.id));
+    if (ult) return { kind: "ultimatum", ultimatum: ult };
+    const offer = (d.offers || []).find((o) => !deferredAudience.includes(o.id));
+    if (offer) return { kind: "offer", offer };
+    return d.pendingWarnings?.[0] || null;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tick, deferredAudience]);
 
   // Bind the token resolver to live engine state. Re-fires on every
   // engine tick so a {faction:lowest-standing-with-active} read mid-game
@@ -1239,7 +1272,7 @@ export default function Prototype({ config, onNewGame }) {
           Shown one at a time; only on your own turn so it never interrupts
           an AI replay. */}
       {isYourTurn && !showDiplomacy && (
-        <EnvoyModal warning={state.diplomacy?.pendingWarnings?.[0]} onRespond={onEnvoyRespond} />
+        <EnvoyModal audience={audience} onRespond={onEnvoyRespond} />
       )}
 
       <HeraldLayer banners={heralds} onDismiss={dismissHerald} topOffset={hudOffset + 14} />

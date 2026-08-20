@@ -821,6 +821,8 @@ function adaptDiplomacy(state, viewer) {
       note: o.note || null,
       from: o.from,
       fromName: factionDef(o.from)?.name || o.from,
+      // How they say it, so the audience box speaks in their voice.
+      temperament: factionDef(o.from)?.temperament || null,
       expiresOnRound: o.expiresOnRound,
       roundsLeft: Math.max(0, o.expiresOnRound - state.round),
       // From the READER's seat. `give` is what the deal's PROPOSER hands
@@ -849,6 +851,7 @@ function adaptDiplomacy(state, viewer) {
       id: u.id,
       from: u.from,
       fromName: factionDef(u.from)?.name || u.from,
+      temperament: factionDef(u.from)?.temperament || null,
       kind: u.demand.kind,
       amount: u.demand.amount ?? null,
       demandText: u.demand.kind === "tribute"
