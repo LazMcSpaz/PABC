@@ -198,13 +198,30 @@ grievance entitles you to. The relationship dossier — audit §3 item 16 —
 renders itself off the same ledger the engine acts on. 17 harness checks
 (Phase 25).
 
-**§2, §3, §4, §5 — still open.**
+**§2 witnessed reputation — BUILT (2026-08-19).** Menace is scored by the
+share of third parties who could see the hex: struck in the open it costs
+full, struck where nobody is watching it costs the `unwitnessedShare` floor
+(rumour travels). Only a *cost* is discounted — checking a bully where nobody
+can see does not earn you the credit for having done it in public. Honor is
+deliberately **not** scaled: you can hide an attack from the board, you
+cannot hide a betrayal from the person you betrayed, which is now the actual
+difference between the two stats.
+
+The loop that makes it work is the denouncement: the victim was there, holds
+the grievance, and putting it in front of the board raises the attacker's
+Menace — *if they are believed*. So striking in the dark buys time, not
+impunity, and only for as long as the party you wronged stays quiet or
+discredited. Fog is a diplomatic instrument, the Intelligence path finally
+has political weight (vision means you witness things, which means you hold
+grievances nobody else can), and Menace stops being omniscient. 10 harness
+checks (Phase 26).
+
+**§3, §4, §5 — still open.**
 
 ## What I'd build, in order
 
 1. ~~**Grievance ledger + reparations** (§1)~~ — **done**, see Status above.
-2. **Witnessed reputation** (§2) — the highest ratio of payoff to effort, and
-   the one that makes two existing systems talk to each other.
+2. ~~**Witnessed reputation** (§2)~~ — **done**, see Status above.
 3. **Receipts** (§5) — small, and makes 1 and 2 visible instead of invisible.
 4. **Claims** (§3, first half) — small, high flavour, no new item type needed.
 5. **Ultimatums** (§4) — rides tier 2's offer machinery.

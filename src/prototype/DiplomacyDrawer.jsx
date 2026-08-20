@@ -1276,8 +1276,9 @@ function GrievanceLedger({ f }) {
       <Side label="You hold against them" entries={l.youHold} weight={l.yourWeight} color="#c9b24e" />
       <div className="pc-prose" style={{ fontSize: 11, lineHeight: 1.5, color: "rgba(207,214,220,0.55)", marginTop: 7 }}>
         A live grievance makes a war righteous for the side that holds it, and
-        gives them grounds to denounce. Offer a settlement in a deal to clear
-        the slate — both ways at once, for a price that tracks the weight.
+        gives them grounds to denounce — which is how something nobody
+        witnessed still reaches the board. Offer a settlement in a deal to
+        clear the slate: both ways at once, for a price that tracks the weight.
       </div>
     </Card>
   );

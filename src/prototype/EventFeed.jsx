@@ -306,9 +306,17 @@ function formatEvent(ev, engineState) {
     case "denounced":
       return {
         color: p.warrant ? theme.accent : theme.accent2,
-        text: p.warrant
-          ? `${who(p.denouncer)} denounced ${who(p.target)} — and had grounds`
-          : `${who(p.denouncer)} denounced ${who(p.target)} — with nothing to point to`,
+        text: !p.heard
+          ? `${who(p.denouncer)} denounced ${who(p.target)} — and nobody listened`
+          : p.warrant
+            ? `${who(p.denouncer)} denounced ${who(p.target)} — and had grounds`
+            : `${who(p.denouncer)} denounced ${who(p.target)} — with nothing to point to`,
+      };
+    case "attack_unwitnessed":
+      if (p.attacker !== you) return null; // you only know about your own
+      return {
+        color: theme.textDim,
+        text: `No one saw that. ${who(p.victim)} did — and will remember it.`,
       };
     case "grievance_recorded":
       // Only your own books. Everyone's ledger moving would bury the feed.

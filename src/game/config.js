@@ -334,6 +334,20 @@ export const CONFIG = {
       // A justified war (denounced first, or answering a betrayal) costs
       // nothing to declare — which is the whole point of earning one.
       declareUnjustified: 2,
+      // Menace is what the BOARD thinks of you, so it should depend on what
+      // the board saw. An attack is scored by the share of third parties who
+      // could see the hex: seen by everyone it costs full, seen by nobody it
+      // costs nothing. The victim always knows regardless — that is what the
+      // grievance ledger is for, and denouncing is how they tell everyone
+      // else. A declaration of war is always public and is never scaled.
+      witnessedOnly: true,
+      // …but never quite nothing: rumour travels, and an army that vanishes
+      // into the wasteland and comes back bloody invites questions.
+      unwitnessedShare: 0.2,
+      // What a believed accusation does to the accused. This is how a crime
+      // nobody saw catches up with you: the victim was there, holds the
+      // grievance, and can put it in front of the board.
+      denouncedShare: 0.5,
       decayPerRound: 1, // slow decay with clean play / time
       min: 0, max: 24,
     },

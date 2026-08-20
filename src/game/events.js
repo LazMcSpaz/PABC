@@ -84,6 +84,8 @@ export const EVENT_NAMES = new Set([
   "offer_tabled", "offer_accepted", "offer_declined", "offer_lapsed", "offer_pestered",
   // The grievance ledger — what was done to you, and what it takes to settle.
   "grievance_recorded", "grievances_settled",
+  // Reputation is what the board saw. Some things it doesn't.
+  "attack_unwitnessed",
 ]);
 
 // Resolve a chip / card instance uid to its content def. Covers Market

@@ -950,7 +950,11 @@ export function runContest(state, { pid, params, ctx = {} }) {
   // §18.5/§18.7 — feed the political layer: the attacker takes a Menace
   // swing vs the target's temperament, breaks any pact/promise with them,
   // and establishes the war-state. (The combat math above is untouched.)
-  if (ambushDefOwner) onAttack(state, pid, ambushDefOwner);
+  // The hex it happened on: Menace is scored by who could SEE it (§18.5), so
+  // the political layer needs to know where, not just who.
+  if (ambushDefOwner) {
+    onAttack(state, pid, ambushDefOwner, t.kind === "raid" ? t.unit.node : (t.loc?.hexId ?? unit.node));
+  }
 
   // §16.6 veterancy — credit survivors and the winning unit, then promote.
   tickVeterancy(state, [attackerUnit, defenderUnit], winnerUnit?.uid ?? null);

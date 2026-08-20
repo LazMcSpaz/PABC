@@ -32,6 +32,7 @@ import {
   // diplomacy audit fixes — consent, cost, one deal schema, terms
   denounce, denounceCooldown, denounceWarrant, denounceGrounds, valueOfItem, applyDeal, adjustStanding,
   recordGrievance, grievancesAgainst, grievanceWeight, worstGrievance,
+  witnessesOf, witnessShare,
   // §6.10 the round trip — offers, counters, patience
   counterOffer, tableOffer, offersFor, answerOffer, asksThisRound,
 } from "./diplomacy.js";
@@ -5842,6 +5843,78 @@ line("\n  [Phase 11] text-token resolver");
     }, "test");
     check("settling takes the grounds out from under it",
       warJustification(g, "goldgrass", "versari") === null);
+  }
+}
+
+// Phase 26 — reputation is what the board SAW. Fog of war and diplomacy did
+// not touch anywhere in the codebase, so a massacre in unexplored wasteland
+// cost exactly what one on a rival's doorstep did.
+{
+  line("\n  [Phase 26] diplomacy — witnessed reputation");
+  const M = CONFIG.diplomacy.menace;
+
+  // Pick a hex nobody third-party can see, and the most-watched one there is.
+  const probe = createGame({ seed: 261, humanFactionId: "versari" });
+  ensureDiplomacy(probe);
+  const opts = { attacker: "versari", victim: "goldgrass" };
+  const counted = Object.keys(probe.board.hexes)
+    .map((h) => [h, witnessesOf(probe, h, opts).length]);
+  const mostSeen = Math.max(...counted.map(([, n]) => n));
+  const openHex = counted.find(([, n]) => n === mostSeen)[0];
+  const darkHex = counted.find(([, n]) => n === 0)?.[0];
+
+  check("some ground is watched and some is not", mostSeen > 0 && !!darkHex);
+  check("an unwatched hex scores near nothing",
+    witnessShare(probe, darkHex, opts) === M.unwitnessedShare);
+  check("a watched one scores more", witnessShare(probe, openHex, opts) > witnessShare(probe, darkHex, opts));
+
+  // The same blow, in the open and in the dark. Already at war both times so
+  // the declaration's own Menace doesn't muddy the reading.
+  const strike = (hex) => {
+    const g = createGame({ seed: 261, humanFactionId: "versari" });
+    ensureDiplomacy(g);
+    declareWar(g, "versari", "goldgrass", "test");
+    const before = g.players.versari.menace || 0;
+    onAttack(g, "versari", "goldgrass", hex);
+    return (g.players.versari.menace || 0) - before;
+  };
+  check("striking where the board can see costs reputation", strike(openHex) > 0);
+  check("…and striking where it cannot costs less", strike(darkHex) < strike(openHex));
+
+  // But the victim was there, and can say so.
+  {
+    const g = createGame({ seed: 261, humanFactionId: "versari" });
+    ensureDiplomacy(g);
+    onAttack(g, "versari", "goldgrass", darkHex); // undeclared, unseen
+    const quiet = g.players.versari.menace || 0;
+    check("the victim holds it against you regardless of who saw",
+      worstGrievance(g, "goldgrass", "versari")?.kind === "surprise-attack");
+    check("…which gives them grounds",
+      denounceWarrant(g, "goldgrass", "versari") === "surprise-attack");
+    denounce(g, "goldgrass", "versari");
+    check("and a believed accusation is how a hidden crime reaches the board",
+      (g.players.versari.menace || 0) > quiet);
+  }
+
+  // …unless the accuser has burned their own credibility.
+  {
+    const g = createGame({ seed: 261, humanFactionId: "versari" });
+    ensureDiplomacy(g);
+    onAttack(g, "versari", "goldgrass", darkHex);
+    const quiet = g.players.versari.menace || 0;
+    g.players.goldgrass.honor = CONFIG.diplomacy.honor.min;
+    denounce(g, "goldgrass", "versari");
+    check("a discredited victim shouts into the void",
+      (g.players.versari.menace || 0) === quiet);
+  }
+
+  // A grievance now knows where it happened, which is what lets the UI cite
+  // the act rather than assert that one exists.
+  {
+    const g = createGame({ seed: 261, humanFactionId: "versari" });
+    ensureDiplomacy(g);
+    onAttack(g, "versari", "goldgrass", darkHex);
+    check("the ledger records the place", worstGrievance(g, "goldgrass", "versari").at === darkHex);
   }
 }
 

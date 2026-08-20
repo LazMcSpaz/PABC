@@ -15,7 +15,7 @@ import { getStanding, adjustStanding, setStanding, standingTier } from "./standi
 import { bfsDistances, reinforcementRoute } from "./board.js";
 import { holdsLocation } from "./control.js";
 import {
-  revealRegion, applySharedVision, recomputeVisibilityFor, isUnitVisibleTo,
+  revealRegion, applySharedVision, recomputeVisibilityFor, isUnitVisibleTo, isHexVisible,
 } from "./visibility.js";
 import { recomputeResearch } from "./stats.js";
 import { recomputeVp } from "./victory.js";
@@ -402,7 +402,32 @@ export function adjustHonor(state, pid, amount, cause) {
 // §18.5 — Menace swing for an attack, scored relative to the TARGET's
 // temperament: bullying a peaceful faction raises it; checking a warlord
 // lowers it. Called on contest resolution (contest.js).
-export function menaceFromAttack(state, attackerPid, targetFid) {
+// Who could SEE what happened at `hex` — third parties only. The attacker
+// obviously knows and the victim was there; neither is news. This is the
+// board, and the board is what Menace measures.
+export function witnessesOf(state, hex, { attacker, victim } = {}) {
+  return factionIds(state).filter((f) => {
+    if (f === attacker || f === victim) return false;
+    if (!state.players[f]) return false;
+    return isHexVisible(state, f, hex);
+  });
+}
+
+// The share of the board that saw it, 0..1. With fog off everyone sees
+// everything, which is exactly right — a game without fog is a game where
+// reputation is omniscient, and it used to be omniscient either way.
+export function witnessShare(state, hex, opts) {
+  const m = D().menace;
+  if (!m.witnessedOnly || !hex) return 1;
+  const audience = factionIds(state).filter(
+    (f) => f !== opts?.attacker && f !== opts?.victim && state.players[f],
+  );
+  if (!audience.length) return 1; // nobody else is playing; no reputation to lose either way
+  const seen = witnessesOf(state, hex, opts).length;
+  return m.unwitnessedShare + (1 - m.unwitnessedShare) * (seen / audience.length);
+}
+
+export function menaceFromAttack(state, attackerPid, targetFid, hex) {
   if (!state.players[attackerPid]) return;
   // A justified war is fought clean: no Menace for the righteous side.
   if (warIsJustified(state, attackerPid, targetFid)) return;
@@ -410,8 +435,18 @@ export function menaceFromAttack(state, attackerPid, targetFid) {
   // Checking a warlord soothes your reputation a LITTLE — clamped at −1 so
   // attacking aggressive factions can't launder a bully's Menace away (the
   // playtest human dropped 5 → 0 Menace purely by attacking Grand Lakers).
-  const delta = Math.max(-1, Math.round(D().menace.base * (0.5 - (tDef.aggression ?? 0.5)) * 2));
-  if (delta) adjustMenace(state, attackerPid, delta, `attack:${targetFid}`);
+  const raw = Math.max(-1, Math.round(D().menace.base * (0.5 - (tDef.aggression ?? 0.5)) * 2));
+  if (!raw) return;
+  // Scaled by who saw it. Only a COST is discounted for being unseen —
+  // striking a bully where nobody is watching should not earn you the credit
+  // for having checked them in public.
+  const share = raw > 0 ? witnessShare(state, hex, { attacker: attackerPid, victim: targetFid }) : 1;
+  const delta = raw > 0 ? Math.round(raw * share) : raw;
+  if (delta) {
+    adjustMenace(state, attackerPid, delta, `attack:${targetFid}`);
+  } else if (raw > 0) {
+    emit(state, "attack_unwitnessed", { attacker: attackerPid, victim: targetFid, hex });
+  }
 }
 
 // --- power / threat (§18.8) -----------------------------------------
@@ -1672,7 +1707,17 @@ export function denounce(state, denouncer, target) {
       adjustStanding(state, f, denouncer, -dc.backlash, "denounce-baseless");
     }
   }
-  emit(state, "denounced", { denouncer, target, warrant });
+  // A warranted accusation the board can hear is how a crime nobody witnessed
+  // catches up with its author. The victim was there — they hold the
+  // grievance — and this is them putting it in front of everyone else.
+  // Which is the whole point of gating Menace on witnesses: striking in the
+  // dark buys you time, not impunity, and only for as long as the party you
+  // wronged stays quiet or unbelieved.
+  const m = D().menace;
+  if (warrant && heardBy.length && state.players[target] && m.denouncedShare) {
+    adjustMenace(state, target, Math.max(1, Math.round(m.base * m.denouncedShare)), `denounced-by:${denouncer}`);
+  }
+  emit(state, "denounced", { denouncer, target, warrant, heard: heardBy.length });
   return true;
 }
 
@@ -1766,7 +1811,7 @@ function breakPromiseIfAny(state, a, b, kinds) {
 // attacker takes a Menace swing scored vs the target's temperament; an
 // attack on an ally or non-aggression partner breaks that word (Honor ding);
 // and an attack that isn't already a war establishes the war-state.
-export function onAttack(state, attackerPid, targetFid) {
+export function onAttack(state, attackerPid, targetFid, hex = null) {
   if (!targetFid || attackerPid === targetFid) return;
   ensureDiplomacy(state);
   // Striking through a live truce is treachery on top of everything else:
@@ -1778,7 +1823,7 @@ export function onAttack(state, attackerPid, targetFid) {
     const tc = D().truce;
     if (state.players[attackerPid]) adjustHonor(state, attackerPid, -tc.breakHonorLoss, "truce-broken");
     adjustMenace(state, attackerPid, tc.breakMenace, "truce-broken");
-    recordGrievance(state, targetFid, attackerPid, "truce-broken");
+    recordGrievance(state, targetFid, attackerPid, "truce-broken", { at: hex });
     emit(state, "truce_broken", { breaker: attackerPid, victim: targetFid });
   }
   // §1.1/§6.8 — a "treacherous strike": attacking before any war exists costs
@@ -1794,12 +1839,12 @@ export function onAttack(state, attackerPid, targetFid) {
       attacker: attackerPid, target: targetFid, amount: D().honor.surpriseAttackLoss,
     });
     adjustBaseline(state, targetFid, attackerPid, -D().baseline.surpriseAttackLoss, "surprise-attack");
-    recordGrievance(state, targetFid, attackerPid, "surprise-attack");
+    recordGrievance(state, targetFid, attackerPid, "surprise-attack", { at: hex });
   }
   if (arePacted(state, attackerPid, targetFid)) breakPact(state, attackerPid, targetFid, "attacked-ally");
   breakPromiseIfAny(state, attackerPid, targetFid, ["nonAggression", "peace"]);
   if (!atWar(state, attackerPid, targetFid)) declareWar(state, attackerPid, targetFid, "attack");
-  menaceFromAttack(state, attackerPid, targetFid);
+  menaceFromAttack(state, attackerPid, targetFid, hex);
 }
 
 // --- Recognition victory (§18.10) -----------------------------------
