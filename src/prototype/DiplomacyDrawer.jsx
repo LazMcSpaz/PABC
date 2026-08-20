@@ -101,16 +101,16 @@ const TIER_COLOR = {
 // menu. Each carries label / description / destructive flag.
 const VERB_META = {
   "gift":                  { label: "Gift", body: "Send scrap. Raises their Standing toward you.", isPane: "gift" },
-  "propose-deal":          { label: "Custom Deal", body: "Build a give/get offer. Opens the deal builder.", isPane: "deal" },
+  "propose-deal":          { label: "Custom Deal", body: "Scrap, streams, alliances, borders, non-aggression — build it and see what they say.", isPane: "deal" },
   "demand-tribute":        { label: "Demand Tribute", body: "Take, don't ask. Stains Honor if refused.", isPane: "tribute", destructive: true },
   "sue-for-peace":         { label: "Sue for Peace", body: "Offer terms alongside the peace promise.", isPane: "peace" },
   "propose-pact":          { label: "Propose Pact", body: "Mutual defence + Standing bonus on both sides." },
-  "make-peace":            { label: "Make Peace", body: "End the war, no terms attached." },
+  "make-peace":            { label: "Ask for a Ceasefire", body: "Offer to end the war with nothing attached. They take it only if they want out." },
   "mediate":               { label: "Mediate", body: "Broker peace between two warring factions.", isPane: "mediate" },
   "pact-call":             { label: "Call to Pact", body: "Call your ally into one of your wars.", isPane: "pact-call" },
   "vassalize":             { label: "Vassalize", body: "Bind them under your banner.", destructive: true },
   "free-vassal":           { label: "Free Vassal", body: "Release them. Honor rises; tribute stops.", destructive: true },
-  "denounce":              { label: "Denounce", body: "Public condemnation. Standing falls on both sides.", destructive: true },
+  "denounce":              { label: "Denounce", body: "Public condemnation. Costs Honor, and makes a war on them just.", destructive: true },
   "declare-war":           { label: "Declare War", body: "Open hostilities. Menace rises immediately.", destructive: true },
   // §6 trade + passive toggles
   "trading-pact":          { label: "Open Trading Pact", body: "Route between capitals — per-round scrap each side + permanent Research floor." },
@@ -121,8 +121,8 @@ const VERB_META = {
 };
 
 const DESTRUCTIVE_PROMPT = {
-  "declare-war":            "Declare war? You'll lose Standing and gain Menace immediately. Their allies may join in.",
-  "denounce":               "Denounce publicly? Standing falls on both sides and your Honor takes a hit.",
+  "declare-war":            "Declare war? Standing collapses, and unless you have a grievance on record the declaration alone raises your Menace. Their allies may join in.",
+  "denounce":               "Denounce publicly? It costs you Honor and cools you both — and it buys the right to a just war on them.",
   "vassalize":              "Take them under your banner? The cornered submit; a friendly minor may welcome a protector.",
   "free-vassal":            "Release this vassal? Your Honor rises, their tribute stops.",
   "demand-tribute":         "Demand tribute? Refusal will damage your Honor and could trigger war.",
@@ -1299,25 +1299,48 @@ function TechReadout({ nodes }) {
 // Action panes — §3.4
 // =======================================================================
 
+// The term, in rounds, that a stream or a standing promise runs for.
+// Mirrors CONFIG.diplomacy.flow — kept here rather than imported so the pane
+// stays a pure view; the engine clamps anything out of range regardless.
+const TERM_DEFAULT = 5;
+const TERM_MAX = 20;
+
 function DealPane({ f, dip, kind = "custom", onBack, onSubmit }) {
   const [scrapGive, setScrapGive] = useState(0);
   const [scrapGet, setScrapGet] = useState(0);
+  const [flowGive, setFlowGive] = useState(0);
+  const [flowGet, setFlowGet] = useState(0);
   const [pactOffer, setPactOffer] = useState(false);
   const [openBorders, setOpenBorders] = useState(false);
+  const [nonAggression, setNonAggression] = useState(false);
+  const [term, setTerm] = useState(TERM_DEFAULT);
   const isPeace = kind === "peace";
   const isTribute = kind === "tribute";
   const isGift = kind === "gift";
+  // A term only means anything when something on the table actually runs for
+  // one; a lump sum and an alliance are both settled the moment it's struck.
+  const termMatters = flowGive > 0 || flowGet > 0 || nonAggression;
 
+  // Everything here speaks the engine's item schema
+  // ({resource} / {flow} / {promise:{kind}}). It used to emit its own
+  // shorthand — {pact:true}, {openBorders:true} — which valueOfItem does not
+  // read, so those terms were worth nothing to the other side and created
+  // nothing when the deal was struck. An offer of "an alliance for free" was
+  // accepted and produced no alliance.
   const deal = useMemo(() => {
     const give = [];
     const get = [];
     if (scrapGive > 0) give.push({ resource: { resource: "scrap", amount: scrapGive } });
     if (scrapGet > 0) get.push({ resource: { resource: "scrap", amount: scrapGet } });
-    if (pactOffer && !isTribute) give.push({ pact: true });
-    if (openBorders) give.push({ openBorders: true });
-    if (isPeace) give.push({ peace: true });
+    if (flowGive > 0) give.push({ flow: { resource: "scrap", amountPerTurn: flowGive, rounds: term } });
+    if (flowGet > 0) get.push({ flow: { resource: "scrap", amountPerTurn: flowGet, rounds: term } });
+    if (pactOffer && !isTribute) give.push({ promise: { kind: "pact" } });
+    if (openBorders) give.push({ promise: { kind: "openBorders" } });
+    if (nonAggression) give.push({ promise: { kind: "nonAggression", rounds: term } });
+    if (isPeace) give.push({ promise: { kind: "peace" } });
     return { proposer: dip.youId, recipient: f.id, give, get };
-  }, [scrapGive, scrapGet, pactOffer, openBorders, dip.youId, f.id, isPeace, isTribute]);
+  }, [scrapGive, scrapGet, flowGive, flowGet, pactOffer, openBorders, nonAggression,
+      term, dip.youId, f.id, isPeace, isTribute]);
 
   const title = isGift ? "Send a gift" : isPeace ? "Sue for peace" : isTribute ? "Demand tribute" : "Custom deal";
   const subtitle = isGift
@@ -1346,11 +1369,17 @@ function DealPane({ f, dip, kind = "custom", onBack, onSubmit }) {
             <Card style={{ flex: 1 }}>
               <SectionLabel>You give</SectionLabel>
               <NumberRow label="Scrap" value={scrapGive} onChange={setScrapGive} max={50} disabled={isTribute} />
+              {!isGift && (
+                <NumberRow label="Scrap / turn" value={flowGive} onChange={setFlowGive} max={12} />
+              )}
               {!isPeace && !isGift && (
                 <Toggle label="Offer pact" value={pactOffer} onChange={setPactOffer} />
               )}
               {!isGift && (
-                <Toggle label="Open borders" value={openBorders} onChange={setOpenBorders} />
+                <Toggle label="Open my borders" value={openBorders} onChange={setOpenBorders} />
+              )}
+              {!isGift && (
+                <Toggle label="Non-aggression" value={nonAggression} onChange={setNonAggression} />
               )}
               {isPeace && (
                 <div style={{
@@ -1366,9 +1395,25 @@ function DealPane({ f, dip, kind = "custom", onBack, onSubmit }) {
             <Card style={{ flex: 1 }}>
               <SectionLabel>You get</SectionLabel>
               <NumberRow label="Scrap" value={scrapGet} onChange={setScrapGet} max={50} />
+              <NumberRow label="Scrap / turn" value={flowGet} onChange={setFlowGet} max={12} />
             </Card>
           )}
         </div>
+
+        {/* Term — only shown once something on the table actually runs for
+            one. A stream priced without a term is how the old builder let a
+            player buy four scrap a turn forever for twelve scrap. */}
+        {termMatters && (
+          <Card>
+            <SectionLabel>Term</SectionLabel>
+            <NumberRow label="Rounds" value={term} onChange={(v) => setTerm(Math.max(1, v))} max={TERM_MAX} />
+            <div className="pc-prose" style={{ fontSize: 11, lineHeight: 1.5, color: "rgba(207,214,220,0.6)", marginTop: 4 }}>
+              Streams and standing promises run for this long, then lapse —
+              honourably, on both sides. They price it accordingly: a longer
+              term is worth more, but not proportionally more.
+            </div>
+          </Card>
+        )}
 
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
           <button onClick={onBack} className="hud-int" style={btnGhostStyle()}>Back</button>
@@ -1836,7 +1881,10 @@ export default function DiplomacyDrawer({
                   onBack={() => setPane(null)}
                   onSubmit={(deal) => runFromPane("demand-tribute", {
                     faction: selectedFaction.id,
-                    give: [], get: deal.get,
+                    // `terms` is what the verb reads. It used to be sent as
+                    // `get`, which the verb ignored, so every demand made
+                    // from here asked for nothing and "succeeded".
+                    terms: deal.get,
                   })}
                 />
               )}

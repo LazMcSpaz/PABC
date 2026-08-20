@@ -329,6 +329,11 @@ export const CONFIG = {
     // §18.5 Menace — reputation for UNJUSTIFIED aggression, scored vs target.
     menace: {
       base: 3, // magnitude of a single attack's Menace swing
+      // Declaring an UNJUSTIFIED war is itself unjustified aggression, and
+      // the board reacts to the declaration, not only to the first blow.
+      // A justified war (denounced first, or answering a betrayal) costs
+      // nothing to declare — which is the whole point of earning one.
+      declareUnjustified: 2,
       decayPerRound: 1, // slow decay with clean play / time
       min: 0, max: 24,
     },
@@ -339,6 +344,13 @@ export const CONFIG = {
       breakLoss: 5, // breaking a pact call / treaty / promise (sharp)
       mediateGain: 2, // §18.7 peacemaker reputation
       surpriseAttackLoss: 8, // §1.1 — attacking before declaring war (treachery)
+      // Denouncing costs Honor. It is a public accusation, and the board
+      // does not distinguish a righteous one from an opportunist building a
+      // pretext — which is exactly the trade: spend standing-as-an-honest-
+      // broker to buy a just war. Smaller than breakLoss (you broke nothing)
+      // but real, because without it the verb was free and unlimited and a
+      // permanent just-war window against the whole board cost nothing.
+      denounceLoss: 2,
       decayToward: 0, decayPerRound: 0, // no passive decay by default
     },
     // §18.5 Tolerance = base + standing·perStanding, ± by the faction's
@@ -415,6 +427,16 @@ export const CONFIG = {
       refuseStandingDropTiers: 2,
     },
     suePeace: { acceptThreshold: 8, standingBoost: 3 }, // §1.5
+    // Deal flows (a per-turn stream, as opposed to a lump sum). Every flow a
+    // DEAL creates is term-limited; vassal tribute is not a deal and stays
+    // perpetual, ending when the vassalage does.
+    flow: {
+      defaultRounds: 5, // a flow proposed without a term runs this long
+      maxRounds: 20, // the deal builder's ceiling
+      // What a perpetual flow (vassal tribute) is worth to a valuer. Only
+      // reached by engine-made agreements; a deal can no longer create one.
+      perpetualHorizon: 8,
+    },
     war: { unitLossWeight: 2, locationLossWeight: 4 }, // §1.5 war-exhaustion weights
     freeVassal: { // §1.7
       honorGain: 5,
@@ -471,6 +493,11 @@ export const CONFIG = {
     justWar: {
       denounceWindowRounds: 6, // your denouncement of them counts this long
       grievanceWindowRounds: 8, // their betrayal of you counts this long
+      // You cannot re-denounce the same faction until this clears. Paired
+      // with honor.denounceLoss it makes a standing pretext something you
+      // have to keep paying for, rather than a switch you flip once a round
+      // to keep the window open forever.
+      denounceCooldownRounds: 5,
     },
     // Precursor warnings — the AI telegraphs trouble to the HUMAN before it
     // lands: a faction whose regard sinks to Wary sends word; the board

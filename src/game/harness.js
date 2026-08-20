@@ -29,6 +29,8 @@ import {
   mediate, sweepTrespass, warJustification, threatScore,
   // pace pass — truces + partial control
   truceBetween, makePeace,
+  // diplomacy audit fixes — consent, cost, one deal schema, terms
+  denounce, denounceCooldown, valueOfItem, applyDeal, adjustStanding,
 } from "./diplomacy.js";
 import { holderOf, controlLevel, holdsLocation } from "./control.js";
 import { recomputeVp, settlementVp, locationVp } from "./victory.js";
@@ -5401,6 +5403,134 @@ line("\n  [Phase 11] text-token resolver");
   sweepTrespass(g3, "versari");
   check("your garrison is never cited for trespassing in a city you hold",
     getStanding(g3, "lakers", "versari") === standBefore);
+}
+
+// Phase 23 — the diplomacy audit fixes (docs/diplomacy-audit-2026-08-19.md).
+// Every check here is a bug that shipped: a verb that did nothing, a verb
+// that skipped consent entirely, a cost the UI promised and the engine never
+// charged, and a deal schema the two halves of the app disagreed on.
+{
+  line("\n  [Phase 23] diplomacy — consent, cost, and one deal schema");
+  const H = CONFIG.diplomacy.honor;
+  const M = CONFIG.diplomacy.menace;
+
+  // --- 1. Make Peace is an OFFER, not a button ---
+  {
+    const g = createGame({ seed: 231, humanFactionId: "versari" });
+    ensureDiplomacy(g);
+    declareWar(g, "lakers", "versari", "test");
+    // A warlord one round into a war it has lost nothing in refuses.
+    check("a fresh war cannot be ended by asking",
+      aiAcceptsPeace(g, "lakers", "versari", null) === false);
+    const res = performDiplomacy(g, "versari", "make-peace", { faction: "lakers" });
+    check("make-peace reports the refusal instead of silently succeeding",
+      res.ok === true && res.accepted === false);
+    check("…and the war is still on", atWar(g, "versari", "lakers"));
+    check("make-peace off a war is refused outright",
+      performDiplomacy(g, "versari", "make-peace", { faction: "goldgrass" }).ok === false);
+  }
+
+  // --- 2. Denounce costs Honor, and cannot be spammed ---
+  {
+    const g = createGame({ seed: 232, humanFactionId: "versari" });
+    ensureDiplomacy(g);
+    const h0 = honorOf(g, "versari");
+    check("denouncing lands the first time", denounce(g, "versari", "lakers") === true);
+    check("denouncing costs Honor", honorOf(g, "versari") === h0 - H.denounceLoss);
+    check("a second denouncement in the window is refused",
+      denounce(g, "versari", "lakers") === false);
+    check("…and costs nothing further", honorOf(g, "versari") === h0 - H.denounceLoss);
+    check("the cooldown is readable by the UI",
+      denounceCooldown(g, "versari", "lakers") > 0
+      && denounceCooldown(g, "versari", "goldgrass") === 0);
+  }
+
+  // --- 3. Declaring an unjustified war marks you; a just one does not ---
+  {
+    const g = createGame({ seed: 233, humanFactionId: "versari" });
+    ensureDiplomacy(g);
+    declareWar(g, "versari", "lakers", "player");
+    check("an unprovoked declaration raises Menace before a shot is fired",
+      (g.players.versari.menace || 0) === M.declareUnjustified);
+    const g2 = createGame({ seed: 233, humanFactionId: "versari" });
+    ensureDiplomacy(g2);
+    denounce(g2, "versari", "lakers");
+    declareWar(g2, "versari", "lakers", "player");
+    check("a war you denounced your way into costs no Menace to declare",
+      (g2.players.versari.menace || 0) === 0);
+  }
+
+  // --- 4. One deal schema: a struck promise is performed ---
+  {
+    const g = createGame({ seed: 234, humanFactionId: "versari" });
+    ensureDiplomacy(g);
+    adjustStanding(g, "goldgrass", "versari", 12, "test");
+    check("the drawer's old shorthand is worth nothing (it is not the schema)",
+      valueOfItem(g, "goldgrass", { pact: true }) === 0);
+    check("an alliance is worth something to a faction that would take one",
+      valueOfItem(g, "goldgrass", { promise: { kind: "pact" } }, { other: "versari" }) > 0);
+    const r = performDiplomacy(g, "versari", "propose-deal", {
+      faction: "goldgrass",
+      give: [{ promise: { kind: "pact" } }, { promise: { kind: "openBorders" } }],
+      get: [{ resource: { resource: "scrap", amount: 3 } }],
+    });
+    check("a struck deal that promised a pact leaves a pact behind",
+      r.accepted === true && arePacted(g, "versari", "goldgrass"));
+    check("…and one that promised open borders leaves them open",
+      hasOpenBorders(g, "versari", "goldgrass"));
+  }
+
+  // --- 5. dontAlly is enforced, not just priced ---
+  {
+    const g = createGame({ seed: 235, humanFactionId: "versari" });
+    ensureDiplomacy(g);
+    applyDeal(g, {
+      proposer: "versari", recipient: "plainers",
+      give: [{ promise: { kind: "dontAlly", target: "lakers", rounds: 6 } }], get: [],
+    }, "test");
+    adjustStanding(g, "lakers", "versari", 12, "test");
+    adjustStanding(g, "versari", "lakers", 12, "test");
+    check("a live dontAlly pledge blocks the alliance it named",
+      formPact(g, "versari", "lakers", "test") === false && !arePacted(g, "versari", "lakers"));
+  }
+
+  // --- 6. A flow is priced on its term, pays exactly that many times ---
+  {
+    const g = createGame({ seed: 236, humanFactionId: "versari" });
+    ensureDiplomacy(g);
+    const short = { flow: { resource: "scrap", amountPerTurn: 4, rounds: 5 } };
+    const long = { flow: { resource: "scrap", amountPerTurn: 4, rounds: 20 } };
+    check("a longer stream is worth more than a shorter one",
+      valueOfItem(g, "goldgrass", long) > valueOfItem(g, "goldgrass", short));
+    check("a stream is priced at rate x term", valueOfItem(g, "goldgrass", short) === 20);
+    applyDeal(g, { proposer: "goldgrass", recipient: "versari", give: [short], get: [] }, "test");
+    g.players.goldgrass.resource = 500;
+    const start = g.players.versari.resource || 0;
+    for (let i = 0; i < 12; i++) { g.round += 1; runDiplomacyRound(g); }
+    check("a 5-round stream pays exactly 5 times, then lapses",
+      (g.players.versari.resource || 0) - start === 20);
+    check("…and the agreement is gone",
+      !g.diplomacy.agreements.some((a) => a.type === "deal-promise"));
+  }
+
+  // --- 7. Demand Tribute reads what the drawer sends ---
+  {
+    const g = createGame({ seed: 237, humanFactionId: "versari" });
+    ensureDiplomacy(g);
+    g.players.goldgrass.resource = 50;
+    g.players.versari.resource = 0;
+    for (const loc of Object.values(g.locations)) {
+      if (loc.controller && loc.controller !== "goldgrass") loc.controller = "versari";
+    }
+    for (const u of Object.values(g.units)) if (u.owner !== "goldgrass") u.owner = "versari";
+    check("a demand naming nothing is refused",
+      performDiplomacy(g, "versari", "demand-tribute", { faction: "goldgrass", terms: [] }).ok === false);
+    performDiplomacy(g, "versari", "demand-tribute", {
+      faction: "goldgrass", terms: [{ resource: { resource: "scrap", amount: 15 } }],
+    });
+    check("a demand that caves actually moves the scrap named",
+      (g.players.versari.resource || 0) === 15);
+  }
 }
 
 line(`\n  v0.2 verification: ${v2pass} passed, ${v2fail} failed`);

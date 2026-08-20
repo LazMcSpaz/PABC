@@ -26,7 +26,8 @@ import { factionDef } from "../game/content.js";
 import {
   recognitionScore, threatScore, tolerance, trustFloor, standingTier, getStanding,
   arePacted, atWar, vassalLord, coalitionAgainst, factionIds,
-  aiAcceptsPact, aiAcceptsVassalage, wouldAccept, passesRepGates,
+  aiAcceptsPact, aiAcceptsVassalage, aiAcceptsPeace, wouldAccept, passesRepGates,
+  denounceCooldown,
   evaluatePactCall, canDemandTribute, hasOpenBorders, warJustification,
   openBordersStanding,
   railAccessStanding,
@@ -1002,19 +1003,25 @@ function availableVerbsAgainst(state, viewer, fid) {
     } else if (warJustification(state, viewer, fid)) {
       out.push({
         verb: "declare-war", state: "enabled",
-        outcome: "JUSTIFIED — your grievance is on record. Fighting this war costs no Menace.",
+        outcome: "JUSTIFIED — your grievance is on record. Neither the declaration nor the fighting costs Menace.",
       });
     } else {
       out.push({
         verb: "declare-war", state: "enabled",
-        outcome: "UNPROVOKED — fighting them will raise your Menace. Denounce them first to declare a just war.",
+        outcome: `UNPROVOKED — +${CONFIG.diplomacy.menace.declareUnjustified} Menace the moment you declare, and more with every attack. Denounce them first to declare a just war.`,
       });
     }
   }
 
-  // 4) Make Peace (only when at war).
+  // 4) Make Peace (only when at war). A bare ask with nothing attached —
+  // whether they take it rides entirely on how tired of the war they are.
   if (war) {
-    out.push({ verb: "make-peace", state: "enabled", outcome: "End the war. They will accept if you've stopped pressing them." });
+    out.push({
+      verb: "make-peace", state: "enabled",
+      outcome: aiAcceptsPeace(state, fid, viewer, null)
+        ? "They have had enough of this war and would take a plain ceasefire."
+        : "They are not tired of this war yet. Offer them something (Sue for Peace) or make it cost them more.",
+    });
   }
 
   // 5) Sue for Peace (when at war, same engine call — kept distinct as a deal builder).
@@ -1059,9 +1066,21 @@ function availableVerbsAgainst(state, viewer, fid) {
     out.push({ verb: "free-vassal", state: "enabled", outcome: "Release them. Honor rises; you lose their tribute." });
   }
 
-  // 10) Denounce — public condemnation; visible whenever you have any standing with them.
+  // 10) Denounce — public condemnation, and the formal first step of a just
+  // war. Costs Honor and cannot be repeated until its cooldown clears.
   if (!myLord && !myVassal) {
-    out.push({ verb: "denounce", state: "enabled", outcome: "Standing falls on both sides; you take an Honor hit but signal allies." });
+    const cd = denounceCooldown(state, viewer, fid);
+    if (cd > 0) {
+      out.push({
+        verb: "denounce", state: "disabled",
+        reason: `Already denounced — the accusation stands for ${cd} more round${cd === 1 ? "" : "s"}.`,
+      });
+    } else {
+      out.push({
+        verb: "denounce", state: "enabled",
+        outcome: `−${CONFIG.diplomacy.honor.denounceLoss} Honor and Standing falls on both sides, but it puts a grievance on record: for ${CONFIG.diplomacy.justWar.denounceWindowRounds} rounds a war on them is JUST, and costs no Menace.`,
+      });
+    }
   }
 
   // 11) Mediate — surfaced from the warring-pair list; this verb is for the action pane.

@@ -78,6 +78,8 @@ export const EVENT_NAMES = new Set([
   "diplomatic_warning",
   // Truces — peace is binding for a window; breaking it is treachery.
   "truce_broken",
+  // Deal flows run for a term and then lapse, honorably.
+  "agreement_expired",
 ]);
 
 // Resolve a chip / card instance uid to its content def. Covers Market

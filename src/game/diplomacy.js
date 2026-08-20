@@ -373,22 +373,66 @@ export function mayEngage(state, a, b) {
 
 // --- deal valuation (§18.6 / §18.8) ---------------------------------
 // Subjective value of one Item to `fid` (positive = good to receive).
+// How many rounds a flow runs for. A deal flow always carries a term (the
+// builder supplies one and applyDeal stamps a default if it somehow doesn't);
+// a flow with no term is engine-made and perpetual — today only vassal
+// tribute, which ends when the vassalage does.
+export function flowRounds(flow) {
+  return flow?.rounds || D().flow.perpetualHorizon;
+}
+
+// How long a standing promise binds for, and what that multiplies its worth
+// by. Square-rooted so a promise twice as long is worth ~1.4x, not 2x — the
+// far end of a long promise is the least believable part of it.
+export function promiseRounds(promise) {
+  return promise?.rounds || D().flow.defaultRounds;
+}
+function promiseTermScale(promise) {
+  return Math.sqrt(promiseRounds(promise) / D().flow.defaultRounds);
+}
+
+// What an alliance itself is worth to `fid` right now — the value of the
+// `pact` deal item. A faction that would accept a bare pact offer values it
+// highly; one that would refuse still prices it above zero if it likes you,
+// so a pact can be the sweetener in a larger deal without being free.
+function pactAppetite(state, fid, other) {
+  if (!other || arePacted(state, fid, other)) return 0;
+  const def = factionDef(fid) || {};
+  const social = def.sociability ?? 0.5;
+  if (aiAcceptsPact(state, fid, other)) return 5 + social * 4;
+  // Below the bar, but not worthless: it is still an alliance being offered.
+  if (!mayEngage(state, fid, other) || atWar(state, fid, other)) return 0;
+  const shortfall = D().pactStandingReq - getStanding(state, fid, other);
+  return Math.max(0, (5 + social * 4) - shortfall);
+}
+
 export function valueOfItem(state, fid, item, ctx = {}) {
   if (!item) return 0;
   if (item.resource) return item.resource.amount || 0;
-  if (item.flow) return (item.flow.amountPerTurn || 0) * 3; // a few turns of stream
+  // A stream is worth its rate times its TERM. This used to be a flat "×3"
+  // against a flow that never expired, so 4 scrap a turn forever priced at
+  // 12 — buy it once, collect it for the rest of the game.
+  if (item.flow) return (item.flow.amountPerTurn || 0) * flowRounds(item.flow);
   if (item.research) return (item.research.amount || 0) * 2;
   if (item.chip) return 4; // generic gear value
   if (item.intel) return item.intel.kind === "mapData" ? 3 : 2;
   if (item.promise) {
     const def = factionDef(fid) || {};
+    // A promise with a term is worth more the longer it binds, but not
+    // linearly — the far end of a long promise is worth less than the near
+    // end, because anything can happen by then. `termScale` is 1.0 at the
+    // default term and grows/shrinks with the square root of the ratio.
+    const termScale = promiseTermScale(item.promise);
     switch (item.promise.kind) {
+      // Enacted on the spot rather than promised, so no term applies.
+      case "pact": return pactAppetite(state, fid, ctx.other);
       case "peace": return atWar(state, fid, ctx.other) ? 6 : 1;
-      case "nonAggression": return 2 + (1 - (def.aggression || 0.5)) * 3;
       case "openBorders": return 1 + (def.sociability || 0.5) * 2;
       case "joinWar": return wantsDead(state, fid, item.promise.target) ? 5 : 0;
-      case "dontAlly": return 1;
-      case "tribute": return 4; // receiving tribute is good
+      // Standing promises — these bind for a term and are enforced.
+      case "nonAggression": return (2 + (1 - (def.aggression || 0.5)) * 3) * termScale;
+      case "dontAlly": return 1 * termScale;
+      case "tribute": return 4 * termScale; // receiving tribute is good
       default: return 1;
     }
   }
@@ -420,7 +464,7 @@ export function wouldAccept(state, fid, deal) {
   const other = deal.proposer === fid ? deal.recipient : deal.proposer;
   // Hard gate: a pact / deep promise needs the proposer past rep gates.
   const hasDeepPromise = [...(deal.give || []), ...(deal.get || [])].some(
-    (it) => it.promise && ["nonAggression", "openBorders", "tribute"].includes(it.promise.kind),
+    (it) => it.promise && ["pact", "nonAggression", "openBorders", "tribute"].includes(it.promise.kind),
   );
   if (hasDeepPromise && !passesRepGates(state, fid, other)) return false;
   // Hard gate: conflicting agreements — won't ally a sworn enemy's friend.
@@ -431,19 +475,91 @@ export function wouldAccept(state, fid, deal) {
   return dealValue(state, fid, deal) >= 0;
 }
 
+// Promise kinds that are ACTS, not undertakings: striking the deal performs
+// them there and then, so they leave a pact / an open border / a peace behind
+// rather than a piece of paper somebody might later dishonour.
+const ENACTED_PROMISES = new Set(["pact", "peace", "openBorders", "joinWar"]);
+
+// Perform the enacted half of a struck deal. `from` is the party making the
+// promise; `to` is the party it is made to.
+function enactPromise(state, from, to, promise, cause) {
+  switch (promise.kind) {
+    case "pact":
+      formPact(state, from, to, cause);
+      return;
+    case "peace":
+      makePeace(state, from, to, cause);
+      return;
+    case "openBorders":
+      // The promiser opens THEIR territory to the other party. One-directional,
+      // exactly like the standalone verb — granting is not receiving.
+      if (!standaloneOpenBorders(state, from, to)) {
+        state.diplomacy.agreements.push({
+          id: `ob-${from}-${to}-${state.round}`, type: "open-borders",
+          a: from, b: to, since: state.round,
+        });
+        emit(state, "open_borders_toggled", { agreement: `ob-${from}-${to}`, on: true });
+      }
+      return;
+    case "joinWar":
+      // "I will fight X with you" is settled by fighting X, now.
+      if (promise.target && !atWar(state, from, promise.target)) {
+        declareWar(state, from, promise.target, "deal-joinwar");
+      }
+      return;
+    default:
+  }
+}
+
 // --- applying a struck deal (§18.6 atomic) --------------------------
 export function applyDeal(state, deal, cause = "deal") {
   // transfer each side's items
   transferItems(state, deal.proposer, deal.recipient, deal.give);
   transferItems(state, deal.recipient, deal.proposer, deal.get);
+  // …then perform the promises that are acts. Before this, a deal could be
+  // struck on "I offer you an alliance and open borders" and leave neither
+  // behind: the terms were recorded on an agreement nothing ever read.
+  for (const it of deal.give || []) {
+    if (it.promise && ENACTED_PROMISES.has(it.promise.kind)) {
+      enactPromise(state, deal.proposer, deal.recipient, it.promise, cause);
+    }
+  }
+  for (const it of deal.get || []) {
+    if (it.promise && ENACTED_PROMISES.has(it.promise.kind)) {
+      enactPromise(state, deal.recipient, deal.proposer, it.promise, cause);
+    }
+  }
   // register live agreement if it carries flows/promises (§6.2 type tag).
-  const promises = [...(deal.give || []), ...(deal.get || [])].filter((it) => it.flow || it.promise);
+  // Only flows and STANDING promises go on the record. An enacted promise
+  // has already happened; keeping it as a live term would let it be
+  // "broken" twice, and would make an alliance look like an IOU.
+  const promises = [...(deal.give || []), ...(deal.get || [])].filter(
+    (it) => it.flow || (it.promise && !ENACTED_PROMISES.has(it.promise.kind)),
+  );
   if (promises.length) {
+    // Every flow a deal creates is term-limited. A flow that arrived without
+    // one takes the default rather than becoming perpetual — the perpetual
+    // case is reserved for agreements the engine makes itself (vassal
+    // tribute), and a deal must never be able to mint one.
+    for (const it of promises) {
+      if (it.flow && !it.flow.rounds) it.flow.rounds = D().flow.defaultRounds;
+      if (it.promise && !it.promise.rounds) it.promise.rounds = D().flow.defaultRounds;
+    }
+    const term = Math.max(
+      ...promises.map((it) => (it.flow ? it.flow.rounds : promiseRounds(it.promise))),
+      0,
+    );
     state.diplomacy.agreements.push({
       id: `agr${state.diplomacy.agreements.length + 1}`,
       type: "deal-promise",
       proposer: deal.proposer, recipient: deal.recipient,
       give: deal.give || [], get: deal.get || [], round: state.round,
+      // The LAST round this is live, not the first round it isn't:
+      // runFlows fires at round-end, after state.round has already advanced,
+      // so a deal struck in round R first pays in R+1. Expiring at
+      // `R + term` exclusive would pay term−1 times and quietly shortchange
+      // whatever the players agreed.
+      expiresOnRound: state.round + term,
     });
   }
   // §1.2 — a gift warms Standing with diminishing returns; any other deal
@@ -519,6 +635,13 @@ export function declareWar(state, a, b, cause = "declared") {
   // road in — coalitions never conscript them).
   const coal = coalitionAgainst(state, b);
   if (coal && a !== coal.target && !coal.members.includes(a)) coal.members.push(a);
+  // The declaration itself is an act the board judges. A war you earned the
+  // right to costs nothing to open; one you simply wanted marks you before
+  // a single shot. (Previously the confirm dialog promised this and nothing
+  // charged it, so declaring was free and only fighting was scored.)
+  if (!justified.includes(a) && D().menace.declareUnjustified) {
+    adjustMenace(state, a, D().menace.declareUnjustified, `declare:${b}`);
+  }
   emit(state, "war_declared", { a, b, cause, justified });
 }
 
@@ -557,8 +680,24 @@ export function findPactAgreement(state, a, b) {
   ) || null;
 }
 
+// A live `dontAlly` promise by `a` naming `b` — the promise that was
+// previously sellable, priceable, and completely unenforced. Returns the
+// agreement so a caller can name it when it blocks something.
+export function dontAllyPledge(state, a, b) {
+  return (state.diplomacy?.agreements || []).find((agr) => {
+    if (agr.type !== "deal-promise") return false;
+    if (agr.expiresOnRound != null && state.round > agr.expiresOnRound) return false;
+    const mine = agr.proposer === a ? agr.give : agr.recipient === a ? agr.get : null;
+    return !!mine?.some((it) => it.promise?.kind === "dontAlly" && it.promise.target === b);
+  }) || null;
+}
+
 export function formPact(state, a, b, cause = "pact") {
   if (arePacted(state, a, b)) return false;
+  // Either side may have promised a third party it would not ally this one.
+  // Honouring it is the default; breaking it is a deliberate act that runs
+  // through breakPromiseIfAny, not something formPact does by accident.
+  if (dontAllyPledge(state, a, b) || dontAllyPledge(state, b, a)) return false;
   makePeace(state, a, b, "pact-peace");
   state.diplomacy.pacts.push({ a, b, since: state.round });
   // §1.9/§1.10 — a pact carries a typed agreement with the auto-share defaults
@@ -1094,10 +1233,26 @@ export function resolvePactCall(state, caller, ally, target, honored) {
 // §18.7 Denounce — shift faction↔faction Standing around the denounced.
 // Also the formal FIRST STEP of a just war: a denouncement on record
 // justifies a later declaration inside the window (no Menace from it).
+// Has `denouncer` already spent a denouncement on `target` too recently to
+// spend another? Exported so the UI can grey the verb and say when it clears
+// rather than letting the player fire a no-op.
+export function denounceCooldown(state, denouncer, target) {
+  const at = state.diplomacy?.denouncements?.[denouncer]?.[target];
+  if (at == null) return 0;
+  const left = D().justWar.denounceCooldownRounds - (state.round - at);
+  return left > 0 ? left : 0;
+}
+
 export function denounce(state, denouncer, target) {
+  // A denouncement on the record already does its work for
+  // justWar.denounceWindowRounds; re-stamping it every round was how a
+  // permanent pretext against the whole board cost nothing.
+  if (denounceCooldown(state, denouncer, target) > 0) return false;
   const dn = state.diplomacy.denouncements = state.diplomacy.denouncements || {};
   dn[denouncer] = dn[denouncer] || {};
   dn[denouncer][target] = state.round;
+  // The Honor cost the verb has always claimed and never charged.
+  if (state.players[denouncer]) adjustHonor(state, denouncer, -D().honor.denounceLoss, "denounce");
   adjustStanding(state, denouncer, target, -3, "denounce");
   for (const f of factionIds(state)) {
     if (f === denouncer || f === target) continue;
@@ -1106,6 +1261,7 @@ export function denounce(state, denouncer, target) {
       adjustStanding(state, f, denouncer, +2, "denounce-enemy");
   }
   emit(state, "denounced", { denouncer, target });
+  return true;
 }
 
 // §18.7 Mediate — broker peace between two OTHER warring factions. A
@@ -1471,10 +1627,22 @@ function runAIPolitics(state) {
 
 // --- agreement upkeep: flows (trade routes / tribute) ----------------
 function runFlows(state) {
+  const expired = [];
   for (const agr of state.diplomacy.agreements) {
     if (agr.vassalTribute) continue; // tribute handled in vassalTick
+    if (agr.expiresOnRound != null && state.round > agr.expiresOnRound) { expired.push(agr); continue; }
     for (const it of agr.give || []) applyFlow(state, agr.proposer, agr.recipient, it);
     for (const it of agr.get || []) applyFlow(state, agr.recipient, agr.proposer, it);
+  }
+  // An agreement that ran its full term was HONORED — the parties kept their
+  // word to the end, which is exactly what Honor is for. That also gives the
+  // stat a source other than punishment for the first time.
+  for (const agr of expired) {
+    state.diplomacy.agreements = state.diplomacy.agreements.filter((x) => x !== agr);
+    for (const side of [agr.proposer, agr.recipient]) {
+      if (state.players[side]) adjustHonor(state, side, D().honor.keepGain, "agreement-kept");
+    }
+    emit(state, "agreement_expired", { agreement: agr.id, proposer: agr.proposer, recipient: agr.recipient });
   }
 }
 function applyFlow(state, from, to, item) {
@@ -1556,9 +1724,22 @@ export function performDiplomacy(state, pid, action, params = {}) {
     case "declare-war":
       declareWar(state, pid, f, "player");
       return r();
-    case "make-peace":
+    // A bare ceasefire offer: no terms, so nothing sweetens it and the only
+    // thing that can carry it is how much they want the war over.
+    // `sue-for-peace` is the same ask WITH terms attached.
+    //
+    // This used to call makePeace() outright, with no check of any kind — a
+    // warlord one round into a war it was winning ended it because you
+    // pressed a button, and peace pays +3 Standing to both sides, so
+    // "declare, take, make peace" came out ahead of never declaring.
+    case "make-peace": {
+      if (!atWar(state, pid, f)) return { ok: false, reason: "not at war with them" };
+      if (!aiAcceptsPeace(state, f, pid, null)) {
+        return { ok: true, accepted: false, reason: "they fight on" };
+      }
       makePeace(state, pid, f, "player-peace");
-      return r();
+      return r({ accepted: true });
+    }
     case "gift": {
       const amount = Math.min(params.amount || 0, state.players[pid]?.resource || 0);
       if (amount <= 0) return { ok: false, reason: "no scrap to gift" };
@@ -1600,7 +1781,16 @@ export function performDiplomacy(state, pid, action, params = {}) {
     // §1.4 — demand tribute. Power-gated; caves or escalates to war.
     case "demand-tribute": {
       if (!canDemandTribute(state, pid, f)) return { ok: false, reason: "not strong enough to coerce them" };
-      const terms = params.terms || [{ resource: { resource: "scrap", amount: params.amount || 0 } }];
+      // The drawer builds a give/get like every other deal pane and sends
+      // the demand as `get`; only the engine's own callers use `terms`.
+      // Reading `terms` alone meant every demand made from the UI asked for
+      // the fallback amount — zero — and "succeeded" moving nothing.
+      const terms = params.terms
+        || (params.get?.length ? params.get : null)
+        || [{ resource: { resource: "scrap", amount: params.amount || 0 } }];
+      if (!terms.some((t) => (t.resource?.amount || 0) > 0 || t.chip || t.research || t.intel)) {
+        return { ok: false, reason: "name something worth demanding" };
+      }
       adjustMenace(state, pid, D().menace.base, "demand-tribute"); // the threat is hostile
       emit(state, "tribute_demanded", { demander: pid, target: f, terms });
       if (caveOnDemand(state, f, pid, terms)) {
