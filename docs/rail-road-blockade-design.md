@@ -304,10 +304,13 @@ play; there is no salvage.
 ## Why this started
 
 Road today (`src/game/board.js`) is free-for-anyone terrain infrastructure —
-it costs 1 to enter and never halts, even through mountain or forest, and
-there's no ownership check on it: any faction's units benefit, not just
-whoever's territory it's in. A rail line with the same effect would just be
-road reskinned.
+it never halts, even through mountain or forest, and there's no ownership
+check on it: any faction's units benefit, not just whoever's territory it's
+in. A rail line with the same effect would just be road reskinned.
+
+(Since 2026-08-20 both road and rail also cost half a hex to enter — see
+§2.5. That is shared between them by design; what still separates rail is the
+station hop, running rights, and production pooling, none of which road has.)
 
 **Rail is NOT player-built.** An earlier pass in this doc differentiated rail
 by making it something a faction constructs and owns; that is overruled. Rail
@@ -413,8 +416,10 @@ still matters the same way it already does everywhere else.
 ### 2.1 Instant unit transport
 
 - A rail hop between two directly rail-linked hexes costs a flat 1 movement
-  point (matching road's per-hex cost-1 pattern), regardless of the
-  geographic distance between the two endpoints.
+  point, regardless of the geographic distance between the two endpoints.
+  (Written when road cost 1 per hex, so the hop was "one hex's worth". Road
+  and rail hexes now cost half a hex — §2.5 — so the hop is worth two hexes
+  of walking, and only pays from a three-hex link upward.)
 - Endpoint-to-endpoint only — a unit must be standing exactly on a
   rail-linked hex to use it, no "boarding mid-route."
 - **Chainable through hub links** (A↔B and B↔C both built): proposed to work
@@ -510,8 +515,50 @@ available as a second knob if the trunk turns out too dense, but "the main
 line serves the major cities" is the more legible rule and it is the one that
 makes station ownership a live question early.
 
-**Still open: rail per-hex movement cost.** The one number nobody has ruled
-on.
+### 2.5 Per-hex movement cost — decided 2026-08-20
+
+**A road or rail hex costs half a hex to enter** (`CONFIG.movement.pavedCost
+= 0.5`). A column that stays on the network covers twice the ground: 2
+Movement is two hexes cross-country and **four** down a lane.
+
+That is the whole rule, and it applies to road and rail alike — both are
+surfaces somebody levelled before the collapse, so both are quick to march
+down and neither halts you. A cutting through a mountain is a cutting whether
+it carries sleepers or tarmac. Graded ground still negates terrain the way
+road always did: no forest surcharge, no mountain halt. A toll (`MOVE_TAX`)
+rides on top and is not absorbed by the surface.
+
+It **replaces** `roadStartBonus` (+1 Movement for beginning the turn on a
+road), which was a patch for the same complaint — roads otherwise differed
+from open ground only on the map's few forest/mountain hexes — but paid out
+whether or not you then used the road, and made a one-hex spur worth exactly
+as much as a highway. Paying per hex travelled fixes both.
+
+**How this sits against the station hop (§2.1).** They are different things
+and both survive. The hop is a property of the LINK and skips the ground
+between entirely at a flat `CONFIG.rail.hopCost` (1); the half-hex is a
+property of the HEXES a line occupies. So walking a link costs 0.5 per hex
+and the hop costs 1 flat: a two-hex link is a wash, and the hop only starts
+paying from three hexes out. That is the right shape — the hop is for
+distance, which is exactly what it was for.
+
+It also gives the network a third job. Rail was already worth holding (the
+hop) and worth cutting (per-hex interruption); now the track itself is worth
+marching along even by a faction with no running rights, because unheld
+track is nobody's to close.
+
+**Measured**, 15 AI-only games, same seeds, only `pavedCost` varying:
+
+| `pavedCost` | unresolved | median length | range |
+|---|---|---|---|
+| 1 (control) | 1/15 | 26 rounds | 12–272 |
+| **0.5 (shipped)** | **0/15** | **17 rounds** | **9–121** |
+
+Armies that can actually reach each other stop circling: the long tail of
+unresolved games goes away and the median game gets about a third shorter.
+Fifteen seeds is a small sample and this is not a law, but it is a real
+isolated signal, and it lands on the "post-self-contest-fix the AI is more
+stalemate-prone" debt from the playtest findings without touching the AI.
 
 ## Part 3 — The Blockade structure
 

@@ -230,12 +230,10 @@ function refreshMoveBudget(state, pid) {
   for (const u of Object.values(state.units)) {
     if (u.owner !== pid) continue;
     u.moveRemaining = u.movement;
-    // §16.2 road march — starting the turn on the highway network is
-    // worth +1 Movement this turn (roads as fast lanes, not only
-    // terrain-negators).
-    if (state.board.hexes[u.node]?.road) {
-      u.moveRemaining += CONFIG.movement.roadStartBonus || 0;
-    }
+    // No road start-bonus any more: the network pays out per hex travelled
+    // (CONFIG.movement.pavedCost), not as a lump for happening to be parked on
+    // it at Upkeep. See config.js.
+
     u.fortified = !u.movedSinceUpkeep;
     u.movedSinceUpkeep = false;
     // Where this unit's turn began, and whether an unseen blocker has since

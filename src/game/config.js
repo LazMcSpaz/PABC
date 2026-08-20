@@ -61,11 +61,18 @@ export const CONFIG = {
   movement: {
     forestCost: 2,     // entering a cover/forest hex costs this (vs 1) — "−1 speed"
     mountainHalts: true, // entering an elevation/mountain hex ends the move
-    // A unit beginning its turn ON a road hex marches +this Movement that
-    // turn — the highway network is a fast lane for armies, not only a
-    // terrain-negator (playtest: roads otherwise only differ from open
-    // ground on the map's few forest/mountain hexes).
-    roadStartBonus: 1,
+    // A graded surface — road OR rail — costs this to enter instead of 1, so a
+    // column that stays on the network covers twice the ground: 2 Movement is
+    // two hexes cross-country and four down a lane. That is what makes the
+    // network worth routing along, worth holding, and worth cutting.
+    //
+    // It replaces an earlier `roadStartBonus: +1 Movement if you began the
+    // turn on a road`, which was a patch for the same complaint (roads only
+    // differed from open ground on the map's few forest/mountain hexes) and
+    // paid out whether or not you then USED the road. Halving the hexes pays
+    // for the distance actually travelled on them, and it makes a long lane
+    // better than a short one, which a flat start bonus never did.
+    pavedCost: 0.5,
   },
 
   // v0.2 §16.4 attrition

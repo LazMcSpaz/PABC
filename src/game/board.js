@@ -109,11 +109,23 @@ export function isCover(hex) {
   return !!(hex && hex.cover);
 }
 // §16.2 roads — a per-hex MOVEMENT modifier (not its own terrain). A road
-// negates terrain movement cost: a road hex costs 1 to enter and never halts,
-// even through forest or mountain. Roads do NOT affect cover/visibility — a
-// road through a forest still conceals and a mountain still blocks sight.
+// negates terrain movement cost and never halts, even through forest or
+// mountain. Roads do NOT affect cover/visibility — a road through a forest
+// still conceals and a mountain still blocks sight.
 export function isRoad(hex) {
   return !!(hex && hex.road);
+}
+
+// Graded ground: a road hex or a rail hex. Both are surfaces somebody levelled
+// before the collapse, so both are quick to march down and neither halts you —
+// a cutting through a mountain is a cutting whether it carries sleepers or
+// tarmac. Entering one costs `CONFIG.movement.pavedCost` rather than 1.
+//
+// This is about the HEXES a line occupies, and is a different thing from the
+// station-to-station rail hop (`CONFIG.rail.hopCost`), which is a property of
+// the LINK and skips the ground between entirely.
+export function isPaved(hex) {
+  return !!(hex && (hex.road || hex.rail));
 }
 
 // §16.2 terrain movement — the hexes a unit can reach this turn from `start`
@@ -174,12 +186,19 @@ function expandMovement(state, start, budget, blocked, ignoreTerrain, extraCost,
     const rem = best[cur];
     if (rem <= 0) continue; // out of movement — also how halting hexes (rem 0) stop
     for (const nb of adj[cur] || []) {
-      const road = isRoad(hexes[nb]);
-      const mountain = halts && isElevation(hexes[nb]) && !road; // road negates the halt
+      const paved = isPaved(hexes[nb]);
+      const mountain = halts && isElevation(hexes[nb]) && !paved; // graded ground negates the halt
       // Toll Gate (MOVE_TAX): a per-hex surcharge layered on top of the
-      // terrain cost — roads don't waive a toll.
+      // terrain cost — a lane doesn't waive a toll.
       const toll = extraCost ? extraCost.get(nb) || 0 : 0;
-      const cost = (mountain ? 1 : (isCover(hexes[nb]) && !road ? forestCost : 1)) + toll;
+      // Graded ground is half a hex. Everything else: a mountain you are
+      // entering costs 1 (and halts below), forest costs `forestCost`, open
+      // ground 1. A Landship (`ignoreTerrain`) drives over terrain — forest
+      // drops to 1 and mountains stop halting — but it is not a road-layer, so
+      // it pays the full 1 off the network.
+      const base = paved ? CONFIG.movement.pavedCost
+        : (mountain ? 1 : (isCover(hexes[nb]) ? forestCost : 1));
+      const cost = base + toll;
       if (rem < cost) continue; // not enough movement to enter
       // A mountain (no road) or a blockaded hex halts you on entry: enter, stop.
       // Terrain is never a "surprise" — a mountain is a mountain whether or not

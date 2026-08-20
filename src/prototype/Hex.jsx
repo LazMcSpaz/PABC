@@ -354,7 +354,7 @@ function GhostToken({ ghost, slot = 0 }) {
 function RoadBand() {
   return (
     <div
-      title="Road — ignores terrain movement cost (a fast, contestable lane)"
+      title="Road — half a hex to enter, and no terrain cost or mountain halt (a fast, contestable lane)"
       style={{
         position: "absolute",
         top: "50%",
