@@ -418,6 +418,31 @@ function formatEvent(ev, engineState) {
       return null;
     case "deal_struck":
       return { color: theme.good, text: `${who(p.proposer)} and ${who(p.recipient)} struck a deal` };
+
+    // --- §6.10 the round trip ------------------------------------------
+    case "offer_tabled":
+      if (p.to !== you) return null; // rival-to-rival tables aren't your post
+      return {
+        color: theme.accent,
+        text: p.isCounter
+          ? `${who(p.from)} counter-offers — see Diplomacy`
+          : `${who(p.from)} has an offer for you — see Diplomacy`,
+      };
+    case "offer_accepted":
+      return { color: theme.good, text: `Terms agreed with ${who(p.from === you ? p.to : p.from)}` };
+    case "offer_declined":
+      return { color: theme.textDim, text: `${who(p.to === you ? p.from : p.to)}'s offer declined` };
+    case "offer_lapsed":
+      if (p.to !== you) return null;
+      return { color: theme.textFaint, text: `${who(p.from)}'s offer lapsed` };
+    case "offer_pestered":
+      if (p.asker !== you) return null;
+      return { color: theme.accent2, text: `${who(p.target)} is tired of being asked` };
+    case "agreement_expired":
+      return {
+        color: theme.textDim,
+        text: `An agreement with ${who(p.proposer === you ? p.recipient : p.proposer)} ran its term`,
+      };
     default:
       return { color: theme.textFaint, text: ev.name };
   }

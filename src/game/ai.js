@@ -22,6 +22,7 @@ import { factionDef } from "./content.js";
 import {
   factionIds, powerOf, arePacted, atWar, vassalLord, mayEngage,
   getStanding, passesRepGates, formPact, vassalize, applyDeal, checkRecognitionVictory,
+  tableOffer, offersFor, warExhaustion,
   aiAcceptsVassalage, truceBetween,
 } from "./diplomacy.js";
 
@@ -404,9 +405,22 @@ function manageDiplomacy(state, pid) {
       const sFwd = getStanding(state, pid, f), sBack = getStanding(state, f, pid);
       if (sFwd >= CONFIG.diplomacy.pactStandingReq && sBack >= CONFIG.diplomacy.pactStandingReq
         && passesRepGates(state, pid, f) && passesRepGates(state, f, pid)) {
-        formPact(state, pid, f, "ai-offer");
-        checkRecognitionVictory(state);
-        return;
+        // Between two AIs an alliance is settled on the spot — neither has an
+        // inbox to read. The human gets ASKED, because being handed an
+        // alliance you never agreed to (which is what this used to do) is
+        // not diplomacy happening to you, it is diplomacy bypassing you.
+        if (f === human) {
+          if (!offersFor(state, human).some((o) => o.from === pid && o.kind === "pact")) {
+            tableOffer(state, pid, human, {
+              give: [{ promise: { kind: "pact" } }], get: [],
+            }, { kind: "pact" });
+            return;
+          }
+        } else {
+          formPact(state, pid, f, "ai-offer");
+          checkRecognitionVictory(state);
+          return;
+        }
       }
       if (me.victoryLean === "diplomacy" && (state.players[pid].resource || 0) >= 4
         && sFwd >= tiers.neutral && sFwd < CONFIG.diplomacy.pactStandingReq && f !== human) {
@@ -414,6 +428,67 @@ function manageDiplomacy(state, pid) {
         return;
       }
     }
+  }
+
+  // 3) …and if none of that fired, consider opening a conversation with the
+  //    human. The audit's blunt finding was that across thirty rounds the AI
+  //    approached the player exactly zero times: it had no way to propose,
+  //    only to act. Now it has an inbox to put things in.
+  if (human && pid !== human) proposeToHuman(state, pid, me);
+}
+
+// What this faction would like from the human, if anything. One offer at a
+// time and only while it has nothing already pending with them, so the inbox
+// stays a thing that happens rather than a thing that accumulates.
+function proposeToHuman(state, pid, me) {
+  const human = state.humanFactionId;
+  if (!mayEngage(state, pid, human)) return;
+  if (offersFor(state, human).some((o) => o.from === pid)) return;
+  const cfg = CONFIG.diplomacy.offers;
+  const tiers = CONFIG.diplomacy.tiers;
+  const s = getStanding(state, pid, human);
+  const purse = state.players[pid]?.resource || 0;
+  // Deterministic in the seed like every other AI decision — the RNG is the
+  // game's, not Math.random, so a replayed game proposes identically.
+  if (state.rng.next() > (cfg.aiProposeChance * (0.4 + (me.sociability ?? 0.5)))) return;
+
+  // At war and losing: buy your way out before your army is gone.
+  if (atWar(state, pid, human)) {
+    if (warExhaustion(state, pid, human) < CONFIG.diplomacy.suePeace.acceptThreshold * 0.6) return;
+    const sweetener = Math.min(purse, 6);
+    tableOffer(state, pid, human, {
+      give: [{ promise: { kind: "peace" } }, ...(sweetener > 0 ? [{ resource: { resource: "scrap", amount: sweetener } }] : [])],
+      get: [],
+    }, { kind: "peace", note: "They want this war over." });
+    return;
+  }
+  // Warm but not allied: buy the alliance rather than wait for the numbers.
+  if (s >= tiers.neutral && s < CONFIG.diplomacy.pactStandingReq && !arePacted(state, pid, human)
+    && passesRepGates(state, pid, human)) {
+    const sweetener = Math.min(purse, 4 + Math.round((me.sociability ?? 0.5) * 6));
+    if (sweetener <= 0) return;
+    tableOffer(state, pid, human, {
+      give: [{ resource: { resource: "scrap", amount: sweetener } }, { promise: { kind: "pact" } }],
+      get: [],
+    }, { kind: "pact", note: "They are courting you." });
+    return;
+  }
+  // Cold and cautious: a non-aggression pact is what you ask a neighbour you
+  // do not trust and do not want to fight yet.
+  if (s <= tiers.neutral && s > tiers.hostile && (me.aggression ?? 0.5) < 0.7) {
+    tableOffer(state, pid, human, {
+      give: [{ promise: { kind: "nonAggression", rounds: 6 } }],
+      get: [{ promise: { kind: "nonAggression", rounds: 6 } }],
+    }, { kind: "deal", note: "They would rather not find out." });
+    return;
+  }
+  // Strong and unfriendly: name a price for leaving you alone.
+  if ((me.aggression ?? 0.5) >= 0.6 && s < tiers.neutral
+    && powerOf(state, pid) > powerOf(state, human) * 1.2) {
+    tableOffer(state, pid, human, {
+      give: [{ promise: { kind: "nonAggression", rounds: 5 } }],
+      get: [{ flow: { resource: "scrap", amountPerTurn: 2, rounds: 5 } }],
+    }, { kind: "deal", note: "It would be a shame if anything happened." });
   }
 }
 

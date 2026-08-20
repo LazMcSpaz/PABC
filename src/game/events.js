@@ -80,6 +80,8 @@ export const EVENT_NAMES = new Set([
   "truce_broken",
   // Deal flows run for a term and then lapse, honorably.
   "agreement_expired",
+  // §6.10 the round trip — offers on the table, counters, and pestering.
+  "offer_tabled", "offer_accepted", "offer_declined", "offer_lapsed", "offer_pestered",
 ]);
 
 // Resolve a chip / card instance uid to its content def. Covers Market

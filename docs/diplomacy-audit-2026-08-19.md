@@ -8,6 +8,14 @@ reproduced by `node scripts/audit-diplomacy.mjs`, which is kept in the repo
 so these can be re-checked after a fix rather than re-argued. Output quoted
 inline below.
 
+> **Status — tiers 1 and 2 are built (2026-08-19).** Everything in §1 is
+> fixed, and §3's tiers 1 and 2 are implemented; §3 tier 3 is still open.
+> `scripts/audit-diplomacy.mjs` now prints the fixed behaviour beside a note
+> of what each block used to do, and the harness holds it down in Phases 23
+> (24 checks) and 24 (25 checks). The findings below are kept in the past
+> tense they were written in — this is the record of what was wrong, not a
+> to-do list. See §4 for what shipped.
+
 **The short version.** The machinery is genuinely deep — ~35 verbs, Standing
 with baselines and grudges, Menace, Honor, just war, coalitions, vassalage,
 trading pacts, war exhaustion, precursor warnings. What's missing is the
@@ -291,3 +299,62 @@ overhaul's evaluation core to be nearby but do not need it — `dealValue` is
 sufficient to generate counter-offers today. Tier 3 item 11 is genuinely
 part of the AI overhaul and should wait for it. Item 16 needs no engine work
 at all and would be a good companion to the content pass.
+
+
+---
+
+## 4. What shipped (2026-08-19)
+
+### Tier 1 — the bugs
+
+| # | Was | Now |
+|---|---|---|
+| 1.1 | Make Peace ended any war with no check at all, and paid +3 Standing to both sides | Runs through `aiAcceptsPeace` and can be refused. Sue for Peace is the same ask with terms — what you reach for when a bare one is turned down |
+| 1.2 | Denounce charged none of the Honor it promised, and had no cooldown | Costs `honor.denounceLoss`, and cannot be repeated on the same faction until `justWar.denounceCooldownRounds` clears |
+| 1.3 | The drawer emitted `{pact:true}`; the engine read `{promise:{kind}}` | One schema. `applyDeal` performs the promises that are ACTS (pact, peace, open borders, joinWar) and records the ones that are undertakings with a term. `dontAlly` is now enforced, not just priced |
+| 1.4 | Demand Tribute always demanded zero | The verb reads `terms` or `get`, and refuses a demand that names nothing |
+| 1.5 | A flow was priced at a flat 3 turns and never expired | Priced at rate × term, pays exactly that many times, then lapses — and running an agreement to term GAINS Honor, the first non-punitive source the stat has had |
+| 1.7 | Declare War's Menace was fiction | An **unjustified** declaration costs Menace before a shot is fired; a justified one costs nothing, which closes a real loop with 1.2 — spend Honor denouncing to avoid Menace declaring |
+
+### Tier 2 — the round trip
+
+The core of §2. `state.diplomacy.offers` holds proposals as objects with an
+expiry, and `resolveProposal` is now the one road every player proposal takes:
+
+- **They accept** → applied, as before.
+- **They counter** → `counterOffer` walks the gap `dealValue` already knew
+  and returns the nearest deal they *would* take, tabled in your inbox. It
+  concedes the ask before it reaches into your treasury, never asks for more
+  scrap than you actually hold (an unanswerable counter is a refusal with
+  extra steps), and never counters with an empty or unchanged deal.
+- **They refuse flat** → and `refusalReason` names why: *"an alliance is not
+  for sale — they need 10 more Standing first"*, not "no".
+
+**Asking costs something.** Two asks per faction per round are free; past
+that, a *refusal* costs Standing. Answering somebody else's offer is never an
+ask, and letting an offer lapse costs nothing — silence has never been an
+answer in this game.
+
+**The AI proposes.** `proposeToHuman` opens conversations by temperament: a
+losing warlord buys its way out of a war, a sociable faction courts you with
+scrap and an alliance, a cautious neighbour asks for mutual non-aggression, a
+strong hostile one names a price for leaving you alone. It also no longer
+imposes a pact on you — the one thing it *did* initiate, it now asks for.
+
+**An alliance is not for sale.** `pactAppetite` prices a pact so it can
+sweeten a deal for a faction that already wants one, but `wouldAccept` hard-
+gates it on `aiAcceptsPact`: no pile of scrap buys past the Standing bar, or
+Standing stops being the currency of the diplomacy game.
+
+**The deal builder is a treaty table.** Lump sums and streams both ways, a
+term stepper that appears when something on the table actually runs for one,
+and promises you can *ask for* as well as offer — the old builder could only
+ever give.
+
+### Still open — tier 3
+
+Items 11–16 in §3: personality in the price (waits for the AI overhaul),
+fuzzy acceptance reads gated on the Intelligence path, term-limited treaties,
+enforcing or dropping the remaining decorative promise kinds, secret deals
+with a leak chance, and a relationship dossier surfacing the grievance and
+betrayal history the engine already keeps and never shows.

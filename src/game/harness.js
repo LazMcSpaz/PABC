@@ -31,6 +31,8 @@ import {
   truceBetween, makePeace,
   // diplomacy audit fixes — consent, cost, one deal schema, terms
   denounce, denounceCooldown, valueOfItem, applyDeal, adjustStanding,
+  // §6.10 the round trip — offers, counters, patience
+  counterOffer, tableOffer, offersFor, answerOffer, asksThisRound,
 } from "./diplomacy.js";
 import { holderOf, controlLevel, holdsLocation } from "./control.js";
 import { recomputeVp, settlementVp, locationVp } from "./victory.js";
@@ -5530,6 +5532,153 @@ line("\n  [Phase 11] text-token resolver");
     });
     check("a demand that caves actually moves the scrap named",
       (g.players.versari.resource || 0) === 15);
+  }
+}
+
+// Phase 24 — §6.10 the round trip. A proposal is a thing on a table, a
+// refusal comes back with a price, and asking has a cost. Before this every
+// verb resolved instantly and the AI never approached the player at all.
+{
+  line("\n  [Phase 24] diplomacy — the round trip");
+  const O = CONFIG.diplomacy.offers;
+
+  // --- a refusal comes back with terms ---
+  {
+    const g = createGame({ seed: 241, humanFactionId: "versari" });
+    ensureDiplomacy(g);
+    g.players.versari.resource = 40;
+    const lowball = {
+      proposer: "versari", recipient: "goldgrass",
+      give: [{ resource: { resource: "scrap", amount: 1 } }],
+      get: [{ promise: { kind: "openBorders" } }, { promise: { kind: "nonAggression", rounds: 6 } }],
+    };
+    check("a lowball is refused as it stands", wouldAccept(g, "goldgrass", lowball) === false);
+    const counter = counterOffer(g, "goldgrass", lowball);
+    check("…but a price exists, and they name it", !!counter);
+    check("the counter is one they would actually take", wouldAccept(g, "goldgrass", counter));
+    check("the counter asks for more than the lowball did",
+      counter.give.find((i) => i.resource)?.resource.amount > 1);
+    check("…and keeps the terms the proposer actually wanted",
+      counter.get.length === lowball.get.length);
+    const r = performDiplomacy(g, "versari", "propose-deal",
+      { faction: "goldgrass", give: lowball.give, get: lowball.get });
+    check("proposing it puts their counter in your inbox",
+      r.countered === true && offersFor(g, "versari").length === 1);
+    const offer = offersFor(g, "versari")[0];
+    check("the tabled offer is theirs, marked as a counter",
+      offer.from === "goldgrass" && offer.isCounter === true);
+    const before = g.players.versari.resource;
+    answerOffer(g, "versari", offer.id, true);
+    check("accepting it applies exactly those terms",
+      g.players.versari.resource < before && hasOpenBorders(g, "goldgrass", "versari"));
+    check("…and takes it off the table", offersFor(g, "versari").length === 0);
+  }
+
+  // --- an alliance is not for sale ---
+  {
+    const g = createGame({ seed: 242, humanFactionId: "versari" });
+    ensureDiplomacy(g);
+    g.players.versari.resource = 200;
+    adjustStanding(g, "goldgrass", "versari", -4, "test"); // under the pact bar
+    const bribe = {
+      proposer: "versari", recipient: "goldgrass",
+      give: [{ resource: { resource: "scrap", amount: 150 } }],
+      get: [{ promise: { kind: "pact" } }],
+    };
+    check("no pile of scrap buys past the Standing bar",
+      wouldAccept(g, "goldgrass", bribe) === false);
+    check("…and there is no counter for it either",
+      counterOffer(g, "goldgrass", bribe) === null);
+  }
+
+  // --- a hopeless ask gets an honest no, not an empty counter ---
+  {
+    const g = createGame({ seed: 243, humanFactionId: "versari" });
+    ensureDiplomacy(g);
+    g.players.versari.resource = 3;
+    const r = performDiplomacy(g, "versari", "propose-deal", {
+      faction: "lakers", give: [],
+      get: [{ flow: { resource: "scrap", amountPerTurn: 10, rounds: 20 } }],
+    });
+    check("a gap beyond the proposer's means is refused outright",
+      r.accepted === false && !r.countered);
+    check("…and tables nothing", offersFor(g, "versari").length === 0);
+  }
+
+  // --- asking too often costs Standing ---
+  {
+    const g = createGame({ seed: 244, humanFactionId: "versari" });
+    ensureDiplomacy(g);
+    g.players.versari.resource = 0;
+    const hopeless = { faction: "lakers", give: [],
+      get: [{ flow: { resource: "scrap", amountPerTurn: 10, rounds: 20 } }] };
+    const s0 = getStanding(g, "lakers", "versari");
+    for (let i = 0; i < O.freeAsksPerRound; i++) performDiplomacy(g, "versari", "propose-deal", hopeless);
+    check("the first asks of a round are free", getStanding(g, "lakers", "versari") === s0);
+    performDiplomacy(g, "versari", "propose-deal", hopeless);
+    check("one past the quota cools them", getStanding(g, "lakers", "versari") === s0 - O.pesterStandingHit);
+    check("the tally is readable", asksThisRound(g, "versari", "lakers") === O.freeAsksPerRound + 1);
+    g.round += 1;
+    check("and it resets with the round", asksThisRound(g, "versari", "lakers") === 0);
+  }
+
+  // --- answering is never an ask ---
+  {
+    const g = createGame({ seed: 245, humanFactionId: "versari" });
+    ensureDiplomacy(g);
+    const o = tableOffer(g, "goldgrass", "versari",
+      { give: [{ resource: { resource: "scrap", amount: 5 } }], get: [] }, { kind: "deal" });
+    performDiplomacy(g, "versari", "answer-offer", { offerId: o.id, accept: false });
+    check("declining somebody else's offer costs no patience",
+      asksThisRound(g, "versari", "goldgrass") === 0);
+  }
+
+  // --- an unanswered offer lapses, and lapsing is free ---
+  {
+    const g = createGame({ seed: 246, humanFactionId: "versari" });
+    ensureDiplomacy(g);
+    tableOffer(g, "goldgrass", "versari",
+      { give: [{ resource: { resource: "scrap", amount: 5 } }], get: [] }, { kind: "deal" });
+    const s0 = getStanding(g, "goldgrass", "versari");
+    check("it waits in the inbox", offersFor(g, "versari").length === 1);
+    for (let i = 0; i < O.expiryRounds + 1; i++) { g.round += 1; runDiplomacyRound(g); }
+    check("…then lapses", offersFor(g, "versari").length === 0);
+    check("and silence was not a refusal", getStanding(g, "goldgrass", "versari") === s0);
+  }
+
+  // --- the AI approaches the human, and stops imposing on them ---
+  {
+    const g = createGame({ seed: 247, humanFactionId: "versari" });
+    ensureDiplomacy(g);
+    adjustStanding(g, "goldgrass", "versari", 20, "test");
+    adjustStanding(g, "versari", "goldgrass", 20, "test");
+    g.activeIndex = g.turnOrder.indexOf("goldgrass");
+    takeAITurn(g);
+    check("an AI no longer imposes an alliance on the human",
+      !arePacted(g, "goldgrass", "versari"));
+    check("…it asks", offersFor(g, "versari").some((o) => o.from === "goldgrass" && o.kind === "pact"));
+    const offer = offersFor(g, "versari").find((o) => o.from === "goldgrass");
+    answerOffer(g, "versari", offer.id, true);
+    check("and accepting the offer forms the pact", arePacted(g, "goldgrass", "versari"));
+  }
+
+  // --- across a real run, the AI opens conversations ---
+  {
+    const g = createGame({ seed: 248, humanFactionId: "versari" });
+    ensureDiplomacy(g);
+    let seen = 0;
+    for (let r = 0; r < 25; r += 1) {
+      for (const f of g.turnOrder) {
+        if (f === "versari") continue;
+        g.activeIndex = g.turnOrder.indexOf(f);
+        takeAITurn(g);
+      }
+      seen += offersFor(g, "versari").length;
+      for (const o of offersFor(g, "versari")) answerOffer(g, "versari", o.id, false);
+      g.round += 1;
+      runDiplomacyRound(g);
+    }
+    check("over 25 rounds the AI approaches the human at least once", seen > 0);
   }
 }
 

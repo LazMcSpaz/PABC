@@ -27,7 +27,7 @@ import {
   recognitionScore, threatScore, tolerance, trustFloor, standingTier, getStanding,
   arePacted, atWar, vassalLord, coalitionAgainst, factionIds,
   aiAcceptsPact, aiAcceptsVassalage, aiAcceptsPeace, wouldAccept, passesRepGates,
-  denounceCooldown,
+  denounceCooldown, asksThisRound, flowRounds, promiseRounds,
   evaluatePactCall, canDemandTribute, hasOpenBorders, warJustification,
   openBordersStanding,
   railAccessStanding,
@@ -786,6 +786,43 @@ function adaptDiplomacy(state, viewer) {
       canPlacate: (me?.resource || 0) >= CONFIG.diplomacy.warnings.placateScrap,
       defyStandingHit: CONFIG.diplomacy.warnings.defyStandingHit,
     })),
+    // §6.10 — offers on the table awaiting your answer: an AI's own approach,
+    // or the counter-terms one came back with when it refused your proposal.
+    // Rendered as readable term lists rather than raw items, so the drawer
+    // never has to know the deal schema.
+    offers: (dip.offers || []).filter((o) => o.to === viewer).map((o) => ({
+      id: o.id,
+      kind: o.kind,
+      isCounter: !!o.isCounter,
+      note: o.note || null,
+      from: o.from,
+      fromName: factionDef(o.from)?.name || o.from,
+      expiresOnRound: o.expiresOnRound,
+      roundsLeft: Math.max(0, o.expiresOnRound - state.round),
+      // From the READER's seat. `give` is what the deal's PROPOSER hands
+      // over — which is not always the other party: a counter-offer is
+      // their answer to terms the viewer wrote, so the viewer is still the
+      // proposer on it and `give` is what the viewer pays.
+      ...(() => {
+        const viewerProposes = o.deal.proposer === viewer;
+        const mine = viewerProposes ? o.deal.give : o.deal.get;
+        const theirs = viewerProposes ? o.deal.get : o.deal.give;
+        return {
+          youGet: (theirs || []).map(describeDealItem),
+          youGive: (mine || []).map(describeDealItem),
+          affordable: (mine || []).every(
+            (it) => it.resource?.resource !== "scrap"
+              || (me?.resource || 0) >= (it.resource.amount || 0),
+          ),
+        };
+      })(),
+    })),
+    // How many times you have already asked each faction for something this
+    // round — past `freeAsks` a refusal starts costing Standing.
+    asks: Object.fromEntries(factionIds(state)
+      .filter((f) => f !== viewer)
+      .map((f) => [f, asksThisRound(state, viewer, f)])),
+    freeAsks: CONFIG.diplomacy.offers.freeAsksPerRound,
     pendingCalls: (dip.pendingCalls || []).map((c) => ({
       id: c.id,
       from: c.from, fromName: factionDef(c.from)?.name || c.from,
@@ -795,6 +832,34 @@ function adaptDiplomacy(state, viewer) {
       ifRefuse: `−${CONFIG.diplomacy.pactCall.declineStandingHit} Standing with ${factionDef(c.from)?.name || c.from} · −${CONFIG.diplomacy.honor.breakLoss} Honor`,
     })),
   };
+}
+
+// One deal term, in words. The drawer used to build its own item objects and
+// its own labels; now the engine's schema is described in exactly one place.
+function describeDealItem(it) {
+  if (!it) return "";
+  if (it.resource?.resource === "scrap") return `${it.resource.amount} scrap`;
+  if (it.resource) return `${it.resource.amount} ${it.resource.resource}`;
+  if (it.flow) {
+    return `${it.flow.amountPerTurn} scrap/turn for ${flowRounds(it.flow)} rounds`;
+  }
+  if (it.research) return `${it.research.amount} research`;
+  if (it.chip) return "a chip";
+  if (it.intel) return it.intel.kind === "mapData" ? "map data" : "intelligence";
+  if (it.promise) {
+    const rounds = promiseRounds(it.promise);
+    switch (it.promise.kind) {
+      case "pact": return "an alliance";
+      case "peace": return "peace";
+      case "openBorders": return "open borders";
+      case "joinWar": return `war on ${factionDef(it.promise.target)?.name || it.promise.target}`;
+      case "nonAggression": return `non-aggression for ${rounds} rounds`;
+      case "dontAlly": return `no alliance with ${factionDef(it.promise.target)?.name || it.promise.target} for ${rounds} rounds`;
+      case "tribute": return `tribute for ${rounds} rounds`;
+      default: return it.promise.kind;
+    }
+  }
+  return "something";
 }
 
 // Recognition checklist — one row per other faction, mirroring

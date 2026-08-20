@@ -34,6 +34,8 @@ export function ensureDiplomacy(state) {
       recognition: {}, // pid -> number (cached)
       giftCounter: {}, // §1.2 — { fromPid: { toPid: gifts-in-window } }
       pendingCalls: [], // AI→human pact-call inbox: { id, from, target, since, expiresOnRound }
+      offers: [], // the round trip — offers awaiting an answer (see §6.10)
+      asks: {}, // pester bookkeeping: { round, byPair: { "a|b": n } }
       standingBaselines: {}, // earned drift targets: { a: { b: -cap..+cap } }
       recognizedEver: {}, // summit VP bookkeeping: { pid: [fids that ever backed pid] }
     };
@@ -44,6 +46,8 @@ export function ensureDiplomacy(state) {
   if (!state.diplomacy.recognizedEver) state.diplomacy.recognizedEver = {};
   if (!state.diplomacy.truces) state.diplomacy.truces = {};
   if (!state.diplomacy.pendingWarnings) state.diplomacy.pendingWarnings = [];
+  if (!state.diplomacy.offers) state.diplomacy.offers = [];
+  if (!state.diplomacy.asks) state.diplomacy.asks = { round: state.round, byPair: {} };
   for (const p of Object.values(state.players)) {
     if (p.menace == null) p.menace = 0;
     if (p.honor == null) p.honor = CONFIG.diplomacy.honor.start;
@@ -471,6 +475,11 @@ export function wouldAccept(state, fid, deal) {
   for (const it of [...(deal.give || []), ...(deal.get || [])]) {
     if (it.promise?.kind === "joinWar" && arePacted(state, fid, it.promise.target)) return false;
     if (it.promise?.kind === "peace" && vassalLord(state, fid) && atWar(state, vassalLord(state, fid), other)) return false;
+    // An alliance is not for sale. `pactAppetite` prices one so a pact can
+    // SWEETEN a deal for a faction that already wants it — it must never let
+    // a pile of scrap buy past the Standing bar aiAcceptsPact guards, or
+    // Standing stops being the currency of the diplomacy game.
+    if (it.promise?.kind === "pact" && !aiAcceptsPact(state, fid, other)) return false;
   }
   return dealValue(state, fid, deal) >= 0;
 }
@@ -509,6 +518,253 @@ function enactPromise(state, from, to, promise, cause) {
       return;
     default:
   }
+}
+
+// --- §6.10 the round trip: patience, counter-offers, the offer inbox ---
+//
+// Before this, every proposal was a turnstile: one click, one binary answer,
+// no state in between. `dealValue` already knew exactly how far short an
+// offer fell and that number was thrown away. These three pieces spend it:
+// asking has a cost, a refusal comes back with terms that WOULD land, and an
+// offer is an object that can sit on a table awaiting an answer.
+
+const askKey = (a, b) => `${a}|${b}`;
+
+// How many times `a` has asked `b` for something this round. The counter
+// resets on the round boundary rather than decaying, so a patient player who
+// spreads their diplomacy across turns is never penalised.
+export function asksThisRound(state, a, b) {
+  const book = state.diplomacy.asks;
+  if (!book || book.round !== state.round) return 0;
+  return book.byPair[askKey(a, b)] || 0;
+}
+
+// Record an ask and report whether it was one too many. Answering somebody
+// else's offer is not an ask — only opening a new one is.
+function recordAsk(state, a, b) {
+  const book = state.diplomacy.asks = state.diplomacy.asks || { round: state.round, byPair: {} };
+  if (book.round !== state.round) { book.round = state.round; book.byPair = {}; }
+  const k = askKey(a, b);
+  book.byPair[k] = (book.byPair[k] || 0) + 1;
+  return book.byPair[k] > D().offers.freeAsksPerRound;
+}
+
+// The Standing cost of pestering, charged only when an over-quota ask is
+// actually REFUSED. A deal they wanted is never pestering, however many
+// times you have already knocked.
+function chargePester(state, asker, target) {
+  const hit = D().offers.pesterStandingHit;
+  if (!hit) return false;
+  adjustStanding(state, target, asker, -hit, "pestered");
+  emit(state, "offer_pestered", { asker, target, asks: asksThisRound(state, asker, target) });
+  return true;
+}
+
+// The scrap terms of a deal, from the PROPOSER's side: what they are putting
+// up, and what they are asking for. Counter-offers move these two numbers and
+// nothing else — the shape of the deal (which promises, which streams) is the
+// proposer's design, and a counter that rewrote it would be a different deal
+// rather than an answer to this one.
+function scrapTerms(deal) {
+  const sum = (items) => (items || []).reduce(
+    (n, it) => n + (it.resource?.resource === "scrap" ? (it.resource.amount || 0) : 0), 0);
+  return { offered: sum(deal.give), asked: sum(deal.get) };
+}
+function withScrapTerms(deal, offered, asked) {
+  const strip = (items) => (items || []).filter((it) => !(it.resource?.resource === "scrap"));
+  // Never write both sides paying each other scrap — "I give you 2, you give
+  // me 2" is not a term, it is an accounting error with a handshake.
+  const net = offered - asked;
+  const give = net > 0 ? net : 0;
+  const get = net < 0 ? -net : 0;
+  return {
+    ...deal,
+    give: [...strip(deal.give), ...(give > 0 ? [{ resource: { resource: "scrap", amount: give } }] : [])],
+    get: [...strip(deal.get), ...(get > 0 ? [{ resource: { resource: "scrap", amount: get } }] : [])],
+  };
+}
+// A deal with nothing on either side of it. Reached when the only way to make
+// an offer acceptable was to delete it, which is a refusal wearing a suit.
+function isEmptyDeal(deal) {
+  return !(deal.give || []).length && !(deal.get || []).length;
+}
+
+// The nearest deal `fid` WOULD take, given one it won't. Returns null when no
+// price closes the gap — which is the honest answer for a hard refusal (a
+// reputation gate, a conflicting alliance) and for a gap the proposer could
+// never cover.
+//
+// The gap is exactly `-dealValue`, and scrap is worth 1 apiece to everyone,
+// so closing it is arithmetic rather than search: give more, ask for less, or
+// both. Preference order is deliberate — dropping YOUR ask costs the proposer
+// nothing they hold, so a counter takes that first and only then reaches into
+// their treasury.
+export function counterOffer(state, fid, deal) {
+  const other = deal.proposer === fid ? deal.recipient : deal.proposer;
+  // Hard gates are not a matter of price.
+  const gated = { ...deal, give: deal.give || [], get: deal.get || [] };
+  if (dealValue(state, fid, gated) >= 0) return null; // they'd take it as-is
+  const bare = withScrapTerms(deal, 0, 0);
+  const gapAtZero = -dealValue(state, fid, bare);
+  if (!Number.isFinite(gapAtZero)) return null;
+
+  const { offered, asked } = scrapTerms(deal);
+  const cfg = D().offers;
+  // How much the proposer can actually reach for.
+  const purse = D().offers.counterWithinMeans
+    ? (state.players[deal.proposer]?.resource || 0)
+    : Infinity;
+
+  // Step 1 — give up the ask. Cheapest concession available to the proposer.
+  let newAsked = asked;
+  let need = gapAtZero + asked - offered; // value still missing at these terms
+  if (need > 0 && newAsked > 0) {
+    const shed = Math.min(newAsked, need);
+    newAsked -= shed;
+    need -= shed;
+  }
+  // Step 2 — the rest comes out of the proposer's pocket, if they have it.
+  let newOffered = offered;
+  if (need > 0) {
+    if (need > cfg.counterGapCeiling) return null; // no price; say no properly
+    newOffered = offered + Math.ceil(need);
+    if (newOffered > purse) return null; // an unanswerable counter is just a refusal
+  }
+  if (newOffered === offered && newAsked === asked) return null;
+
+  const counter = withScrapTerms(deal, newOffered, newAsked);
+  // Sanity: the counter must actually be one they take. If the arithmetic
+  // missed (a promise whose value moved with the terms), walk it up a little
+  // rather than returning an offer that would itself be refused.
+  for (let i = 0; i < 8 && dealValue(state, fid, counter) < 0; i++) {
+    const bump = scrapTerms(counter).offered + 1;
+    if (bump > purse) return null;
+    Object.assign(counter, withScrapTerms(counter, bump, scrapTerms(counter).asked));
+  }
+  if (dealValue(state, fid, counter) < 0) return null;
+  if (!wouldAccept(state, fid, counter)) return null;
+  // "Yes, if you ask me for nothing and give me nothing" is not an answer.
+  if (isEmptyDeal(counter)) return null;
+  // Nor is a counter that concedes nothing — if the terms came back
+  // unchanged in substance, the honest reply is no.
+  const before = scrapTerms(deal);
+  const after = scrapTerms(counter);
+  if (after.offered === before.offered && after.asked === before.asked) return null;
+  return counter;
+}
+
+// Put an offer on the table. `from` proposes to `to`; it waits until answered
+// or until it lapses.
+// One road for every proposal the player makes: they take it, they name a
+// price, or they say no — and only the last of those is a dead end. This is
+// the piece that turns a turnstile into a conversation, and it needed no new
+// valuation model: `dealValue` has always known the size of the gap.
+export function resolveProposal(state, pid, f, deal, cause, kind) {
+  const pestering = recordAsk(state, pid, f);
+  if (wouldAccept(state, f, deal)) {
+    applyDeal(state, deal, cause);
+    emit(state, "deal_struck", { proposer: pid, recipient: f, cause });
+    return { accepted: true };
+  }
+  const counter = counterOffer(state, f, deal);
+  if (counter) {
+    const offer = tableOffer(state, f, pid, counter, { kind, isCounter: true });
+    return { accepted: false, countered: true, offerId: offer.id, reason: "they answer with terms of their own" };
+  }
+  // A flat no. THIS is where asking too often lands: a refusal you brought on
+  // yourself by knocking again after two.
+  if (pestering) chargePester(state, pid, f);
+  return {
+    accepted: false,
+    reason: pestering ? "they are tired of being asked" : refusalReason(state, f, deal),
+  };
+}
+
+// Why they will not deal at ANY price. "No" is a poor answer when the player
+// cannot tell whether they were 3 scrap short or asking for something that is
+// not for sale — the first is a haggle, the second is a different game.
+function refusalReason(state, fid, deal) {
+  const other = deal.proposer === fid ? deal.recipient : deal.proposer;
+  for (const it of [...(deal.give || []), ...(deal.get || [])]) {
+    const kind = it.promise?.kind;
+    if (kind === "pact" && !aiAcceptsPact(state, fid, other)) {
+      const short = D().pactStandingReq - getStanding(state, fid, other);
+      return short > 0
+        ? `an alliance is not for sale — they need ${short} more Standing first`
+        : "they will not enter an alliance with you";
+    }
+    if (kind === "joinWar" && arePacted(state, fid, it.promise.target)) {
+      return `they will not turn on ${factionDef(it.promise.target)?.name || it.promise.target}, who is their ally`;
+    }
+  }
+  if (!passesRepGates(state, fid, other)) {
+    return menaceOf(state, other) > tolerance(state, fid, other)
+      ? "your Menace is past what they will overlook"
+      : "your Honor is below what they will deal on";
+  }
+  return "nothing they would take, at any price you could pay";
+}
+
+export function tableOffer(state, from, to, deal, meta = {}) {
+  ensureDiplomacy(state);
+  const offer = {
+    id: `offer-${from}-${to}-${state.round}-${state.diplomacy.offers.length}`,
+    from, to,
+    // `from`/`to` say who is putting this to whom — who reads it in their
+    // inbox. They are NOT the deal's own direction, and must not overwrite
+    // it: a counter-offer is the RECIPIENT's answer to terms the PROPOSER
+    // wrote, so its give/get are still written from the proposer's side.
+    // Re-stamping them here flipped every counter inside out — the AI would
+    // have paid the scrap the player offered, and the player would have made
+    // the promises they had asked for.
+    deal: {
+      ...deal,
+      proposer: deal.proposer || from,
+      recipient: deal.recipient || to,
+    },
+    kind: meta.kind || "deal",
+    isCounter: !!meta.isCounter,
+    note: meta.note || null,
+    since: state.round,
+    expiresOnRound: state.round + D().offers.expiryRounds,
+  };
+  state.diplomacy.offers.push(offer);
+  emit(state, "offer_tabled", { offer: offer.id, from, to, kind: offer.kind, isCounter: offer.isCounter });
+  return offer;
+}
+
+export function offersFor(state, fid) {
+  return (state.diplomacy?.offers || []).filter((o) => o.to === fid);
+}
+
+// Answer an offer sitting in your inbox. Accepting applies it exactly as
+// tabled — the terms are the terms, which is the whole point of an offer
+// existing as an object.
+export function answerOffer(state, fid, offerId, accept) {
+  ensureDiplomacy(state);
+  const i = state.diplomacy.offers.findIndex((o) => o.id === offerId && o.to === fid);
+  if (i < 0) return { ok: false, reason: "that offer is no longer on the table" };
+  const [offer] = state.diplomacy.offers.splice(i, 1);
+  if (!accept) {
+    emit(state, "offer_declined", { offer: offer.id, from: offer.from, to: fid });
+    return { ok: true, accepted: false };
+  }
+  applyDeal(state, offer.deal, offer.isCounter ? "counter-accepted" : "offer-accepted");
+  emit(state, "offer_accepted", { offer: offer.id, from: offer.from, to: fid });
+  checkRecognitionVictory(state);
+  return { ok: true, accepted: true };
+}
+
+// Offers nobody answered lapse quietly. Letting one lapse is not a refusal
+// and costs nothing — silence has never been an answer in this game
+// (expirePactCalls has always worked the same way).
+function expireOffers(state) {
+  const live = [];
+  for (const o of state.diplomacy.offers || []) {
+    if (state.round <= o.expiresOnRound) { live.push(o); continue; }
+    emit(state, "offer_lapsed", { offer: o.id, from: o.from, to: o.to });
+  }
+  state.diplomacy.offers = live;
 }
 
 // --- applying a struck deal (§18.6 atomic) --------------------------
@@ -1667,6 +1923,7 @@ export function runDiplomacyRound(state) {
       if (h !== tgt) adjustHonor(state, pid, Math.sign(tgt - h) * D().honor.decayPerRound, "decay");
     }
   }
+  expireOffers(state); // §6.10 — an unanswered offer lapses; silence is not a no
   pactTenureBaselines(state); // warm long-alliance baselines before the fade
   driftStanding(state);
   guestHouseDrift(state);
@@ -1751,16 +2008,16 @@ export function performDiplomacy(state, pid, action, params = {}) {
       return r();
     case "mediate":
       return mediate(state, pid, params.a, params.b) ? r() : { ok: false, reason: "they refuse mediation" };
+    // A bare alliance offer is a deal whose only term is the alliance, so it
+    // goes down the same road: they take it, or they name a price.
     case "propose-pact": {
-      if (!aiAcceptsPact(state, f, pid)) return { ok: true, accepted: false, reason: "they decline the pact" };
-      formPact(state, pid, f, "player-pact");
-      return r({ accepted: true });
+      if (arePacted(state, pid, f)) return { ok: false, reason: "already allied" };
+      const deal = { proposer: pid, recipient: f, give: [{ promise: { kind: "pact" } }], get: [] };
+      return r(resolveProposal(state, pid, f, deal, "player-pact", "pact"));
     }
     case "propose-deal": {
       const deal = { proposer: pid, recipient: f, give: params.give || [], get: params.get || [] };
-      if (!wouldAccept(state, f, deal)) return { ok: true, accepted: false, reason: "they decline the deal" };
-      applyDeal(state, deal, "player-deal");
-      return r({ accepted: true });
+      return r(resolveProposal(state, pid, f, deal, "player-deal", "deal"));
     }
     case "vassalize": {
       if (!aiAcceptsVassalage(state, f, pid)) return { ok: true, accepted: false, reason: "they refuse to submit" };
@@ -1772,10 +2029,31 @@ export function performDiplomacy(state, pid, action, params = {}) {
     case "sue-for-peace": {
       if (!atWar(state, pid, f)) return { ok: false, reason: "not at war with them" };
       const side = { proposer: pid, recipient: f, give: params.give || [], get: params.get || [] };
-      if (!aiAcceptsPeace(state, f, pid, side)) return { ok: true, accepted: false, reason: "they fight on" };
-      if ((side.give.length || side.get.length)) applyDeal(state, side, "sue-for-peace");
-      makePeace(state, pid, f, "sue-for-peace");
-      return r({ accepted: true });
+      const pestering = recordAsk(state, pid, f);
+      if (aiAcceptsPeace(state, f, pid, side)) {
+        if (side.give.length || side.get.length) applyDeal(state, side, "sue-for-peace");
+        makePeace(state, pid, f, "sue-for-peace");
+        return r({ accepted: true });
+      }
+      // What would buy it? aiAcceptsPeace weighs exhaustion + the side terms,
+      // so the shortfall converts straight into scrap the same way a deal's
+      // does — which turns "they fight on" into a number.
+      const short = D().suePeace.acceptThreshold
+        - warExhaustion(state, f, pid)
+        - (getStanding(state, f, pid) >= D().tiers.neutral ? D().suePeace.standingBoost : 0)
+        - dealValue(state, f, side);
+      const purse = state.players[pid]?.resource || 0;
+      const terms = scrapTerms(side);
+      const need = terms.offered + Math.ceil(Math.max(0, short));
+      if (short > 0 && need <= purse && short <= D().offers.counterGapCeiling) {
+        const counter = withScrapTerms(side, need, 0);
+        const offer = tableOffer(state, f, pid, counter, {
+          kind: "peace", isCounter: true, note: "They will stop for a price.",
+        });
+        return r({ accepted: false, countered: true, offerId: offer.id, reason: "they name a price for peace" });
+      }
+      if (pestering) chargePester(state, pid, f);
+      return r({ accepted: false, reason: "they fight on" });
     }
 
     // §1.4 — demand tribute. Power-gated; caves or escalates to war.
@@ -1954,6 +2232,11 @@ export function performDiplomacy(state, pid, action, params = {}) {
     }
 
     // §1.7/§6.10 — voluntarily release a vassal (clemency).
+    // §6.10 — answer something sitting in your inbox. Answering is never an
+    // ask, so it never counts toward pestering.
+    case "answer-offer":
+      return r(answerOffer(state, pid, params.offerId, params.accept !== false));
+
     case "free-vassal": {
       const vassal = f;
       if (vassalLord(state, vassal) !== pid) return { ok: false, reason: "not your vassal" };

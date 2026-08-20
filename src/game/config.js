@@ -512,6 +512,30 @@ export const CONFIG = {
       toggleVisionStandingHit: 1,
       toggleBordersStandingHit: 1,
     },
+
+    // The round trip. A proposal is a thing that sits on a table, not a
+    // button that resolves the instant it is pressed.
+    offers: {
+      // How long an offer waits in the recipient's inbox before it lapses.
+      // Short: an offer nobody answered is an insult that fades, and a stale
+      // inbox is worse than an empty one.
+      expiryRounds: 3,
+      // Asking is free this many times per round, per faction. Past that
+      // you are pestering, and a refusal cools them.
+      freeAsksPerRound: 2,
+      pesterStandingHit: 1,
+      // A counter-offer will not ask the proposer for more scrap than they
+      // actually hold. An unanswerable counter is a refusal with extra
+      // steps, and reads as the AI not listening.
+      counterWithinMeans: true,
+      // Nor will it counter at all when the gap is this far past what the
+      // proposer could cover — at some point "no" is the honest answer.
+      counterGapCeiling: 60,
+      // How often an AI opens with a proposal of its own, as a share of its
+      // sociability. Kept low: an inbox that fills every round stops being
+      // an event.
+      aiProposeChance: 0.35,
+    },
   },
 };
 
