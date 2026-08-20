@@ -537,6 +537,40 @@ export const CONFIG = {
       // has burned its reputation.
       settlementHonorGain: 2,
     },
+    // §3.2 — a Location on the table. The map is the thing the war is
+    // about, and until now the only thing anyone could trade was scrap, so
+    // diplomacy ran as a side-market beside the game rather than inside it.
+    // These are the numbers that make "cede Omara and we have peace" a
+    // sentence with a price attached.
+    cession: {
+      // A city's worth, before anybody's feelings about it: its victory
+      // points, weighted, plus what it actually produces each turn.
+      vpWeight: 4,
+      outputWeight: 1.2,
+      // …and what its walls are worth. Bigger places are harder to take, so
+      // they cost more to be handed.
+      valueRank: { low: 0, medium: 1, high: 2, veryHigh: 4 },
+      // A homeland is not priced like a holding. Goldgrass will pay well
+      // past Omara's output to have Omara back, which is what makes
+      // "give it back" a thing a faction can want badly enough to deal for.
+      claimMultiplier: 2.2,
+      // Ground given up is worth more than ground gained — you lose the
+      // place, the ZoC around it, and the base you were operating from.
+      // Scaled by aggression: a warlord does not sell land.
+      cedeReluctanceBase: 1.15,
+      cedeReluctancePerAggression: 0.7,
+      // Handed over, not stormed. A city given is a city intact — no chip
+      // is destroyed — but the people living in it did not choose this, so
+      // Loyalty starts where a capture would leave it.
+      loyaltyOnCede: 2,
+      // Being traded away is a grievance the residents' faction holds
+      // against nobody in particular, but the affiliated faction minds who
+      // ends up standing there. Same penalty a conquest carries: to
+      // Goldgrass, Omara passing from Versari to the Lakers is not an
+      // improvement.
+      thirdPartyStandingHit: 2,
+    },
+
     justWar: {
       denounceWindowRounds: 6, // your denouncement of them counts this long
       grievanceWindowRounds: 8, // their betrayal of you counts this long

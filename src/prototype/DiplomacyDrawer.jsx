@@ -1568,6 +1568,12 @@ function DealPane({ f, dip, kind = "custom", onBack, onSubmit }) {
   const [wantPact, setWantPact] = useState(false);
   const [wantBorders, setWantBorders] = useState(false);
   const [settle, setSettle] = useState(false);
+  // §3.2 — cities on the table, by hexId. The map is what the war is about,
+  // and until now the only thing this pane could move was scrap.
+  const [cedeGive, setCedeGive] = useState(() => new Set());
+  const [cedeGet, setCedeGet] = useState(() => new Set());
+  const yoursToGive = dip.youCouldCede || [];
+  const theirsToAsk = f.theyCouldCede || [];
   // Only worth offering when there is something a settlement can clear. An
   // occupation is not in the past, so scrap does not touch it.
   const owed = f.ledger?.settleable || 0;
@@ -1605,10 +1611,12 @@ function DealPane({ f, dip, kind = "custom", onBack, onSubmit }) {
     // Asked for, not given: the party holding the grievances is the one being
     // asked to give something up, and they price it accordingly.
     if (settle) get.push({ settlement: true });
+    for (const hex of cedeGive) give.push({ location: { hexId: hex } });
+    for (const hex of cedeGet) get.push({ location: { hexId: hex } });
     if (isPeace) give.push({ promise: { kind: "peace" } });
     return { proposer: dip.youId, recipient: f.id, give, get };
   }, [scrapGive, scrapGet, flowGive, flowGet, pactOffer, openBorders, nonAggression,
-      wantPact, wantBorders, settle, term, dip.youId, f.id, isPeace, isTribute]);
+      wantPact, wantBorders, settle, cedeGive, cedeGet, term, dip.youId, f.id, isPeace, isTribute]);
 
   const title = isGift ? "Send a gift" : isPeace ? "Sue for peace" : isTribute ? "Demand tribute" : "Custom deal";
   const subtitle = isGift
@@ -1649,6 +1657,15 @@ function DealPane({ f, dip, kind = "custom", onBack, onSubmit }) {
               {!isGift && (
                 <Toggle label="Non-aggression" value={nonAggression} onChange={setNonAggression} />
               )}
+              {!isGift && yoursToGive.length > 0 && (
+                <CityPicker
+                  label="Cede a city"
+                  cities={yoursToGive}
+                  chosen={cedeGive}
+                  onChange={setCedeGive}
+                  claimantOf={f.id}
+                />
+              )}
               {isPeace && (
                 <div style={{
                   fontFamily: C.font, fontSize: 10, letterSpacing: 1.2,
@@ -1670,6 +1687,15 @@ function DealPane({ f, dip, kind = "custom", onBack, onSubmit }) {
               <Toggle label="Their borders" value={wantBorders} onChange={setWantBorders} />
               {owed > 0 && (
                 <Toggle label={`Call it settled (weight ${owed})`} value={settle} onChange={setSettle} />
+              )}
+              {theirsToAsk.length > 0 && (
+                <CityPicker
+                  label="Ask for a city"
+                  cities={theirsToAsk}
+                  chosen={cedeGet}
+                  onChange={setCedeGet}
+                  claimantOf={dip.youId}
+                />
               )}
             </Card>
           )}
@@ -1964,6 +1990,65 @@ function smallBtnStyle() {
     padding: 0,
   };
 }
+// §3.2 — the cities each side can put on the table. Multi-select, because
+// "both Omara and Kansit and we have peace" is a sentence somebody will want
+// to say, and each row carries the two facts that decide the price: what the
+// place is worth, and whose homeland it is. `claimantOf` is the party on the
+// OTHER side of this column — a city they call theirs is the one they will
+// pay far over the odds for, and the row says so rather than leaving the
+// player to discover it from a refusal.
+function CityPicker({ label, cities, chosen, onChange, claimantOf }) {
+  const toggle = (hex) => {
+    const next = new Set(chosen);
+    if (next.has(hex)) next.delete(hex); else next.add(hex);
+    onChange(next);
+  };
+  return (
+    <div style={{ marginTop: 10 }}>
+      <div style={{
+        fontFamily: C.font, fontSize: 9.5, letterSpacing: 1.4,
+        textTransform: "uppercase", color: "rgba(207,214,220,0.5)", marginBottom: 4,
+      }}>{label}</div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+        {cities.map((c) => {
+          const on = chosen.has(c.hexId);
+          const theirHomeland = c.affiliation && c.affiliation === claimantOf;
+          return (
+            <button
+              key={c.hexId}
+              onClick={() => toggle(c.hexId)}
+              className="hud-int"
+              style={{
+                display: "flex", alignItems: "baseline", gap: 6, width: "100%",
+                textAlign: "left", cursor: "pointer",
+                padding: "4px 6px", borderRadius: 3,
+                border: `1px solid ${on ? C.holo : "rgba(207,214,220,0.18)"}`,
+                background: on ? "rgba(86,211,198,0.14)" : "rgba(255,255,255,0.02)",
+                boxShadow: on ? `0 0 6px ${C.holo}55` : undefined,
+              }}
+            >
+              <span style={{
+                fontFamily: C.font, fontSize: 11.5, letterSpacing: 0.6,
+                color: on ? "#f4efe2" : "#cfd6dc", flex: 1,
+              }}>{c.name}</span>
+              {theirHomeland && (
+                <span
+                  title="Their homeland — they will pay well past its output to have it back"
+                  style={{ fontFamily: C.font, fontSize: 9, letterSpacing: 1, color: C.holoHi }}
+                >CLAIMED</span>
+              )}
+              <span style={{
+                fontFamily: C.font, fontSize: 10, letterSpacing: 0.6,
+                color: "rgba(207,214,220,0.55)",
+              }}>{c.vp} VP · {c.output}/turn</span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function Toggle({ label, value, onChange }) {
   return (
     <label style={{

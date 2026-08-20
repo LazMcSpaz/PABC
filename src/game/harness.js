@@ -36,6 +36,8 @@ import {
   ultimatumsFor, ultimatumCooldown,
   // §6.10 the round trip — offers, counters, patience
   counterOffer, tableOffer, offersFor, answerOffer, asksThisRound,
+  // §3.2 Locations as deal items — ceding ground
+  locationWorth, cedeBlocker, cedeableLocations, cedeLocation, resolveProposal,
 } from "./diplomacy.js";
 import { holderOf, controlLevel, holdsLocation } from "./control.js";
 import { recomputeVp, settlementVp, locationVp } from "./victory.js";
@@ -57,7 +59,7 @@ import { resolveTokens } from "./textTokens.js";
 import { evalCond, evalStrength } from "./dsl.js";
 import { registerQuest } from "./quests.js";
 import { CONFIG } from "./config.js";
-import { takeAITurn, maybeAssignTech } from "./ai.js";
+import { takeAITurn, maybeAssignTech, warPeaceTerms } from "./ai.js";
 import { enforceLoyaltySlotCap, chargeChipUpkeep, slotCapacity, effectiveBuildCost, buildableChips, applyOutputAndBuilds, locationOutput, unitUpkeepFor, chargeUnitUpkeep } from "./economy.js";
 
 const seed = Number(process.argv[2]) || 42;
@@ -6123,6 +6125,298 @@ line("\n  [Phase 11] text-token resolver");
     check("you cannot immediately threaten them again",
       performDiplomacy(g, "versari", "issue-ultimatum", { faction: "goldgrass", demand }).ok === false);
     check("…and the wait is readable", ultimatumCooldown(g, "versari", "goldgrass") > 0);
+  }
+}
+
+// Phase 30 — §3's second half: Locations as deal items. Claims made holding
+// somebody else's homeland a standing grievance, and it could only ever end
+// one way: give the place back. There was no way to give the place back.
+// Diplomacy could move scrap, streams, promises and apologies, but not the
+// one thing the whole war is about, so it ran as a side-market beside the
+// game rather than inside it.
+{
+  line("\n  [Phase 30] diplomacy — ground on the table");
+  const C30 = CONFIG.diplomacy.cession;
+
+  // Set a Goldgrass homeland in Versari hands, and make sure Versari has
+  // somewhere else to stand so the last-ground rule is not what is being
+  // tested. Returns the game and the contested city.
+  const seize = (seed = 301) => {
+    const g = createGame({ seed, humanFactionId: "versari" });
+    ensureDiplomacy(g);
+    const theirs = Object.values(g.locations).find(
+      (l) => LOCATIONS[l.locationId]?.affiliation === "goldgrass" && !l.controller,
+    ) || Object.values(g.locations).find(
+      (l) => LOCATIONS[l.locationId]?.affiliation === "goldgrass" && l.controller !== "versari",
+    );
+    theirs.controller = "versari";
+    theirs.loyaltyOwner = "versari";
+    theirs.sections = ["versari", "versari", "versari"];
+    return { g, theirs };
+  };
+
+  // --- a city has a price, and it is not the same price to everybody ---
+  {
+    const { g, theirs } = seize();
+    const toThem = locationWorth(g, "goldgrass", theirs.hexId);
+    const toYou = locationWorth(g, "versari", theirs.hexId);
+    check("a city is worth something on the table", toYou > 0);
+    check("…and worth more to the faction that calls it home", toThem > toYou);
+    check("the claim is exactly the difference",
+      Math.abs(toThem - toYou * C30.claimMultiplier) < 0.001);
+    // Ground given up costs more than ground gained.
+    const giving = valueOfItem(g, "versari", { location: { hexId: theirs.hexId } },
+      { other: "goldgrass", side: "give" });
+    const getting = valueOfItem(g, "versari", { location: { hexId: theirs.hexId } },
+      { other: "goldgrass", side: "get" });
+    check("letting go of ground costs more than taking it", giving > getting);
+  }
+
+  // --- what can and cannot be signed away ---
+  {
+    const { g, theirs } = seize();
+    check("you can offer a city you fully hold",
+      cedeBlocker(g, "versari", theirs.hexId) === null);
+    check("…and not one you do not hold",
+      typeof cedeBlocker(g, "goldgrass", theirs.hexId) === "string");
+    // Half a city is not a thing you can sign away.
+    theirs.sections = ["versari", "versari", "goldgrass"];
+    theirs.controller = null;
+    check("nor half of one", typeof cedeBlocker(g, "versari", theirs.hexId) === "string");
+    theirs.sections = ["versari", "versari", "versari"];
+    theirs.controller = "versari";
+    // A seat is not a bargaining chip.
+    const seat = Object.values(g.locations).find(
+      (l) => l.controller === "versari"
+        && (l.chips || []).some((c) => g.chips[c]?.chipId === "capital"),
+    );
+    check("a capital is on the board", !!seat);
+    check("but a seat is never for sale",
+      typeof cedeBlocker(g, "versari", seat.hexId) === "string");
+    check("the picker offers what is offerable and nothing else",
+      cedeableLocations(g, "versari").includes(theirs.hexId)
+      && !cedeableLocations(g, "versari").includes(seat.hexId));
+    // …and never the last thing you hold, which would be an elimination
+    // dressed as an offer.
+    for (const l of Object.values(g.locations)) {
+      if (l.controller === "versari" && l.hexId !== theirs.hexId) l.controller = null;
+    }
+    check("nor the last ground you stand on",
+      typeof cedeBlocker(g, "versari", theirs.hexId) === "string"
+      && cedeableLocations(g, "versari").length === 0);
+  }
+
+  // --- the flagship sentence: "cede Omara and we have peace" ---
+  {
+    const { g, theirs } = seize();
+    declareWar(g, "versari", "goldgrass", "test");
+    check("you are at war, and they hold a grievance you cannot pay off",
+      atWar(g, "versari", "goldgrass")
+      && warJustification(g, "goldgrass", "versari") === "occupation"
+      && settleableWeight(g, "goldgrass", "versari") === 0);
+    const r = performDiplomacy(g, "versari", "sue-for-peace", {
+      faction: "goldgrass",
+      give: [{ location: { hexId: theirs.hexId } }], get: [],
+    });
+    check("handing the city back buys the peace", r.accepted === true);
+    check("…and the city actually moved", theirs.controller === "goldgrass");
+    check("…and the war is over", atWar(g, "versari", "goldgrass") === false);
+    check("the grievance ends because the condition ended",
+      grievanceWeight(g, "goldgrass", "versari") === 0
+      && warJustification(g, "goldgrass", "versari") === null);
+  }
+
+  // --- a city given is a city intact ---
+  {
+    const { g, theirs } = seize();
+    theirs.chips = [...theirs.chips];
+    const chipsBefore = theirs.chips.length;
+    theirs.activeBuild = { kind: "build", chipId: "workshop", cost: 6 };
+    theirs.buildProgress = 4;
+    cedeLocation(g, "versari", "goldgrass", theirs.hexId, "test");
+    check("nothing is sacked — every chip carries over",
+      theirs.chips.length === chipsBefore);
+    check("but the workshop's half-built job does not",
+      theirs.activeBuild === null && theirs.buildProgress === 0);
+    check("the people living there did not agree to this",
+      theirs.loyalty === C30.loyaltyOnCede);
+    check("control is whole, not partial",
+      theirs.controller === "goldgrass"
+      && theirs.sections.every((x) => x === "goldgrass"));
+    check("the feed calls it a cession, not a conquest",
+      g.log.some((e) => e.name === "location_ceded" && e.payload.to === "goldgrass")
+      && !g.log.some((e) => e.name === "location_captured"));
+  }
+
+  // --- a third party minds who ends up standing in its homeland ---
+  {
+    const { g, theirs } = seize();
+    const before = getStanding(g, "goldgrass", "lakers");
+    cedeLocation(g, "versari", "lakers", theirs.hexId, "test");
+    check("passing a homeland to somebody else is not an improvement",
+      getStanding(g, "goldgrass", "lakers") === before - C30.thirdPartyStandingHit);
+    check("…and the occupation simply re-points at its new holder",
+      grievanceWeight(g, "goldgrass", "lakers") > 0
+      && grievanceWeight(g, "goldgrass", "versari") === 0);
+  }
+
+  // --- a promise nobody can keep is not a deal that fell short ---
+  {
+    const { g, theirs } = seize();
+    g.players.goldgrass.resource = 100;
+    // Versari asking Goldgrass to cede a city Goldgrass does not hold.
+    const bad = performDiplomacy(g, "versari", "propose-deal", {
+      faction: "goldgrass", give: [], get: [{ location: { hexId: theirs.hexId } }],
+    });
+    check("you cannot be sold a city its seller does not hold",
+      bad.accepted === false && bad.countered !== true
+      && /do not hold/.test(bad.reason || ""));
+    check("…and no counter-offer is invented for it",
+      offersFor(g, "versari").length === 0);
+  }
+
+  // --- an offer sits on a table for rounds; the world does not wait ---
+  {
+    const { g, theirs } = seize();
+    g.players.goldgrass.resource = 100;
+    tableOffer(g, "goldgrass", "versari", {
+      proposer: "goldgrass", recipient: "versari",
+      give: [{ resource: { resource: "scrap", amount: 20 } }],
+      get: [{ location: { hexId: theirs.hexId } }],
+    }, { kind: "deal" });
+    const id = offersFor(g, "versari")[0].id;
+    // …and in the meantime the city is lost.
+    theirs.controller = "lakers";
+    const res = answerOffer(g, "versari", id, true);
+    check("accepting a city you no longer hold is refused, not half-applied",
+      res.ok === false && (g.players.versari.resource || 0) < 100);
+    check("…and the offer is still there to decline properly",
+      offersFor(g, "versari").length === 1);
+    check("nothing moved", theirs.controller === "lakers");
+  }
+
+  // --- ground is not tribute ---
+  {
+    const { g, theirs } = seize();
+    // Give versari the muscle to coerce, so the refusal is about the ASK and
+    // not about the power ratio.
+    for (const [id, u] of Object.entries(g.units)) {
+      if (u.owner === "goldgrass") delete g.units[id];
+    }
+    const r = performDiplomacy(g, "versari", "demand-tribute", {
+      faction: "goldgrass",
+      get: [{ resource: { resource: "scrap", amount: 1 } }, { location: { hexId: theirs.hexId } }],
+    });
+    check("a city cannot be squeezed out of somebody on a power ratio",
+      r.ok === false && /not tribute/.test(r.reason || ""));
+  }
+
+  // --- and the AI can say it too, in both directions ---
+  //
+  // Tested on the DECISION rather than by playing games until an AI happens
+  // to speak: approaching the player is behind the game's own RNG gate, so
+  // "run turns until it fires" is a coin-flip dressed as a check — and if
+  // the game reaches a winner first, takeAITurn quietly stops doing anything
+  // at all, which is how an earlier version of this passed for the wrong
+  // reason. warPeaceTerms is the whole judgement; the callers only choose
+  // between an inbox and applying it on the spot.
+  const warSetup = (seed, occupier, victim) => {
+    const g = createGame({ seed, humanFactionId: "versari" });
+    ensureDiplomacy(g);
+    // A homeland of `victim`'s that is not their seat: a captured capital
+    // has its chip destroyed, so a city really held in a war has none.
+    const loc = Object.values(g.locations).find(
+      (l) => LOCATIONS[l.locationId]?.affiliation === victim
+        && !(l.chips || []).some((c) => g.chips[c]?.chipId === "capital"),
+    );
+    loc.controller = occupier;
+    loc.loyaltyOwner = occupier;
+    loc.sections = [occupier, occupier, occupier];
+    loc.loyalty = CONFIG.loyalty.ceiling;
+    declareWar(g, occupier, victim, "test");
+    return { g, loc };
+  };
+
+  // Losing badly, and squatting on the other side's homeland: give it back.
+  {
+    const { g, loc } = warSetup(303, "goldgrass", "versari");
+    const war = findWar(g, "goldgrass", "versari");
+    war.unitsLost.goldgrass = 12;
+    war.contestsWon.versari = 8;
+    check("they are losing and they know it",
+      warExhaustion(g, "goldgrass", "versari") >= CONFIG.diplomacy.suePeace.acceptThreshold * 0.6);
+    const terms = warPeaceTerms(g, "goldgrass", "versari");
+    check("the AI offers the city back to end a war it is losing",
+      !!terms && (terms.give || []).some((it) => it.location?.hexId === loc.hexId));
+    check("…and offers peace with it, not the city alone",
+      !!terms && (terms.give || []).some((it) => it.promise?.kind === "peace"));
+    check("…and asks for nothing in return", !!terms && !(terms.get || []).length);
+    applyDeal(g, { proposer: "goldgrass", recipient: "versari", give: terms.give, get: terms.get }, "test");
+    check("…and the terms, applied, move the city and end the war",
+      loc.controller === "versari" && atWar(g, "versari", "goldgrass") === false);
+    check("…and the occupation goes with it",
+      grievanceWeight(g, "versari", "goldgrass") === 0);
+  }
+
+  // Losing, but holding nothing of theirs: scrap, because there is no city
+  // to hand over. The branch has to fall through cleanly, not stall.
+  {
+    const g = createGame({ seed: 304, humanFactionId: "versari" });
+    ensureDiplomacy(g);
+    declareWar(g, "goldgrass", "versari", "test");
+    const war = findWar(g, "goldgrass", "versari");
+    war.unitsLost.goldgrass = 12;
+    war.contestsWon.versari = 8;
+    g.players.goldgrass.resource = 20;
+    const terms = warPeaceTerms(g, "goldgrass", "versari");
+    check("with no city of theirs to give, it reaches for the purse",
+      !!terms && !(terms.give || []).some((it) => it.location)
+      && (terms.give || []).some((it) => it.resource?.resource === "scrap"));
+  }
+
+  // Winning, and the player is sitting in their homeland: name the price.
+  // The AI had no way to say this at all — it could only fight on until
+  // exhaustion turned it into a supplicant, so a war it was WINNING had no
+  // diplomatic expression whatsoever.
+  {
+    const { g, loc } = warSetup(305, "versari", "goldgrass");
+    const war = findWar(g, "versari", "goldgrass");
+    war.unitsLost.versari = 12;
+    war.contestsWon.goldgrass = 8;
+    // …and the muscle to mean it. Strip the human's army rather than inflate
+    // theirs: `powerOf` reads live Strength, which recomputeStats rebuilds
+    // from baseStrength on every turn, so a hand-set `strength` survives
+    // exactly one call.
+    for (const [id, u] of Object.entries(g.units)) {
+      if (u.owner === "versari") delete g.units[id];
+    }
+    const terms = warPeaceTerms(g, "goldgrass", "versari");
+    check("the AI names the city as the price of peace",
+      !!terms && (terms.get || []).some((it) => it.location?.hexId === loc.hexId)
+      && (terms.give || []).some((it) => it.promise?.kind === "peace"));
+    applyDeal(g, { proposer: "goldgrass", recipient: "versari", give: terms.give, get: terms.get }, "test");
+    check("…and paying it ends the war and the occupation together",
+      loc.controller === "goldgrass"
+      && atWar(g, "versari", "goldgrass") === false
+      && grievanceWeight(g, "goldgrass", "versari") === 0);
+  }
+
+  // …and between two AIs it lands on the spot, because neither has an inbox
+  // — the same road the settle branch takes. Before this, two AIs in a war
+  // one of them was plainly losing fought it to the end while the loser sat
+  // in the winner's homeland with no way to put it down.
+  {
+    const { g, loc } = warSetup(303, "goldgrass", "lakers");
+    const war = findWar(g, "goldgrass", "lakers");
+    war.unitsLost.goldgrass = 12;
+    war.contestsWon.lakers = 8;
+    const terms = warPeaceTerms(g, "goldgrass", "lakers");
+    const deal = { proposer: "goldgrass", recipient: "lakers", give: terms.give, get: terms.get };
+    check("the wronged AI takes the city back rather than fight on",
+      wouldAccept(g, "lakers", deal));
+    applyDeal(g, deal, "ai-war-cession");
+    check("…and it changes hands with no human in the room",
+      loc.controller === "lakers" && atWar(g, "goldgrass", "lakers") === false);
   }
 }
 

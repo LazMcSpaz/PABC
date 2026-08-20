@@ -19,6 +19,10 @@ export const EVENT_NAMES = new Set([
   "contest_declared", "contest_won", "contest_lost",
   "obstacle_claimed", "encounter_resolved",
   "location_spawned", "section_flipped", "location_captured", "location_decayed",
+  // §3.2 — a city changing hands by treaty rather than by force. Its own
+  // name, because "Omara falls" and "Omara is signed away" are not the
+  // same thing to read in a feed, and only one of them is a conquest.
+  "location_ceded",
   // §18.2 Loyalty
   "loyalty_changed", "loyalty_failing", "control_peeled",
   // §18.3 Influence & Zone of Control

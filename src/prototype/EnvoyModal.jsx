@@ -144,6 +144,14 @@ function OfferAudience({ o, onRespond }) {
           <p style={{ margin: "0 0 10px", color: "#8fd8ce", fontStyle: "italic" }}>
             {(OFFER_OPENER[t] || OFFER_OPENER.honorable)(who)}
           </p>
+          {/* Why they came. The engine attaches a reason to every offer an AI
+              opens — "Give it back and this ends.", "It would be a shame if
+              anything happened." — and the audience box was the one place it
+              never reached, so an envoy arrived with terms and no argument.
+              The drawer's inbox has always shown it. */}
+          {o.note && (
+            <p style={{ margin: "0 0 10px", color: "#efe3ae" }}>{o.note}</p>
+          )}
           <p style={{ margin: "0 0 10px" }}>
             <b style={{ color: "#efe3ae" }}>You receive:</b> {o.youGet.length ? o.youGet.join(" · ") : "nothing"}
             <br />

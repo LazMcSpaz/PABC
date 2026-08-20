@@ -255,7 +255,79 @@ has the strength to mean it, and now follows through; before that fix every
 threat it made became a bluff it called on itself. Per-pair cooldown, because
 a threat repeated every other round is a tic. 19 harness checks (Phase 29).
 
-**§3's second half — Locations as deal items — is the last one open.**
+**§3 second half — Locations as deal items — BUILT (2026-08-20).** A city is
+now a deal item: `{ location: { hexId } }`, on either side of any give/get,
+priced and transferred with everything else. So the sentences the layer could
+not say are sayable, and they land:
+
+- *"Cede Omara and we have peace."*
+- *"Support my war and Chigan is yours."*
+- *"Reparations for Tin Town: take Erport."*
+
+**A city is not worth the same to everybody**, which is the whole reason it
+can be traded. Its flat worth is its victory points, its output and its
+walls; a faction that calls it home multiplies that (`claimMultiplier`), so
+Goldgrass will pay far past Omara's two production to have Omara. And ground
+given up costs more than ground gained — you lose the place, the zone of
+control around it and the base you were working from — scaled by aggression,
+so a warlord does not sell land while a merchant might. That asymmetry is
+what makes a cession a *deal* rather than a transfer: there is a range of
+prices where both sides come out ahead.
+
+**Some cities are not for sale.** Not one you only half hold, because half a
+city cannot be signed away. Never a Capital — a faction's seat is not a
+bargaining chip, and trading one would be an elimination dressed as an offer.
+Never the last ground you stand on, for the same reason. And a cession the
+giver cannot perform is refused with the reason rather than countered with
+scrap: a deal promising Omara by somebody who does not hold Omara has not
+fallen short on price, it cannot be performed at all. Since an offer sits on
+a table for rounds, that is re-checked when it is *answered* too — a city
+lost in the meantime voids the offer instead of quietly dropping the term and
+handing over everything else for free.
+
+**A city given is a city intact.** Deliberately not `captureLocation`:
+nothing is sacked, no chip is destroyed, and the affiliated faction is not
+told a conquest happened, because one didn't. What does carry over is
+everything that follows from control changing hands — the people living there
+did not agree to this, so Loyalty starts low; the half-built workshop belongs
+to somebody else now; and Research, Influence, Vision and VP are all told.
+The feed says *"Versari ceded Omara to Goldgrass Coalition"*, not *"Omara
+falls"*.
+
+**Ground is not tribute.** `caveOnDemand` weighs a demand on the power ratio
+alone — right for scrap, absurd for a city: it would hand over Omara because
+somebody counted the armies. Demanding a city belongs in a deal or behind an
+ultimatum's deadline, so it is the one verb a `{ location }` is barred from.
+
+**And the AI says it, in both directions.** Winning, with the player sitting
+in its homeland, it names the price: *give it back and this ends*. Losing,
+while squatting on the player's, it offers the city back — the cheapest thing
+it owns, because holding it is what the war is costing it. Between two AIs
+the same judgement applies on the spot, since neither has an inbox; the
+winning half correctly comes to nothing there, because a demand for somebody's
+homeland is priced far past what peace is worth. Across twelve AI-only games
+the map now changes hands by treaty seven times, and every one of them was a
+homeland going back to the faction that claims it.
+
+Two bugs surfaced while building it, both fixed:
+
+- **A faction losing a war would court a stranger instead of ending it.** The
+  gift branch fires on every turn a sociable faction takes, and it *returns*,
+  so everything below it was unreachable in practice — including the offer
+  that would end the war. Same obstacle the settle branch was hoisted over in
+  §1. Talking to the party you are actually fighting now outranks courting a
+  stranger.
+- **An envoy arrived with terms and no argument.** Every AI offer carries a
+  reason (*"Give it back and this ends."*, *"It would be a shame if anything
+  happened."*); the drawer's inbox had always shown it and the audience box
+  never did.
+
+40 harness checks (Phase 30). The UI is two pickers in the deal builder — one
+per column, marking whose homeland each place is, because a city they call
+theirs is the one they will pay over the odds for and a player should not
+have to learn that from a refusal.
+
+**All five gaps are now built.**
 
 ## What I'd build, in order
 
@@ -264,8 +336,7 @@ a threat repeated every other round is a tic. 19 harness checks (Phase 29).
 3. ~~**Receipts** (§5)~~ — **done**, see Status above.
 4. ~~**Claims** (§3, first half)~~ — **done**, see Status above.
 5. ~~**Ultimatums** (§4)~~ — **done**, see Status above.
-6. **Ceding Locations** (§3, second half) — the big one, best done once claims
-   and the ledger exist to give it meaning.
+6. ~~**Ceding Locations** (§3, second half)~~ — **done**, see Status above.
 
 Deliberately still parked: audit §3 tier 3's *personality in the price* (wants
 the AI overhaul) and *fuzzy acceptance reads* (wants a decision about how much

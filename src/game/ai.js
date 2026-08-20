@@ -27,6 +27,7 @@ import {
   counterOffer, ultimatumsFor, answerUltimatum, aiComplies, unitsInTerritory, declareWar,
   performDiplomacy,
   aiAcceptsVassalage, truceBetween,
+  occupationsBy, cedeBlocker, locationWorth,
 } from "./diplomacy.js";
 
 const SAFETY_CAP = 16; // hard stop if priority loop ever spins
@@ -430,6 +431,12 @@ function manageDiplomacy(state, pid) {
     }
   }
 
+  // 2b) Say something about the war you are in, before going shopping for
+  //     friends. See warTalk: the gift branch immediately below returns on
+  //     every turn a sociable faction takes, which made every branch under
+  //     it unreachable — including the one that ends the war.
+  if (warTalk(state, pid, me)) return;
+
   // 3) Proactive pact with a warm, compatible, engageable faction; or a gift
   //    to warm one up (diplomacy-lean factions buy Standing toward a pact).
   if ((me.sociability ?? 0) >= 0.5) {
@@ -511,6 +518,101 @@ function manageDiplomacy(state, pid) {
   }
 }
 
+// What `pid` would put to `other` about the war between them, or null if it
+// has nothing to say yet. Written as terms rather than as an action so the
+// same reasoning serves both audiences: the human, who gets an offer in an
+// inbox to answer, and another AI, which has no inbox and settles on the
+// spot — exactly the split the settle branch already makes.
+export function warPeaceTerms(state, pid, other) {
+  const sue = CONFIG.diplomacy.suePeace.acceptThreshold;
+
+  // WINNING: name the price, and let it be the thing the war is actually
+  // about. The AI had no way to say this at all — it could only fight on
+  // until exhaustion turned it into a supplicant, so a war it was WINNING
+  // had no diplomatic expression whatsoever. Asking for a homeland back is
+  // the one ask that motivates itself: the occupation is already a standing
+  // grievance, and giving the place back is already the only thing that
+  // ends one.
+  if (warExhaustion(state, other, pid) >= sue * 0.5
+    && powerOf(state, pid) > powerOf(state, other)) {
+    const want = occupationsBy(state, pid, other)
+      .filter((o) => !cedeBlocker(state, other, o.at))
+      .sort((a, b) => locationWorth(state, pid, b.at) - locationWorth(state, pid, a.at))[0];
+    if (want) {
+      return {
+        give: [{ promise: { kind: "peace" } }],
+        get: [{ location: { hexId: want.at } }],
+        note: "Give it back and this ends.",
+      };
+    }
+  }
+  // LOSING: buy your way out before your army is gone. Ground first, and
+  // specifically THEIR ground — a city of theirs that this faction is
+  // squatting on is the cheapest thing it owns, because holding it is what
+  // the war is costing it. Scrap only if it has no such card to play.
+  if (warExhaustion(state, pid, other) < sue * 0.6) return null;
+  const backDown = occupationsBy(state, other, pid)
+    .filter((o) => !cedeBlocker(state, pid, o.at))
+    .sort((a, b) => locationWorth(state, other, b.at) - locationWorth(state, other, a.at))[0];
+  if (backDown) {
+    return {
+      give: [{ promise: { kind: "peace" } }, { location: { hexId: backDown.at } }],
+      get: [],
+      note: "They want this war over, and they know what it will cost.",
+    };
+  }
+  const sweetener = Math.min(state.players[pid]?.resource || 0, 6);
+  return {
+    give: [{ promise: { kind: "peace" } }, ...(sweetener > 0 ? [{ resource: { resource: "scrap", amount: sweetener } }] : [])],
+    get: [],
+    note: "They want this war over.",
+  };
+}
+
+// Everything `pid` has to say about the wars it is in. Lives above the
+// courtship branch in manageDiplomacy for a reason that took a while to
+// find: a sociable faction gifts a stranger three scrap on every turn it
+// takes, and that branch RETURNS, so a faction losing a war it could end by
+// talking never reached the part of its own turn where it would have said
+// so. The settle branch was hoisted over the same obstacle in §1. Talking to
+// the party you are actually fighting outranks courting a stranger, and the
+// courting is still there, one branch down.
+function warTalk(state, pid, me) {
+  const human = state.humanFactionId;
+  // The player's own seat never conducts diplomacy on its own account, even
+  // if something drives manageDiplomacy for it: a faction that signs away
+  // its own cities behind the player's back is not an AI, it is a bug.
+  if (pid === human) return false;
+  for (const other of factionIds(state)) {
+    if (other === pid || !atWar(state, pid, other)) continue;
+    if (!mayEngage(state, pid, other)) continue;
+    if (other === human) {
+      if (offersFor(state, human).some((o) => o.from === pid)) continue;
+      // Same gate every other approach to the player passes through, so an
+      // AI does not become chatty just because it is at war.
+      if (state.rng.next() > (CONFIG.diplomacy.offers.aiProposeChance * (0.4 + (me.sociability ?? 0.5)))) continue;
+      const terms = warPeaceTerms(state, pid, other);
+      if (!terms) continue;
+      tableOffer(state, pid, human, { give: terms.give, get: terms.get },
+        { kind: "peace", note: terms.note });
+      return true;
+    }
+    // Between two AIs there is no inbox to put anything in, so the terms
+    // land or they do not — the same road the settle branch takes. Only the
+    // LOSING side acts here: a demand for somebody's homeland is priced far
+    // past what peace is worth, so the winning branch correctly comes to
+    // nothing between two AIs, and an AI is never talked out of a city it
+    // is winning by holding.
+    const terms = warPeaceTerms(state, pid, other);
+    if (!terms || !terms.give.some((it) => it.location)) continue;
+    const deal = { proposer: pid, recipient: other, give: terms.give, get: terms.get };
+    if (!wouldAccept(state, other, deal)) continue;
+    applyDeal(state, deal, "ai-war-cession");
+    return true;
+  }
+  return false;
+}
+
 // What this faction would like from the human, if anything. One offer at a
 // time and only while it has nothing already pending with them, so the inbox
 // stays a thing that happens rather than a thing that accumulates.
@@ -526,16 +628,7 @@ function proposeToHuman(state, pid, me) {
   // game's, not Math.random, so a replayed game proposes identically.
   if (state.rng.next() > (cfg.aiProposeChance * (0.4 + (me.sociability ?? 0.5)))) return;
 
-  // At war and losing: buy your way out before your army is gone.
-  if (atWar(state, pid, human)) {
-    if (warExhaustion(state, pid, human) < CONFIG.diplomacy.suePeace.acceptThreshold * 0.6) return;
-    const sweetener = Math.min(purse, 6);
-    tableOffer(state, pid, human, {
-      give: [{ promise: { kind: "peace" } }, ...(sweetener > 0 ? [{ resource: { resource: "scrap", amount: sweetener } }] : [])],
-      get: [],
-    }, { kind: "peace", note: "They want this war over." });
-    return;
-  }
+  if (atWar(state, pid, human)) return; // handled above, before the courtship
   // Warm but not allied: buy the alliance rather than wait for the numbers.
   if (s >= tiers.neutral && s < CONFIG.diplomacy.pactStandingReq && !arePacted(state, pid, human)
     && passesRepGates(state, pid, human)) {

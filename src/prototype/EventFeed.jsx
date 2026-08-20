@@ -82,6 +82,14 @@ function formatEvent(ev, engineState) {
         color: factionColor(p.controller),
         text: `${who(p.controller)} captured ${place(p.hex)}`,
       };
+    // §3.2 — a city changing hands by treaty. Its own line, because
+    // "Omara falls" and "Omara is signed over" read nothing alike, and the
+    // second one is the more interesting thing to have happened.
+    case "location_ceded":
+      return {
+        color: factionColor(p.to),
+        text: `${who(p.from)} ceded ${place(p.hex)} to ${who(p.to)}`,
+      };
     case "location_decayed":
       return { color: theme.accent2, text: `${place(p.hex)} fell to neutral` };
     // §18.2 — the loyalty-failing alert path. Fires before any Control peel

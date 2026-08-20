@@ -19,6 +19,7 @@ import {
 } from "./visibility.js";
 import { recomputeResearch } from "./stats.js";
 import { recomputeVp } from "./victory.js";
+import { recomputeInfluence } from "./influence.js";
 
 // --- state ----------------------------------------------------------
 export function ensureDiplomacy(state) {
@@ -606,6 +607,132 @@ function pactAppetite(state, fid, other) {
   return Math.max(0, (5 + social * 4) - shortfall);
 }
 
+// --- §3.2 Locations as deal items -----------------------------------
+//
+// Every faction in content.js carries affiliated Locations, and the claims
+// half of this work made holding somebody else's a standing grievance. What
+// was still missing was the other side of that sentence: a way to GIVE ONE
+// BACK. Diplomacy could move scrap, streams, promises and apologies — it
+// could not move the one thing the whole war is about, so it ran as a
+// side-market beside the game rather than inside it.
+//
+// A cession is a deal item like any other: `{ location: { hexId } }` on
+// either side of a give/get. It prices itself, it transfers atomically with
+// the rest of the deal, and — because occupation grievances are computed
+// live from who holds what — handing a homeland back ends the grievance it
+// created the moment the deed is done, with nothing to clear and nobody to
+// forgive.
+
+const CESSION = () => D().cession;
+
+// A Location's flat worth, before anybody's feelings about it: victory
+// points, what it actually produces, and how hard its walls are.
+function baseLocationWorth(state, loc) {
+  const def = LOCATIONS[loc.locationId] || {};
+  const c = CESSION();
+  return (def.vpReward || 0) * c.vpWeight
+    + (loc.output ?? loc.production ?? 0) * c.outputWeight
+    + (c.valueRank[def.strategicValue] ?? 0);
+}
+
+// What this Location is worth TO `fid` — the number a deal is priced on.
+// The claim multiplier is what separates a holding from a homeland: to
+// Goldgrass, Omara is not a medium-value city with two production, it is
+// Omara. That is the whole reason "give it back" is a thing a faction can
+// want badly enough to pay for.
+export function locationWorth(state, fid, hexId) {
+  const loc = state.locations?.[hexId];
+  if (!loc) return 0;
+  let worth = baseLocationWorth(state, loc);
+  if (LOCATIONS[loc.locationId]?.affiliation === fid) worth *= CESSION().claimMultiplier;
+  return worth;
+}
+
+// Ground given up is worth more than ground gained. You lose the place, the
+// zone of control around it and the base you were working from — and a
+// warlord feels that harder than a merchant does, which is `aggression`
+// paying for itself in the price rather than in a special case.
+function cedeReluctance(fid) {
+  const c = CESSION();
+  const agg = factionDef(fid)?.aggression ?? 0.5;
+  return c.cedeReluctanceBase + agg * c.cedeReluctancePerAggression;
+}
+
+// Why `from` cannot hand `hexId` over — or null if they can. Full control,
+// because half a city is not a thing you can sign away; and never a Capital,
+// because a faction's seat is not a bargaining chip and trading one away
+// would be an elimination dressed as an offer.
+export function cedeBlocker(state, from, hexId) {
+  const loc = state.locations?.[hexId];
+  if (!loc) return "there is no such place";
+  const name = LOCATIONS[loc.locationId]?.name || hexId;
+  if (loc.controller !== from) return `they do not hold ${name} to give`;
+  if ((loc.chips || []).some((c) => state.chips?.[c]?.chipId === "capital"))
+    return `${name} is their seat, and a seat is not for sale`;
+  const held = Object.values(state.locations).filter((l) => l.controller === from);
+  if (held.length <= 1) return `${name} is the last ground they hold`;
+  return null;
+}
+
+// Everything `fid` could put on a table right now. The UI's picker reads
+// this rather than filtering locations itself, so the rule about seats and
+// last ground lives in exactly one place.
+export function cedeableLocations(state, fid) {
+  return Object.values(state.locations || {})
+    .filter((loc) => loc.controller === fid && !cedeBlocker(state, fid, loc.hexId))
+    .map((loc) => loc.hexId);
+}
+
+// Which party a `{ location }` item is being given BY, inside a deal. The
+// item itself does not say — the side of the give/get it sits on does.
+function cessionsIn(deal) {
+  const out = [];
+  for (const it of deal.give || []) if (it.location) out.push({ from: deal.proposer, to: deal.recipient, hexId: it.location.hexId });
+  for (const it of deal.get || []) if (it.location) out.push({ from: deal.recipient, to: deal.proposer, hexId: it.location.hexId });
+  return out;
+}
+
+// The handover. Deliberately NOT captureLocation: a city given is a city
+// intact. Nothing is sacked, no chip is destroyed, and the affiliated
+// faction is not told a conquest happened — because one didn't.
+//
+// What does carry over from capture is everything that follows from control
+// changing hands: the people living there did not agree to this, so Loyalty
+// starts low; the half-built workshop belongs to somebody else now, so the
+// build resets; and Research, Influence, Vision and VP all have to be told.
+export function cedeLocation(state, from, to, hexId, cause = "cession") {
+  const loc = state.locations?.[hexId];
+  if (!loc) return false;
+  loc.controller = to;
+  loc.loyaltyOwner = to;
+  loc.sections = loc.sections.map(() => to);
+  loc.loyalty = CESSION().loyaltyOnCede;
+  // §20.8 — the same reasoning capture uses: whatever was on the bench
+  // belongs to whoever holds the bench now, and they have not chosen yet.
+  loc.activeBuild = null;
+  loc.buildProgress = 0;
+  loc.buildSlider = CONFIG.economy.defaultSlider;
+  loc.buildPriority = "blockade";
+  loc.poolTarget = null;
+  emit(state, "location_ceded", {
+    hex: hexId, locationId: loc.locationId, from, to, cause,
+    name: LOCATIONS[loc.locationId]?.name || hexId,
+  });
+  // A third party whose homeland this is minds who is standing in it. Handing
+  // Omara from Versari to the Lakers is not, to Goldgrass, an improvement —
+  // and the standing occupation grievance simply re-points at its new holder
+  // on its own, because it is computed from the board rather than recorded.
+  const aff = LOCATIONS[loc.locationId]?.affiliation;
+  if (aff && aff !== to && state.players[aff]) {
+    adjustStanding(state, aff, to, -CESSION().thirdPartyStandingHit, "location-ceded");
+  }
+  recomputeResearch(state);
+  recomputeInfluence(state);
+  recomputeVisibilityFor(state, [to, from], { emitEvents: false });
+  recomputeVp(state);
+  return true;
+}
+
 export function valueOfItem(state, fid, item, ctx = {}) {
   if (!item) return 0;
   if (item.resource) return item.resource.amount || 0;
@@ -624,6 +751,13 @@ export function valueOfItem(state, fid, item, ctx = {}) {
     const owedToMe = settleableWeight(state, fid, ctx.other);
     const owedByMe = settleableWeight(state, ctx.other, fid);
     return (owedToMe + owedByMe) * D().grievance.settlementPerWeight;
+  }
+  // A city on the table. Priced from `fid`'s own side — their claim on it,
+  // their output from it — and, when they are the one giving it up, scaled
+  // by what it costs to be the party that lets go of ground.
+  if (item.location) {
+    const worth = locationWorth(state, fid, item.location.hexId);
+    return ctx.side === "give" ? worth * cedeReluctance(fid) : worth;
   }
   if (item.chip) return 4; // generic gear value
   if (item.intel) return item.intel.kind === "mapData" ? 3 : 2;
@@ -664,8 +798,12 @@ export function dealValue(state, fid, deal) {
   const get = iAmProposer ? deal.get : deal.give;
   const give = iAmProposer ? deal.give : deal.get;
   let v = 0;
-  for (const it of get || []) v += valueOfItem(state, fid, it, ctx);
-  for (const it of give || []) v -= valueOfItem(state, fid, it, ctx);
+  // Which side an item sits on is not decoration for every kind: a Location
+  // is worth more to lose than to gain, so the valuer has to be told which
+  // it is doing. Every other item kind ignores `side` and prices the same
+  // either way, which is what keeps a settlement symmetrical.
+  for (const it of get || []) v += valueOfItem(state, fid, it, { ...ctx, side: "get" });
+  for (const it of give || []) v -= valueOfItem(state, fid, it, { ...ctx, side: "give" });
   v += getStanding(state, fid, other) * D().ai.relationshipBiasPerStanding;
   return v;
 }
@@ -678,6 +816,14 @@ export function wouldAccept(state, fid, deal) {
     (it) => it.promise && ["pact", "nonAggression", "openBorders", "tribute"].includes(it.promise.kind),
   );
   if (hasDeepPromise && !passesRepGates(state, fid, other)) return false;
+  // Hard gate: a city nobody can actually hand over. This is not a matter of
+  // price — a deal that promises Omara by a party who does not hold Omara is
+  // not a deal that fell short, it is a deal that cannot be performed. The
+  // check runs on BOTH parties, because a proposer who cannot deliver their
+  // own side is the more common mistake.
+  for (const c of cessionsIn(deal)) {
+    if (cedeBlocker(state, c.from, c.hexId)) return false;
+  }
   // Hard gate: conflicting agreements — won't ally a sworn enemy's friend.
   for (const it of [...(deal.give || []), ...(deal.get || [])]) {
     if (it.promise?.kind === "joinWar" && arePacted(state, fid, it.promise.target)) return false;
@@ -892,6 +1038,12 @@ export function resolveProposal(state, pid, f, deal, cause, kind) {
         : "there is nothing between you to settle",
     };
   }
+  // …and the same courtesy for a city that cannot change hands: say why,
+  // rather than counter with scrap against terms that were never performable.
+  for (const c of cessionsIn(deal)) {
+    const blocker = cedeBlocker(state, c.from, c.hexId);
+    if (blocker) return { accepted: false, reason: c.from === pid ? blocker.replace(/^they /, "you ") : blocker };
+  }
   const pestering = recordAsk(state, pid, f);
   if (wouldAccept(state, f, deal)) {
     applyDeal(state, deal, cause);
@@ -927,6 +1079,14 @@ function refusalReason(state, fid, deal) {
     }
     if (kind === "joinWar" && arePacted(state, fid, it.promise.target)) {
       return `they will not turn on ${factionDef(it.promise.target)?.name || it.promise.target}, who is their ally`;
+    }
+  }
+  for (const c of cessionsIn(deal)) {
+    const blocker = cedeBlocker(state, c.from, c.hexId);
+    if (blocker) return blocker;
+    if (c.from === fid) {
+      const name = LOCATIONS[state.locations[c.hexId]?.locationId]?.name || c.hexId;
+      return `they will not give up ${name} at that price`;
     }
   }
   if (!passesRepGates(state, fid, other)) {
@@ -976,7 +1136,19 @@ export function answerOffer(state, fid, offerId, accept) {
   ensureDiplomacy(state);
   const i = state.diplomacy.offers.findIndex((o) => o.id === offerId && o.to === fid);
   if (i < 0) return { ok: false, reason: "that offer is no longer on the table" };
-  const [offer] = state.diplomacy.offers.splice(i, 1);
+  const offer = state.diplomacy.offers[i];
+  // An offer is an object that SITS there, for rounds — long enough for a
+  // city named in it to be lost, given away, or peeled to neutral. Applying
+  // it anyway would quietly drop the term and hand the other side everything
+  // else for free, so a cession that can no longer be performed voids the
+  // offer instead, and it stays on the table to be declined properly.
+  if (accept) {
+    for (const c of cessionsIn(offer.deal)) {
+      const blocker = cedeBlocker(state, c.from, c.hexId);
+      if (blocker) return { ok: false, reason: blocker.replace(/^they /, c.from === fid ? "you " : "they ") };
+    }
+  }
+  state.diplomacy.offers.splice(i, 1);
   if (!accept) {
     emit(state, "offer_declined", { offer: offer.id, from: offer.from, to: fid });
     return { ok: true, accepted: false };
@@ -1255,6 +1427,13 @@ function transferItems(state, from, to, items) {
       // §18.6/§19.9 — intel delivers Fog vision/mapData of the giver's area.
       const giverHexes = [...(state.visibility?.[from]?.explored || [])];
       if (giverHexes.length) revealRegion(state, to, giverHexes);
+    } else if (it.location) {
+      // §3.2 — the deed changes hands with everything else in the deal.
+      // Re-checked here rather than trusted: a deal can sit in an inbox for
+      // rounds, and the city can be lost in the meantime.
+      if (!cedeBlocker(state, from, it.location.hexId)) {
+        cedeLocation(state, from, to, it.location.hexId, "deal");
+      }
     }
     // flows + promises are tracked in the live agreement (applied per round)
   }
@@ -2511,6 +2690,14 @@ export function performDiplomacy(state, pid, action, params = {}) {
         || [{ resource: { resource: "scrap", amount: params.amount || 0 } }];
       if (!terms.some((t) => (t.resource?.amount || 0) > 0 || t.chip || t.research || t.intel)) {
         return { ok: false, reason: "name something worth demanding" };
+      }
+      // A city is not tribute. `caveOnDemand` weighs a demand on the power
+      // ratio alone — right for scrap, absurd for ground: it would hand over
+      // Omara because somebody counted the armies. Ceding is a thing you
+      // negotiate or a thing you threaten, so it belongs in a deal or an
+      // ultimatum, and this is the one verb it is not allowed in.
+      if (terms.some((t) => t.location)) {
+        return { ok: false, reason: "ground is not tribute — ask for it in a deal, or demand it with a deadline" };
       }
       adjustMenace(state, pid, D().menace.base, "demand-tribute"); // the threat is hostile
       emit(state, "tribute_demanded", { demander: pid, target: f, terms });

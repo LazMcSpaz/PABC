@@ -29,6 +29,7 @@ import {
   aiAcceptsPact, aiAcceptsVassalage, aiAcceptsPeace, wouldAccept, passesRepGates,
   denounceCooldown, denounceWarrant, denounceGrounds, grievanceWeight, grievancesAgainst,
   reputationLog, settleableWeight, unitsInTerritory, ultimatumCooldown,
+  cedeableLocations, locationWorth,
   asksThisRound, flowRounds, promiseRounds,
   evaluatePactCall, canDemandTribute, hasOpenBorders, warJustification,
   openBordersStanding,
@@ -678,6 +679,7 @@ function adaptDiplomacy(state, viewer) {
   const me = state.players[viewer];
   const rec = recognitionScore(state, viewer);
   const spyRing = hasTechNode(state, viewer, "int-b1");
+  const viewerVis = state.visibility?.[viewer] || null;
   const factions = factionIds(state).filter((f) => f !== viewer).map((f) => {
     const def = factionDef(f) || {};
     const sToward = getStanding(state, f, viewer); // their Standing toward you
@@ -711,6 +713,13 @@ function adaptDiplomacy(state, viewer) {
       // a "get out" ultimatum is about, and the check on whether one is
       // even sayable.
       unitsInYourTerritory: unitsInTerritory(state, f, viewer).length,
+      // §3.2 — the cities each side could actually put on a table. What THEY
+      // hold is fog-gated: you cannot ask for a place you have never seen,
+      // which is the Intelligence path buying its way into the deal builder
+      // the same way it bought its way into denouncement.
+      theyCouldCede: cedeableLocations(state, f)
+        .filter((hex) => !viewerVis || viewerVis.explored.has(hex))
+        .map((hex) => cessionOption(state, hex, viewer)),
       color: def.color || "#888",
       tier: def.tier || "major",
       temperament: def.temperament,
@@ -810,6 +819,11 @@ function adaptDiplomacy(state, viewer) {
       canPlacate: (me?.resource || 0) >= CONFIG.diplomacy.warnings.placateScrap,
       defyStandingHit: CONFIG.diplomacy.warnings.defyStandingHit,
     })),
+    // §3.2 — your own cities, as deal items. One list, not one per faction:
+    // what you can give does not depend on who you are talking to. The
+    // engine decides what qualifies (full control, never your seat, never
+    // your last ground) so the picker cannot offer something unofferable.
+    youCouldCede: cedeableLocations(state, viewer).map((hex) => cessionOption(state, hex, viewer)),
     // §6.10 — offers on the table awaiting your answer: an AI's own approach,
     // or the counter-terms one came back with when it refused your proposal.
     // Rendered as readable term lists rather than raw items, so the drawer
@@ -834,8 +848,8 @@ function adaptDiplomacy(state, viewer) {
         const mine = viewerProposes ? o.deal.give : o.deal.get;
         const theirs = viewerProposes ? o.deal.get : o.deal.give;
         return {
-          youGet: (theirs || []).map(describeDealItem),
-          youGive: (mine || []).map(describeDealItem),
+          youGet: (theirs || []).map((it) => describeDealItem(it, state)),
+          youGive: (mine || []).map((it) => describeDealItem(it, state)),
           affordable: (mine || []).every(
             (it) => it.resource?.resource !== "scrap"
               || (me?.resource || 0) >= (it.resource.amount || 0),
@@ -960,10 +974,38 @@ function grievanceLedger(state, victim, offender) {
     });
 }
 
+// One city, as the deal builder needs to see it: what it is called, what it
+// is worth to the viewer, and whose homeland it is. The worth is the same
+// number the engine prices the deal on — the builder does not get its own
+// arithmetic, because two valuations that disagree is how a player learns
+// not to trust the one on screen.
+function cessionOption(state, hex, viewer) {
+  const loc = state.locations[hex];
+  const def = ENGINE_LOCATIONS[loc?.locationId] || {};
+  return {
+    hexId: hex,
+    name: def.name || hex,
+    vp: def.vpReward || 0,
+    output: loc?.output ?? 0,
+    holder: loc?.controller || null,
+    affiliation: def.affiliation || null,
+    affiliationName: def.affiliation ? (factionDef(def.affiliation)?.name || def.affiliation) : null,
+    yoursByRight: def.affiliation === viewer,
+    worth: Math.round(locationWorth(state, viewer, hex) * 10) / 10,
+  };
+}
+
 // One deal term, in words. The drawer used to build its own item objects and
 // its own labels; now the engine's schema is described in exactly one place.
-function describeDealItem(it) {
+// `state` is optional and only a Location needs it — every other item kind
+// carries its own text, but a city is a hexId until the board says what
+// stands there.
+function describeDealItem(it, state) {
   if (!it) return "";
+  if (it.location) {
+    const loc = state?.locations?.[it.location.hexId];
+    return ENGINE_LOCATIONS[loc?.locationId]?.name || it.location.hexId;
+  }
   if (it.resource?.resource === "scrap") return `${it.resource.amount} scrap`;
   if (it.resource) return `${it.resource.amount} ${it.resource.resource}`;
   if (it.flow) {
