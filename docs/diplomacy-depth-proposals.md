@@ -216,13 +216,20 @@ has political weight (vision means you witness things, which means you hold
 grievances nobody else can), and Menace stops being omniscient. 10 harness
 checks (Phase 26).
 
-**§3, §4, §5 — still open.**
+**§5 receipts — BUILT (2026-08-19).** Every Menace and Honor change is kept
+with its cause, bounded to a receipt roll rather than an archive, and the
+drawer renders it as "How you got here": *"+2 · declaring war on Goldgrass
+Coalition without grounds · round 2"*, *"+2 · Free Plainers put your name to
+it in public · round 4"*. The causes were already flowing through `emit` and
+nothing kept them. 9 harness checks (Phase 27).
+
+**§3 and §4 — still open.**
 
 ## What I'd build, in order
 
 1. ~~**Grievance ledger + reparations** (§1)~~ — **done**, see Status above.
 2. ~~**Witnessed reputation** (§2)~~ — **done**, see Status above.
-3. **Receipts** (§5) — small, and makes 1 and 2 visible instead of invisible.
+3. ~~**Receipts** (§5)~~ — **done**, see Status above.
 4. **Claims** (§3, first half) — small, high flavour, no new item type needed.
 5. **Ultimatums** (§4) — rides tier 2's offer machinery.
 6. **Ceding Locations** (§3, second half) — the big one, best done once claims

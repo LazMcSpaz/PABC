@@ -60,12 +60,21 @@ export function heraldFromLog(entries, youId) {
         if (p.lord === youId) break;
         push("🕊", `${name(p.lord)} frees ${name(p.vassal)}`, "info", p.lord);
         break;
-      case "denounced":
+      case "denounced": {
         if (p.denouncer === youId) break;
-        push("📣", p.target === youId
-          ? `${name(p.denouncer)} denounces YOU before the powers`
-          : `${name(p.denouncer)} denounces ${name(p.target)}`, p.target === youId ? "warn" : "info", p.denouncer);
+        // Half the faction names are plural ("The Dambarans", "Free
+        // Plainers") and half singular ("Clan Tempest"); no verb agrees with
+        // both, so the sentence is built around the name rather than after
+        // it. Whether the accusation had grounds is the news, not a detail.
+        const who = name(p.denouncer);
+        const line = p.target === youId
+          ? (p.warrant
+            ? `Denounced before the powers by ${who} — and they had grounds`
+            : `Denounced before the powers by ${who}`)
+          : `${name(p.target)} denounced by ${who}`;
+        push("📣", line, p.target === youId ? "warn" : "info", p.denouncer);
         break;
+      }
       case "recognition_summit":
         push("★", p.player === youId
           ? `${name(p.backer)} backs your claim — +${p.vp} VP`

@@ -32,7 +32,7 @@ import {
   // diplomacy audit fixes — consent, cost, one deal schema, terms
   denounce, denounceCooldown, denounceWarrant, denounceGrounds, valueOfItem, applyDeal, adjustStanding,
   recordGrievance, grievancesAgainst, grievanceWeight, worstGrievance,
-  witnessesOf, witnessShare,
+  witnessesOf, witnessShare, reputationLog, adjustHonor, adjustMenace,
   // §6.10 the round trip — offers, counters, patience
   counterOffer, tableOffer, offersFor, answerOffer, asksThisRound,
 } from "./diplomacy.js";
@@ -5916,6 +5916,39 @@ line("\n  [Phase 11] text-token resolver");
     onAttack(g, "versari", "goldgrass", darkHex);
     check("the ledger records the place", worstGrievance(g, "goldgrass", "versari").at === darkHex);
   }
+}
+
+// Phase 27 — receipts. Menace and Honor were floats with no history, so a
+// player could watch the board turn on them with no way to learn which of
+// their own acts had done it.
+{
+  line("\n  [Phase 27] diplomacy — reputation receipts");
+  const g = createGame({ seed: 271, humanFactionId: "versari" });
+  ensureDiplomacy(g);
+  check("a clean faction has nothing on its record",
+    reputationLog(g, "versari").length === 0);
+
+  declareWar(g, "versari", "goldgrass", "player"); // unjustified → Menace
+  const menace = reputationLog(g, "versari", "menace");
+  check("an act that moved Menace leaves a receipt", menace.length === 1);
+  check("…carrying its cause", /^declare:/.test(menace[0].cause));
+  check("…its size", menace[0].delta === CONFIG.diplomacy.menace.declareUnjustified);
+  check("…and when", menace[0].round === g.round);
+
+  adjustHonor(g, "versari", -2, "test-cause");
+  check("Honor keeps its own receipts, filterable apart from Menace",
+    reputationLog(g, "versari", "honor").length === 1
+    && reputationLog(g, "versari", "menace").length === 1);
+  check("newest first", reputationLog(g, "versari")[0].stat === "honor");
+
+  // A change of zero is not an event.
+  const before = reputationLog(g, "versari").length;
+  adjustMenace(g, "versari", 0, "nothing-happened");
+  check("a no-op writes no receipt", reputationLog(g, "versari").length === before);
+
+  // The roll is bounded — it is a receipt, not an archive.
+  for (let i = 0; i < 40; i += 1) adjustMenace(g, "versari", 1, "test-spam");
+  check("the roll stays bounded", reputationLog(g, "versari").length <= 14);
 }
 
 line(`\n  v0.2 verification: ${v2pass} passed, ${v2fail} failed`);

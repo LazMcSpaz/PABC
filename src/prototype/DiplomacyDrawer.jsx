@@ -359,6 +359,46 @@ function btnHoloStyle() {
 // Landing view — §3.2
 // =======================================================================
 
+// Where your Menace and Honor came from. Both were floats with no history:
+// a player could watch the board turn on them with no way to learn which of
+// their own acts had done it.
+function Receipts({ receipts }) {
+  const [open, setOpen] = useState(false);
+  if (!receipts) return null;
+  const rows = [
+    ...receipts.menace.map((r) => ({ ...r, stat: "Menace", color: "#d2913c" })),
+    ...receipts.honor.map((r) => ({ ...r, stat: "Honor", color: "#5fc27a" })),
+  ].sort((a, b) => b.round - a.round);
+  if (!rows.length) return null;
+  return (
+    <Card>
+      <button
+        className="hud-int"
+        onClick={() => setOpen((v) => !v)}
+        style={{
+          width: "100%", textAlign: "left", background: "none", border: "none",
+          padding: 0, cursor: "pointer", color: C.holoHi,
+          fontFamily: C.font, fontSize: 10, fontWeight: 700,
+          letterSpacing: 1.6, textTransform: "uppercase",
+        }}
+      >{open ? "▾" : "▸"} How you got here · {rows.length}</button>
+      {open && (
+        <div style={{ marginTop: 7, display: "flex", flexDirection: "column", gap: 3 }}>
+          {rows.map((r, i) => (
+            <div key={i} className="pc-prose" style={{ fontSize: 11.5, lineHeight: 1.45 }}>
+              <span style={{
+                color: r.color, fontFamily: C.font, fontWeight: 700,
+                fontSize: 10, letterSpacing: 0.8, marginRight: 6,
+              }}>{r.stat}</span>
+              <span style={{ color: r.delta > 0 ? "#e8b467" : "rgba(207,214,220,0.8)" }}>{r.text}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
+  );
+}
+
 // One offer awaiting an answer. Deliberately plain: two term lists and two
 // buttons. The interesting part is that it EXISTS — before this, a proposal
 // resolved the instant it was made and there was no state in which anything
@@ -479,6 +519,8 @@ function LandingView({ dip, onSelectFaction, onAction, onClose }) {
             />
           </div>
         </Card>
+
+        <Receipts receipts={dip.receipts} />
 
         {/* Path to Recognition — the per-faction backing checklist. Coarse
             status is common knowledge; exact numbers ride with the Spy Ring. */}

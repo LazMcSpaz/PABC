@@ -383,11 +383,31 @@ export function warIsJustified(state, pid, other) {
 }
 
 // --- Menace / Honor (§18.5) -----------------------------------------
+// Every reputation change, kept with its reason. Menace 9 and Honor −2 are
+// facts about you that the player could not previously trace to a single
+// act — the causes were flowing through `emit` and nothing kept them.
+// Bounded, because this is a receipt roll and not an archive.
+const REP_LOG_MAX = 14;
+function recordRep(state, pid, stat, delta, value, cause) {
+  const p = state.players[pid];
+  if (!p || !delta) return;
+  p.repLog = p.repLog || [];
+  p.repLog.push({ stat, delta, value, cause: cause || null, round: state.round });
+  if (p.repLog.length > REP_LOG_MAX) p.repLog.splice(0, p.repLog.length - REP_LOG_MAX);
+}
+
+// The receipts behind a faction's Menace or Honor, newest first.
+export function reputationLog(state, pid, stat = null) {
+  const log = state.players[pid]?.repLog || [];
+  return log.filter((e) => !stat || e.stat === stat).slice().reverse();
+}
+
 export function adjustMenace(state, pid, amount, cause) {
   const p = state.players[pid];
   if (!p || !amount) return;
   const m = D().menace;
   p.menace = Math.max(m.min, Math.min(m.max, (p.menace || 0) + amount));
+  recordRep(state, pid, "menace", amount, p.menace, cause);
   emit(state, "menace_changed", { player: pid, value: p.menace, delta: amount, cause });
 }
 
@@ -396,6 +416,7 @@ export function adjustHonor(state, pid, amount, cause) {
   if (!p || !amount) return;
   const h = D().honor;
   p.honor = Math.max(h.min, Math.min(h.max, honorOf(state, pid) + amount));
+  recordRep(state, pid, "honor", amount, p.honor, cause);
   emit(state, "honor_changed", { player: pid, value: p.honor, delta: amount, cause });
 }
 

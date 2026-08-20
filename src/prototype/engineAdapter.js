@@ -28,6 +28,7 @@ import {
   arePacted, atWar, vassalLord, coalitionAgainst, factionIds,
   aiAcceptsPact, aiAcceptsVassalage, aiAcceptsPeace, wouldAccept, passesRepGates,
   denounceCooldown, denounceWarrant, denounceGrounds, grievanceWeight, grievancesAgainst,
+  reputationLog,
   asksThisRound, flowRounds, promiseRounds,
   evaluatePactCall, canDemandTribute, hasOpenBorders, warJustification,
   openBordersStanding,
@@ -770,6 +771,11 @@ function adaptDiplomacy(state, viewer) {
       summits: [...(dip.recognizedEver?.[viewer] || [])],
       summitVp: CONFIG.diplomacy.recognition.summitVp,
     },
+    // Where your own numbers came from, act by act.
+    receipts: {
+      menace: repReceipts(state, viewer, "menace"),
+      honor: repReceipts(state, viewer, "honor"),
+    },
     coalitionAgainstYou: coalitionAgainst(state, viewer)?.members || null,
     factions,
     pacts: dip.pacts.map((p) => ({ a: p.a, b: p.b, vassal: !!p.vassal })),
@@ -842,6 +848,48 @@ function adaptDiplomacy(state, viewer) {
       ifRefuse: `−${CONFIG.diplomacy.pactCall.declineStandingHit} Standing with ${factionDef(c.from)?.name || c.from} · −${CONFIG.diplomacy.honor.breakLoss} Honor`,
     })),
   };
+}
+
+// A reputation change, in words. The engine records a `cause` on every one —
+// these are terse machine strings ("attack:lakers", "denounced-by:goldgrass"),
+// and this is the one place that turns them into a sentence.
+function repCauseText(state, cause) {
+  if (!cause) return "unrecorded";
+  const [key, who] = String(cause).split(":");
+  const name = who ? (factionDef(who)?.name || who) : null;
+  const fixed = {
+    decay: "time and clean play",
+    "truce-broken": "striking through a truce",
+    "surprise-attack": "attacking undeclared",
+    "pact-broken": "abandoning an alliance",
+    "promise-broken": "breaking your word",
+    "pact-honored": "answering an ally's call",
+    "pact-declined": "refusing an ally's call",
+    mediator: "brokering a peace",
+    "made-amends": "making amends",
+    "agreement-kept": "keeping an agreement to its term",
+    "denounce-warranted": "denouncing a faction that had earned it",
+    "denounce-baseless": "an accusation you could not support",
+    "demand-tribute": "demanding tribute under threat",
+    "influence-pressure": "squeezing a rival's city",
+    trespass: "marching through territory not yours",
+  }[key];
+  if (fixed) return fixed;
+  if (key === "attack") return `attacking ${name}`;
+  if (key === "declare") return `declaring war on ${name} without grounds`;
+  if (key === "denounced-by") return `${name} put your name to it in public`;
+  return key.replace(/-/g, " ");
+}
+
+// The receipts behind a number. This is the difference between a stat and a
+// story: "Menace 9" told the player nothing about which of their own acts
+// they were being judged for.
+function repReceipts(state, pid, stat) {
+  return reputationLog(state, pid, stat).map((e) => ({
+    delta: e.delta,
+    round: e.round,
+    text: `${e.delta > 0 ? "+" : ""}${e.delta} · ${repCauseText(state, e.cause)} · round ${e.round}`,
+  }));
 }
 
 // A faction's grievances against another, in words, worst first — the
