@@ -27,7 +27,8 @@ import {
   recognitionScore, threatScore, tolerance, trustFloor, standingTier, getStanding,
   arePacted, atWar, vassalLord, coalitionAgainst, factionIds,
   aiAcceptsPact, aiAcceptsVassalage, aiAcceptsPeace, wouldAccept, passesRepGates,
-  denounceCooldown, denounceWarrant, asksThisRound, flowRounds, promiseRounds,
+  denounceCooldown, denounceWarrant, denounceGrounds, grievanceWeight, grievancesAgainst,
+  asksThisRound, flowRounds, promiseRounds,
   evaluatePactCall, canDemandTribute, hasOpenBorders, warJustification,
   openBordersStanding,
   railAccessStanding,
@@ -692,6 +693,15 @@ function adaptDiplomacy(state, viewer) {
       // Public scoreboard — VP is common knowledge (the race is visible
       // even when the map is not). Null for factions with no player seat.
       vp: state.players[f]?.vp ?? null,
+      // The books between you, both ways. This is the relationship the
+      // engine has always kept and never shown — a war being "justified" was
+      // a boolean nobody could see the reason for.
+      ledger: {
+        theyHold: grievanceLedger(state, f, viewer),
+        youHold: grievanceLedger(state, viewer, f),
+        theirWeight: grievanceWeight(state, f, viewer),
+        yourWeight: grievanceWeight(state, viewer, f),
+      },
       color: def.color || "#888",
       tier: def.tier || "major",
       temperament: def.temperament,
@@ -834,6 +844,30 @@ function adaptDiplomacy(state, viewer) {
   };
 }
 
+// A faction's grievances against another, in words, worst first — the
+// dossier the drawer renders. Reads the same ledger `warJustification` and
+// `denounceWarrant` do, so what the player is shown is exactly what the
+// engine is acting on.
+const GRIEVANCE_TEXT = {
+  "surprise-attack": "attacked undeclared",
+  "truce-broken": "struck through a truce",
+  "pact-broken": "abandoned the alliance",
+  "promise-broken": "broke their word",
+  occupation: "holds ground they call theirs",
+};
+function grievanceLedger(state, victim, offender) {
+  return grievancesAgainst(state, victim, offender)
+    .slice()
+    .sort((a, b) => b.severity - a.severity || b.round - a.round)
+    .map((e) => ({
+      kind: e.kind,
+      round: e.round,
+      severity: e.severity,
+      at: e.at ? describeHex(state, e.at) : null,
+      text: `${GRIEVANCE_TEXT[e.kind] || e.kind}${e.at ? ` at ${describeHex(state, e.at)}` : ""} — round ${e.round}`,
+    }));
+}
+
 // One deal term, in words. The drawer used to build its own item objects and
 // its own labels; now the engine's schema is described in exactly one place.
 function describeDealItem(it) {
@@ -844,6 +878,7 @@ function describeDealItem(it) {
     return `${it.flow.amountPerTurn} scrap/turn for ${flowRounds(it.flow)} rounds`;
   }
   if (it.research) return `${it.research.amount} research`;
+  if (it.settlement) return "all grievances settled";
   if (it.chip) return "a chip";
   if (it.intel) return it.intel.kind === "mapData" ? "map data" : "intelligence";
   if (it.promise) {
@@ -1144,16 +1179,23 @@ function availableVerbsAgainst(state, viewer, fid) {
       // Denouncing is judged the same way declaring war is: on whether you
       // have grounds. The verb reads completely differently in the two cases,
       // so say which one the player is looking at.
-      const warrant = denounceWarrant(state, viewer, fid);
+      const g = denounceGrounds(state, viewer, fid);
+      const warrant = g?.kind || null;
       const H = CONFIG.diplomacy.honor;
-      const grounds = {
-        menace: "their aggression is past what you will overlook",
-        honor: "their word is worth nothing and everyone knows it",
-        "pact-broken": "they broke their pact with you",
-        "promise-broken": "they broke their word to you",
-        "truce-broken": "they struck you through a truce",
-        "surprise-attack": "they attacked you undeclared",
-      }[warrant] || "you have grounds";
+      const grounds = ((kind) => {
+        const base = {
+          menace: "their aggression is past what you will overlook",
+          honor: "their word is worth nothing and everyone knows it",
+          "pact-broken": "they broke their pact with you",
+          "promise-broken": "they broke their word to you",
+          "truce-broken": "they struck you through a truce",
+          "surprise-attack": "they attacked you undeclared",
+        }[kind] || "you have grounds";
+        // Cite the act, with the receipt the ledger now keeps.
+        if (!g?.entry) return base;
+        const where = g.entry.at ? ` at ${describeHex(state, g.entry.at)}` : "";
+        return `${base}${where}, round ${g.entry.round}`;
+      })(warrant);
       out.push({
         verb: "denounce", state: "enabled",
         outcome: warrant

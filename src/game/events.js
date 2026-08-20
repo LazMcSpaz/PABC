@@ -82,6 +82,8 @@ export const EVENT_NAMES = new Set([
   "agreement_expired",
   // §6.10 the round trip — offers on the table, counters, and pestering.
   "offer_tabled", "offer_accepted", "offer_declined", "offer_lapsed", "offer_pestered",
+  // The grievance ledger — what was done to you, and what it takes to settle.
+  "grievance_recorded", "grievances_settled",
 ]);
 
 // Resolve a chip / card instance uid to its content def. Covers Market

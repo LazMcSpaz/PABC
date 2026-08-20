@@ -178,10 +178,31 @@ grievance severity and ultimatum breaches all need somewhere to show up.
 
 ---
 
+---
+
+## Status
+
+**§1 grievance ledger + reparations — BUILT (2026-08-19).** Grievances are a
+list with severity and place, bounded per pair, ageing out one entry at a
+time. `worstGrievance` is what a denouncement cites and what a war is
+declared over, so the UI can say *"they attacked you undeclared at Korad,
+round 1"* instead of *"you have grounds"*. A `{ settlement: true }` deal item
+buys the slate clean — priced from the holder's side, so an apology is never
+free and never refusable for nothing — and clears both ledgers at once,
+pays Honor to both parties, and pulls the grounds out from under any
+denouncement resting on it. The AI settles its debts before it goes courting
+(a diplomacy-lean faction gifted a stranger every single turn, which made
+everything below that branch unreachable), and asks the human rather than
+assuming, because taking compensation means giving up the righteous war the
+grievance entitles you to. The relationship dossier — audit §3 item 16 —
+renders itself off the same ledger the engine acts on. 17 harness checks
+(Phase 25).
+
+**§2, §3, §4, §5 — still open.**
+
 ## What I'd build, in order
 
-1. **Grievance ledger + reparations** (§1) — foundational; four other things
-   are waiting on it.
+1. ~~**Grievance ledger + reparations** (§1)~~ — **done**, see Status above.
 2. **Witnessed reputation** (§2) — the highest ratio of payoff to effort, and
    the one that makes two existing systems talk to each other.
 3. **Receipts** (§5) — small, and makes 1 and 2 visible instead of invisible.

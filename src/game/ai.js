@@ -23,7 +23,8 @@ import {
   factionIds, powerOf, arePacted, atWar, vassalLord, mayEngage,
   getStanding, passesRepGates, formPact, vassalize, applyDeal, checkRecognitionVictory,
   tableOffer, offersFor, warExhaustion,
-  denounce, denounceWarrant, denounceCooldown, honorOf,
+  denounce, denounceWarrant, denounceCooldown, honorOf, grievanceWeight, wouldAccept,
+  counterOffer,
   aiAcceptsVassalage, truceBetween,
 } from "./diplomacy.js";
 
@@ -397,7 +398,38 @@ function manageDiplomacy(state, pid) {
     }
   }
 
-  // 2) Proactive pact with a warm, compatible, engageable faction; or a gift
+  // 2) Settle with somebody you have wronged, BEFORE going shopping for new
+  //    friends. A faction that gifts a stranger while owing its neighbour
+  //    blood reads as having no memory — and the gift branch below fires
+  //    every single turn for a diplomacy-lean faction, so anything under it
+  //    was unreachable in practice. This is also the one road back for a
+  //    faction that has burned its reputation.
+  if ((me.aggression ?? 0.5) < 0.7) {
+    for (const f of others) {
+      if (atWar(state, pid, f) || !mayEngage(state, pid, f)) continue;
+      if (!grievanceWeight(state, f, pid)) continue;
+      // Ask what it would take rather than guessing: counterOffer already
+      // walks exactly this gap, and already clamps to what the payer holds.
+      // Guessing the bare weight-times-rate landed a hair under whatever the
+      // wronged party's standing bias asked for, so nobody ever settled.
+      const bare = { proposer: pid, recipient: f, give: [], get: [{ settlement: true }] };
+      const deal = wouldAccept(state, f, bare) ? bare : counterOffer(state, f, bare);
+      if (!deal) continue;
+      // The human is ASKED — taking compensation means giving up the
+      // righteous war the grievance entitles them to, which is their call
+      // to make. Between two AIs it lands on the spot; neither has an inbox.
+      if (f === human) {
+        if (offersFor(state, human).some((o) => o.from === pid)) continue;
+        tableOffer(state, pid, human, deal, { kind: "deal", note: "They want the books closed." });
+        return;
+      }
+      if (!wouldAccept(state, f, deal)) continue;
+      applyDeal(state, deal, "ai-amends");
+      return;
+    }
+  }
+
+  // 3) Proactive pact with a warm, compatible, engageable faction; or a gift
   //    to warm one up (diplomacy-lean factions buy Standing toward a pact).
   if ((me.sociability ?? 0) >= 0.5) {
     for (const f of others) {
@@ -431,7 +463,7 @@ function manageDiplomacy(state, pid) {
     }
   }
 
-  // 3) Say something about a faction that has earned it. A denouncement is
+  // 4) Say something about a faction that has earned it. A denouncement is
   //    now judged on whether there are grounds, which makes it the peaceful
   //    faction's real lever: a pacifist that cannot answer a tyrant with
   //    armies can answer with its reputation, gain Honor for it, and pull
@@ -447,7 +479,7 @@ function manageDiplomacy(state, pid) {
     }
   }
 
-  // 4) …and if none of that fired, consider opening a conversation with the
+  // 5) …and if none of that fired, consider opening a conversation with the
   //    human. The audit's blunt finding was that across thirty rounds the AI
   //    approached the player exactly zero times: it had no way to propose,
   //    only to act. Now it has an inbox to put things in.

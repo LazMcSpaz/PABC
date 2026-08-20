@@ -1205,6 +1205,7 @@ function FactionDetailView({ f, dip, onBack, onClose, onVerb, onOpenPane, onConf
         <Card>
           <ObligationsList f={f} dip={dip} />
         </Card>
+        <GrievanceLedger f={f} />
 
         <SectionRule index={3} label="What They Want" color={C.holo} />
         <Card>
@@ -1245,6 +1246,40 @@ function FactionDetailView({ f, dip, onBack, onClose, onVerb, onOpenPane, onConf
         />
       </div>
     </div>
+  );
+}
+
+// What is actually between you — the books, both ways. The engine has always
+// kept this (it is what makes a war "justified") and never shown a line of
+// it, so a player could be denounced, invaded and coalitioned against with
+// no way to read why.
+function GrievanceLedger({ f }) {
+  const l = f.ledger;
+  if (!l || (!l.theyHold.length && !l.youHold.length)) return null;
+  const Side = ({ label, entries, weight, color }) => {
+    if (!entries.length) return null;
+    return (
+      <div style={{ marginTop: 6 }}>
+        <SectionLabel color={color}>{label} · weight {weight}</SectionLabel>
+        {entries.map((e, i) => (
+          <div key={i} className="pc-prose" style={{ fontSize: 11.5, lineHeight: 1.5, color: "rgba(207,214,220,0.85)" }}>
+            <span style={{ color, fontWeight: 700 }}>▪</span> {e.text}
+          </div>
+        ))}
+      </div>
+    );
+  };
+  return (
+    <Card accent="#d2913c">
+      <SectionLabel color="#e8b467">The books</SectionLabel>
+      <Side label="They hold against you" entries={l.theyHold} weight={l.theirWeight} color="#d2453f" />
+      <Side label="You hold against them" entries={l.youHold} weight={l.yourWeight} color="#c9b24e" />
+      <div className="pc-prose" style={{ fontSize: 11, lineHeight: 1.5, color: "rgba(207,214,220,0.55)", marginTop: 7 }}>
+        A live grievance makes a war righteous for the side that holds it, and
+        gives them grounds to denounce. Offer a settlement in a deal to clear
+        the slate — both ways at once, for a price that tracks the weight.
+      </div>
+    </Card>
   );
 }
 
@@ -1406,6 +1441,9 @@ function DealPane({ f, dip, kind = "custom", onBack, onSubmit }) {
   // what anyone actually wants out of one.
   const [wantPact, setWantPact] = useState(false);
   const [wantBorders, setWantBorders] = useState(false);
+  const [settle, setSettle] = useState(false);
+  // Only worth offering when there is actually something between you.
+  const owed = (f.ledger?.theirWeight || 0) + (f.ledger?.yourWeight || 0);
   const [term, setTerm] = useState(TERM_DEFAULT);
   const isPeace = kind === "peace";
   const isTribute = kind === "tribute";
@@ -1437,10 +1475,13 @@ function DealPane({ f, dip, kind = "custom", onBack, onSubmit }) {
     }
     if (wantPact && !isTribute) get.push({ promise: { kind: "pact" } });
     if (wantBorders) get.push({ promise: { kind: "openBorders" } });
+    // Asked for, not given: the party holding the grievances is the one being
+    // asked to give something up, and they price it accordingly.
+    if (settle) get.push({ settlement: true });
     if (isPeace) give.push({ promise: { kind: "peace" } });
     return { proposer: dip.youId, recipient: f.id, give, get };
   }, [scrapGive, scrapGet, flowGive, flowGet, pactOffer, openBorders, nonAggression,
-      wantPact, wantBorders, term, dip.youId, f.id, isPeace, isTribute]);
+      wantPact, wantBorders, settle, term, dip.youId, f.id, isPeace, isTribute]);
 
   const title = isGift ? "Send a gift" : isPeace ? "Sue for peace" : isTribute ? "Demand tribute" : "Custom deal";
   const subtitle = isGift
@@ -1500,6 +1541,9 @@ function DealPane({ f, dip, kind = "custom", onBack, onSubmit }) {
                 <Toggle label="Their alliance" value={wantPact} onChange={setWantPact} />
               )}
               <Toggle label="Their borders" value={wantBorders} onChange={setWantBorders} />
+              {owed > 0 && (
+                <Toggle label={`Call it settled (weight ${owed})`} value={settle} onChange={setSettle} />
+              )}
             </Card>
           )}
         </div>

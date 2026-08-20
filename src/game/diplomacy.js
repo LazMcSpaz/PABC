@@ -264,11 +264,75 @@ export function passesRepGates(state, observerFid, subjectPid) {
 // intent the whole board heard) or b wronged a (broken pact/promise,
 // surprise attack) inside the grievance window. Fighting a justified war
 // generates no Menace for the justified side.
-function recordGrievance(state, victim, offender, kind) {
-  if (!victim || !offender || victim === offender) return;
+// The ledger of what `offender` has actually done to `victim`. A LIST, not a
+// slot: it used to be `gr[victim][offender] = {kind, round}`, overwritten
+// every time, so a faction that betrayed you three times had one record of
+// the most recent betrayal and no notion of how badly. Nothing downstream
+// could name what happened, weigh it, or settle it.
+//
+// `at` is where it happened, kept so a denouncement can cite the place and
+// so the dossier can point at the map.
+export function recordGrievance(state, victim, offender, kind, opts = {}) {
+  if (!victim || !offender || victim === offender) return null;
+  const g = D().grievance;
   const gr = state.diplomacy.grievances = state.diplomacy.grievances || {};
   gr[victim] = gr[victim] || {};
-  gr[victim][offender] = { kind, round: state.round };
+  const list = gr[victim][offender] = gr[victim][offender] || [];
+  const entry = {
+    kind,
+    round: state.round,
+    severity: opts.severity ?? g.severity[kind] ?? g.defaultSeverity,
+    at: opts.at || null,
+  };
+  list.push(entry);
+  // Keep the ledger bounded. The oldest entries are also the ones closest to
+  // ageing out of the window anyway.
+  if (list.length > g.maxPerPair) list.splice(0, list.length - g.maxPerPair);
+  emit(state, "grievance_recorded", { victim, offender, kind, severity: entry.severity, at: entry.at });
+  return entry;
+}
+
+// The entries still inside the grievance window, newest first.
+export function grievancesAgainst(state, victim, offender) {
+  const list = state.diplomacy?.grievances?.[victim]?.[offender] || [];
+  const window = D().justWar.grievanceWindowRounds;
+  return list
+    .filter((e) => state.round - e.round <= window)
+    .sort((a, b) => b.round - a.round);
+}
+
+// How much `victim` holds against `offender`, all live entries summed. This
+// is the number a settlement has to buy out, and the number that says whether
+// a grudge is a scratch or a blood feud.
+export function grievanceWeight(state, victim, offender) {
+  return grievancesAgainst(state, victim, offender).reduce((n, e) => n + e.severity, 0);
+}
+
+// The single entry that best answers "what did they do to you" — the worst
+// one still standing, most recent breaking ties. What a denouncement cites
+// and what a war is declared over.
+export function worstGrievance(state, victim, offender) {
+  let worst = null;
+  for (const e of grievancesAgainst(state, victim, offender)) {
+    if (!worst || e.severity > worst.severity) worst = e;
+  }
+  return worst;
+}
+
+// Wipe the slate between two factions. The victim's decision, not the
+// offender's — reached by accepting a settlement they were offered.
+export function settleGrievances(state, victim, offender) {
+  const held = grievancesAgainst(state, victim, offender);
+  if (!held.length) return 0;
+  const weight = grievanceWeight(state, victim, offender);
+  if (state.diplomacy.grievances?.[victim]) state.diplomacy.grievances[victim][offender] = [];
+  // A denouncement resting on those grievances loses its grounds with them —
+  // otherwise settling would leave the accusation standing and the just war
+  // it bought still live.
+  const den = state.diplomacy.denouncements?.[victim]?.[offender];
+  if (den?.warrant && !denounceWarrant(state, victim, offender)) den.warrant = null;
+  emit(state, "grievances_settled", { victim, offender, weight, count: held.length });
+  return weight;
 }
 
 // Is there something to denounce? Judged by the DENOUNCER's own standards —
@@ -280,13 +344,22 @@ function recordGrievance(state, victim, offender, kind) {
 // answer wants the same shape: an accusation is either grounded in something
 // the target actually did, or it is an accusation you invented.
 export function denounceWarrant(state, denouncer, target) {
-  const jw = D().justWar;
-  const gr = state.diplomacy?.grievances?.[denouncer]?.[target];
-  if (gr && state.round - gr.round <= jw.grievanceWindowRounds) return gr.kind;
+  const worst = worstGrievance(state, denouncer, target);
+  if (worst) return worst.kind;
   if (!state.players[target]) return null; // no Menace/Honor to judge
   if (menaceOf(state, target) > tolerance(state, denouncer, target)) return "menace";
   if (honorOf(state, target) < trustFloor(state, denouncer)) return "honor";
   return null;
+}
+
+// The same answer with the receipt attached — which act, when, and where —
+// so the UI can say "for the strike on Tin Town at round 7" instead of
+// "you have grounds".
+export function denounceGrounds(state, denouncer, target) {
+  const worst = worstGrievance(state, denouncer, target);
+  if (worst) return { kind: worst.kind, entry: worst, weight: grievanceWeight(state, denouncer, target) };
+  const kind = denounceWarrant(state, denouncer, target);
+  return kind ? { kind, entry: null, weight: 0 } : null;
 }
 
 export function warJustification(state, a, b) {
@@ -298,9 +371,8 @@ export function warJustification(state, a, b) {
   // something the other side actually did — you cannot manufacture one by
   // saying so loudly.
   if (den?.warrant && state.round - den.round <= jw.denounceWindowRounds) return "denounced";
-  const gr = state.diplomacy?.grievances?.[a]?.[b];
-  if (gr && state.round - gr.round <= jw.grievanceWindowRounds) return gr.kind;
-  return null;
+  const worst = worstGrievance(state, a, b);
+  return worst ? worst.kind : null;
 }
 
 // Is `pid`'s side of its war with `other` justified? (Reads the war record,
@@ -441,6 +513,17 @@ export function valueOfItem(state, fid, item, ctx = {}) {
   // 12 — buy it once, collect it for the rest of the game.
   if (item.flow) return (item.flow.amountPerTurn || 0) * flowRounds(item.flow);
   if (item.research) return (item.research.amount || 0) * 2;
+  // "Let us call it settled." Priced from `fid`'s own side of the ledger:
+  // to the party that HOLDS the grievances this is something being asked of
+  // them — they give up a righteous war and the moral standing that comes
+  // with it — and to the party that owes them it is a clean record. Same
+  // number either way; dealValue's give/get sides supply the sign, so an
+  // apology can never be free and can never be refused for nothing.
+  if (item.settlement) {
+    const owedToMe = grievanceWeight(state, fid, ctx.other);
+    const owedByMe = grievanceWeight(state, ctx.other, fid);
+    return (owedToMe + owedByMe) * D().grievance.settlementPerWeight;
+  }
   if (item.chip) return 4; // generic gear value
   if (item.intel) return item.intel.kind === "mapData" ? 3 : 2;
   if (item.promise) {
@@ -511,6 +594,18 @@ export function wouldAccept(state, fid, deal) {
 // them there and then, so they leave a pact / an open border / a peace behind
 // rather than a piece of paper somebody might later dishonour.
 const ENACTED_PROMISES = new Set(["pact", "peace", "openBorders", "joinWar"]);
+
+// A settlement clears the slate BOTH ways. Half a reconciliation is not one,
+// and a deal that wiped only the proposer's debts would be a trap rather
+// than an offer.
+function enactSettlement(state, a, b) {
+  const cleared = settleGrievances(state, a, b) + settleGrievances(state, b, a);
+  if (!cleared) return;
+  const gain = D().grievance.settlementHonorGain;
+  for (const side of [a, b]) {
+    if (state.players[side]) adjustHonor(state, side, gain, "made-amends");
+  }
+}
 
 // Perform the enacted half of a struck deal. `from` is the party making the
 // promise; `to` is the party it is made to.
@@ -807,6 +902,9 @@ export function applyDeal(state, deal, cause = "deal") {
     if (it.promise && ENACTED_PROMISES.has(it.promise.kind)) {
       enactPromise(state, deal.recipient, deal.proposer, it.promise, cause);
     }
+  }
+  if ([...(deal.give || []), ...(deal.get || [])].some((it) => it.settlement)) {
+    enactSettlement(state, deal.proposer, deal.recipient);
   }
   // register live agreement if it carries flows/promises (§6.2 type tag).
   // Only flows and STANDING promises go on the record. An enacted promise

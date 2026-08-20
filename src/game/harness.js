@@ -30,7 +30,8 @@ import {
   // pace pass — truces + partial control
   truceBetween, makePeace,
   // diplomacy audit fixes — consent, cost, one deal schema, terms
-  denounce, denounceCooldown, denounceWarrant, valueOfItem, applyDeal, adjustStanding,
+  denounce, denounceCooldown, denounceWarrant, denounceGrounds, valueOfItem, applyDeal, adjustStanding,
+  recordGrievance, grievancesAgainst, grievanceWeight, worstGrievance,
   // §6.10 the round trip — offers, counters, patience
   counterOffer, tableOffer, offersFor, answerOffer, asksThisRound,
 } from "./diplomacy.js";
@@ -5734,6 +5735,113 @@ line("\n  [Phase 11] text-token resolver");
       runDiplomacyRound(g);
     }
     check("over 25 rounds the AI approaches the human at least once", seen > 0);
+  }
+}
+
+// Phase 25 — the grievance ledger. What was done to you is a list with
+// weights and places, not one overwritten flag, and it can be settled.
+{
+  line("\n  [Phase 25] diplomacy — the grievance ledger");
+  const G = CONFIG.diplomacy.grievance;
+
+  // --- it accumulates, instead of overwriting ---
+  {
+    const g = createGame({ seed: 251, humanFactionId: "versari" });
+    ensureDiplomacy(g);
+    recordGrievance(g, "goldgrass", "versari", "surprise-attack", { at: "h2-1" });
+    g.round += 1;
+    recordGrievance(g, "goldgrass", "versari", "truce-broken", { at: "h3-0" });
+    g.round += 1;
+    recordGrievance(g, "goldgrass", "versari", "promise-broken");
+    const held = grievancesAgainst(g, "goldgrass", "versari");
+    check("three betrayals leave three entries, not one", held.length === 3);
+    check("each carries its own weight",
+      grievanceWeight(g, "goldgrass", "versari")
+        === G.severity["surprise-attack"] + G.severity["truce-broken"] + G.severity["promise-broken"]);
+    check("and its own place", held.some((e) => e.at === "h3-0"));
+    const worst = worstGrievance(g, "goldgrass", "versari");
+    check("a denouncement cites the worst of them, not the latest",
+      worst.kind === "truce-broken");
+    check("…with the receipt attached",
+      denounceGrounds(g, "goldgrass", "versari").entry.at === "h3-0");
+  }
+
+  // --- entries age out one at a time ---
+  {
+    const g = createGame({ seed: 252, humanFactionId: "versari" });
+    ensureDiplomacy(g);
+    recordGrievance(g, "goldgrass", "versari", "truce-broken");
+    g.round += CONFIG.diplomacy.justWar.grievanceWindowRounds;
+    recordGrievance(g, "goldgrass", "versari", "promise-broken");
+    g.round += 1;
+    check("the old grievance lapses while the fresh one stands",
+      grievancesAgainst(g, "goldgrass", "versari").length === 1
+      && worstGrievance(g, "goldgrass", "versari").kind === "promise-broken");
+  }
+
+  // --- the ledger stays bounded ---
+  {
+    const g = createGame({ seed: 253, humanFactionId: "versari" });
+    ensureDiplomacy(g);
+    for (let i = 0; i < G.maxPerPair + 5; i += 1) recordGrievance(g, "goldgrass", "versari", "promise-broken");
+    check("the ledger keeps a bounded history",
+      g.diplomacy.grievances.goldgrass.versari.length === G.maxPerPair);
+  }
+
+  // --- an apology is not free, and a settlement has a price ---
+  {
+    const g = createGame({ seed: 254, humanFactionId: "versari" });
+    ensureDiplomacy(g);
+    g.players.versari.resource = 40;
+    recordGrievance(g, "goldgrass", "versari", "truce-broken");
+    recordGrievance(g, "goldgrass", "versari", "surprise-attack");
+    const weight = grievanceWeight(g, "goldgrass", "versari");
+    const sorry = { proposer: "versari", recipient: "goldgrass", give: [], get: [{ settlement: true }] };
+    check("'let us call it settled', offering nothing, is refused",
+      wouldAccept(g, "goldgrass", sorry) === false);
+    const counter = counterOffer(g, "goldgrass", sorry);
+    check("…but they will name a price for it", !!counter);
+    check("the price tracks what is owed",
+      counter.give.find((i) => i.resource)?.resource.amount >= Math.floor(weight * G.settlementPerWeight));
+  }
+
+  // --- paying it clears the slate, both ways, and restores Honor ---
+  {
+    const g = createGame({ seed: 255, humanFactionId: "versari" });
+    ensureDiplomacy(g);
+    g.players.versari.resource = 40;
+    recordGrievance(g, "goldgrass", "versari", "truce-broken");
+    recordGrievance(g, "versari", "goldgrass", "promise-broken");
+    const h0 = honorOf(g, "versari");
+    check("a grievance justifies their war on you",
+      warJustification(g, "goldgrass", "versari") === "truce-broken");
+    applyDeal(g, {
+      proposer: "versari", recipient: "goldgrass",
+      give: [{ resource: { resource: "scrap", amount: 12 } }], get: [{ settlement: true }],
+    }, "test");
+    check("settling clears what they hold against you",
+      grievanceWeight(g, "goldgrass", "versari") === 0);
+    check("…and what you hold against them — half a reconciliation is not one",
+      grievanceWeight(g, "versari", "goldgrass") === 0);
+    check("their justification goes with it",
+      warJustification(g, "goldgrass", "versari") === null);
+    check("making amends is honourable", honorOf(g, "versari") === h0 + G.settlementHonorGain);
+  }
+
+  // --- and it pulls the rug from a denouncement resting on it ---
+  {
+    const g = createGame({ seed: 256, humanFactionId: "versari" });
+    ensureDiplomacy(g);
+    recordGrievance(g, "goldgrass", "versari", "truce-broken");
+    denounce(g, "goldgrass", "versari");
+    check("the denouncement stands while the grievance does",
+      warJustification(g, "goldgrass", "versari") === "denounced");
+    applyDeal(g, {
+      proposer: "versari", recipient: "goldgrass",
+      give: [{ resource: { resource: "scrap", amount: 9 } }], get: [{ settlement: true }],
+    }, "test");
+    check("settling takes the grounds out from under it",
+      warJustification(g, "goldgrass", "versari") === null);
   }
 }
 

@@ -501,6 +501,27 @@ export const CONFIG = {
       allyDefends: 2, // the target's allies close ranks whatever the merits
       targetHit: 3, // Standing the target loses toward you (always)
     },
+    // Grievances — the ledger of what has actually been done to you. Each
+    // entry carries a severity, so three small betrayals can weigh like one
+    // large one, and a settlement has a PRICE rather than being a word.
+    grievance: {
+      severity: {
+        "surprise-attack": 3, // struck before declaring
+        "truce-broken": 4, // struck through a promise not to
+        "pact-broken": 4, // abandoned an alliance
+        "promise-broken": 2, // walked away from a term
+        occupation: 2, // holds a place you call yours (a condition, not an event)
+      },
+      defaultSeverity: 2,
+      maxPerPair: 8, // the ledger keeps this many; older entries fall off
+      // What settling costs the VICTIM: giving up a grievance means giving
+      // up the righteous war it entitles you to, so it is not free to ask
+      // for and cannot be bought with an apology.
+      settlementPerWeight: 1.2,
+      // Making amends is honourable — the one route back for a faction that
+      // has burned its reputation.
+      settlementHonorGain: 2,
+    },
     justWar: {
       denounceWindowRounds: 6, // your denouncement of them counts this long
       grievanceWindowRounds: 8, // their betrayal of you counts this long

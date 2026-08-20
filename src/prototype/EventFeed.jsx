@@ -304,7 +304,22 @@ function formatEvent(ev, engineState) {
     case "coalition_dissolved":
       return { color: theme.textDim, text: `The coalition against ${who(p.target)} dissolved` };
     case "denounced":
-      return { color: theme.accent2, text: `${who(p.denouncer)} denounced ${who(p.target)}` };
+      return {
+        color: p.warrant ? theme.accent : theme.accent2,
+        text: p.warrant
+          ? `${who(p.denouncer)} denounced ${who(p.target)} — and had grounds`
+          : `${who(p.denouncer)} denounced ${who(p.target)} — with nothing to point to`,
+      };
+    case "grievance_recorded":
+      // Only your own books. Everyone's ledger moving would bury the feed.
+      if (p.victim !== you) return null;
+      return { color: theme.accent2, text: `You will remember this of ${who(p.offender)}` };
+    case "grievances_settled":
+      if (p.victim !== you && p.offender !== you) return null;
+      return {
+        color: theme.good,
+        text: `Settled with ${who(p.victim === you ? p.offender : p.victim)} — the books are clear`,
+      };
     case "mediated":
       return { color: theme.good, text: `${who(p.mediator)} brokered peace between ${who(p.a)} and ${who(p.b)}` };
     case "vassal_established":
