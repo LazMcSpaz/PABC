@@ -1316,6 +1316,12 @@ function GrievanceLedger({ f }) {
       <SectionLabel color="#e8b467">The books</SectionLabel>
       <Side label="They hold against you" entries={l.theyHold} weight={l.theirWeight} color="#d2453f" />
       <Side label="You hold against them" entries={l.youHold} weight={l.yourWeight} color="#c9b24e" />
+      {(l.theyHold.some((e) => e.kind === "occupation") || l.youHold.some((e) => e.kind === "occupation")) && (
+        <div className="pc-prose" style={{ fontSize: 11, lineHeight: 1.5, color: "#e8b467", marginTop: 6 }}>
+          Ground held is not a thing that happened — no settlement clears it.
+          It ends when the place changes hands.
+        </div>
+      )}
       <div className="pc-prose" style={{ fontSize: 11, lineHeight: 1.5, color: "rgba(207,214,220,0.55)", marginTop: 7 }}>
         A live grievance makes a war righteous for the side that holds it, and
         gives them grounds to denounce — which is how something nobody
@@ -1485,8 +1491,9 @@ function DealPane({ f, dip, kind = "custom", onBack, onSubmit }) {
   const [wantPact, setWantPact] = useState(false);
   const [wantBorders, setWantBorders] = useState(false);
   const [settle, setSettle] = useState(false);
-  // Only worth offering when there is actually something between you.
-  const owed = (f.ledger?.theirWeight || 0) + (f.ledger?.yourWeight || 0);
+  // Only worth offering when there is something a settlement can clear. An
+  // occupation is not in the past, so scrap does not touch it.
+  const owed = f.ledger?.settleable || 0;
   const [term, setTerm] = useState(TERM_DEFAULT);
   const isPeace = kind === "peace";
   const isTribute = kind === "tribute";

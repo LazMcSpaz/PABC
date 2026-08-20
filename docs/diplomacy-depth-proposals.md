@@ -223,14 +223,32 @@ Coalition without grounds · round 2"*, *"+2 · Free Plainers put your name to
 it in public · round 4"*. The causes were already flowing through `emit` and
 nothing kept them. 9 harness checks (Phase 27).
 
-**§3 and §4 — still open.**
+**§3 claims — BUILT (2026-08-19).** Every Location carries an `affiliation`
+in `content.js` and it decided exactly one thing: where factions start.
+Holding somebody else's homeland is now a standing grievance — computed live
+from who holds what, so it appears the moment a city is taken and vanishes
+the moment it is given back. It justifies their war to retake it and gives
+them grounds to denounce you, which an AI does unprompted.
+
+The interesting half is that it **cannot be settled**. A settlement
+compensates for things that *happened*; a city you are still standing in is
+not in the past, and paying someone to stop minding that you occupy their
+homeland is not a deal anyone would take. So `settleableWeight` excludes it,
+the deal builder hides the toggle when nothing is settleable, and a
+proposal that would clear nothing is refused with a reason rather than
+quietly pocketing the scrap. Goldgrass will not call it square while you are
+sitting in Omara, whatever you pay. It ends the only way it can. 10 harness
+checks (Phase 28).
+
+**§3's second half (Locations as deal items) and §4 (ultimatums) — still
+open.**
 
 ## What I'd build, in order
 
 1. ~~**Grievance ledger + reparations** (§1)~~ — **done**, see Status above.
 2. ~~**Witnessed reputation** (§2)~~ — **done**, see Status above.
 3. ~~**Receipts** (§5)~~ — **done**, see Status above.
-4. **Claims** (§3, first half) — small, high flavour, no new item type needed.
+4. ~~**Claims** (§3, first half)~~ — **done**, see Status above.
 5. **Ultimatums** (§4) — rides tier 2's offer machinery.
 6. **Ceding Locations** (§3, second half) — the big one, best done once claims
    and the ledger exist to give it meaning.

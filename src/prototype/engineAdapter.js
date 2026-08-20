@@ -28,7 +28,7 @@ import {
   arePacted, atWar, vassalLord, coalitionAgainst, factionIds,
   aiAcceptsPact, aiAcceptsVassalage, aiAcceptsPeace, wouldAccept, passesRepGates,
   denounceCooldown, denounceWarrant, denounceGrounds, grievanceWeight, grievancesAgainst,
-  reputationLog,
+  reputationLog, settleableWeight,
   asksThisRound, flowRounds, promiseRounds,
   evaluatePactCall, canDemandTribute, hasOpenBorders, warJustification,
   openBordersStanding,
@@ -702,6 +702,10 @@ function adaptDiplomacy(state, viewer) {
         youHold: grievanceLedger(state, viewer, f),
         theirWeight: grievanceWeight(state, f, viewer),
         yourWeight: grievanceWeight(state, viewer, f),
+        // What a settlement could actually clear. An occupation is not in
+        // the past, so it is not on this number — giving the place back is
+        // the only thing that ends it.
+        settleable: settleableWeight(state, f, viewer) + settleableWeight(state, viewer, f),
       },
       color: def.color || "#888",
       tier: def.tier || "major",
@@ -901,19 +905,20 @@ const GRIEVANCE_TEXT = {
   "truce-broken": "struck through a truce",
   "pact-broken": "abandoned the alliance",
   "promise-broken": "broke their word",
-  occupation: "holds ground they call theirs",
 };
 function grievanceLedger(state, victim, offender) {
   return grievancesAgainst(state, victim, offender)
     .slice()
     .sort((a, b) => b.severity - a.severity || b.round - a.round)
-    .map((e) => ({
-      kind: e.kind,
-      round: e.round,
-      severity: e.severity,
-      at: e.at ? describeHex(state, e.at) : null,
-      text: `${GRIEVANCE_TEXT[e.kind] || e.kind}${e.at ? ` at ${describeHex(state, e.at)}` : ""} — round ${e.round}`,
-    }));
+    .map((e) => {
+      const where = e.at ? describeHex(state, e.at) : null;
+      // An occupation is a standing condition, not something that happened
+      // on a round, so it reads in the present tense and cites no date.
+      const text = e.kind === "occupation"
+        ? `holds ${where || "ground they call theirs"} — theirs by right`
+        : `${GRIEVANCE_TEXT[e.kind] || e.kind}${where ? ` at ${where}` : ""} — round ${e.round}`;
+      return { kind: e.kind, round: e.round, severity: e.severity, at: where, standing: !!e.standing, text };
+    });
 }
 
 // One deal term, in words. The drawer used to build its own item objects and
@@ -1238,10 +1243,13 @@ function availableVerbsAgainst(state, viewer, fid) {
           "promise-broken": "they broke their word to you",
           "truce-broken": "they struck you through a truce",
           "surprise-attack": "they attacked you undeclared",
+          occupation: "they are sitting on ground that is yours by right",
         }[kind] || "you have grounds";
         // Cite the act, with the receipt the ledger now keeps.
         if (!g?.entry) return base;
         const where = g.entry.at ? ` at ${describeHex(state, g.entry.at)}` : "";
+        // A standing condition has no date — it is true right now.
+        if (g.entry.standing) return `${base}${where}`;
         return `${base}${where}, round ${g.entry.round}`;
       })(warrant);
       out.push({

@@ -32,7 +32,7 @@ import {
   // diplomacy audit fixes — consent, cost, one deal schema, terms
   denounce, denounceCooldown, denounceWarrant, denounceGrounds, valueOfItem, applyDeal, adjustStanding,
   recordGrievance, grievancesAgainst, grievanceWeight, worstGrievance,
-  witnessesOf, witnessShare, reputationLog, adjustHonor, adjustMenace,
+  witnessesOf, witnessShare, reputationLog, adjustHonor, adjustMenace, settleableWeight,
   // §6.10 the round trip — offers, counters, patience
   counterOffer, tableOffer, offersFor, answerOffer, asksThisRound,
 } from "./diplomacy.js";
@@ -5949,6 +5949,68 @@ line("\n  [Phase 11] text-token resolver");
   // The roll is bounded — it is a receipt, not an archive.
   for (let i = 0; i < 40; i += 1) adjustMenace(g, "versari", 1, "test-spam");
   check("the roll stays bounded", reputationLog(g, "versari").length <= 14);
+}
+
+// Phase 28 — claims. Every Location carries an `affiliation` in content.js
+// and it decided exactly one thing: where factions start. Holding somebody
+// else's homeland was politically invisible.
+{
+  line("\n  [Phase 28] diplomacy — ground held is a grievance");
+  const g = createGame({ seed: 281, humanFactionId: "versari" });
+  ensureDiplomacy(g);
+  const theirs = Object.values(g.locations).find(
+    (l) => LOCATIONS[l.locationId]?.affiliation === "goldgrass",
+  );
+  check("the board seats a Goldgrass homeland", !!theirs);
+  check("nothing is held against you to begin with",
+    grievanceWeight(g, "goldgrass", "versari") === 0);
+
+  theirs.controller = "versari";
+  check("taking it is a grievance the moment you hold it",
+    grievanceWeight(g, "goldgrass", "versari") > 0);
+  check("…recorded as an occupation, on the hex",
+    worstGrievance(g, "goldgrass", "versari").kind === "occupation"
+    && worstGrievance(g, "goldgrass", "versari").at === theirs.hexId);
+  check("their war to take it back is righteous",
+    warJustification(g, "goldgrass", "versari") === "occupation");
+  check("…and they may say so publicly",
+    denounceWarrant(g, "goldgrass", "versari") === "occupation");
+
+  // …but it is not a thing that HAPPENED, so it cannot be paid off.
+  check("no payment settles ground you are still standing on",
+    settleableWeight(g, "goldgrass", "versari") === 0);
+  g.players.versari.resource = 200;
+  const bribe = performDiplomacy(g, "versari", "propose-deal", {
+    faction: "goldgrass",
+    give: [{ resource: { resource: "scrap", amount: 100 } }],
+    get: [{ settlement: true }],
+  });
+  check("offering a fortune for it is refused, not pocketed",
+    bribe.accepted === false && (g.players.versari.resource || 0) === 200);
+
+  // It ends the only way it can.
+  theirs.controller = "goldgrass";
+  check("giving the place back ends it",
+    grievanceWeight(g, "goldgrass", "versari") === 0
+    && warJustification(g, "goldgrass", "versari") === null);
+
+  // A real betrayal alongside an occupation settles; the occupation stays.
+  {
+    const g2 = createGame({ seed: 281, humanFactionId: "versari" });
+    ensureDiplomacy(g2);
+    g2.players.versari.resource = 60;
+    recordGrievance(g2, "goldgrass", "versari", "truce-broken");
+    Object.values(g2.locations).find(
+      (l) => LOCATIONS[l.locationId]?.affiliation === "goldgrass",
+    ).controller = "versari";
+    applyDeal(g2, {
+      proposer: "versari", recipient: "goldgrass",
+      give: [{ resource: { resource: "scrap", amount: 20 } }], get: [{ settlement: true }],
+    }, "test");
+    const left = grievancesAgainst(g2, "goldgrass", "versari");
+    check("the betrayal is settled and the occupation is not",
+      left.length === 1 && left[0].kind === "occupation");
+  }
 }
 
 line(`\n  v0.2 verification: ${v2pass} passed, ${v2fail} failed`);

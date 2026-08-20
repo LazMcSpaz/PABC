@@ -292,13 +292,41 @@ export function recordGrievance(state, victim, offender, kind, opts = {}) {
   return entry;
 }
 
-// The entries still inside the grievance window, newest first.
+// Places `offender` holds that `victim` calls its own. Every Location in
+// content.js already carries an `affiliation` and it was used for exactly one
+// thing — deciding where factions start. Politically it did not exist, which
+// left the game's central object (the map) outside its diplomacy entirely.
+//
+// These are CONDITIONS, not events: computed live from who holds what, so
+// they appear the moment a city is taken, vanish the moment it is given back,
+// and cannot be bought off with scrap. Goldgrass will not call it square
+// while you are sitting in Omara, whatever you pay them.
+export function occupationsBy(state, victim, offender) {
+  const out = [];
+  for (const loc of Object.values(state.locations || {})) {
+    if (loc.controller !== offender) continue;
+    if (LOCATIONS[loc.locationId]?.affiliation !== victim) continue;
+    out.push({
+      kind: "occupation",
+      round: state.round, // a standing condition is always current
+      severity: D().grievance.severity.occupation ?? D().grievance.defaultSeverity,
+      at: loc.hexId,
+      locationId: loc.locationId,
+      standing: true, // not a ledger entry — cannot be settled, only ended
+    });
+  }
+  return out;
+}
+
+// The entries still inside the grievance window, newest first — the recorded
+// ones plus whatever standing conditions currently hold.
 export function grievancesAgainst(state, victim, offender) {
   const list = state.diplomacy?.grievances?.[victim]?.[offender] || [];
   const window = D().justWar.grievanceWindowRounds;
-  return list
-    .filter((e) => state.round - e.round <= window)
-    .sort((a, b) => b.round - a.round);
+  return [
+    ...occupationsBy(state, victim, offender),
+    ...list.filter((e) => state.round - e.round <= window),
+  ].sort((a, b) => b.round - a.round);
 }
 
 // How much `victim` holds against `offender`, all live entries summed. This
@@ -306,6 +334,16 @@ export function grievancesAgainst(state, victim, offender) {
 // a grudge is a scratch or a blood feud.
 export function grievanceWeight(state, victim, offender) {
   return grievancesAgainst(state, victim, offender).reduce((n, e) => n + e.severity, 0);
+}
+
+// The part of that weight a settlement can actually buy. Standing conditions
+// are excluded: an occupation ends by giving the place back, not by paying
+// somebody to stop minding it. Pricing the settlement off the full weight
+// let a player hand over a fortune for an item that then cleared nothing.
+export function settleableWeight(state, victim, offender) {
+  return grievancesAgainst(state, victim, offender)
+    .filter((e) => !e.standing)
+    .reduce((n, e) => n + e.severity, 0);
 }
 
 // The single entry that best answers "what did they do to you" — the worst
@@ -322,10 +360,15 @@ export function worstGrievance(state, victim, offender) {
 // Wipe the slate between two factions. The victim's decision, not the
 // offender's — reached by accepting a settlement they were offered.
 export function settleGrievances(state, victim, offender) {
-  const held = grievancesAgainst(state, victim, offender);
+  // Only the recorded ones. A settlement is compensation for things that
+  // HAPPENED; a city you are still holding is not in the past, and paying
+  // somebody to stop minding that you occupy their homeland is not a deal
+  // anyone would take. Ending that grievance means giving the place back.
+  const held = (state.diplomacy?.grievances?.[victim]?.[offender] || [])
+    .filter((e) => state.round - e.round <= D().justWar.grievanceWindowRounds);
   if (!held.length) return 0;
-  const weight = grievanceWeight(state, victim, offender);
-  if (state.diplomacy.grievances?.[victim]) state.diplomacy.grievances[victim][offender] = [];
+  const weight = held.reduce((n, e) => n + e.severity, 0);
+  state.diplomacy.grievances[victim][offender] = [];
   // A denouncement resting on those grievances loses its grounds with them —
   // otherwise settling would leave the accusation standing and the just war
   // it bought still live.
@@ -576,8 +619,8 @@ export function valueOfItem(state, fid, item, ctx = {}) {
   // number either way; dealValue's give/get sides supply the sign, so an
   // apology can never be free and can never be refused for nothing.
   if (item.settlement) {
-    const owedToMe = grievanceWeight(state, fid, ctx.other);
-    const owedByMe = grievanceWeight(state, ctx.other, fid);
+    const owedToMe = settleableWeight(state, fid, ctx.other);
+    const owedByMe = settleableWeight(state, ctx.other, fid);
     return (owedToMe + owedByMe) * D().grievance.settlementPerWeight;
   }
   if (item.chip) return 4; // generic gear value
@@ -834,6 +877,19 @@ export function counterOffer(state, fid, deal) {
 // the piece that turns a turnstile into a conversation, and it needed no new
 // valuation model: `dealValue` has always known the size of the gap.
 export function resolveProposal(state, pid, f, deal, cause, kind) {
+  // A settlement that would clear nothing is an empty box, and an AI will
+  // cheerfully take real scrap for one. Refuse it here rather than let a
+  // player pay for a term with no content — the same guard tribute has
+  // against demanding zero.
+  const hasSettlement = [...(deal.give || []), ...(deal.get || [])].some((it) => it.settlement);
+  if (hasSettlement && !settleableWeight(state, f, pid) && !settleableWeight(state, pid, f)) {
+    return {
+      accepted: false,
+      reason: grievanceWeight(state, f, pid) || grievanceWeight(state, pid, f)
+        ? "what stands between you is ground held, and no payment ends that"
+        : "there is nothing between you to settle",
+    };
+  }
   const pestering = recordAsk(state, pid, f);
   if (wouldAccept(state, f, deal)) {
     applyDeal(state, deal, cause);
