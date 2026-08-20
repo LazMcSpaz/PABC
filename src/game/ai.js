@@ -24,7 +24,8 @@ import {
   getStanding, passesRepGates, formPact, vassalize, applyDeal, checkRecognitionVictory,
   tableOffer, offersFor, warExhaustion,
   denounce, denounceWarrant, denounceCooldown, honorOf, grievanceWeight, wouldAccept,
-  counterOffer,
+  counterOffer, ultimatumsFor, answerUltimatum, aiComplies, unitsInTerritory, declareWar,
+  performDiplomacy,
   aiAcceptsVassalage, truceBetween,
 } from "./diplomacy.js";
 
@@ -463,6 +464,27 @@ function manageDiplomacy(state, pid) {
     }
   }
 
+  // 3b2) Make good on your own words. An ultimatum you let lapse costs Honor
+  //      publicly, and it should: the AI checked it had the strength to mean
+  //      it before issuing, so the only reason not to follow through is that
+  //      nothing in the code ever made it. Left unfixed, every threat it
+  //      issued became a bluff it called on itself.
+  for (const u of ultimatumsFor(state, pid, { issuedBy: true })) {
+    if (!u.defied || atWar(state, pid, u.to)) continue;
+    declareWar(state, pid, u.to, "ultimatum-defied");
+    return;
+  }
+
+  // 3c) Answer anything standing over you. Silence past the deadline is
+  //     defiance, and defiance hands them a righteous war — so this is a
+  //     decision, not a formality.
+  for (const u of ultimatumsFor(state, pid)) {
+    if (u.defied) continue;
+    if (!aiComplies(state, pid, u)) continue;
+    const res = answerUltimatum(state, pid, u.id, true);
+    if (res.ok) return;
+  }
+
   // 4) Say something about a faction that has earned it. A denouncement is
   //    now judged on whether there are grounds, which makes it the peaceful
   //    faction's real lever: a pacifist that cannot answer a tyrant with
@@ -483,7 +505,10 @@ function manageDiplomacy(state, pid) {
   //    human. The audit's blunt finding was that across thirty rounds the AI
   //    approached the player exactly zero times: it had no way to propose,
   //    only to act. Now it has an inbox to put things in.
-  if (human && pid !== human) proposeToHuman(state, pid, me);
+  if (human && pid !== human) {
+    if (ultimatumToHuman(state, pid, me)) return;
+    proposeToHuman(state, pid, me);
+  }
 }
 
 // What this faction would like from the human, if anything. One offer at a
@@ -539,6 +564,32 @@ function proposeToHuman(state, pid, me) {
       get: [{ flow: { resource: "scrap", amountPerTurn: 2, rounds: 5 } }],
     }, { kind: "deal", note: "It would be a shame if anything happened." });
   }
+}
+
+// "Stop, or else." What a faction reaches for when it is strong enough to
+// mean it and has something concrete to be angry about — the step it used to
+// have no way to take between grumbling through an envoy and simply
+// attacking.
+function ultimatumToHuman(state, pid, me) {
+  const human = state.humanFactionId;
+  if (!human || atWar(state, pid, human)) return false;
+  if (ultimatumsFor(state, human).some((u) => u.from === pid)) return false;
+  if (!mayEngage(state, pid, human)) return false;
+  // You have to be able to back it up. Threatening from weakness is how a
+  // faction ends up in the bluff branch, and the AI should not walk into it.
+  if (powerOf(state, pid) < powerOf(state, human) * 1.25) return false;
+  if ((me.aggression ?? 0.5) < 0.45) return false;
+  // Something concrete first: their army in your fields.
+  if (unitsInTerritory(state, human, pid).length) {
+    return performDiplomacy(state, pid, "issue-ultimatum",
+      { faction: human, demand: { kind: "withdraw" } }).ok;
+  }
+  // Otherwise the old-fashioned kind, with a clock on it.
+  const purse = state.players[human]?.resource || 0;
+  const ask = Math.min(CONFIG.diplomacy.ultimatum.maxScrap, Math.floor(purse * 0.3));
+  if (ask < 3) return false;
+  return performDiplomacy(state, pid, "issue-ultimatum",
+    { faction: human, demand: { kind: "tribute", amount: ask } }).ok;
 }
 
 // Stale-intel hooks: hexes where the AI last saw an enemy (ghosts). It may

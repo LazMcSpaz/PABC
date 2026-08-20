@@ -28,7 +28,7 @@ import {
   arePacted, atWar, vassalLord, coalitionAgainst, factionIds,
   aiAcceptsPact, aiAcceptsVassalage, aiAcceptsPeace, wouldAccept, passesRepGates,
   denounceCooldown, denounceWarrant, denounceGrounds, grievanceWeight, grievancesAgainst,
-  reputationLog, settleableWeight,
+  reputationLog, settleableWeight, unitsInTerritory, ultimatumCooldown,
   asksThisRound, flowRounds, promiseRounds,
   evaluatePactCall, canDemandTribute, hasOpenBorders, warJustification,
   openBordersStanding,
@@ -707,6 +707,10 @@ function adaptDiplomacy(state, viewer) {
         // the only thing that ends it.
         settleable: settleableWeight(state, f, viewer) + settleableWeight(state, viewer, f),
       },
+      // How many of their units are standing inside your borders — the thing
+      // a "get out" ultimatum is about, and the check on whether one is
+      // even sayable.
+      unitsInYourTerritory: unitsInTerritory(state, f, viewer).length,
       color: def.color || "#888",
       tier: def.tier || "major",
       temperament: def.temperament,
@@ -836,6 +840,38 @@ function adaptDiplomacy(state, viewer) {
           ),
         };
       })(),
+    })),
+    // §6.11 — threats standing over you, and the ones you have made. An
+    // ultimatum binds the issuer too, so both directions are the player's
+    // business: the second list is a clock they are running against
+    // themselves.
+    ultimatums: (dip.ultimatums || []).filter((u) => u.to === viewer).map((u) => ({
+      id: u.id,
+      from: u.from,
+      fromName: factionDef(u.from)?.name || u.from,
+      kind: u.demand.kind,
+      amount: u.demand.amount ?? null,
+      demandText: u.demand.kind === "tribute"
+        ? `${u.demand.amount} scrap`
+        : "your units out of their territory",
+      defied: !!u.defied,
+      roundsLeft: Math.max(0, u.expiresOnRound - state.round),
+      canComply: u.demand.kind === "tribute"
+        ? (me?.resource || 0) >= u.demand.amount
+        : unitsInTerritory(state, viewer, u.from).length === 0,
+      // Why complying is not simply the safe option, and defying is not
+      // simply the brave one.
+      ifDefy: `They gain a righteous war on you — and lose ${CONFIG.diplomacy.ultimatum.bluffHonorLoss} Honor if they do not take it.`,
+    })),
+    ultimatumsIssued: (dip.ultimatums || []).filter((u) => u.from === viewer).map((u) => ({
+      id: u.id,
+      to: u.to,
+      toName: factionDef(u.to)?.name || u.to,
+      demandText: u.demand.kind === "tribute"
+        ? `${u.demand.amount} scrap`
+        : "their units out of your territory",
+      defied: !!u.defied,
+      roundsLeft: Math.max(0, (u.defied ? u.mustActBy : u.expiresOnRound) - state.round),
     })),
     // How many times you have already asked each faction for something this
     // round — past `freeAsks` a refusal starts costing Standing.
@@ -1217,6 +1253,26 @@ function availableVerbsAgainst(state, viewer, fid) {
   // 9) Free Vassal (only when this faction is your vassal).
   if (myVassal) {
     out.push({ verb: "free-vassal", state: "enabled", outcome: "Release them. Honor rises; you lose their tribute." });
+  }
+
+  // 9b) Ultimatum — the step between asking and attacking.
+  if (!myLord && !myVassal && !war) {
+    const U = CONFIG.diplomacy.ultimatum;
+    const cd = ultimatumCooldown(state, viewer, fid);
+    const standing = (state.diplomacy?.ultimatums || []).some((u) => u.from === viewer && u.to === fid);
+    if (standing) {
+      out.push({ verb: "issue-ultimatum", state: "disabled", reason: "One already stands over them." });
+    } else if (cd > 0) {
+      out.push({
+        verb: "issue-ultimatum", state: "disabled",
+        reason: `You threatened them too recently — ${cd} more round${cd === 1 ? "" : "s"}.`,
+      });
+    } else {
+      out.push({
+        verb: "issue-ultimatum", state: "enabled",
+        outcome: `+${U.menaceOnIssue} Menace now. They have ${U.deadlineRounds} rounds. Defiance hands you a JUST war — but if you then do nothing, the board watches you back down and it costs ${U.bluffHonorLoss} Honor.`,
+      });
+    }
   }
 
   // 10) Denounce — public condemnation, and the formal first step of a just

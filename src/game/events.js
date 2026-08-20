@@ -86,6 +86,8 @@ export const EVENT_NAMES = new Set([
   "grievance_recorded", "grievances_settled",
   // Reputation is what the board saw. Some things it doesn't.
   "attack_unwitnessed",
+  // §6.11 ultimatums — the verb between asking and attacking.
+  "ultimatum_issued", "ultimatum_complied", "ultimatum_defied", "ultimatum_bluffed",
 ]);
 
 // Resolve a chip / card instance uid to its content def. Covers Market

@@ -525,6 +525,7 @@ export const CONFIG = {
         "pact-broken": 4, // abandoned an alliance
         "promise-broken": 2, // walked away from a term
         occupation: 2, // holds a place you call yours (a condition, not an event)
+        defiance: 3, // ignored an ultimatum you put your name to
       },
       defaultSeverity: 2,
       maxPerPair: 8, // the ledger keeps this many; older entries fall off
@@ -557,6 +558,23 @@ export const CONFIG = {
     pact: { // §1.9, §1.10 — toggle costs
       toggleVisionStandingHit: 1,
       toggleBordersStandingHit: 1,
+    },
+
+    // The verb between asking and attacking. A demand with a deadline and a
+    // named consequence — and, crucially, a cost for not following through:
+    // an ultimatum you let lapse is a bluff the whole board watched you make.
+    ultimatum: {
+      deadlineRounds: 3, // how long the other side has to comply
+      graceRounds: 2, // how long the issuer then has to make good on it
+      menaceOnIssue: 1, // a threat is a hostile act, however politely worded
+      bluffHonorLoss: 4, // …and an empty one is worse than never speaking
+      defianceSeverity: 3, // the grievance the issuer earns when defied
+      complyStandingGain: 2, // giving in buys a little warmth; it costs face
+      maxScrap: 30, // ceiling on a tribute demand
+      // How long before the same pair can be threatened again. Without this
+      // a strong AI reissues every other round and the word stops meaning
+      // anything — which is the same reason denouncing has a cooldown.
+      cooldownRounds: 8,
     },
 
     // The round trip. A proposal is a thing that sits on a table, not a

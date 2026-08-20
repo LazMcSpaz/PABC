@@ -240,8 +240,22 @@ quietly pocketing the scrap. Goldgrass will not call it square while you are
 sitting in Omara, whatever you pay. It ends the only way it can. 10 harness
 checks (Phase 28).
 
-**§3's second half (Locations as deal items) and §4 (ultimatums) — still
-open.**
+**§4 ultimatums — BUILT (2026-08-19).** A demand with a deadline and your
+name on it. Two kinds the engine can check without ambiguity — pay us, or get
+your units out of our territory — and the second is satisfied by simply
+marching home, with nothing to click: the world is the check.
+
+Issuing costs Menace (a threat is a hostile act however politely worded).
+Complying costs you the thing and ends the crisis fractionally warmer.
+Defiance hands the issuer a real grievance and a righteous war. And the part
+that gives the verb its weight: **it binds the issuer too.** Defy one and the
+issuer starts their own clock — let it run out without acting and the board
+watched you back down, at a hard Honor cost. The AI issues them only when it
+has the strength to mean it, and now follows through; before that fix every
+threat it made became a bluff it called on itself. Per-pair cooldown, because
+a threat repeated every other round is a tic. 19 harness checks (Phase 29).
+
+**§3's second half — Locations as deal items — is the last one open.**
 
 ## What I'd build, in order
 
@@ -249,7 +263,7 @@ open.**
 2. ~~**Witnessed reputation** (§2)~~ — **done**, see Status above.
 3. ~~**Receipts** (§5)~~ — **done**, see Status above.
 4. ~~**Claims** (§3, first half)~~ — **done**, see Status above.
-5. **Ultimatums** (§4) — rides tier 2's offer machinery.
+5. ~~**Ultimatums** (§4)~~ — **done**, see Status above.
 6. **Ceding Locations** (§3, second half) — the big one, best done once claims
    and the ledger exist to give it meaning.
 

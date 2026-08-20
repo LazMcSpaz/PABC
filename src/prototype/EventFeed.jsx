@@ -318,6 +318,31 @@ function formatEvent(ev, engineState) {
         color: theme.textDim,
         text: `No one saw that. ${who(p.victim)} did — and will remember it.`,
       };
+    case "ultimatum_issued": {
+      const what = p.demand?.kind === "tribute" ? `${p.demand.amount} scrap` : "their units out";
+      if (p.to === you) return { color: theme.accent2, text: `${who(p.from)} demands ${what} — or else` };
+      if (p.from === you) return { color: theme.accent, text: `You have put terms to ${who(p.to)}` };
+      return { color: theme.textDim, text: `${who(p.from)} puts terms to ${who(p.to)}` };
+    }
+    case "ultimatum_complied":
+      return {
+        color: p.to === you ? theme.textDim : theme.good,
+        text: p.to === you ? `You gave in to ${who(p.from)}` : `${who(p.to)} gave in to ${who(p.from)}`,
+      };
+    case "ultimatum_defied":
+      return {
+        color: theme.accent2,
+        text: p.to === you
+          ? `You let ${possessive(who(p.from))} demand stand — their war on you is now righteous`
+          : `${who(p.to)} defied ${who(p.from)}`,
+      };
+    case "ultimatum_bluffed":
+      return {
+        color: p.from === you ? theme.accent2 : theme.textDim,
+        text: p.from === you
+          ? `You did not make good on your demand to ${who(p.to)} — the board noticed`
+          : `${who(p.from)} backed down from ${who(p.to)}`,
+      };
     case "grievance_recorded":
       // Only your own books. Everyone's ledger moving would bury the feed.
       if (p.victim !== you) return null;

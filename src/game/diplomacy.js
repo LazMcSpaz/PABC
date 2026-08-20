@@ -35,6 +35,7 @@ export function ensureDiplomacy(state) {
       giftCounter: {}, // §1.2 — { fromPid: { toPid: gifts-in-window } }
       pendingCalls: [], // AI→human pact-call inbox: { id, from, target, since, expiresOnRound }
       offers: [], // the round trip — offers awaiting an answer (see §6.10)
+      ultimatums: [], // demands with a deadline and a consequence (§6.11)
       asks: {}, // pester bookkeeping: { round, byPair: { "a|b": n } }
       standingBaselines: {}, // earned drift targets: { a: { b: -cap..+cap } }
       recognizedEver: {}, // summit VP bookkeeping: { pid: [fids that ever backed pid] }
@@ -47,6 +48,7 @@ export function ensureDiplomacy(state) {
   if (!state.diplomacy.truces) state.diplomacy.truces = {};
   if (!state.diplomacy.pendingWarnings) state.diplomacy.pendingWarnings = [];
   if (!state.diplomacy.offers) state.diplomacy.offers = [];
+  if (!state.diplomacy.ultimatums) state.diplomacy.ultimatums = [];
   if (!state.diplomacy.asks) state.diplomacy.asks = { round: state.round, byPair: {} };
   for (const p of Object.values(state.players)) {
     if (p.menace == null) p.menace = 0;
@@ -995,6 +997,160 @@ function expireOffers(state) {
     emit(state, "offer_lapsed", { offer: o.id, from: o.from, to: o.to });
   }
   state.diplomacy.offers = live;
+}
+
+// --- §6.11 ultimatums ------------------------------------------------
+//
+// The verb the layer had no version of. You could ask, you could trade, you
+// could declare war — there was nothing in between, no way to say "stop, or
+// else", which is the most common act in pre-war diplomacy and the one that
+// generates all the tension.
+//
+// An ultimatum is public, deadlined, and binding on the ISSUER as much as on
+// the target: defying one hands the issuer a righteous war, and issuing one
+// you then do nothing about is a bluff the whole board watched you make.
+
+// Is the demand met right now? Deliberately checked against the world rather
+// than tracked as a flag, so a target that complies by simply marching home
+// is complying, without having to announce it.
+export function demandSatisfied(state, u) {
+  const d = u.demand || {};
+  if (d.kind === "tribute") return !!u.paid;
+  if (d.kind === "withdraw") return unitsInTerritory(state, u.to, u.from).length === 0;
+  return false;
+}
+
+// `moverFid`'s units standing inside `ownerFid`'s zone of control. The same
+// question the trespass rules ask, which is what makes "get out of my
+// territory" a demand with an unambiguous answer.
+export function unitsInTerritory(state, moverFid, ownerFid) {
+  const zoc = state.world?.zoc || {};
+  return Object.values(state.units || {}).filter(
+    (unit) => unit.owner === moverFid && zoc[unit.node] === ownerFid,
+  );
+}
+
+// How long until `from` may threaten `to` again. A threat repeated every
+// other round is not a threat, it is a tic.
+export function ultimatumCooldown(state, from, to) {
+  const at = state.diplomacy?.ultimatumHistory?.[`${from}|${to}`];
+  if (at == null) return 0;
+  const left = D().ultimatum.cooldownRounds - (state.round - at);
+  return left > 0 ? left : 0;
+}
+
+export function ultimatumsFor(state, fid, { issuedBy = false } = {}) {
+  return (state.diplomacy?.ultimatums || []).filter((u) => (issuedBy ? u.from : u.to) === fid);
+}
+
+export function issueUltimatum(state, from, to, demand) {
+  ensureDiplomacy(state);
+  const cfg = D().ultimatum;
+  if (from === to || !state.players[to]) return { ok: false, reason: "there is nobody to say that to" };
+  if (!mayEngage(state, from, to)) return { ok: false, reason: "they are beyond your reach" };
+  if (atWar(state, from, to)) return { ok: false, reason: "you are already at war — there is nothing left to threaten" };
+  if (ultimatumsFor(state, to).some((u) => u.from === from)) {
+    return { ok: false, reason: "they are already under one of your ultimatums" };
+  }
+  const cd = ultimatumCooldown(state, from, to);
+  if (cd > 0) return { ok: false, reason: `you threatened them too recently — ${cd} rounds` };
+  if (demand?.kind === "tribute") {
+    const amount = Math.min(cfg.maxScrap, Math.max(1, Math.round(demand.amount || 0)));
+    if (!amount) return { ok: false, reason: "name what you want" };
+    demand = { kind: "tribute", amount };
+  } else if (demand?.kind === "withdraw") {
+    if (!unitsInTerritory(state, to, from).length) {
+      return { ok: false, reason: "they have nothing of yours to leave" };
+    }
+    demand = { kind: "withdraw" };
+  } else {
+    return { ok: false, reason: "no such demand" };
+  }
+  const u = {
+    id: `ult-${from}-${to}-${state.round}`,
+    from, to, demand,
+    since: state.round,
+    expiresOnRound: state.round + cfg.deadlineRounds,
+    paid: false,
+    mustActBy: null,
+  };
+  state.diplomacy.ultimatums.push(u);
+  state.diplomacy.ultimatumHistory = state.diplomacy.ultimatumHistory || {};
+  state.diplomacy.ultimatumHistory[`${from}|${to}`] = state.round;
+  // A threat is a hostile act however politely it is worded, and the board
+  // is watching — this one is never discounted for witnesses.
+  adjustMenace(state, from, cfg.menaceOnIssue, `ultimatum:${to}`);
+  emit(state, "ultimatum_issued", { id: u.id, from, to, demand, expiresOnRound: u.expiresOnRound });
+  return { ok: true, id: u.id };
+}
+
+// Give in. For a tribute demand that means paying; for a withdrawal it means
+// marching home, which the round check notices on its own.
+export function answerUltimatum(state, fid, id, comply) {
+  ensureDiplomacy(state);
+  const u = (state.diplomacy.ultimatums || []).find((x) => x.id === id && x.to === fid);
+  if (!u) return { ok: false, reason: "that ultimatum has passed" };
+  if (!comply) return { ok: true, complied: false, reason: "you let it stand" };
+  if (u.demand.kind === "tribute") {
+    const p = state.players[fid];
+    if ((p?.resource || 0) < u.demand.amount) return { ok: false, reason: "you cannot cover it" };
+    transferItems(state, fid, u.from, [{ resource: { resource: "scrap", amount: u.demand.amount } }]);
+    u.paid = true;
+  }
+  if (!demandSatisfied(state, u)) {
+    return { ok: false, reason: "your units are still in their territory" };
+  }
+  completeUltimatum(state, u, true);
+  return { ok: true, complied: true };
+}
+
+function completeUltimatum(state, u, complied) {
+  state.diplomacy.ultimatums = state.diplomacy.ultimatums.filter((x) => x !== u);
+  const cfg = D().ultimatum;
+  if (complied) {
+    // Giving in costs face, not standing: they got what they wanted, and the
+    // relationship is fractionally warmer for the crisis having ended.
+    adjustStanding(state, u.from, u.to, cfg.complyStandingGain, "ultimatum-met");
+    emit(state, "ultimatum_complied", { id: u.id, from: u.from, to: u.to, demand: u.demand });
+    return;
+  }
+  // Defied. The issuer now has a grievance on the record and a righteous war
+  // available — and a clock of their own to make good on it.
+  recordGrievance(state, u.from, u.to, "defiance", { severity: cfg.defianceSeverity });
+  state.diplomacy.ultimatums.push({ ...u, defied: true, mustActBy: state.round + cfg.graceRounds });
+  emit(state, "ultimatum_defied", { id: u.id, from: u.from, to: u.to, demand: u.demand });
+}
+
+// Would `fid` give in? Weighed against what defying actually risks: a
+// righteous war from someone stronger is a bad trade, and a righteous war
+// from someone weaker is an invitation. Temperament decides the margin —
+// a warlord would rather be invaded than be seen to fold.
+export function aiComplies(state, fid, u) {
+  const def = factionDef(fid) || {};
+  if (u.demand.kind === "tribute" && (state.players[fid]?.resource || 0) < u.demand.amount) return false;
+  const ratio = powerOf(state, u.from) / Math.max(1, powerOf(state, fid));
+  // Backing down is worth roughly what the war would cost you, discounted by
+  // how much this faction minds being pushed around.
+  const spine = 0.6 + (def.aggression ?? 0.5) * 1.2;
+  return ratio > spine;
+}
+
+// Round cadence: deadlines fall due, and bluffs get called.
+function resolveUltimatums(state) {
+  const cfg = D().ultimatum;
+  for (const u of [...(state.diplomacy.ultimatums || [])]) {
+    if (u.defied) {
+      // The issuer said "or else" and the board is waiting to see the else.
+      if (state.round <= u.mustActBy) continue;
+      state.diplomacy.ultimatums = state.diplomacy.ultimatums.filter((x) => x !== u);
+      if (atWar(state, u.from, u.to)) continue; // they made good on it
+      if (state.players[u.from]) adjustHonor(state, u.from, -cfg.bluffHonorLoss, `bluff:${u.to}`);
+      emit(state, "ultimatum_bluffed", { id: u.id, from: u.from, to: u.to });
+      continue;
+    }
+    if (demandSatisfied(state, u)) { completeUltimatum(state, u, true); continue; }
+    if (state.round > u.expiresOnRound) completeUltimatum(state, u, false);
+  }
 }
 
 // --- applying a struck deal (§18.6 atomic) --------------------------
@@ -2210,6 +2366,7 @@ export function runDiplomacyRound(state) {
     }
   }
   expireOffers(state); // §6.10 — an unanswered offer lapses; silence is not a no
+  resolveUltimatums(state); // §6.11 — deadlines fall due, and bluffs get called
   pactTenureBaselines(state); // warm long-alliance baselines before the fade
   driftStanding(state);
   guestHouseDrift(state);
@@ -2522,6 +2679,14 @@ export function performDiplomacy(state, pid, action, params = {}) {
     // ask, so it never counts toward pestering.
     case "answer-offer":
       return r(answerOffer(state, pid, params.offerId, params.accept !== false));
+
+    // §6.11 — "stop, or else", with a deadline and your name on it.
+    case "issue-ultimatum": {
+      const res = issueUltimatum(state, pid, f, params.demand);
+      return res.ok ? r(res) : res;
+    }
+    case "answer-ultimatum":
+      return r(answerUltimatum(state, pid, params.ultimatumId, params.comply !== false));
 
     case "free-vassal": {
       const vassal = f;

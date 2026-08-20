@@ -111,6 +111,7 @@ const VERB_META = {
   "vassalize":             { label: "Vassalize", body: "Bind them under your banner.", destructive: true },
   "free-vassal":           { label: "Free Vassal", body: "Release them. Honor rises; tribute stops.", destructive: true },
   "denounce":              { label: "Denounce", body: "Name them publicly. Warranted, it pays; baseless, it costs — and the board can tell.", destructive: true },
+  "issue-ultimatum":       { label: "Issue Ultimatum", body: "Name a demand and a deadline. Defiance makes your war just — backing down costs Honor.", isPane: "ultimatum", destructive: true },
   "declare-war":           { label: "Declare War", body: "Open hostilities. Menace rises immediately.", destructive: true },
   // §6 trade + passive toggles
   "trading-pact":          { label: "Open Trading Pact", body: "Route between capitals — per-round scrap each side + permanent Research floor." },
@@ -122,6 +123,7 @@ const VERB_META = {
 
 const DESTRUCTIVE_PROMPT = {
   "declare-war":            "Declare war? Standing collapses, and unless you have a grievance on record the declaration alone raises your Menace. Their allies may join in.",
+  "issue-ultimatum":        "Put your name to a demand with a deadline? If they defy you and you then do nothing, the whole board sees you back down.",
   "denounce":               "Denounce publicly? The board judges the accusation, not the accused: with grounds it earns you Honor and allies, without them it marks you as the liar.",
   "vassalize":              "Take them under your banner? The cornered submit; a friendly minor may welcome a protector.",
   "free-vassal":            "Release this vassal? Your Honor rises, their tribute stops.",
@@ -399,6 +401,53 @@ function Receipts({ receipts }) {
   );
 }
 
+// A demand with a deadline. Complying costs you the thing; defying costs you
+// nothing yet, and hands them the right to take it.
+function UltimatumCard({ u, dip, onAction }) {
+  const f = dip.factions.find((x) => x.id === u.from);
+  return (
+    <Card accent="#d2453f">
+      <div className="pc-prose" style={{ fontSize: 12, lineHeight: 1.5, marginBottom: 7 }}>
+        <b style={{ color: f?.color || "#d2453f" }}>{u.fromName}</b> demands{" "}
+        <b style={{ color: C.holoHi }}>{u.demandText}</b>
+        {u.defied ? " — and you have refused." : "."}
+      </div>
+      {!u.defied && (
+        <div style={{ display: "flex", gap: 8 }}>
+          <button
+            className="hud-int"
+            disabled={!u.canComply}
+            onClick={() => onAction("answer-ultimatum", { ultimatumId: u.id, comply: true })}
+            style={{
+              flex: 1, fontFamily: C.font, fontSize: 10, fontWeight: 700,
+              letterSpacing: 1, textTransform: "uppercase", color: "#f4efe2",
+              padding: "6px 8px", borderRadius: 4, border: "1px solid rgba(86,211,198,0.35)",
+              background: "rgba(86,211,198,0.06)",
+              cursor: u.canComply ? "pointer" : "not-allowed", opacity: u.canComply ? 1 : 0.45,
+            }}
+          >{u.canComply ? "Give in" : (u.kind === "tribute" ? "Can't afford" : "Units still there")}</button>
+          <button
+            className="hud-int"
+            onClick={() => onAction("answer-ultimatum", { ultimatumId: u.id, comply: false })}
+            title={u.ifDefy}
+            style={{
+              flex: 1, fontFamily: C.font, fontSize: 10, fontWeight: 700,
+              letterSpacing: 1, textTransform: "uppercase", color: "#fff",
+              padding: "6px 8px", borderRadius: 4, border: "1px solid #6e1f12",
+              background: "linear-gradient(180deg, #d8553f, #a5331f)", cursor: "pointer",
+            }}
+          >Let it stand</button>
+        </div>
+      )}
+      <div style={{ fontFamily: C.font, fontSize: 9, letterSpacing: 0.5, color: "rgba(255,180,174,0.75)", marginTop: 6 }}>
+        {u.defied
+          ? "They may now take it by force, righteously."
+          : `${u.roundsLeft} round${u.roundsLeft === 1 ? "" : "s"} left. ${u.ifDefy}`}
+      </div>
+    </Card>
+  );
+}
+
 // One offer awaiting an answer. Deliberately plain: two term lists and two
 // buttons. The interesting part is that it EXISTS — before this, a proposal
 // resolved the instant it was made and there was no state in which anything
@@ -545,6 +594,34 @@ function LandingView({ dip, onSelectFaction, onAction, onClose }) {
             <SectionLabel color={C.holoHi}>On the Table</SectionLabel>
             {dip.offers.map((o) => (
               <OfferCard key={o.id} offer={o} dip={dip} onAction={onAction} />
+            ))}
+          </>
+        )}
+
+        {/* §6.11 — threats standing over you, and your own clock running. */}
+        {(dip.ultimatums || []).length > 0 && (
+          <>
+            <SectionLabel color="#d2453f">Or Else</SectionLabel>
+            {dip.ultimatums.map((u) => (
+              <UltimatumCard key={u.id} u={u} dip={dip} onAction={onAction} />
+            ))}
+          </>
+        )}
+        {(dip.ultimatumsIssued || []).length > 0 && (
+          <>
+            <SectionLabel color="#c9b24e">Your Word</SectionLabel>
+            {dip.ultimatumsIssued.map((u) => (
+              <Card key={u.id} accent="#c9b24e">
+                <div className="pc-prose" style={{ fontSize: 12, lineHeight: 1.5 }}>
+                  You have demanded <b style={{ color: C.holoHi }}>{u.demandText}</b> of{" "}
+                  <b>{u.toName}</b>.
+                </div>
+                <div style={{ fontFamily: C.font, fontSize: 9, letterSpacing: 0.5, color: u.defied ? "#ffb4ae" : "rgba(143,246,234,0.6)", marginTop: 5 }}>
+                  {u.defied
+                    ? `THEY REFUSED. ${u.roundsLeft} round${u.roundsLeft === 1 ? "" : "s"} to make good on it, or the board watches you back down.`
+                    : `${u.roundsLeft} round${u.roundsLeft === 1 ? "" : "s"} to answer.`}
+                </div>
+              </Card>
             ))}
           </>
         )}
@@ -1627,6 +1704,54 @@ function DealPane({ f, dip, kind = "custom", onBack, onSubmit }) {
   );
 }
 
+// Naming a demand and a deadline. Two kinds, because these are the two the
+// engine can check without ambiguity: scrap paid, and units gone.
+function UltimatumPane({ f, dip, onBack, onSubmit }) {
+  const [kind, setKind] = useState("tribute");
+  const [amount, setAmount] = useState(8);
+  const intruders = f.unitsInYourTerritory ?? null;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
+      <PaneHeader title="Issue an ultimatum" f={f} onBack={onBack} />
+      <div className="pc-scroll" style={{
+        flex: 1, overflowY: "auto", padding: "12px 16px",
+        display: "flex", flexDirection: "column", gap: 12,
+      }}>
+        <div style={{ fontFamily: C.font, fontSize: 11, letterSpacing: 1, lineHeight: 1.5, color: "rgba(207,214,220,0.7)" }}>
+          Say it out loud, with a date on it. If they defy you, your war on
+          them is righteous — and if you then do nothing, everyone saw.
+        </div>
+        <Card>
+          <SectionLabel>The demand</SectionLabel>
+          <Toggle label="Pay us" value={kind === "tribute"} onChange={() => setKind("tribute")} />
+          {kind === "tribute" && (
+            <NumberRow label="Scrap" value={amount} onChange={setAmount} max={30} />
+          )}
+          <Toggle
+            label="Get your units out of our territory"
+            value={kind === "withdraw"}
+            onChange={() => setKind("withdraw")}
+          />
+          {kind === "withdraw" && intruders === 0 && (
+            <div className="pc-prose" style={{ fontSize: 11, color: "#ffb4ae", marginTop: 5 }}>
+              They have nothing inside your borders to withdraw.
+            </div>
+          )}
+        </Card>
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+          <button onClick={onBack} className="hud-int" style={btnGhostStyle()}>Back</button>
+          <button
+            className="hud-int"
+            disabled={kind === "tribute" && amount < 1}
+            onClick={() => onSubmit(kind === "tribute" ? { kind, amount } : { kind })}
+            style={btnHoloStyle()}
+          >Deliver it</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function MediatePane({ dip, onBack, onSubmit }) {
   const [picked, setPicked] = useState(null);
   return (
@@ -2095,6 +2220,16 @@ export default function DiplomacyDrawer({
                   onSubmit={(deal) => runFromPane("sue-for-peace", {
                     faction: selectedFaction.id,
                     give: deal.give, get: deal.get,
+                  })}
+                />
+              )}
+              {pane === "ultimatum" && (
+                <UltimatumPane
+                  f={selectedFaction}
+                  dip={dip}
+                  onBack={() => setPane(null)}
+                  onSubmit={(demand) => runFromPane("issue-ultimatum", {
+                    faction: selectedFaction.id, demand,
                   })}
                 />
               )}

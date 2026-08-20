@@ -33,6 +33,7 @@ import {
   denounce, denounceCooldown, denounceWarrant, denounceGrounds, valueOfItem, applyDeal, adjustStanding,
   recordGrievance, grievancesAgainst, grievanceWeight, worstGrievance,
   witnessesOf, witnessShare, reputationLog, adjustHonor, adjustMenace, settleableWeight,
+  ultimatumsFor, ultimatumCooldown,
   // §6.10 the round trip — offers, counters, patience
   counterOffer, tableOffer, offersFor, answerOffer, asksThisRound,
 } from "./diplomacy.js";
@@ -6010,6 +6011,118 @@ line("\n  [Phase 11] text-token resolver");
     const left = grievancesAgainst(g2, "goldgrass", "versari");
     check("the betrayal is settled and the occupation is not",
       left.length === 1 && left[0].kind === "occupation");
+  }
+}
+
+// Phase 29 — ultimatums. There was no verb between asking and attacking:
+// no way to say "stop, or else", which is the act that generates all the
+// tension in pre-war diplomacy.
+{
+  line("\n  [Phase 29] diplomacy — or else");
+  const U = CONFIG.diplomacy.ultimatum;
+  const demand = { kind: "tribute", amount: 10 };
+
+  // --- issuing costs something, and starts a clock ---
+  {
+    const g = createGame({ seed: 291, humanFactionId: "versari" });
+    ensureDiplomacy(g);
+    g.players.goldgrass.resource = 40;
+    const r = performDiplomacy(g, "versari", "issue-ultimatum", { faction: "goldgrass", demand });
+    check("an ultimatum can be issued", r.ok === true);
+    check("a threat is a hostile act", (g.players.versari.menace || 0) === U.menaceOnIssue);
+    check("…and it lands in their hands with a deadline",
+      ultimatumsFor(g, "goldgrass").length === 1);
+    check("you cannot stack two on the same faction",
+      performDiplomacy(g, "versari", "issue-ultimatum", { faction: "goldgrass", demand }).ok === false);
+  }
+
+  // --- complying pays, and ends it warmer than it started ---
+  {
+    const g = createGame({ seed: 291, humanFactionId: "versari" });
+    ensureDiplomacy(g);
+    g.players.goldgrass.resource = 40;
+    g.players.versari.resource = 0;
+    performDiplomacy(g, "versari", "issue-ultimatum", { faction: "goldgrass", demand });
+    const u = ultimatumsFor(g, "goldgrass")[0];
+    const s0 = getStanding(g, "versari", "goldgrass");
+    performDiplomacy(g, "goldgrass", "answer-ultimatum", { ultimatumId: u.id, comply: true });
+    check("giving in moves the scrap", (g.players.versari.resource || 0) === demand.amount);
+    check("…and the crisis ending warms them a little",
+      getStanding(g, "versari", "goldgrass") === s0 + U.complyStandingGain);
+    check("…and it is off the table", ultimatumsFor(g, "goldgrass").length === 0);
+  }
+
+  // --- defiance hands the issuer a righteous war ---
+  {
+    const g = createGame({ seed: 291, humanFactionId: "versari" });
+    ensureDiplomacy(g);
+    g.players.goldgrass.resource = 40;
+    performDiplomacy(g, "versari", "issue-ultimatum", { faction: "goldgrass", demand });
+    check("nothing is owed while the deadline stands",
+      warJustification(g, "versari", "goldgrass") === null);
+    for (let i = 0; i < U.deadlineRounds + 1; i += 1) { g.round += 1; runDiplomacyRound(g); }
+    check("silence past the deadline is defiance",
+      denounceWarrant(g, "versari", "goldgrass") === "defiance");
+    check("…and makes the war you threatened a just one",
+      warJustification(g, "versari", "goldgrass") === "defiance");
+
+    // …and now the issuer is the one on a clock.
+    const h0 = honorOf(g, "versari");
+    for (let i = 0; i < U.graceRounds + 1; i += 1) { g.round += 1; runDiplomacyRound(g); }
+    check("an ultimatum you do not act on is a bluff the board watched",
+      honorOf(g, "versari") === h0 - U.bluffHonorLoss);
+  }
+
+  // --- unless you meant it ---
+  {
+    const g = createGame({ seed: 291, humanFactionId: "versari" });
+    ensureDiplomacy(g);
+    g.players.goldgrass.resource = 40;
+    performDiplomacy(g, "versari", "issue-ultimatum", { faction: "goldgrass", demand });
+    for (let i = 0; i < U.deadlineRounds + 1; i += 1) { g.round += 1; runDiplomacyRound(g); }
+    const h0 = honorOf(g, "versari");
+    const m0 = g.players.versari.menace || 0;
+    declareWar(g, "versari", "goldgrass", "ultimatum-defied");
+    for (let i = 0; i < U.graceRounds + 1; i += 1) { g.round += 1; runDiplomacyRound(g); }
+    check("making good on it costs no Honor", honorOf(g, "versari") === h0);
+    check("…and the war is justified, so the declaration costs no Menace",
+      (g.players.versari.menace || 0) === m0);
+  }
+
+  // --- "get out" is satisfied by marching home, with nothing to click ---
+  {
+    const g = createGame({ seed: 291, humanFactionId: "versari" });
+    ensureDiplomacy(g);
+    const zoc = g.world.zoc || {};
+    const mine = Object.keys(zoc).find((h) => zoc[h] === "versari");
+    const theirs = Object.values(g.units).find((u) => u.owner === "goldgrass");
+    check("the board gives you territory and them a unit", !!mine && !!theirs);
+    check("you cannot demand a withdrawal from somebody who is not there",
+      performDiplomacy(g, "versari", "issue-ultimatum",
+        { faction: "goldgrass", demand: { kind: "withdraw" } }).ok === false);
+    theirs.node = mine;
+    check("…but you can once they are",
+      performDiplomacy(g, "versari", "issue-ultimatum",
+        { faction: "goldgrass", demand: { kind: "withdraw" } }).ok === true);
+    theirs.node = Object.keys(g.board.hexes).find((h) => zoc[h] !== "versari");
+    g.round += 1;
+    runDiplomacyRound(g);
+    check("marching home IS complying — the world is the check",
+      ultimatumsFor(g, "goldgrass").length === 0
+      && g.log.some((e) => e.name === "ultimatum_complied"));
+  }
+
+  // --- the word has to mean something, so it has a cooldown ---
+  {
+    const g = createGame({ seed: 291, humanFactionId: "versari" });
+    ensureDiplomacy(g);
+    g.players.goldgrass.resource = 40;
+    performDiplomacy(g, "versari", "issue-ultimatum", { faction: "goldgrass", demand });
+    const u = ultimatumsFor(g, "goldgrass")[0];
+    performDiplomacy(g, "goldgrass", "answer-ultimatum", { ultimatumId: u.id, comply: true });
+    check("you cannot immediately threaten them again",
+      performDiplomacy(g, "versari", "issue-ultimatum", { faction: "goldgrass", demand }).ok === false);
+    check("…and the wait is readable", ultimatumCooldown(g, "versari", "goldgrass") > 0);
   }
 }
 
