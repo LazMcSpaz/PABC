@@ -907,7 +907,24 @@ export function LocationWindow({ view, onClose, onActivate, onContest, onRecruit
               <span style={{ fontFamily: C.font, fontSize: 10.5, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", color: "#08100f", background: v.valueColor || C.copperHi, padding: "2px 8px", borderRadius: 3 }}>{v.valueLabel}</span>
               <span style={{ display: "flex", gap: 2 }}>{Array.from({ length: v.vp }).map((_, i) => <img key={i} src={ICON.vp} alt="" style={{ width: 15, height: 15 }} />)}</span>
             </div>
-            <div style={{ fontSize: 10, letterSpacing: 1.4, textTransform: "uppercase", color: C.textDim, marginTop: 7 }}>{v.statusLabel}</div>
+            <div style={{ fontSize: 10, letterSpacing: 1.4, textTransform: "uppercase", color: C.textDim, marginTop: 7 }}>
+              {v.statusLabel}
+              {/* Still has its action — the same holo dot the board and the
+                  HUD's READY strip use. The window is where a city's action
+                  is actually spent, so it is the one place that has to say
+                  whether there is one left. */}
+              {v.actionsReady > 0 && (
+                <span style={{ marginLeft: 8, whiteSpace: "nowrap", color: C.holoHi }}>
+                  {Array.from({ length: v.actionsReady }, (_, i) => (
+                    <span key={i} style={{ display: "inline-block", width: 6, height: 6, borderRadius: "50%", background: C.holo, boxShadow: `0 0 5px ${C.holo}`, marginRight: 5, verticalAlign: "middle" }} />
+                  ))}
+                  {v.actionsReady > 1 ? `${v.actionsReady} actions` : "1 action"}
+                </span>
+              )}
+            </div>
+            {v.basis && (
+              <div style={{ fontSize: 9.5, letterSpacing: 1.6, textTransform: "uppercase", color: C.textFaint, marginTop: 4 }}>{v.basis}</div>
+            )}
           </div>
           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3 }}>
             <div style={{ filter: `drop-shadow(0 0 8px ${C.holo}55)` }}>
@@ -922,6 +939,16 @@ export function LocationWindow({ view, onClose, onActivate, onContest, onRecruit
           <Stat icon={ICON.scrap} value={`+${v.economy ? v.economy.output : v.production}`} label="Output" />
           <Stat icon={ICON.units} value={v.economy ? `${v.economy.slotsUsed}/${v.economy.slotCapacity}` : v.chipSlots} label="Chip Slots" />
         </div>
+
+        {/* What the place IS, before what it scores. The prose is authored in
+            content/locations.csv and reached nothing until now; the nine
+            Locations added after that sheet have no line yet and simply
+            render without one. */}
+        {v.flavour && (
+          <p className="pc-prose" style={{ margin: 0, fontSize: 12.5, lineHeight: 1.6, color: C.textDim, fontStyle: "italic" }}>
+            {v.flavour}
+          </p>
+        )}
 
         {v.economy && (
           <EconomyPanel hexId={v.hexId} eco={v.economy} onBuild={onBuild} onUpgrade={onUpgrade} onRush={onRush} onSetSlider={onSetSlider} onSetPoolTarget={onSetPoolTarget} onSetBuildPriority={onSetBuildPriority} />

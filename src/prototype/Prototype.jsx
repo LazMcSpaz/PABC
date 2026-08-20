@@ -234,6 +234,13 @@ function buildLocView(state, hex, isYourTurn) {
     valueColor: val.color,
     vp: uiLoc.vp || 0,
     statusLabel: ctrl ? `Held — ${UI_FACTIONS[ctrl]?.name}` : claimed ? "Contested" : "Uncontrolled",
+    // What this place IS, as opposed to what it scores. Nine of the nineteen
+    // have no line written yet and render without one.
+    flavour: uiLoc.flavour || null,
+    basis: uiLoc.basis || null,
+    // Whether the city can still do something — the window is where you spend
+    // a city's action, so it is the one place that has to say so.
+    actionsReady: hex.actionsReady || 0,
     sections: control.sections,
     loyalty: control.loyalty,
     loyaltyMax: control.loyaltyMax,

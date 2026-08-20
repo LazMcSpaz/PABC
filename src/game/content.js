@@ -110,23 +110,29 @@ export function factionDef(fid) {
 // Total board VP = 3·1 (med) + 5·2 (high) + 2·3 (veryHigh) = 19, so
 // the win threshold of 12 needs a little under two-thirds of the map.
 // (Was 18 before Tin Town was promoted to high as the Plainers capital.)
+// `flavour` and `basis` are the authored lines from content/locations.csv —
+// a sheet that, like unit-names.csv before it, was wired to nothing: nineteen
+// cities on the board and not a word of the prose written for them reaching a
+// player. Folded in here so the registry stays the single source the adapter
+// reads. Only the ten Locations that sheet covers carry them; the nine third
+// homes and outposts added later have none written yet and render without.
 export const LOCATIONS = {
-  korad: { id: "korad", name: "Korad", strategicValue: "high", affiliation: "versari", production: [3, 3], vpReward: 2 },
-  dambar: { id: "dambar", name: "Dambar", strategicValue: "veryHigh", affiliation: "versari", production: [4, 5], vpReward: 3 },
-  kansit: { id: "kansit", name: "Kansit", strategicValue: "high", affiliation: "goldgrass", production: [3, 3], vpReward: 2 },
-  omara: { id: "omara", name: "Omara", strategicValue: "medium", affiliation: "goldgrass", production: [2, 3], vpReward: 1 },
-  chigan: { id: "chigan", name: "Chigan", strategicValue: "veryHigh", affiliation: "lakers", production: [4, 5], vpReward: 3 },
-  droit: { id: "droit", name: "Droit", strategicValue: "high", affiliation: "lakers", production: [3, 3], vpReward: 2 },
-  "the-shelf": { id: "the-shelf", name: "The Shelf", strategicValue: "high", affiliation: "plainers", production: [3, 4], vpReward: 2 },
+  korad: { id: "korad", name: "Korad", strategicValue: "high", affiliation: "versari", production: [3, 3], vpReward: 2, basis: "Boulder, CO", flavour: "Where the Versari keep their best work and their worst secrets." },
+  dambar: { id: "dambar", name: "Dambar", strategicValue: "veryHigh", affiliation: "versari", production: [4, 5], vpReward: 3, basis: "Denver, CO", flavour: "The continent's brain. It knows this about itself." },
+  kansit: { id: "kansit", name: "Kansit", strategicValue: "high", affiliation: "goldgrass", production: [3, 3], vpReward: 2, basis: "Kansas City", flavour: "Every trade route on the plains runs through here eventually. The city charges accordingly." },
+  omara: { id: "omara", name: "Omara", strategicValue: "medium", affiliation: "goldgrass", production: [2, 3], vpReward: 1, basis: "Omaha", flavour: "Far enough north to feel the Laker wind. Close enough to Dambar to feel the other kind." },
+  chigan: { id: "chigan", name: "Chigan", strategicValue: "veryHigh", affiliation: "lakers", production: [4, 5], vpReward: 3, basis: "Chicago", flavour: "The factories never fully stopped. Neither did the people who depend on them." },
+  droit: { id: "droit", name: "Droit", strategicValue: "high", affiliation: "lakers", production: [3, 3], vpReward: 2, basis: "Detroit", flavour: "Whoever holds the straits holds the conversation between east and west." },
+  "the-shelf": { id: "the-shelf", name: "The Shelf", strategicValue: "high", affiliation: "plainers", production: [3, 4], vpReward: 2, basis: "New settlement", flavour: "Someone built here because it was defensible. Someone else is always trying to prove them wrong." },
   // The four capitals -- korad, kansit, droit, tin-town -- are deliberately
   // identical: all `high` (same garrison, chip slots and VP) and all with a
   // FIXED production of 3 rather than a [3,4] roll, so every faction's opening
   // is the same rather than merely the same in expectation. Tin Town was
   // raised medium -> high to join them. Non-capital Locations keep their
   // ranges.
-  "tin-town": { id: "tin-town", name: "Tin Town", strategicValue: "high", affiliation: "plainers", production: [3, 3], vpReward: 2 },
-  concordan: { id: "concordan", name: "Concordan", strategicValue: "medium", affiliation: null, production: [2, 3], vpReward: 1 },
-  erport: { id: "erport", name: "Erport", strategicValue: "medium", affiliation: null, production: [2, 3], vpReward: 1 },
+  "tin-town": { id: "tin-town", name: "Tin Town", strategicValue: "high", affiliation: "plainers", production: [3, 3], vpReward: 2, basis: "New settlement", flavour: "It looks like nothing. That's the first mistake people make about it." },
+  concordan: { id: "concordan", name: "Concordan", strategicValue: "medium", affiliation: null, production: [2, 3], vpReward: 1, flavour: "Unaffiliated by choice" },
+  erport: { id: "erport", name: "Erport", strategicValue: "medium", affiliation: null, production: [2, 3], vpReward: 1, flavour: "The last stop before open water. Or the first" },
 
   // Third homes — one per faction, so the group stays a whole fairness group
   // (board.js generateLayout admits them all or none).

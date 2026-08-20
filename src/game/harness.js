@@ -4845,6 +4845,34 @@ line("\n  [Phase 11] text-token resolver");
 }
 
 
+// Phase 15b — the authored Location prose. content/locations.csv carried a
+// Flavor column for the ten original cities and, exactly like unit-names.csv
+// before it, was wired to nothing: nineteen places on the board and not a
+// word of what was written for them ever reaching a player.
+{
+  line("\n  [Phase 15b] Locations say what they are");
+  // The ten the sheet covers. Deliberately a list of ids rather than "every
+  // Location must have one" — nine more were added after that sheet and have
+  // no line written yet, and a check that failed on those would be demanding
+  // fiction rather than guarding the pipe.
+  const AUTHORED = ["korad", "dambar", "kansit", "omara", "chigan", "droit",
+    "the-shelf", "tin-town", "concordan", "erport"];
+  const missing = AUTHORED.filter((id) => !(LOCATIONS[id]?.flavour || "").trim());
+  check("every Location the sheet covers carries its authored line",
+    missing.length === 0);
+  check("…and it is prose, not an id echoed back",
+    AUTHORED.every((id) => (LOCATIONS[id]?.flavour || "").length > 12
+      && LOCATIONS[id].flavour !== LOCATIONS[id].name));
+  // The real-world basis is optional — two of the ten are invented
+  // settlements and two more have none recorded.
+  check("the real-world basis rides along where the sheet has one",
+    LOCATIONS.korad.basis === "Boulder, CO" && LOCATIONS.droit.basis === "Detroit");
+  // Nothing may claim a line it does not have: an empty string would render
+  // an empty italic paragraph in the Location window rather than nothing.
+  check("a Location with no line written carries none at all",
+    Object.values(LOCATIONS).every((l) => l.flavour === undefined || !!l.flavour.trim()));
+}
+
 // Phase 16 — per-entity actions (docs/vp-and-actions-design.md §2/§4):
 // one action per unit/Location, coalition charging, wildcards.
 {

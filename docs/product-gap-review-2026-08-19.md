@@ -305,6 +305,26 @@ done and on the branch.
 - ~~`npm run shots` (§8)~~ — walks the real title → New Game → setup → Begin
   flow again, plus new title and tech-wheel shots.
 - ~~Roadmap out of date (§8)~~ — re-grounded and pointed here.
+- ~~Per-entity action pips (§6.11)~~ — a READY strip beside the dials names
+  every unit and city that still has an action, and the same holo dot appears
+  at a ready unit's feet and beside a ready city's name plaque. The unit
+  panel's Status said "Ready" for a unit that had already fought; it now says
+  "Acted". Found in passing: a Logistics Hub city refreshes to two actions
+  but the readout counted one per city, so a full turn could read "8/7" —
+  `locationActionCapacity` is now the one name for the refresh rule.
+- ~~Location window shows nothing (§6.9)~~ — **partly.** The authored prose in
+  `content/locations.csv` was wired to nothing, exactly like `unit-names.csv`
+  before it; it is now folded into the engine registry and the window renders
+  it, with the real-world basis as a subtitle. **Ten of the nineteen
+  Locations have a line; the nine added after that sheet
+  (runaway, witcha, dulut, linkin, restaria, lastgas, overlook, nosservis,
+  detor) have none written and render without one** — that is content work,
+  not code. Concordan's line reads "Unaffiliated by choice", which is a note
+  rather than prose and wants rewriting. The other two claims in this item
+  were already out of date: chip slots have rendered *as* slots since the
+  economy pass, and abilities were deliberately withdrawn (§10.3 of
+  `vp-and-actions-design.md`), so there is nothing to surface. Art is still
+  missing (§5).
 - **Also found and fixed while in there:** the Oswald display font was never
   loading at all (no `@font-face`, no link — every heading fell back to
   system sans); `standing_changed` named the wrong faction of the pair; and
@@ -313,6 +333,8 @@ done and on the branch.
 
 Still open from the list below: hide-or-fill the Lore menu item, and
 everything under the product shell, content, art and engineering headings.
+Plus, newly named: **flavour prose for the nine Locations added after
+`content/locations.csv` was written**, which is the remaining half of §6.9.
 
 ## 9. If it were mine to sequence
 

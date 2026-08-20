@@ -151,6 +151,11 @@ export function ensureUiConstantsSynced() {
     uiDef.garrison = CONFIG.garrisonByValue[def.strategicValue] ?? uiDef.garrison;
     uiDef.chipSlots = CONFIG.chipSlotsByValue[def.strategicValue] ?? uiDef.chipSlots;
     uiDef.vp = def.vpReward ?? uiDef.vp;
+    // The authored prose from content/locations.csv, folded into the engine
+    // registry and carried across here so the Location window has something
+    // to say about a place beyond its numbers.
+    uiDef.flavour = def.flavour ?? uiDef.flavour ?? null;
+    uiDef.basis = def.basis ?? uiDef.basis ?? null;
     // engine production is a range [min,max] — show the midpoint
     if (Array.isArray(def.production)) {
       uiDef.production = Math.round((def.production[0] + def.production[1]) / 2);
