@@ -271,10 +271,33 @@ function recordGrievance(state, victim, offender, kind) {
   gr[victim][offender] = { kind, round: state.round };
 }
 
+// Is there something to denounce? Judged by the DENOUNCER's own standards —
+// tolerance and trustFloor are per-observer, so a pacifist and a warlord
+// genuinely disagree about what counts as beyond the pale, which is as it
+// should be.
+//
+// This is the same question `warJustification` asks about a war, and the
+// answer wants the same shape: an accusation is either grounded in something
+// the target actually did, or it is an accusation you invented.
+export function denounceWarrant(state, denouncer, target) {
+  const jw = D().justWar;
+  const gr = state.diplomacy?.grievances?.[denouncer]?.[target];
+  if (gr && state.round - gr.round <= jw.grievanceWindowRounds) return gr.kind;
+  if (!state.players[target]) return null; // no Menace/Honor to judge
+  if (menaceOf(state, target) > tolerance(state, denouncer, target)) return "menace";
+  if (honorOf(state, target) < trustFloor(state, denouncer)) return "honor";
+  return null;
+}
+
 export function warJustification(state, a, b) {
   const jw = D().justWar;
   const den = state.diplomacy?.denouncements?.[a]?.[b];
-  if (den != null && state.round - den <= jw.denounceWindowRounds) return "denounced";
+  // Only a WARRANTED denouncement makes a war righteous. Otherwise the verb
+  // is a laundry: pay a little Honor, denounce anyone, and every war of
+  // conquest you ever fight is free of Menace. A grievance has to come from
+  // something the other side actually did — you cannot manufacture one by
+  // saying so loudly.
+  if (den?.warrant && state.round - den.round <= jw.denounceWindowRounds) return "denounced";
   const gr = state.diplomacy?.grievances?.[a]?.[b];
   if (gr && state.round - gr.round <= jw.grievanceWindowRounds) return gr.kind;
   return null;
@@ -1493,9 +1516,9 @@ export function resolvePactCall(state, caller, ally, target, honored) {
 // spend another? Exported so the UI can grey the verb and say when it clears
 // rather than letting the player fire a no-op.
 export function denounceCooldown(state, denouncer, target) {
-  const at = state.diplomacy?.denouncements?.[denouncer]?.[target];
-  if (at == null) return 0;
-  const left = D().justWar.denounceCooldownRounds - (state.round - at);
+  const rec = state.diplomacy?.denouncements?.[denouncer]?.[target];
+  if (rec == null) return 0;
+  const left = D().justWar.denounceCooldownRounds - (state.round - rec.round);
   return left > 0 ? left : 0;
 }
 
@@ -1504,20 +1527,63 @@ export function denounce(state, denouncer, target) {
   // justWar.denounceWindowRounds; re-stamping it every round was how a
   // permanent pretext against the whole board cost nothing.
   if (denounceCooldown(state, denouncer, target) > 0) return false;
+  const dc = D().denounce;
+  const warrant = denounceWarrant(state, denouncer, target);
+  // Who would have believed them, judged BEFORE this denouncement's own
+  // Honor cost lands. Otherwise a slander silences itself: the accuser drops
+  // under the listeners' trust floor in the same breath, and the backlash
+  // that should follow a baseless accusation never arrives.
+  const heardBy = factionIds(state).filter((f) => believableTo(state, f, denouncer));
   const dn = state.diplomacy.denouncements = state.diplomacy.denouncements || {};
   dn[denouncer] = dn[denouncer] || {};
-  dn[denouncer][target] = state.round;
-  // The Honor cost the verb has always claimed and never charged.
-  if (state.players[denouncer]) adjustHonor(state, denouncer, -D().honor.denounceLoss, "denounce");
-  adjustStanding(state, denouncer, target, -3, "denounce");
+  dn[denouncer][target] = { round: state.round, warrant };
+
+  // Honor cuts both ways here, as it does for a war. Naming a faction the
+  // board can already see is dangerous is what having Honor MEANS; naming a
+  // clean-handed neighbour because you want their cities is a slander.
+  if (state.players[denouncer]) {
+    adjustHonor(
+      state, denouncer,
+      warrant ? D().honor.denounceWarrantedGain : -D().honor.denounceLoss,
+      warrant ? "denounce-warranted" : "denounce-baseless",
+    );
+  }
+  adjustStanding(state, denouncer, target, -dc.targetHit, "denounce");
+
+  // …and the board judges the ACCUSATION, not whether it happens to like the
+  // accused. It used to warm anyone who merely disliked the target, which
+  // meant slandering a saint still rallied their rivals to you. Now the
+  // question each faction asks is "do I agree?" — and by their own gates,
+  // which differ: a high-trust faction is quicker to believe an accusation
+  // about a liar, an aggressive one slower to be shocked by a bully.
   for (const f of factionIds(state)) {
     if (f === denouncer || f === target) continue;
-    if (arePacted(state, f, target)) adjustStanding(state, f, denouncer, -2, "denounce-friend");
-    else if (atWar(state, f, target) || getStanding(state, f, target) <= D().tiers.wary)
-      adjustStanding(state, f, denouncer, +2, "denounce-enemy");
+    // An ally closes ranks whatever the merits — that is what an ally is.
+    if (arePacted(state, f, target)) {
+      adjustStanding(state, f, denouncer, -dc.allyDefends, "denounce-friend");
+      continue;
+    }
+    // A denouncer nobody believes moves nobody. Liars can shout all they like.
+    if (!heardBy.includes(f)) continue;
+    const agrees = atWar(state, f, target) || !passesRepGates(state, f, target);
+    if (agrees) {
+      adjustStanding(state, f, denouncer, warrant ? dc.rallyWarranted : dc.rally, "denounce-enemy");
+    } else {
+      // They see a faction with clean hands being accused, and draw the
+      // obvious conclusion about the accuser.
+      adjustStanding(state, f, denouncer, -dc.backlash, "denounce-baseless");
+    }
   }
-  emit(state, "denounced", { denouncer, target });
+  emit(state, "denounced", { denouncer, target, warrant });
   return true;
+}
+
+// Would `observer` take `speaker`'s word for anything? An accusation from a
+// faction whose own Honor is beneath the observer's floor carries no weight —
+// which gives Honor a use beyond passing gates: it is what makes you audible.
+function believableTo(state, observer, speaker) {
+  if (!state.players[speaker]) return true;
+  return honorOf(state, speaker) >= trustFloor(state, observer);
 }
 
 // §18.7 Mediate — broker peace between two OTHER warring factions. A

@@ -344,13 +344,13 @@ export const CONFIG = {
       breakLoss: 5, // breaking a pact call / treaty / promise (sharp)
       mediateGain: 2, // §18.7 peacemaker reputation
       surpriseAttackLoss: 8, // §1.1 — attacking before declaring war (treachery)
-      // Denouncing costs Honor. It is a public accusation, and the board
-      // does not distinguish a righteous one from an opportunist building a
-      // pretext — which is exactly the trade: spend standing-as-an-honest-
-      // broker to buy a just war. Smaller than breakLoss (you broke nothing)
-      // but real, because without it the verb was free and unlimited and a
-      // permanent just-war window against the whole board cost nothing.
-      denounceLoss: 2,
+      // Denouncing cuts both ways, exactly as declaring war does. Naming a
+      // faction the board can already see is dangerous — one past your
+      // Menace tolerance, below your Honor floor, or that has wronged you —
+      // is what Honor IS, and pays a little. Naming a clean-handed neighbour
+      // because you want their cities is a slander, and costs.
+      denounceLoss: 3,
+      denounceWarrantedGain: 1,
       decayToward: 0, decayPerRound: 0, // no passive decay by default
     },
     // §18.5 Tolerance = base + standing·perStanding, ± by the faction's
@@ -490,6 +490,17 @@ export const CONFIG = {
     // no Menace. You earn one by denouncing the target first (a declared
     // intent the board has heard) or by being wronged by them (broken pact
     // or promise, surprise attack) within the window.
+    // Third-party reaction to a denouncement, scored on whether the
+    // accusation is CREDIBLE rather than on whether they happen to dislike
+    // the target. Saying out loud what everyone was thinking rallies the
+    // board; accusing a faction with clean hands isolates you.
+    denounce: {
+      rallyWarranted: 3, // they agree, and you had grounds
+      rally: 2, // they agree
+      backlash: 2, // they do not, and now they wonder about you
+      allyDefends: 2, // the target's allies close ranks whatever the merits
+      targetHit: 3, // Standing the target loses toward you (always)
+    },
     justWar: {
       denounceWindowRounds: 6, // your denouncement of them counts this long
       grievanceWindowRounds: 8, // their betrayal of you counts this long

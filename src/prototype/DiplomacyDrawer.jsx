@@ -110,7 +110,7 @@ const VERB_META = {
   "pact-call":             { label: "Call to Pact", body: "Call your ally into one of your wars.", isPane: "pact-call" },
   "vassalize":             { label: "Vassalize", body: "Bind them under your banner.", destructive: true },
   "free-vassal":           { label: "Free Vassal", body: "Release them. Honor rises; tribute stops.", destructive: true },
-  "denounce":              { label: "Denounce", body: "Public condemnation. Costs Honor, and makes a war on them just.", destructive: true },
+  "denounce":              { label: "Denounce", body: "Name them publicly. Warranted, it pays; baseless, it costs — and the board can tell.", destructive: true },
   "declare-war":           { label: "Declare War", body: "Open hostilities. Menace rises immediately.", destructive: true },
   // §6 trade + passive toggles
   "trading-pact":          { label: "Open Trading Pact", body: "Route between capitals — per-round scrap each side + permanent Research floor." },
@@ -122,7 +122,7 @@ const VERB_META = {
 
 const DESTRUCTIVE_PROMPT = {
   "declare-war":            "Declare war? Standing collapses, and unless you have a grievance on record the declaration alone raises your Menace. Their allies may join in.",
-  "denounce":               "Denounce publicly? It costs you Honor and cools you both — and it buys the right to a just war on them.",
+  "denounce":               "Denounce publicly? The board judges the accusation, not the accused: with grounds it earns you Honor and allies, without them it marks you as the liar.",
   "vassalize":              "Take them under your banner? The cornered submit; a friendly minor may welcome a protector.",
   "free-vassal":            "Release this vassal? Your Honor rises, their tribute stops.",
   "demand-tribute":         "Demand tribute? Refusal will damage your Honor and could trigger war.",

@@ -23,6 +23,7 @@ import {
   factionIds, powerOf, arePacted, atWar, vassalLord, mayEngage,
   getStanding, passesRepGates, formPact, vassalize, applyDeal, checkRecognitionVictory,
   tableOffer, offersFor, warExhaustion,
+  denounce, denounceWarrant, denounceCooldown, honorOf,
   aiAcceptsVassalage, truceBetween,
 } from "./diplomacy.js";
 
@@ -430,7 +431,23 @@ function manageDiplomacy(state, pid) {
     }
   }
 
-  // 3) …and if none of that fired, consider opening a conversation with the
+  // 3) Say something about a faction that has earned it. A denouncement is
+  //    now judged on whether there are grounds, which makes it the peaceful
+  //    faction's real lever: a pacifist that cannot answer a tyrant with
+  //    armies can answer with its reputation, gain Honor for it, and pull
+  //    the board along. A warlord would rather just attack, so it doesn't
+  //    bother.
+  if ((me.aggression ?? 0.5) < 0.7 && honorOf(state, pid) > 0) {
+    for (const f of others) {
+      if (arePacted(state, pid, f) || vassalLord(state, f) === pid) continue;
+      if (!mayEngage(state, pid, f)) continue;
+      if (denounceCooldown(state, pid, f) > 0) continue;
+      if (!denounceWarrant(state, pid, f)) continue;
+      if (denounce(state, pid, f)) return;
+    }
+  }
+
+  // 4) …and if none of that fired, consider opening a conversation with the
   //    human. The audit's blunt finding was that across thirty rounds the AI
   //    approached the player exactly zero times: it had no way to propose,
   //    only to act. Now it has an inbox to put things in.

@@ -27,7 +27,7 @@ import {
   recognitionScore, threatScore, tolerance, trustFloor, standingTier, getStanding,
   arePacted, atWar, vassalLord, coalitionAgainst, factionIds,
   aiAcceptsPact, aiAcceptsVassalage, aiAcceptsPeace, wouldAccept, passesRepGates,
-  denounceCooldown, asksThisRound, flowRounds, promiseRounds,
+  denounceCooldown, denounceWarrant, asksThisRound, flowRounds, promiseRounds,
   evaluatePactCall, canDemandTribute, hasOpenBorders, warJustification,
   openBordersStanding,
   railAccessStanding,
@@ -1141,9 +1141,24 @@ function availableVerbsAgainst(state, viewer, fid) {
         reason: `Already denounced — the accusation stands for ${cd} more round${cd === 1 ? "" : "s"}.`,
       });
     } else {
+      // Denouncing is judged the same way declaring war is: on whether you
+      // have grounds. The verb reads completely differently in the two cases,
+      // so say which one the player is looking at.
+      const warrant = denounceWarrant(state, viewer, fid);
+      const H = CONFIG.diplomacy.honor;
+      const grounds = {
+        menace: "their aggression is past what you will overlook",
+        honor: "their word is worth nothing and everyone knows it",
+        "pact-broken": "they broke their pact with you",
+        "promise-broken": "they broke their word to you",
+        "truce-broken": "they struck you through a truce",
+        "surprise-attack": "they attacked you undeclared",
+      }[warrant] || "you have grounds";
       out.push({
         verb: "denounce", state: "enabled",
-        outcome: `−${CONFIG.diplomacy.honor.denounceLoss} Honor and Standing falls on both sides, but it puts a grievance on record: for ${CONFIG.diplomacy.justWar.denounceWindowRounds} rounds a war on them is JUST, and costs no Menace.`,
+        outcome: warrant
+          ? `WARRANTED — ${grounds}. +${H.denounceWarrantedGain} Honor, and any faction that reads them the same way warms to you. Makes a war on them JUST for ${CONFIG.diplomacy.justWar.denounceWindowRounds} rounds.`
+          : `BASELESS — they have done nothing you can point to. −${H.denounceLoss} Honor, and factions with no quarrel with them will hold it against you. It justifies no war.`,
       });
     }
   }

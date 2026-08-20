@@ -30,7 +30,7 @@ import {
   // pace pass — truces + partial control
   truceBetween, makePeace,
   // diplomacy audit fixes — consent, cost, one deal schema, terms
-  denounce, denounceCooldown, valueOfItem, applyDeal, adjustStanding,
+  denounce, denounceCooldown, denounceWarrant, valueOfItem, applyDeal, adjustStanding,
   // §6.10 the round trip — offers, counters, patience
   counterOffer, tableOffer, offersFor, answerOffer, asksThisRound,
 } from "./diplomacy.js";
@@ -5253,10 +5253,19 @@ line("\n  [Phase 11] text-token resolver");
   const jw = CONFIG.diplomacy.justWar;
 
   // --- denounce → declare = justified: fighting costs no Menace ---
+  // The denouncement has to be WARRANTED to justify anything. Lakers earn it
+  // here the way a faction earns it in play: by piling up Menace past what
+  // Versari will overlook. (Denouncing a clean-handed faction is covered
+  // below — it is a slander, and justifies nothing.)
   const g = createGame({ seed: 211, humanFactionId: "versari" });
   ensureDiplomacy(g);
+  check("a clean-handed faction cannot be denounced into a just war",
+    denounceWarrant(g, "versari", "lakers") === null);
+  g.players.lakers.menace = 24;
+  check("…but a faction past your tolerance can",
+    denounceWarrant(g, "versari", "lakers") === "menace");
   performDiplomacy(g, "versari", "denounce", { faction: "lakers" });
-  check("a denouncement on record justifies a later declaration",
+  check("a warranted denouncement justifies a later declaration",
     warJustification(g, "versari", "lakers") === "denounced");
   performDiplomacy(g, "versari", "declare-war", { faction: "lakers" });
   const war21 = findWar(g, "versari", "lakers");
@@ -5438,13 +5447,52 @@ line("\n  [Phase 11] text-token resolver");
     ensureDiplomacy(g);
     const h0 = honorOf(g, "versari");
     check("denouncing lands the first time", denounce(g, "versari", "lakers") === true);
-    check("denouncing costs Honor", honorOf(g, "versari") === h0 - H.denounceLoss);
+    check("denouncing a clean faction costs Honor", honorOf(g, "versari") === h0 - H.denounceLoss);
     check("a second denouncement in the window is refused",
       denounce(g, "versari", "lakers") === false);
     check("…and costs nothing further", honorOf(g, "versari") === h0 - H.denounceLoss);
+    // …and the same act against a faction that has earned it PAYS.
+    const gw = createGame({ seed: 232, humanFactionId: "versari" });
+    ensureDiplomacy(gw);
+    gw.players.lakers.menace = 24;
+    const hw = honorOf(gw, "versari");
+    denounce(gw, "versari", "lakers");
+    check("denouncing a faction the board can see is dangerous pays Honor",
+      honorOf(gw, "versari") === hw + H.denounceWarrantedGain);
     check("the cooldown is readable by the UI",
       denounceCooldown(g, "versari", "lakers") > 0
       && denounceCooldown(g, "versari", "goldgrass") === 0);
+  }
+
+  // --- 2b. The board judges the ACCUSATION, not the accused ---
+  {
+    // A tyrant everyone can see: denouncing them says out loud what the
+    // board was already thinking, and the board warms to the speaker.
+    const g = createGame({ seed: 238, humanFactionId: "versari" });
+    ensureDiplomacy(g);
+    g.players.lakers.menace = 24;
+    const before = getStanding(g, "goldgrass", "versari");
+    denounce(g, "versari", "lakers");
+    check("denouncing a faction the board also condemns rallies them to you",
+      getStanding(g, "goldgrass", "versari") > before);
+
+    // The same words against a faction with clean hands land as slander.
+    const g2 = createGame({ seed: 238, humanFactionId: "versari" });
+    ensureDiplomacy(g2);
+    const before2 = getStanding(g2, "goldgrass", "versari");
+    denounce(g2, "versari", "lakers");
+    check("denouncing a clean-handed faction turns the board against YOU",
+      getStanding(g2, "goldgrass", "versari") < before2);
+
+    // …and nobody listens to a liar in the first place.
+    const g3 = createGame({ seed: 238, humanFactionId: "versari" });
+    ensureDiplomacy(g3);
+    g3.players.lakers.menace = 24;
+    g3.players.versari.honor = CONFIG.diplomacy.honor.min;
+    const before3 = getStanding(g3, "goldgrass", "versari");
+    denounce(g3, "versari", "lakers");
+    check("an accusation from a faction with no Honor moves nobody",
+      getStanding(g3, "goldgrass", "versari") === before3);
   }
 
   // --- 3. Declaring an unjustified war marks you; a just one does not ---
@@ -5456,10 +5504,17 @@ line("\n  [Phase 11] text-token resolver");
       (g.players.versari.menace || 0) === M.declareUnjustified);
     const g2 = createGame({ seed: 233, humanFactionId: "versari" });
     ensureDiplomacy(g2);
+    g2.players.lakers.menace = 24; // they have earned the accusation
     denounce(g2, "versari", "lakers");
     declareWar(g2, "versari", "lakers", "player");
     check("a war you denounced your way into costs no Menace to declare",
       (g2.players.versari.menace || 0) === 0);
+    const g3 = createGame({ seed: 233, humanFactionId: "versari" });
+    ensureDiplomacy(g3);
+    denounce(g3, "versari", "lakers"); // baseless — they have done nothing
+    declareWar(g3, "versari", "lakers", "player");
+    check("a baseless denouncement launders nothing",
+      (g3.players.versari.menace || 0) === M.declareUnjustified);
   }
 
   // --- 4. One deal schema: a struck promise is performed ---
