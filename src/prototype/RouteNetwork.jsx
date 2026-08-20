@@ -161,7 +161,7 @@ export default function RouteNetwork({ rows, hexes, centers, width, height }) {
       .filter((k) => railKeys.has(k)),
   );
   const roads = buildPaths(rows, hexes, centers, roadCarries, shared, -1);
-  // Rail is generated as a capital-to-capital trunk line (board.js
+  // Rail is generated as a trunk line over the major settlements (board.js
   // assignRails) and stamped per hex, so this draws whatever that laid down.
   const rails = buildPaths(rows, hexes, centers, railCarries, shared, +1);
   // Blockades sit ON the road network, so they are drawn with it rather than in

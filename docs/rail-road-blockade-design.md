@@ -16,7 +16,7 @@ aren't.
 | 2.2 Rail production pooling | built | `economy.js railPoolRecipient` |
 | Rail as a trade route | built | `diplomacy.js tradeRouteOpen` |
 | 2.3 Rail access | built (held stations + granted) | `movement.js unitRailEdges` |
-| 2.4 Rail generation | built (capital spanning tree) | `board.js assignRails` |
+| 2.4 Rail generation | built (spanning tree over `CONFIG.rail.hubTiers`) | `board.js assignRails` |
 | — No terminus at sign-named towns | built | `content.js noRailTerminus`, `setup.js railHubs` |
 | 3.1 Blockade construction | built | `blockades.js`, `actions.js build-blockade` |
 | 3.2 Once complete | built, chips included | `blockades.js`, `contest.js`, `visibility.js` |
@@ -59,12 +59,21 @@ hold, the priority toggle only while a blockade is actually being funded.
 `scripts/check-pooling-ui.mjs` drives a real browser and asserts a click
 changes engine state, not just the DOM.
 
-Worth knowing: **rail is a spanning tree over CAPITALS, and a faction starts
-holding exactly one**, so nobody has a legal pool pair at turn 1. Pooling only
-becomes reachable once you take a second capital. That is why the control was
-never missed — there was nothing to show. If pooling is meant to be an
-early-game tool it needs either non-capital rail termini or a rule change
-letting an ally's station receive (today §2.2 requires you hold both).
+**Where the stations are decides whether pooling is reachable at all**, and
+until 2026-08-20 the answer was "barely". Rail was a spanning tree over the
+four CAPITALS and nothing else, so the only way to hold both ends of a link
+was to take an enemy capital — the hardest target in the game. The control was
+never missed because there was nothing to show.
+
+Rail now stops at every settlement in `CONFIG.rail.hubTiers` (`high` and
+`veryHigh` — 11 of the 19-Location roster). A faction still starts holding
+exactly one city, so **there is still no legal pool pair on turn 1** — that
+follows from the one-city start, not from the rail map, and no rail topology
+can change it. What changed is what you have to take: every faction now has
+one or two *neutral* stations one or two hexes from its capital, so pooling
+opens by taking a nearby unheld city rather than by storming a rival's seat.
+On seed 424242/medium: Versari has Dambar 1 hex out, Lakers has Chigan 1 hex
+out, Goldgrass has Witcha at 2, Plainers has The Shelf at 2 — all neutral.
 
 "Cut" has one definition across all four systems that ask the question —
 rail's line-cut check, blockade construction supply, blockade funding, and
@@ -76,18 +85,26 @@ faction: a trading pact has two, and neither of them cuts its own route.
 whom is a diplomacy question, not a movement one) and are re-exported from
 `movement.js`, where every mover already looks for them.
 
-### Trading pacts route by rail
+### Trading pacts route between the two powers, not between two capitals
 
-A trading pact needs a capital-to-capital route. It used to accept only an
-overland corridor (`reinforcementRoute`), which meant a pact could collapse for
-want of a footpath while a railway ran between the two cities — rail is
-generated as a spanning tree over the CAPITALS, so it is literally the artery
-between the two a pact joins. `tradeRouteOpen` now accepts either.
+A trading pact used to demand a clear **capital-to-capital** route. That is a
+statement about two specific hexes rather than about whether the two powers can
+reach each other: two neighbours whose border towns shared a railway could not
+trade if their capitals sat at opposite ends of the map, and a pact died the
+moment either capital was cut off however well-connected the rest of both
+countries were. It also refused a faction that held three cities but had lost
+its seat.
+
+`tradeRouteOpen` now asks whether **any city one holds can reach any city the
+other holds**, overland or by rail, and returns the pair it found rather than a
+bare boolean — the map draws the line between the two cities actually carrying
+the trade. The gate on forming one is "both parties hold somewhere", not "both
+parties hold a Capital".
 
 Rail is not a free pass: a line is a real sequence of hexes, so a hostile third
-party standing anywhere along it severs that link, and a severed link can
-isolate a capital even though the track is still there. That is what keeps a
-railed pact worth attacking.
+party standing anywhere along it severs that link, and a severed link can cut
+a city off even though the track is still there. That is what keeps a railed
+pact worth attacking.
 
 ### Rail never terminates at a sign-named settlement
 
@@ -472,18 +489,29 @@ There is no requirement to hold the hexes a line passes through — ZoC drifts
 constantly at runtime and that would make rail absurdly fragile. The only
 ongoing vulnerability is the per-hex blockade-interruption check (2.1).
 
-**Open: which settlement pairs get track.** Roads now connect every settlement
-to its nearest one or two neighbours, so rail must be much sparser or it adds
-nothing. Candidates, not yet decided:
+**Decided 2026-08-20: value-gated.** Roads connect every settlement to its
+nearest one or two neighbours, so rail has to be much sparser or it adds
+nothing — but capital↔capital only, which is what shipped first, was too
+sparse in a way that broke things downstream. It gave every board the same
+three links whether the map was 30 hexes or 127 and whether it seated ten
+cities or nineteen, and because a faction starts holding one city it meant no
+station pair was ever holdable without taking a rival's seat (see §2.2).
 
-- capital ↔ capital only (4 lines, one per faction pair — very legible, very
-  strategic, and immediately meaningful because capitals are fixed);
-- the *longest* settlement pairs, so rail is specifically the thing that
-  crosses distance road handles badly;
-- value-gated — only `veryHigh`/`high` Locations get a station.
+A trunk line stops at the big places. `CONFIG.rail.hubTiers` is the band —
+`["high", "veryHigh"]`, which is 11 of the 19-Location roster — and the
+spanning tree runs over whichever of those are actually seated. Every capital
+is `high`, so all four remain on the line; sign-named settlements are excluded
+separately (`noRailTerminus`). Rail now scales with the board: 3 links at the
+sparsest density, 6 in the middle, 10 on a full 19-city map.
 
-Whichever it is, it wants a `CONFIG.rail` knob for the count, the same way
-`CONFIG.roads.linksByValue` controls road density.
+The rejected alternative was *longest pairs* — rail as specifically the thing
+that crosses distance road handles badly. It is a good instinct and it stays
+available as a second knob if the trunk turns out too dense, but "the main
+line serves the major cities" is the more legible rule and it is the one that
+makes station ownership a live question early.
+
+**Still open: rail per-hex movement cost.** The one number nobody has ruled
+on.
 
 ## Part 3 — The Blockade structure
 

@@ -32,7 +32,7 @@ const LEADER_PORTRAIT = {
   plainers:  `${A}assets/portraits/factions/plainers/plainer_leader_1.webp`,
 };
 
-// Draw a dotted capital-to-capital line between two location ids by
+// Draw a dotted route line between two location ids by
 // querying the DOM for hex cells tagged data-loc=<id>. Re-measures on
 // resize/scroll so the line tracks pan/zoom.
 function TradingPactRouteLayer({ fromLocId, toLocId, status }) {
@@ -114,7 +114,7 @@ const VERB_META = {
   "issue-ultimatum":       { label: "Issue Ultimatum", body: "Name a demand and a deadline. Defiance makes your war just — backing down costs Honor.", isPane: "ultimatum", destructive: true },
   "declare-war":           { label: "Declare War", body: "Open hostilities. Menace rises immediately.", destructive: true },
   // §6 trade + passive toggles
-  "trading-pact":          { label: "Open Trading Pact", body: "Route between capitals — per-round scrap each side + permanent Research floor." },
+  "trading-pact":          { label: "Open Trading Pact", body: "Any city of yours reaching any of theirs — per-round scrap each side + permanent Research floor." },
   "dissolve-trading-pact": { label: "Close Trading Pact", body: "Closes the trade route. Keeps the Research floor.", destructive: true },
   "set-open-borders":      { label: "Open Borders", body: "Let them transit your territory; they may grant the reverse." },
   "toggle-open-borders":   { label: "Toggle Open Borders", body: "Flip your half of the open-borders agreement on or off." },
@@ -134,7 +134,7 @@ const DESTRUCTIVE_PROMPT = {
 // Loose match — used to skip a verb's `outcome` tooltip when it's a
 // near-paraphrase of the static body. Jaccard on long-enough word tokens;
 // ≥0.55 overlap is the empirical threshold that catches "Opens a route
-// between your capitals — …" vs. "Route between capitals — …" without
+// between you — …" vs. "Route between you — …" without
 // collapsing genuinely-different sentences like "Costs 5 scrap" vs.
 // "Will likely accept".
 function sameish(a, b) {
@@ -1479,7 +1479,7 @@ function ObligationsList({ f, dip }) {
   if (f.tradingPact) {
     items.push(f.tradingPact.suspended
       ? `Trading pact — suspended (round ${f.tradingPact.suspendedRounds} of grace).`
-      : "Trading pact — open route between capitals.");
+      : "Trading pact — a clear route from your ground to theirs.");
   }
   if (f.openBordersFromYou && f.openBordersFromThem) items.push("Open borders both ways.");
   else if (f.openBordersFromYou) items.push("You allow their units through your territory.");
@@ -2128,22 +2128,25 @@ export default function DiplomacyDrawer({
     setPane(null);
   }
 
-  // §5.3 — when the faction-detail view is showing a faction with an
-  // active trading pact, paint the capital-to-capital dotted route line
-  // on the map (green if clear, amber if suspended). Both endpoints come from
-  // live state via the adapter — a Capital moves when its Location is taken,
-  // so a static table cannot supply them.
+  // §5.3 — when the faction-detail view is showing a faction with an active
+  // trading pact, paint the dotted route line on the map (green if clear,
+  // amber if suspended). The endpoints are the two cities the ENGINE found the
+  // route between, not the two capitals: a pact is no longer a statement about
+  // anybody's seat, and drawing capital-to-capital would trace a line the
+  // trade is not travelling. Falls back to the capitals when the route is
+  // severed, so a suspended pact still shows what it was.
   const tradeFor = selectedFaction?.tradingPact || null;
-  const myCapital = dip.youCapital || null;
-  const theirCapital = selectedFaction?.capital || null;
-  const showRoute = tradeFor && myCapital && theirCapital && view === "detail";
+  const route = selectedFaction?.tradeRoute || null;
+  const fromLoc = route?.fromLocId || dip.youCapital || null;
+  const toLoc = route?.toLocId || selectedFaction?.capital || null;
+  const showRoute = tradeFor && fromLoc && toLoc && view === "detail";
 
   return (
     <>
       {showRoute && (
         <TradingPactRouteLayer
-          fromLocId={myCapital}
-          toLocId={theirCapital}
+          fromLocId={fromLoc}
+          toLocId={toLoc}
           status={tradeFor.suspended ? "suspended" : "clear"}
         />
       )}

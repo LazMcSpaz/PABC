@@ -336,18 +336,19 @@ export function assignRoads(adjacency, hexes, settlementHexes, valueOfHex = () =
 // Rail — docs/rail-road-blockade-design.md §2. NOT player-built: it is
 // pre-collapse trunk line, laid once here and never changed.
 //
-// Rail is deliberately sparse where road is dense. Roads now reach every
+// Rail is deliberately sparse where road is dense. Roads reach every
 // settlement, so a rail network of comparable size would add nothing; instead
-// rail is a spanning tree over the CAPITALS only — the fewest lines that still
-// tie every faction's home into one system. Capitals are fixed content
-// (`FACTIONS[fid].capital`), so the trunk line is stable across a game.
+// rail is a spanning tree over the MAJOR settlements — the fewest lines that
+// tie the big places into one system. Which settlements qualify is
+// `CONFIG.rail.hubTiers` (see setup.js); every capital is in that band, so the
+// trunk still ties every faction's home into the network.
 //
 // A line occupies a real sequence of hexes, so it can be cut per-hex like a
 // road (§2.1), and `hex.rail` gives the board renderer something to draw. But
 // the 1-MP hop is a property of the LINK, not of its hexes, so the endpoints
 // and the path are returned as records for `state.board.rails`.
-export function assignRails(adjacency, hexes, capitalHexes) {
-  const hubs = [...new Set(capitalHexes)].filter((h) => hexes[h]);
+export function assignRails(adjacency, hexes, hubHexes) {
+  const hubs = [...new Set(hubHexes)].filter((h) => hexes[h]);
   if (hubs.length < 2) return [];
   const distCache = {};
   const distFrom = (h) => (distCache[h] ||= bfsDistances(adjacency, h));

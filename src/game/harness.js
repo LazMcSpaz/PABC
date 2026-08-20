@@ -3704,10 +3704,44 @@ line("\n  [§1.3] Trading Pact");
     !g.diplomacy.agreements.some((x) => x.type === "trading-pact") && (g.players[a].permanentResearch || 0) === permA);
 }
 
-// Trade routes may run by rail, not only overland. Rail is generated as a
-// spanning tree over the CAPITALS, so it is literally the artery between the
-// two cities a pact joins — a pact should not collapse for want of a footpath
-// while a railway runs between them.
+// A trading pact is about whether two powers can reach each other, not about
+// two specific hexes. It used to demand a clear CAPITAL-to-capital route, so
+// two neighbours whose border towns shared a railway could not trade if their
+// capitals sat at opposite ends of the map, and a pact died the moment either
+// capital was cut off however well-connected the rest of both countries were.
+{
+  const g = createGame({ seed }); ensureDiplomacy(g);
+  const a = "versari", b = "goldgrass";
+  const isCap = (l) => (l.chips || []).some((c) => g.chips[c]?.chipId === "capital");
+  const seat = (loc, fid) => {
+    loc.controller = fid; loc.loyaltyOwner = fid;
+    loc.sections = [fid, fid, fid]; loc.loyalty = CONFIG.loyalty.ceiling;
+  };
+  setStanding(g, a, b, 0); setStanding(g, b, a, 0);
+  g.players[a].menace = 0; g.players[b].menace = 0; g.players[a].honor = 6; g.players[b].honor = 6;
+  g.world.zoc = {};
+
+  // `a` loses its seat but keeps a city. It still has something to trade from.
+  const capA = Object.values(g.locations).find((l) => l.controller === a && isCap(l));
+  const spare = Object.values(g.locations).find((l) => !l.controller);
+  seat(spare, a);
+  capA.controller = null;
+  capA.sections = ["neutral", "neutral", "neutral"];
+  check("a faction that has lost its Capital can still trade from the cities it holds",
+    formTradingPact(g, a, b).ok);
+
+  // …but one with nothing left cannot.
+  const g2 = createGame({ seed }); ensureDiplomacy(g2);
+  setStanding(g2, a, b, 0); setStanding(g2, b, a, 0);
+  g2.players[a].menace = 0; g2.players[b].menace = 0; g2.players[a].honor = 6; g2.players[b].honor = 6;
+  for (const loc of Object.values(g2.locations)) if (loc.controller === a) loc.controller = null;
+  const landless = formTradingPact(g2, a, b);
+  check("…and a landless faction has nowhere to trade from",
+    !landless.ok && /somewhere to trade from/.test(landless.reason || ""));
+}
+
+// Trade routes may run by rail, not only overland — a pact should not collapse
+// for want of a footpath while a railway runs between the two.
 line("\n  [§1.3] Trading Pact — routing by rail");
 {
   const stage = () => {
@@ -3983,6 +4017,59 @@ line("\n  [§1.6/§1.10] Open borders contract");
     performDiplomacy(g, a, "set-open-borders", { faction: b, on: false }).ok && !hasOpenBorders(g, a, b));
 }
 
+// Rail doc §2 — where the trunk line stops. It used to stop at the four
+// CAPITALS and nowhere else, which gave every board the same three links
+// however big the map or however many cities were seated, and meant the only
+// way to hold both ends of a link — which is what production pooling needs —
+// was to take an enemy capital.
+{
+  line("\n  [Rail doc §2] The trunk stops at the major settlements");
+  const rails = (g2) => g2.board.rails || [];
+  const hubsOf = (g2) => new Set(rails(g2).flatMap((l) => [l.a, l.b]));
+  const nameAt = (g2, hex) => LOCATIONS[g2.locations[hex]?.locationId];
+
+  const small = createGame({ seed, mapSize: "medium", locationBudget: 6 });
+  const big = createGame({ seed, mapSize: "large", locationBudget: 19 });
+  check("rail scales with how many major settlements are seated",
+    rails(big).length > rails(small).length);
+  check("…and stops at more than the four capitals",
+    hubsOf(big).size > 4);
+
+  // Every station is a major settlement, and never a sign-named one.
+  const badTier = [...hubsOf(big)].filter((h) => {
+    const def = nameAt(big, h);
+    return !def || !CONFIG.rail.hubTiers.includes(def.strategicValue);
+  });
+  check("every station is a settlement in the hub tiers",
+    badTier.length === 0);
+  check("…and a sign-named settlement is never a station",
+    [...hubsOf(big)].every((h) => !nameAt(big, h)?.noRailTerminus));
+
+  // Capitals are all `high`, so widening the band must not drop any of them.
+  const capHexes = Object.values(big.locations)
+    .filter((l) => (l.chips || []).some((c) => big.chips[c]?.chipId === "capital"))
+    .map((l) => l.hexId);
+  check("every capital is still on the line",
+    capHexes.length > 0 && capHexes.every((h) => hubsOf(big).has(h)));
+
+  // A line may still RUN THROUGH a hex that is not a station — that is what
+  // makes it cuttable per-hex rather than an abstract edge.
+  check("a link is a real sequence of hexes, not an abstract edge",
+    rails(big).every((l) => l.path.length >= 2 && l.path[0] === l.a && l.path[l.path.length - 1] === l.b));
+
+  // The network is one system: every station reachable from every other.
+  const seen = new Set([rails(big)[0].a]);
+  const queue = [rails(big)[0].a];
+  while (queue.length) {
+    const cur = queue.shift();
+    for (const l of rails(big)) {
+      const far = l.a === cur ? l.b : l.b === cur ? l.a : null;
+      if (far && !seen.has(far)) { seen.add(far); queue.push(far); }
+    }
+  }
+  check("…and the trunk is ONE network, not islands", seen.size === hubsOf(big).size);
+}
+
 // Rail doc §2.3 — running rights over another faction's stations.
 {
   line("\n  [Rail doc §2.3] Running rights");
@@ -4018,11 +4105,25 @@ line("\n  [§1.6/§1.10] Open borders contract");
   // until they grant rights, then it opens.
   check("running rights open a foreign station for unit transport", (() => {
     const h = createGame({ seed }); ensureDiplomacy(h);
+    // CONSTRUCT the situation rather than hunt the board for it. This used to
+    // take rails[0] and assume its two ends belonged to different factions,
+    // which held only while rail stopped at capitals and nothing else. Now the
+    // trunk stops at every major settlement and the capitals are joined
+    // THROUGH the unheld big cities, so on some seeds no link has a rival at
+    // each end at all — and a fixture that returns early is a check that
+    // silently stopped checking.
     const link = (h.board.rails || [])[0];
     if (!link) return false;
-    const holderA = h.locations[link.a]?.controller;
-    const holderB = h.locations[link.b]?.controller;
-    if (!holderA || !holderB || holderA === holderB) return false;
+    const holderA = "versari", holderB = "lakers";
+    const seat = (hexId, fid) => {
+      const loc = h.locations[hexId];
+      loc.controller = fid;
+      loc.loyaltyOwner = fid;
+      loc.sections = [fid, fid, fid];
+      loc.loyalty = CONFIG.loyalty.ceiling;
+    };
+    seat(link.a, holderA);
+    seat(link.b, holderB);
     // Pick the rider FIRST, then clear every other unit off the line so a
     // parked garrison isn't what closes it (deleting first can delete the
     // only unit holderA has).
@@ -4037,7 +4138,14 @@ line("\n  [§1.6/§1.10] Open borders contract");
     h.players[holderB].menace = 0; h.players[holderA].honor = 6;
     const ok = performDiplomacy(h, holderB, "set-rail-access", { faction: holderA, on: true }).ok;
     const after = unitRailEdges(h, rider);
-    return ok && !before?.has(link.a) && !!after?.get(link.a)?.includes(link.b);
+    // Assert the specific EDGE, not the whole station. A hub now has several
+    // lines out of it, and unheld track is nobody's to close — so the station
+    // can be open toward a neutral neighbour while still shut toward this
+    // rival's. "Does this station have any edge at all" stopped being the
+    // same question as "is this link open".
+    return ok
+      && !before?.get(link.a)?.includes(link.b)
+      && !!after?.get(link.a)?.includes(link.b);
   })());
 }
 

@@ -30,6 +30,7 @@ import {
   aiAcceptsPact, aiAcceptsVassalage, aiAcceptsPeace, wouldAccept, passesRepGates,
   denounceCooldown, denounceWarrant, denounceGrounds, grievanceWeight, grievancesAgainst,
   reputationLog, settleableWeight, unitsInTerritory, ultimatumCooldown,
+  tradeRouteOpen,
   cedeableLocations, locationWorth,
   asksThisRound, flowRounds, promiseRounds,
   evaluatePactCall, canDemandTribute, hasOpenBorders, warJustification,
@@ -802,9 +803,24 @@ function adaptDiplomacy(state, viewer) {
       // Inbox + capital (for map binding).
       capital: capitalLocOf(state, f),
       // §5.3 trading-pact route status — read straight off the agreement
-      // shape on `state.diplomacy.agreements` so the map can draw the
-      // capital-to-capital line green (clear) or amber (suspended).
+      // shape on `state.diplomacy.agreements` so the map can draw the route
+      // line green (clear) or amber (suspended).
       tradingPact: findTradingPact(state, viewer, f),
+      // …and WHICH two cities are carrying it. The line used to be drawn
+      // capital-to-capital because that was the only route a pact could have;
+      // now it can run between any two cities, so the engine names the pair it
+      // actually found rather than the map guessing at a pair that may not be
+      // on the route at all. Null while the route is severed — there is no
+      // line to draw when nothing is getting through.
+      tradeRoute: (() => {
+        const r = tradeRouteOpen(state, viewer, f);
+        if (!r) return null;
+        return {
+          fromLocId: engineLocationIdToUi(state.locations[r.from]?.locationId),
+          toLocId: engineLocationIdToUi(state.locations[r.to]?.locationId),
+          by: r.by,
+        };
+      })(),
       // §1.4 passive agreements (open-borders, allied-vision) — exposed
       // so the relationship panel can summarise active toggles.
       openBordersFromYou: hasOpenBorders(state, f, viewer), // they may transit your land
@@ -1429,7 +1445,8 @@ function availableVerbsAgainst(state, viewer, fid) {
   }
 
   // 13) Trading Pact (§6) — needs Neutral+ both ways, rep gates, and a
-  // capital-to-capital route. Engine returns specific reasons; we only
+  // route from any of your cities to any of theirs. Engine returns specific
+  // reasons; we only
   // surface the common ones here.
   const tradingActive = findTradingPact(state, viewer, fid);
   if (!myLord && !myVassal && !war) {

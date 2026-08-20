@@ -1875,40 +1875,42 @@ export function railLinkOpenTo(state, link, parties) {
 }
 
 // --- §1.3 trading pact ----------------------------------------------
-// The Capital hex a faction controls (carries the `capital` chip), or null.
-function capitalHexOf(state, fid) {
-  for (const loc of Object.values(state.locations)) {
-    if (loc.controller === fid && (loc.chips || []).some((c) => state.chips[c]?.chipId === "capital")) return loc.hexId;
-  }
-  return null;
-}
-// Is there a trade route between two capitals? Two ways to have one, and they
+// Is there a trade route between two factions? Two ways to have one, and they
 // are genuinely different roads:
 //
 //   overland   `reinforcementRoute` — a corridor of friendly/neutral ground,
 //              which an enemy ZoC can wall off.
-//   rail       the pre-collapse trunk line. Rail is generated as a spanning
-//              tree over the CAPITALS (board.js assignRails), which makes it
-//              literally the trade artery between them — it would be strange
-//              for a pact to collapse for want of a footpath while a railway
-//              runs between the two cities.
+//   rail       the pre-collapse trunk line. It would be strange for a pact to
+//              collapse for want of a footpath while a railway runs between
+//              the two.
 //
 // Rail is not free: a line is a real sequence of hexes (rail doc §2.1), so a
 // hostile third party parked anywhere along it cuts that link, and a cut can
-// isolate a capital even though the track still exists. That is what makes
+// isolate a city even though the track still exists. That is what makes
 // railed trade worth attacking rather than a free pass.
+//
+// Takes SETS at both ends — any station on one side reaching any station on
+// the other. It used to take one capital and one capital, which is not what
+// being connected to a faction means: you trade with the places you can
+// actually reach, and their capital may not be one of them.
 //
 // `isCut` is injected by the caller so this module stays clear of movement.js.
 // `parties` are the two factions the route is for: a link is only usable if
 // its stations are open to one of them (rail doc §2.3 running rights).
-function railRouteBetween(state, capA, capB, isCut, parties) {
+function railRouteBetween(state, fromHexes, toHexes, isCut, parties) {
   const links = state.board?.rails;
-  if (!links || !links.length) return false;
-  const seen = new Set([capA]);
-  const queue = [capA];
+  if (!links || !links.length) return null;
+  const starts = Array.isArray(fromHexes) ? fromHexes : [fromHexes];
+  const goals = new Set(Array.isArray(toHexes) ? toHexes : [toHexes]);
+  if (!starts.length || !goals.size) return null;
+  // Track where each station was reached FROM, so the walk can name the pair
+  // of cities the route actually joins rather than only that one exists.
+  const origin = new Map(starts.map((h) => [h, h]));
+  const seen = new Set(starts);
+  const queue = [...starts];
   while (queue.length) {
     const cur = queue.shift();
-    if (cur === capB) return true;
+    if (goals.has(cur)) return { from: origin.get(cur), to: cur };
     for (const link of links) {
       const far = link.a === cur ? link.b : link.b === cur ? link.a : null;
       if (far === null || seen.has(far)) continue;
@@ -1918,19 +1920,43 @@ function railRouteBetween(state, capA, capB, isCut, parties) {
       // through the yards of a faction that wants nothing to do with either.
       if (parties && !railLinkOpenTo(state, link, parties)) continue;
       seen.add(far);
+      origin.set(far, origin.get(cur));
       queue.push(far);
     }
   }
-  return false;
+  return null;
 }
 
-// The trade route between `a` and `b`, overland or by rail.
-function tradeRouteOpen(state, a, b) {
-  const capA = capitalHexOf(state, a);
-  const capB = capitalHexOf(state, b);
-  if (!capA || !capB) return false;
-  if (reinforcementRoute(state, a, capB)) return true;
-  return railRouteBetween(state, capA, capB, routeCutter(state, [a, b]), [a, b]);
+// The trade route between `a` and `b`, overland or by rail — from ANY city one
+// holds to ANY city the other holds.
+//
+// This used to demand a clear CAPITAL-to-capital route, which made a trading
+// pact a statement about two specific hexes rather than about whether the two
+// powers can reach each other. Two neighbours whose border towns share a
+// railway could not trade because their capitals sat at opposite ends of the
+// map; a pact also died the moment either capital was cut off, even with the
+// rest of both countries in easy contact.
+// Returns the PAIR it found — `{ from, to, by }` — or null. A boolean was
+// enough while the answer was always "their capital and yours"; now that the
+// route can run between any two cities, the map has to be able to draw the
+// one that is actually carrying the trade.
+export function tradeRouteOpen(state, a, b) {
+  const mine = controlledHexes(state, a);
+  const theirs = controlledHexes(state, b);
+  if (!mine.length || !theirs.length) return null;
+  // Overland: reinforcementRoute already searches out of EVERY city `a` holds,
+  // so this only has to ask about each possible destination. It returns the
+  // route, whose first hex is the city that supplies it.
+  for (const hex of theirs) {
+    // `{ dist, originHex }` — originHex is the city of `a`'s that supplies the
+    // corridor, which is exactly the near end of the route to draw.
+    const route = reinforcementRoute(state, a, hex);
+    if (route) return { from: route.originHex ?? mine[0], to: hex, by: "road" };
+  }
+  // Rail: one walk, seeded with every station `a` holds, looking for any of
+  // theirs.
+  const rail = railRouteBetween(state, mine, theirs, routeCutter(state, [a, b]), [a, b]);
+  return rail ? { ...rail, by: "rail" } : null;
 }
 
 function tradingPactBetween(state, a, b) {
@@ -1943,9 +1969,10 @@ function grantResearchFloor(state, fid, amount) {
   if (p) p.permanentResearch = Math.max(0, (p.permanentResearch || 0) + amount);
 }
 
-// Form a Trading Pact between a and b: both need a Capital with a clear
-// capital-to-capital route (reusing `reinforcementRoute`), Neutral+ both ways,
-// not at war, rep gates clear. Grants +1 permanent Research FLOOR to each.
+// Form a Trading Pact between a and b: both need at least one city, with a
+// clear route from any of one's to any of the other's (road or rail), Neutral+
+// both ways, not at war, rep gates clear. Grants +1 permanent Research FLOOR
+// to each.
 export function formTradingPact(state, a, b) {
   if (a === b) return { ok: false, reason: "can't trade with yourself" };
   if (atWar(state, a, b)) return { ok: false, reason: "at war with them" };
@@ -1954,10 +1981,13 @@ export function formTradingPact(state, a, b) {
     return { ok: false, reason: "standing too low (need Neutral+)" };
   if (!passesRepGates(state, a, b) || !passesRepGates(state, b, a))
     return { ok: false, reason: "reputation gates fail" };
-  const capA = capitalHexOf(state, a), capB = capitalHexOf(state, b);
-  if (!capA || !capB) return { ok: false, reason: "both parties need a Capital" };
+  // A landless faction has nothing to trade from. The gate used to be "both
+  // need a Capital", which is a stricter thing: it refused a faction that held
+  // three cities but had lost its seat.
+  if (!controlledHexes(state, a).length || !controlledHexes(state, b).length)
+    return { ok: false, reason: "both parties need somewhere to trade from" };
   if (!tradeRouteOpen(state, a, b))
-    return { ok: false, reason: "no clear route between capitals — by road or by rail" };
+    return { ok: false, reason: "nothing of yours can reach anything of theirs — by road or by rail" };
   state.diplomacy.agreements.push({
     id: `trade-${a}-${b}-${state.round}`,
     type: "trading-pact", a, b, partyA: a, partyB: b,
@@ -2713,7 +2743,7 @@ export function performDiplomacy(state, pid, action, params = {}) {
       return r({ accepted: false, refused: true });
     }
 
-    // §1.3 — form a Trading Pact (capital-to-capital route + Neutral+).
+    // §1.3 — form a Trading Pact (a clear route between the two + Neutral+).
     case "trading-pact": {
       const res = formTradingPact(state, pid, f);
       return res.ok ? r(res) : res;

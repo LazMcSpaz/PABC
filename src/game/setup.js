@@ -136,16 +136,22 @@ export function createGame({
   const settlementHexes = Object.keys(layout.placement);
   assignRoads(grid.adjacency, hexes, settlementHexes,
     (hexId) => LOCATIONS[layout.placement[hexId]]?.strategicValue || "medium");
-  // Rail: pre-collapse trunk line between the capitals. Generated, never
-  // built (docs/rail-road-blockade-design.md §2.4).
-  // Rail termini. Sign-named settlements (`noRailTerminus`) are never stations
-  // — they grew up around ROAD signage, and a railway had no reason to stop at
-  // a lay-by. A line may still run THROUGH their hex to reach somewhere that
-  // does matter. Capitals are the only hubs today, so this filter changes
-  // nothing yet; it is here so the rule holds if either end of that ever moves.
-  const railHubs = Object.values(layout.factionStart).filter(
-    (hexId) => !LOCATIONS[layout.placement[hexId]]?.noRailTerminus,
-  );
+  // Rail: pre-collapse trunk line between the major settlements. Generated,
+  // never built (docs/rail-road-blockade-design.md §2.4).
+  //
+  // Stations are every seated Location in `CONFIG.rail.hubTiers`, not just the
+  // four capitals: a trunk line stops at the big places, and stopping only at
+  // capitals gave every board — 30 hexes or 127, ten cities or nineteen — the
+  // same three links, with no faction holding both ends of one at setup.
+  //
+  // Sign-named settlements (`noRailTerminus`) are never stations: they grew up
+  // around ROAD signage and a railway had no reason to stop at a lay-by. A line
+  // may still run THROUGH their hex to reach somewhere that does matter.
+  const railHubs = settlementHexes.filter((hexId) => {
+    const def = LOCATIONS[layout.placement[hexId]];
+    return def && !def.noRailTerminus
+      && CONFIG.rail.hubTiers.includes(def.strategicValue);
+  });
   const rails = assignRails(grid.adjacency, hexes, railHubs);
 
   // --- players ---

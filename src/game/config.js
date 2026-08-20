@@ -122,10 +122,21 @@ export const CONFIG = {
 
   // Rail (docs/rail-road-blockade-design.md §2). Pre-collapse trunk line,
   // generated at setup, never built or destroyed. A hop between two linked
-  // capitals costs this regardless of how far apart they are — that flat cost
+  // stations costs this regardless of how far apart they are — that flat cost
   // IS the mechanic, so it should stay cheap enough to be worth a detour.
   rail: {
     hopCost: 1,
+    // Which settlements the trunk line stops at. It used to be the four
+    // CAPITALS and nothing else, which made rail three links on every board
+    // size however big the map or however many cities were seated — and, worse,
+    // meant no faction ever held both ends of a link at setup, so production
+    // pooling (which needs both stations) could not be used until you had taken
+    // an enemy capital. A trunk line stops at the big places: every capital is
+    // `high`, so this keeps all four and adds the other major cities.
+    // Sign-named settlements are excluded separately (`noRailTerminus`) — they
+    // grew up around road signage and a railway had no reason to stop at a
+    // lay-by, though a line may still run through their hex.
+    hubTiers: ["high", "veryHigh"],
   },
 
   // The v0.1 test board — still the default when no map size is given, so
