@@ -108,7 +108,7 @@ the game because acquisition is rationed by play, not by scrap.
 |---|---|---|---|---|
 | **Cache Maps** | Can build and sustain a Blockade with no road connection, funded from your scrap bank | 5 | 1 | Keep. Ships with the Blockade feature, not before. |
 | **Field Medics** | Heals +1 at Upkeep anywhere, not only on a held Location | 4 | 1 | Keep. Owns healing outright now that Cache Maps is a blockade chip. Changes campaign tempo (no rotate-home loop). |
-| **Pathfinders** | Forest costs 1 to enter; mountains don't halt the move | 5 | 1 | Merged from Switchbacks + Brushcutters. Separately, each solved half of ~7 terrain hexes — neither passed "would a player buy this." Together it's one real chip, and the stepping stone to Landship. |
+| **Pathfinders** | Rough ground plays road-grade: forest 1, mountains 2 and no halt | 5 | 1 | Merged from Switchbacks + Brushcutters. Separately, each solved half of ~7 terrain hexes — neither passed "would a player buy this." Together it's one real chip, and the stepping stone to Landship. |
 | **Rearguard** | On losing a contest, may retreat 2 hexes; never takes rout spill damage | 4 | 1 | Merged from Fighting Withdrawal + Dispersed Order. Two narrow loss-mitigation chips → one genuine defensive pick. |
 | **Trailwise** | Once per turn, discard an encounter this unit triggers and redraw | 3 | 1 | Keep. 13 of 30 hexes are encounter hexes; mirrors Recon Team's `encounterRedraws`. |
 | **Entrenching Tools** | +1 to this unit's fortify bonus | 3 | 1 | Keep. Looks worse than a flat +1 Strength — its niche is that it's the *only* legal way to push a defensive unit past the one-per-stat cap (+2 Str chip + this = +4 fortified). The turtle build. |
