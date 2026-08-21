@@ -717,9 +717,12 @@ hop count:
 - **rough ground is dear** (`CONFIG.roads.terrainCost`, forest 2 / mountain 4)
   — roads run round a ridge the way a surveyor would.
 
-The second is a movement fix as much as a looks fix. A road negates a
-mountain's halt and a forest's toll (`expandMovement`), so every rough hex a
-corridor crossed was a rough hex that stopped playing like rough ground.
+The second is a movement fix as much as a looks fix. A road eases a mountain's
+halt and a forest's toll (`expandMovement`), so every rough hex a corridor
+crosses is a rough hex that plays softer than it looks. (At the time this was
+written a road *negated* both outright; §12 changes it to halve them. Routing
+around the rough ground and easing rather than deleting it are the same fix
+from two ends.)
 
 Measured over 30 generated boards (10 seeds × 3 sizes):
 
@@ -741,6 +744,37 @@ remaining adjacencies are still real connections that supply and blockades
 honour. Storing the actual links (as rail already does, `state.board.rails`)
 would let both the renderer and the supply walk follow roads rather than infer
 them — a bigger change, and a rules change, so it is not made here.
+
+## 12. A road eases terrain; it does not delete it (2026-08-21)
+
+A road used to make rough ground cost the same as open grass: 1 MP to enter and
+never halting, through forest and mountain alike. With roads reaching about a
+third of the board, that meant about a third of the board's terrain stopped
+being terrain.
+
+Roads now HALVE the toll instead of waiving it (`CONFIG.movement`):
+
+| ground | no road | road |
+|---|---|---|
+| open | 1 | 1 |
+| forest | 2 | **1** |
+| mountain | 1, and the move HALTS there | **2**, no halt |
+
+A mountain's real cost was never its 1 MP — it was the halt, which spends
+whatever you had left. Two is half of that for a unit on a road march (base 2,
++1 for starting on the highway): a winding mountain road gets you over the pass
+and no further, where before it cost the same as crossing a field.
+
+`ignoresTerrain` (Landship, Pathfinders) is defined in the engine as "treats
+every hex as road-grade", so it inherits the new numbers — forest 1, mountain 2
+without halting. Both chips' rules text only ever promised that mountains don't
+halt, which is still true; their descriptions now state the costs outright.
+
+This pairs with §11 rather than duplicating it. §11 routes corridors AROUND
+rough ground so a road rarely crosses it (measured: high ground on about one
+board in thirty, forest about once a board); §12 makes the crossings that do
+happen still cost something. Route around it, and ease rather than delete what
+you cannot route around — the same fix from two ends.
 
 ## 8. What this does not change
 

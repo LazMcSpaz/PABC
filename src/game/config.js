@@ -57,10 +57,21 @@ export const CONFIG = {
   // §16.2 terrain movement — per-hex entry costs over the base 1/hex.
   // Forest (cover) costs extra; mountains (elevation) HALT a move (you may
   // climb onto one but advance no further that turn — "speed 1 in mountains").
-  // (Roads, when added, will reduce these.)
+  //
+  // A road EASES rough ground; it does not delete it. That distinction is the
+  // whole reason terrain survives contact with the road network: a road that
+  // makes a mountain cost the same as open grass has removed the mountain from
+  // the game, and once a third of the board carries road, a third of the
+  // board's terrain stops mattering. A road through a mountain is a winding
+  // road — it gets you over, it does not make the climb free.
   movement: {
     forestCost: 2,     // entering a cover/forest hex costs this (vs 1) — "−1 speed"
     mountainHalts: true, // entering an elevation/mountain hex ends the move
+    // What ROAD-GRADE rough ground costs — a road, or a Landship-class mover
+    // (chip `ignoresTerrain`), which the engine defines as road-grade too.
+    // Roughly half the toll in each case, never none.
+    roadForestCost: 1,   // forest is 2 without one
+    roadMountainCost: 2, // a mountain otherwise halts you outright
     // A unit beginning its turn ON a road hex marches +this Movement that
     // turn — the highway network is a fast lane for armies, not only a
     // terrain-negator (playtest: roads otherwise only differ from open
@@ -130,9 +141,16 @@ export const CONFIG = {
     // funnels harder onto shared trunks.
     reuseCost: 0.3,
     // terrainCost — rough ground. Roads run round a ridge rather than over it,
-    // which is both what a surveyor does and a movement lever: a road negates
-    // a mountain's halt and a forest's toll, so a corridor driven straight
-    // over the high ground quietly deletes that terrain from the game.
+    // which is what a surveyor does when there is a valley to follow, and also
+    // keeps rough ground rough: a road EASES what it crosses (see
+    // CONFIG.movement), so a corridor driven straight over the high ground
+    // softens exactly the terrain the map put there to matter.
+    //
+    // Measured: at mountain 4 a road crosses high ground on about one board in
+    // thirty; dropping it to 3 or 2.5 barely moves that, because there is
+    // nearly always a way round. So the few that do happen are genuine passes
+    // — the one gap in a ridge — which is the right place for a road and the
+    // right place for a chokepoint.
     terrainCost: { forest: 2, mountain: 4 },
   },
 

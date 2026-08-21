@@ -657,8 +657,8 @@ line("\n  [Terrain] movement costs (forest +1, mountains halt)");
   }
 }
 
-// --- §16.2 roads — a hex modifier that negates terrain MOVEMENT cost ---
-line("\n  [Roads] negate terrain movement cost (forest + mountain)");
+// --- §16.2 roads — a hex modifier that EASES terrain MOVEMENT cost ---
+line("\n  [Roads] EASE terrain movement cost (forest + mountain), never delete it");
 {
   const mk = (B, C) => ({
     board: {
@@ -669,9 +669,18 @@ line("\n  [Roads] negate terrain movement cost (forest + mountain)");
   const forestRoad = movementField(mk({ cover: true, road: true }, {}), "A", 2);
   check("a road through forest costs 1 (B rem1, C still reachable)",
     forestRoad.B === 1 && "C" in forestRoad);
-  const mtnRoad = movementField(mk({}, { elevation: true, road: true }), "A", 3);
-  check("a road through a mountain does NOT halt (C rem1, D reachable)",
-    mtnRoad.C === 1 && "D" in mtnRoad);
+  // A road EASES a mountain rather than deleting it: no halt, but the climb
+  // still costs roadMountainCost. Budget 4 so there is room to see both — B
+  // (1) leaves 3, the roaded mountain C (2) leaves 1, and D is still reachable
+  // beyond it, which a halt would have made impossible.
+  const mtnRoad = movementField(mk({}, { elevation: true, road: true }), "A", 4);
+  check("a road through a mountain does NOT halt (D reachable beyond it)",
+    "D" in mtnRoad);
+  check(`a road over a mountain still costs ${CONFIG.movement.roadMountainCost}, not 1`,
+    mtnRoad.C === 4 - 1 - CONFIG.movement.roadMountainCost);
+  // ...and a road through a forest halves its toll rather than waiving it.
+  check("a road halves forest's toll rather than waiving it",
+    CONFIG.movement.roadForestCost === CONFIG.movement.forestCost / 2);
   // Setup lays road corridors between the faction capitals.
   const g = createGame({ seed });
   const roads = Object.values(g.board.hexes).filter((h) => h.road).length;
@@ -5028,8 +5037,8 @@ line("\n  [Phase 11] text-token resolver");
   check("mountain (no road): enterable but terminal (0 movement remains)",
     noRoad[mtHex] === 0);
   const roaded = stage(true);
-  check("road over a mountain: costs 1 and does not halt",
-    roaded[mtHex] === 2);
+  check(`road over a mountain: costs ${CONFIG.movement.roadMountainCost} and does not halt`,
+    roaded[mtHex] === 3 - CONFIG.movement.roadMountainCost);
   // -- forest cost vs road-negated forest.
   const hf = g18.board.hexes[mtHex];
   hf.elevation = false; hf.cover = true; hf.road = false;
@@ -5040,7 +5049,8 @@ line("\n  [Phase 11] text-token resolver");
   hf.road = true;
   walker.moveRemaining = 3;
   const forestRoad = unitReach(g18, walker);
-  check("road through a forest: costs 1", forestRoad[mtHex] === 2);
+  check(`road through a forest: costs ${CONFIG.movement.roadForestCost}`,
+    forestRoad[mtHex] === 3 - CONFIG.movement.roadForestCost);
 }
 
 // Phase 19 — diplomacy robustness pass: standing baselines (drift toward
