@@ -43,12 +43,13 @@ const btn = {
 };
 
 export default function EnvoyModal({ warning, onRespond }) {
-  // The envoy's arrival gets a cue. This modal seizes the whole screen, and a
-  // player mid-board-scan should hear it land rather than discover it. Keyed
-  // on the warning id, so a second warning queued behind the first announces
-  // itself too while re-renders and remounts of the same one stay silent.
+  // The envoy's arrival gets a cue. This modal seizes the whole screen with a
+  // leader's portrait, and a player mid-board-scan should hear it land rather
+  // than discover it. Keyed on the warning id, so a second warning queued
+  // behind the first announces itself too while re-renders and remounts of
+  // the same one stay silent.
   // Called before the early return — a hook may not be conditional.
-  useSfxOn(warning?.id ?? null, "diplomacyAlert");
+  useSfxOn(warning?.id ?? null, "envoyArrival");
 
   if (!warning) return null;
   const coalition = warning.kind === "coalition";

@@ -17,13 +17,15 @@ const A = import.meta.env?.BASE_URL ?? "/";
 const DIR = `${A}assets/audio/sfx`;
 
 export const SFX = {
-  /** The envoy audience — an AI opening a diplomatic warning on the player.
-   *  It interrupts, so it gets to be the loudest thing here. */
-  diplomacyAlert: { src: `${DIR}/diplomacy-alert.mp3`, gain: 1.0 },
+  /** The envoy audience — an AI's leader art filling the screen with a
+   *  demand that has to be answered. It interrupts everything, so it gets to
+   *  be the loudest thing here. */
+  envoyArrival: { src: `${DIR}/envoy-arrival.mp3`, gain: 1.0 },
 
-  /** The diplomacy drawer sliding in. Player-initiated, so it announces
-   *  rather than demands. */
-  diplomacyOpen: { src: `${DIR}/diplomacy-open.mp3`, gain: 0.8 },
+  /** A herald banner — the small, option-less callouts that slide in at the
+   *  top when the powers move against each other. Informational and frequent,
+   *  so it stays under the envoy's cue rather than matching it. */
+  diplomacyAlert: { src: `${DIR}/diplomacy-alert.mp3`, gain: 0.7 },
 
   /** A detail window sliding in — a selected unit, location, or blockade.
    *  Fires on nearly every click on the board, so it sits well back. */
@@ -46,4 +48,4 @@ export const SFX = {
 };
 
 /** Cues worth having in memory before the moment they're needed. */
-export const PRELOAD = ["diplomacyAlert", "diplomacyOpen", "windowOpen", "radialAmbience", "contestRoll"];
+export const PRELOAD = ["envoyArrival", "diplomacyAlert", "windowOpen", "radialAmbience", "contestRoll"];

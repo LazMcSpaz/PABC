@@ -134,7 +134,7 @@ await page.waitForTimeout(200);
 const liveGain = await page.evaluate(() => window.__ashlandAudio.music.gain?.gain.value ?? -1);
 check("unmute restores it", liveGain > 0.05, `gain=${liveGain.toFixed(3)}`);
 
-for (const cue of ["diplomacyAlert", "diplomacyOpen", "windowOpen", "radialAmbience", "contestRoll"]) {
+for (const cue of ["envoyArrival", "diplomacyAlert", "windowOpen", "radialAmbience", "contestRoll"]) {
   const loaded = await page.evaluate(async (name) => {
     const p = window.__ashlandAudio.sfx;
     await p.load(name);
@@ -205,14 +205,14 @@ await page.keyboard.press("Escape"); // closes the radial with nothing picked
 await page.waitForTimeout(600);
 check("closing the radial stops it", !(await looping()));
 
-// Re-open and pick Diplomacy: the bed must stop and the drawer's cue fire.
+// Re-open and pick a sector: the bed must stop when the choice is made, not
+// only when the radial is dismissed.
 await page.locator("button[title='Menu']").first().click();
 await page.waitForTimeout(400);
 await clearFired();
 await page.locator("text=Diplomacy").first().click();
 await page.waitForTimeout(700);
 check("picking a sector stops the ambience", !(await looping()));
-check("opening the diplomacy drawer fires its cue", (await fired()).includes("diplomacyOpen"), (await fired()).join(","));
 await page.keyboard.press("Escape");
 await page.waitForTimeout(400);
 
@@ -285,6 +285,26 @@ const envoyStaged = await page.evaluate(() => {
 });
 await page.waitForTimeout(600);
 check("envoy modal opened", envoyStaged && (await page.getByText("An Envoy Arrives").count()) > 0);
+check("the envoy's arrival cue fires with it", (await fired()).includes("envoyArrival"), (await fired()).join(","));
+
+// A herald banner — the small option-less callout at the top of the screen.
+await page.locator("button").filter({ hasText: /Hear them out/i }).first()
+  .click({ timeout: 2000 }).catch(() => {});
+await page.waitForTimeout(400);
+await clearFired();
+const heraldStaged = await page.evaluate(() => {
+  const g = window.__ashland;
+  const me = g.turnOrder[g.activeIndex];
+  const [a, b] = g.turnOrder.filter((f) => f !== me);
+  if (!a || !b) return false;
+  // A war between two OTHER powers: heraldFromLog skips moves the human
+  // initiated, so the player must not be either side of it.
+  g.log.push({ name: "war_declared", payload: { a, b } });
+  window.__ashlandBump?.();
+  return true;
+});
+await page.waitForTimeout(700);
+check("a herald banner appears", heraldStaged && (await page.getByText(/declares war on/i).count()) > 0);
 check("the diplomacy alert fires with it", (await fired()).includes("diplomacyAlert"), (await fired()).join(","));
 
 check("no audio asset 404s", failedAudio.length === 0, failedAudio.join(", "));

@@ -15,7 +15,7 @@ import {
   TopBar, MenuOrb, RadialMenu, LocationWindow, BlockadeWindow, EconomyLedger, TitledWindow, ICON, C as HUD, COMPACT_HUD_H,
 } from "./HudChrome.jsx";
 import { useIsPhone } from "./useViewport.js";
-import { useSfxHold, useSfxOnChange } from "../audio/AudioProvider.jsx";
+import { useSfxHold, useSfxOn, useSfxOnChange } from "../audio/AudioProvider.jsx";
 import { createGame } from "../game/setup.js";
 import { startTurn, endTurn } from "../game/turn.js";
 import { performAction } from "../game/actions.js";
@@ -1019,9 +1019,12 @@ export default function Prototype({ config, onNewGame }) {
   })();
   useSfxOnChange(selectedUnitForPanel && `unit:${selectedUnitForPanel}`, "windowOpen");
   useSfxOnChange(selectedHexForWindow && `hex:${selectedHexForWindow}`, "windowOpen");
-  // The diplomacy drawer gets its own, heavier cue — it is a screen, not a
-  // panel. (The envoy audience has a third, fired from EnvoyModal itself.)
-  useSfxOnChange(showDiplomacy ? "diplomacy" : null, "diplomacyOpen");
+  // Herald banners — the small, option-less callouts at the top of the screen
+  // announcing what the powers just did to each other. Keyed on the newest
+  // banner's id: they arrive in batches and the retrigger guard collapses a
+  // batch into one hit, which is what a batch should sound like.
+  // (The envoy audience gets its own, heavier cue, fired from EnvoyModal.)
+  useSfxOn(heralds.length ? heralds[heralds.length - 1].id : null, "diplomacyAlert");
 
   // The radial menu hums while it is open and waiting on a choice. It stops
   // the moment a sector is picked — onMenuPick closes the radial before it

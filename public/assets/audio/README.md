@@ -31,7 +31,7 @@ release.
 | `sfx/contest-roll.mp3` | `dragon-studio-sword-fight-2-393846` | Dragon Studio |
 | `sfx/contest-roll.mp3` | `dragon-studio-sword-fight-393849` | Dragon Studio |
 | `sfx/window-open.mp3` | `suno-via-sci-fi-whoosh-289719` | Suno |
-| `sfx/diplomacy-open.mp3` | `47313572-sci-fi-launch-3351238` | — |
+| `sfx/envoy-arrival.mp3` | `47313572-sci-fi-launch-3351238` | — |
 | `music/*.mp3` | Replicate predictions (see below) | generated |
 
 `contest-roll.mp3` is a mix of four sources; all four need clearing, not just
@@ -117,17 +117,19 @@ Then blend — the crowd is a bed and sits under the action, the sword stems are
 the impact, the war cry is the hero element and enters a second late:
 
 ```sh
-ffmpeg -i mob.wav -i sword1.wav -i sword2.wav -i scream.wav -filter_complex "[0:a]volume=0.55[mob];[1:a]volume=0.90[s1];[2:a]volume=0.90[s2];[3:a]adelay=1000|1000,volume=1.0[scr];[mob][s1][s2][scr]amix=inputs=4:duration=longest:normalize=0[sum];[sum]afade=t=out:st=6.0:d=1.4,atrim=0:7.4,asetpts=N/SR/TB[out]" -map "[out]" raw.wav
+ffmpeg -i mob.wav -i sword1.wav -i sword2.wav -i scream.wav -filter_complex "[0:a]volume=0.55[mob];[1:a]volume=0.90[s1];[2:a]volume=0.90[s2];[3:a]adelay=1000|1000,volume=1.0[scr];[mob][s1][s2][scr]amix=inputs=4:duration=longest:normalize=0[sum];[sum]afade=t=out:st=5.0:d=1.4,atrim=0:6.5,asetpts=N/SR/TB[out]" -map "[out]" raw.wav
 ```
 
 `normalize=0` keeps the weights literal — `amix` otherwise divides by the input
 count and the weights stop meaning anything.
 
-The taper is not a stylistic trim. The crowd source is a **loop**: it runs 11.9 s
-and its raw end is a hard cut, not a decay, so leaving it whole would end the
-cue with an audible chop. Fading from 6.0 s also lands the stinger on the
-contest overlay's own arc (dice lock at 5 s, winner banner at 6.3 s). The sword
-and war-cry stems finish at 6.1 s and 3.2 s, so nothing but the bed is shortened.
+The taper is also load-bearing, not just a length choice. The crowd source is a
+**loop**: it runs 11.9 s and its raw end is a hard cut, not a decay, so leaving
+it whole would end the cue on an audible chop whatever the length. Fading from
+5.0 s puts the decay on the contest overlay's own arc — the dice lock at 5 s and
+the cue is silent by 6.4 s, right as the winner banner lands. That fade catches
+the tail of the longer sword stem (which runs to 6.1 s) as well as the bed; the
+war cry has finished by 3.2 s and is untouched.
 
 Finally normalise the sum to the −14 max-M cue target and limit, as above.
 
@@ -159,6 +161,7 @@ in the wrap on a browser that does not strip them.
 
 `npm run check:audio` (with `npm run dev` running) drives the real players in a
 real browser: the pinned title theme, the ten-second gaps, the four-cut
-rotation, every cue firing on the interaction it belongs to, the bed starting
-and stopping with the radial menu, a staged contest sounding and releasing the
-battle stinger, and the autoplay-blocked path.
+rotation, every cue firing on the interaction it belongs to (including a staged
+envoy audience and a staged herald banner), the bed starting and stopping with
+the radial menu, a staged contest sounding and releasing the battle stinger,
+and the autoplay-blocked path.
