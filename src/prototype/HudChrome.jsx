@@ -140,6 +140,11 @@ function HoloSegments({ svgW, svgH, cx, cy, ri, ro, accent = C.holo, segments, p
             // The icon/label layer sits over the <path> and takes the click a
             // player actually aims at, so the audio hook has to be on both.
             data-sfx={s.onClick ? "select" : undefined}
+            // The key this segment stands for. Labels are not unique on screen
+            // — the Rainmaker has a menu entry AND a HUD dial, both reading
+            // "Rainmaker" — so anything selecting one by its text picks the
+            // wrong element sooner or later.
+            data-radial={s.mark}
             style={{ position: "absolute", left: x, top: y, transform: on ? "translate(-50%,-50%) scale(1.12)" : "translate(-50%,-50%)", transition: "transform .14s cubic-bezier(.2,.9,.3,1.4)", display: "flex", flexDirection: "column", alignItems: "center", gap: 1, pointerEvents: s.onClick ? "auto" : "none", cursor: s.onClick ? "pointer" : "default", textShadow: "0 1px 3px rgba(0,0,0,0.85)" }}
           >
             {s.icon && (
@@ -263,9 +268,9 @@ function ActionPips({ roster }) {
   );
 }
 
-function DialCell({ label, children }) {
+function DialCell({ label, children, mark }) {
   return (
-    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
+    <div data-dial={mark} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
       {children}
       <span style={{ fontFamily: C.font, fontSize: 8, letterSpacing: 1.4, textTransform: "uppercase", color: C.textFaint, fontWeight: 600 }}>{label}</span>
     </div>
@@ -291,7 +296,7 @@ function CompactStat({ icon, value, color }) {
 // name, VP/Actions dials); at phone width those clusters collide. This
 // swaps to a plain three-row rectangular bar: faction/settings, a row of
 // icon+value stats, then a full-width End Turn button underneath.
-function CompactTopBar({ scrap, upkeep, units, tech, name, color = C.red, vp, vpGoal, dominion, actions, round, onEndTurn, endDisabled, onSettings }) {
+function CompactTopBar({ scrap, upkeep, units, tech, name, color = C.red, vp, vpGoal, dominion, rainmaker, actions, round, onEndTurn, endDisabled, onSettings }) {
   return (
     <div style={{
       position: "absolute", top: 0, left: 0, right: 0, height: COMPACT_HUD_H, zIndex: 30,
@@ -343,7 +348,7 @@ export function TopBar(props) {
   return <DesktopTopBar {...props} />;
 }
 
-function DesktopTopBar({ scrap, upkeep, units, tech, name, color = C.red, vp, vpGoal, dominion, actions, round, onEndTurn, endDisabled, onSettings }) {
+function DesktopTopBar({ scrap, upkeep, units, tech, name, color = C.red, vp, vpGoal, dominion, rainmaker, actions, round, onEndTurn, endDisabled, onSettings }) {
   const H = 60;
   const clip = "polygon(0 0, 100% 0, 100% 60px, 78% 60px, 72% 28px, 28% 28px, 22% 60px, 0 60px)";
   const outline = "M0 0 L100 0 L100 60 L78 60 L72 28 L28 28 L22 60 L0 60 Z";
@@ -393,7 +398,7 @@ function DesktopTopBar({ scrap, upkeep, units, tech, name, color = C.red, vp, vp
             not the score. It used to fill toward a VP threshold that turned
             out not to be a conquest condition at all; VP is the end-of-game
             standing now and nothing fills toward it. */}
-        <DialCell label={dominion?.roundsLeft != null ? `${dominion.roundsLeft} to win` : "Dominion"}>
+        <DialCell mark="dominion" label={dominion?.roundsLeft != null ? `${dominion.roundsLeft} to win` : "Dominion"}>
           <Dial
             size={46}
             accent={dominion?.roundsLeft != null ? C.holo : C.gold}
@@ -407,6 +412,14 @@ function DesktopTopBar({ scrap, upkeep, units, tech, name, color = C.red, vp, vp
             />
           </Dial>
         </DialCell>
+        {/* The Rainmaker races the same finish line, so it sits beside the
+            dominion dial rather than in a panel of its own — two ways to win,
+            two clocks, read together. It only appears once the myth is public:
+            before that there is nothing for a player to act on and a dial for
+            it would just be a spoiler. */}
+        {rainmaker?.open && !rainmaker.destroyed && (
+          <RainmakerDial rm={rainmaker} />
+        )}
         <ActionPips roster={actions.roster} />
         <DialCell label="Actions">
           <Dial size={46} accent={C.red} progress={actions.max ? actions.remaining / actions.max : 0} glow>
@@ -419,6 +432,47 @@ function DesktopTopBar({ scrap, upkeep, units, tech, name, color = C.red, vp, vp
         End Turn
       </button>
     </div>
+  );
+}
+
+// The Rainmaker's dial. Three things it has to say, in priority order,
+// because at any moment only one of them is what the player needs:
+//
+//   somebody is holding it switched on and the game ends in N   → the clock
+//   somebody has it and is working toward that                  → their stage
+//   nobody has it yet                                           → your stage
+//
+// The hold clock is the one that matters most and the one a player is most
+// likely to miss, so it takes the face outright and turns the dial red.
+function RainmakerDial({ rm }) {
+  const hold = rm.hold;
+  const mine = rm.you;
+  const leader = rm.holders?.find((h) => !h.hunting && h.stage > 0);
+  // One name unless the clock is running, and then the clock. Labelling it by
+  // the stage read as "The myth" while the dial beside it said 3/8, which is
+  // the dial contradicting itself.
+  const label = hold ? `${hold.roundsLeft} to rain` : "Rainmaker";
+  const stage = hold ? rm.finalStage
+    : rm.device?.owner ? (rm.holders.find((h) => h.fid === rm.device.owner)?.stage ?? 0)
+      : mine?.stage ?? leader?.stage ?? 0;
+  const accent = hold ? C.red : rm.device?.owner && !mine?.stage ? C.gold : C.holo;
+  return (
+    <DialCell label={label} mark="rainmaker">
+      <Dial
+        size={46}
+        accent={accent}
+        progress={hold
+          ? 1 - (hold.roundsLeft / Math.max(1, hold.holdRounds))
+          : stage / rm.finalStage}
+        glow={!!hold}
+      >
+        <DialFace
+          value={hold ? `${hold.roundsLeft}` : `${stage}/${rm.finalStage}`}
+          valueColor={hold ? C.red : C.text}
+          valueSize={15}
+        />
+      </Dial>
+    </DialCell>
   );
 }
 
@@ -529,7 +583,7 @@ export function RadialMenu({ items, onPick, onClose }) {
         <div className="hud-glitch" style={{ position: "absolute", inset: 0 }}>
           <ScannerRing size={S} />
           <HoloSegments svgW={S} svgH={S} cx={c} cy={c} ri={ri} ro={ro} accent={C.holo} prominent gapPx={10 * k}
-            segments={items.map((it, i) => ({ ...seg(i), icon: it.icon, iconSize: 46 * k, label: it.label, onClick: () => onPick(it.key) }))}
+            segments={items.map((it, i) => ({ ...seg(i), icon: it.icon, iconSize: 46 * k, label: it.label, mark: it.key, onClick: () => onPick(it.key) }))}
             hub={<span style={{ display: "flex", flexDirection: "column", alignItems: "center", color: C.holoHi }}><span style={{ fontFamily: C.font, fontSize: 13, fontWeight: 700, letterSpacing: 3 }}>SELECT</span><span style={{ fontSize: 9, letterSpacing: 1.5, color: C.textFaint }}>tap a sector</span></span>}
           />
           <div className="hud-scanlines" style={{ position: "absolute", left: c - ro, top: c - ro, width: ro * 2, height: ro * 2, borderRadius: "50%" }} />

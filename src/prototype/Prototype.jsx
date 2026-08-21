@@ -20,6 +20,11 @@ import VolumeSliders from "../audio/VolumeSliders.jsx";
 import { createGame } from "../game/setup.js";
 import { startTurn, endTurn } from "../game/turn.js";
 import { performAction } from "../game/actions.js";
+import {
+  joinRainmaker, extractEarly, hireSpecialist, seizeSpecialist, activate,
+  grantDevice, destroyDevice, rainmakerState, DEVICE,
+} from "../game/rainmaker.js";
+import RainmakerPanel from "./RainmakerPanel.jsx";
 import { applyOutputAndBuilds, chargeChipUpkeep, chargeUnitUpkeep } from "../game/economy.js";
 import { chargePostUpkeep } from "../game/posts.js";
 import { chargeBlockadeUpkeep } from "../game/blockades.js";
@@ -154,6 +159,8 @@ const MENU_ITEMS = [
   { key: "units", icon: ICON.units, label: "Units" },
   { key: "economy", icon: ICON.scrap, label: "Economy" },
   { key: "diplomacy", icon: ICON.diplomacy, label: "Diplomacy" },
+  // The third way to win needs a door, or it is something only the AI can do.
+  { key: "rainmaker", icon: ICON.research, label: "Rainmaker" },
 ];
 
 // Collapse a selected location hex into the single-window view-model that
@@ -942,6 +949,46 @@ export default function Prototype({ config, onNewGame }) {
     replay.runAITurns();
   }
 
+  // Is one of your units standing on a device nobody holds? That is the only
+  // moment take-or-destroy is a decision you have, so the panel's two loudest
+  // buttons appear exactly then.
+  const standingOnLooseDevice = (() => {
+    const g = gameRef.current;
+    const rm = g && rainmakerState(g);
+    if (!rm || rm.device.status !== DEVICE.LOOSE) return false;
+    return Object.values(g.units || {}).some(
+      (u) => u.owner === state.youId && u.node === rm.device.hex,
+    );
+  })();
+
+  // Every Rainmaker decision the player can make, through one door. These are
+  // free of the Action budget for the same reason diplomacy is: they are the
+  // beats of a story the whole board is racing, not a thing you spend a turn's
+  // worth of orders on.
+  function onRainmakerAct(kind) {
+    const g = gameRef.current;
+    if (!g) return;
+    const me = state.youId;
+    const rm = rainmakerState(g);
+    if (kind === "join") joinRainmaker(g, me);
+    else if (kind === "extractEarly") extractEarly(g, me);
+    else if (kind === "hire") hireSpecialist(g, me);
+    else if (kind === "seize") {
+      let power = 0;
+      for (const u of Object.values(g.units || {})) if (u.owner === me) power += u.strength || 0;
+      seizeSpecialist(g, me, power);
+    } else if (kind === "activate") activate(g, me);
+    else if (kind === "takeDevice") {
+      const here = Object.values(g.units || {})
+        .filter((u) => u.owner === me && u.node === rm.device.hex)
+        .sort((a, b) => (b.strength || 0) - (a.strength || 0))[0];
+      if (here) grantDevice(g, me, { hex: here.node, carrierUid: here.uid, reason: "recovered" });
+    } else if (kind === "destroyDevice") {
+      destroyDevice(g, me, { reason: "denied to everyone" });
+    }
+    bumpTick();
+  }
+
   function onMenuPick(key) {
     setMenuOpen(false);
     if (key === "research") {
@@ -1231,6 +1278,7 @@ export default function Prototype({ config, onNewGame }) {
         vp={you.vp}
         vpGoal={state.vpGoal}
         dominion={state.diplomacy?.recognition || null}
+        rainmaker={state.rainmaker || null}
         actions={you.actions}
         round={state.round}
         onEndTurn={onEndTurn}
@@ -1263,6 +1311,17 @@ export default function Prototype({ config, onNewGame }) {
               </div>
             ))}
           </div>
+        </TitledWindow>
+      )}
+
+      {menuPanel === "rainmaker" && (
+        <TitledWindow key="rainmaker" title="The Rainmaker" icon={ICON.research} onClose={() => setMenuPanel(null)}>
+          <RainmakerPanel
+            rm={state.rainmaker}
+            you={state.youId}
+            standingOnDevice={standingOnLooseDevice}
+            onAct={onRainmakerAct}
+          />
         </TitledWindow>
       )}
 
@@ -1624,6 +1683,7 @@ function EndOverlay({ state, onNewGame }) {
               conquest: "By conquest — nobody left standing.",
               diplomacy: "By treaty — every rival an ally.",
               submission: "By submission — every rival sworn.",
+              rainmaker: "By the Rainmaker — they made it rain, and held it.",
               mixed: "By war and treaty together.",
             }[state.winnerBy] || ""}
           </div>

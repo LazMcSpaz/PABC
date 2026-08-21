@@ -5,6 +5,12 @@
 // shape-agnostic.
 
 import { CONFIG } from "../game/config.js";
+import {
+  STAGE, PHASE, DEVICE, rainmakerState, progressFor, publicStanding,
+  candidateArea, specialistStanding, rainmakerCountdown, siegeIntent,
+  installBlocker, installTurnsNeeded, capitalHexOf, convoyHex, mythIsOpen,
+} from "../game/rainmaker.js";
+import { dispositionOf } from "../game/rainmakerAi.js";
 import { locationActionCapacity } from "../game/turn.js";
 import { reinforcementRoute } from "../game/board.js";
 import { takeAITurn } from "../game/ai.js";
@@ -560,8 +566,20 @@ export function adaptState(state) {
     // HOW they won — conquest, diplomacy, submission, or the mix. The end
     // screen used to show only a VP table, which since VP stopped being the
     // condition told a player nothing about what actually ended the game.
+    // The Rainmaker — the third way to win. Its own top-level slice rather than
+    // a corner of the diplomacy view, because it is its own system: the board
+    // draws the device off this, and so does the HUD's second clock.
+    //
+    // Everything here is what the VIEWER is entitled to know, which is
+    // deliberately less than the engine holds — the site's position is secret
+    // until it is found, progress is public at stage resolution and no finer,
+    // the convoy's hex is given up only where the viewer can see it, and the
+    // backup specialist does not appear at all until one exists.
+    rainmaker: rainmakerView(state, viewer),
     winnerBy: state.winnerId
-      ? ([...(state.log || [])].reverse().find((e) => e.name === "dominion_won")?.payload?.by || null)
+      ? (state.log || []).some((e) => e.name === "rainmaker_won" && e.payload.player === state.winnerId)
+        ? "rainmaker"
+        : ([...(state.log || [])].reverse().find((e) => e.name === "dominion_won")?.payload?.by || null)
       : null,
     // v0.2 §16.5 — in-transit field reinforcements, for board overlay /
     // unit panel ETA display.
@@ -1117,6 +1135,90 @@ function describeDealItem(it, state) {
 }
 
 // The victory checklist — one row per other faction, mirroring
+// What a viewer may know about the Rainmaker.
+//
+// The line is a race with a public scoreboard and private cards, so this is
+// where the split is enforced rather than in the components: a screen that gets
+// handed the site hex will draw it, whatever it meant to do. Coarse and late to
+// non-participants, per design §7 — *someone is researching*, *someone has found
+// it*, *the convoy is moving* — with routes unknown until they are in sight.
+function rainmakerView(state, viewer) {
+  const rm = rainmakerState(state);
+  if (!rm) return null;
+  const pub = publicStanding(state);
+  const mine = viewer ? progressFor(state, viewer) : null;
+  const sp = specialistStanding(state);
+  const intent = siegeIntent(state);
+  const vis = viewer ? state.visibility?.[viewer] : null;
+  const seesDevice = !rm.foundBy ? false
+    : !vis ? true : vis.visible?.has(rm.device.hex) || rm.device.status === DEVICE.INSTALLED;
+
+  return {
+    phase: rm.phase,
+    open: mythIsOpen(state),
+    stages: STAGE,
+    finalStage: STAGE.ACTIVATION,
+    // Secret until somebody walks onto it, then public to everybody at once.
+    siteHex: pub.siteHex,
+    foundBy: rm.foundBy,
+    destroyed: rm.device.status === DEVICE.DESTROYED,
+    destroyedBy: rm.destroyedBy || null,
+    // The device on the board. Its POSITION is only given up where the viewer
+    // can actually see it — the design's promise is that routes stay unknown
+    // until within sight range, and a map object drawn from omniscient state
+    // would break that quietly.
+    device: pub.device
+      ? {
+        status: rm.device.status,
+        owner: rm.device.owner,
+        hex: seesDevice ? rm.device.hex : null,
+        damaged: !!rm.device.damaged,
+        carrier: rm.device.carrierUid || null,
+      }
+      : null,
+    // Everyone's stage, which is common knowledge, and nothing finer.
+    holders: pub.holders.map((h) => ({
+      ...h,
+      you: h.fid === viewer,
+      disposition: h.fid === viewer ? null : dispositionOf(state, h.fid),
+    })),
+    // Your own line, in full.
+    you: mine
+      ? {
+        stage: mine.stage,
+        hunting: mine.hunting,
+        search: Math.round((mine.search || 0) * 100),
+        retained: { ...mine.retained },
+        siteTurns: mine.siteTurns || 0,
+        siteTurnsNeeded: CONFIG.rainmaker.stages.siteTurns,
+        installTurns: mine.installTurns || 0,
+        installTurnsNeeded: installTurnsNeeded(state),
+        installBlocker: installBlocker(state, viewer),
+        // The area you have narrowed it down to — only worth drawing while you
+        // are still looking, and never a list of hexes it is NOT on.
+        candidates: !rm.foundBy && mine.stage >= STAGE.SEARCH
+          ? candidateArea(state, viewer) : null,
+        homeHex: capitalHexOf(state, viewer),
+      }
+      : null,
+    convoyHex: seesDevice ? convoyHex(state) : null,
+    claim: rm.claim ? { by: rm.claim.by, since: rm.claim.since } : null,
+    specialist: sp,
+    hold: rm.activatedBy
+      ? {
+        by: rm.activatedBy,
+        roundsLeft: rainmakerCountdown(state),
+        holdRounds: CONFIG.rainmaker.holdRounds,
+        // Symmetrical on purpose: the holder sees what is coming, and every
+        // attacker sees they are not alone.
+        besiegers: intent?.committed || [],
+        hex: intent?.hex || null,
+      }
+      : null,
+    splinter: rm.splinterId || null,
+  };
+}
+
 // `dominionStanding` EXACTLY, so the screen can never disagree with the
 // condition about who is dealt with.
 //

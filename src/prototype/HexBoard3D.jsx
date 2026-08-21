@@ -31,6 +31,8 @@ import FlatTileLayer from "./FlatTileLayer.jsx";
 import FloatingControlMeter from "./FloatingControlMeter.jsx";
 import RouteNetwork, { useRouteNetwork } from "./RouteNetwork.jsx";
 import BlockadeSprites from "./BlockadeSprites.jsx";
+import RainmakerMark from "./RainmakerMark.jsx";
+import RainmakerSearchArea from "./RainmakerSearchArea.jsx";
 import BoardTokens from "./BoardTokens.jsx";
 import { LOD_FLAT, useBoardLod } from "./boardLod.js";
 import { buildHexGeometry, eastRimHexes, paintOrder, topFacePolygon } from "./hexProjection.js";
@@ -104,6 +106,14 @@ export default function HexBoard3D({
         })
       )}
 
+      {/* The ground the search has narrowed to, under the routes and the units
+          — it is a hint about the terrain, not a thing standing on it. */}
+      <RainmakerSearchArea
+        candidates={state.rainmaker?.you?.candidates}
+        centers={geom.centers}
+        totalHexes={Object.keys(state.hexes).length}
+      />
+
       <RouteNetwork
         net={routeNet}
         rows={state.rows}
@@ -120,6 +130,22 @@ export default function HexBoard3D({
         centers={geom.centers}
         nodes={routeNet.road.nodes}
       />
+
+      {/* The Rainmaker stands on its own hex, above the routes and below the
+          units, so a unit escorting it reads as being in front of it — the
+          same stacking a blockade gets, for the same reason. Its position is
+          only ever what the adapter hands over, which is null wherever the
+          viewer cannot see it. */}
+      {state.rainmaker?.device?.hex && geom.centers[state.rainmaker.device.hex] && (
+        <div style={{ position: "absolute", inset: 0, zIndex: 8150, pointerEvents: "none" }}>
+          <RainmakerMark
+            x={geom.centers[state.rainmaker.device.hex].x}
+            y={geom.centers[state.rainmaker.device.hex].y}
+            device={state.rainmaker.device}
+            running={state.rainmaker.hold?.by === state.rainmaker.device.owner}
+          />
+        </div>
+      )}
 
       <BoardTokens
         order={order}

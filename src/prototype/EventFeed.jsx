@@ -422,6 +422,111 @@ function formatEvent(ev, engineState) {
     case "faction_eliminated":
       return { color: theme.accent2, text: `${who(p.player)} has been eliminated` };
 
+    // --- the Rainmaker, the third way to win ---------------------------
+    // Coarse and late to everyone who is not in it, exactly as the design
+    // asks: *someone is researching*, *someone has found it*, *the convoy is
+    // moving*. What a rival is told is never more than what they could
+    // reasonably know.
+    case "rainmaker_myth":
+      return {
+        color: theme.accent2,
+        text: "Word from the deep waste: something out there made rain, once",
+      };
+    case "rainmaker_joined":
+      if (p.player !== you) return null;
+      return { color: theme.dim, text: "You put people on the story" };
+    case "rainmaker_advanced":
+      if (p.player !== you) return null;
+      return { color: theme.good, text: `The search moves on — stage ${p.to} of 8` };
+    case "rainmaker_found":
+      return {
+        color: theme.accent,
+        text: `${who(p.player)} has found it at ${place(p.hex)} — everyone knows where it is now`,
+      };
+    case "rainmaker_exclusive":
+      return {
+        color: theme.accent,
+        text: `${who(p.holder)} has reached the machine. There is only one — nobody else is looking for it now, they are coming for it`,
+      };
+    case "rainmaker_extracted":
+      return {
+        color: theme.accent2,
+        text: p.damaged
+          ? `${who(p.player)} has torn it loose in a hurry — it is moving, and it is damaged`
+          : `${who(p.player)} has it out of the ground and on the road`,
+      };
+    case "rainmaker_hauled":
+      if (p.player !== you) return null;
+      return { color: theme.dim, text: `The convoy makes ${place(p.hex)} — one hex, as it always is` };
+    case "rainmaker_claimed":
+      return { color: theme.accent2, text: `${who(p.player)} has the convoy engaged — everyone else waits their turn` };
+    case "rainmaker_claim_released":
+      return { color: theme.dim, text: `${who(p.player)} is off the convoy — the road is open again` };
+    case "rainmaker_loose":
+      return {
+        color: theme.accent,
+        text: `The machine sits at ${place(p.hex)} with nobody holding it — first there takes it`,
+      };
+    case "rainmaker_taken":
+      return {
+        color: theme.accent,
+        text: p.from
+          ? `${who(p.player)} has taken the machine off ${who(p.from)} — and starts the haul from nothing`
+          : `${who(p.player)} has the machine`,
+      };
+    case "rainmaker_delivered":
+      return { color: theme.accent2, text: `${who(p.player)} has the machine home at ${place(p.hex)}` };
+    case "rainmaker_installing":
+      if (p.player !== you) return null;
+      return { color: theme.dim, text: `Fitting the machine — ${p.turns} of ${p.needed}` };
+    case "rainmaker_specialist_secured":
+      return {
+        color: theme.accent2,
+        text: p.from
+          ? `${who(p.player)} has ${p.how === "taken" ? "taken" : "bought"} the engineer out from under ${who(p.from)}`
+          : `${who(p.player)} has the only engineer who can finish it`,
+      };
+    case "rainmaker_specialist_lost":
+      return { color: theme.accent, text: "The engineer is dead. There is word of one other." };
+    case "rainmaker_activated":
+      return {
+        color: theme.accent,
+        text: `${who(p.player)} has switched it on. It is raining over ${place(p.hex)} — ${p.holdRounds} rounds and the Ashlands are theirs`,
+      };
+    case "rainmaker_siege":
+      return {
+        color: theme.accent,
+        text: `Everyone still standing is turning toward ${who(p.holder)}`,
+      };
+    case "splinter_rose":
+      return {
+        color: theme.accent,
+        text: `Nobody was left to stop them, so their own people did — a splinter has taken the field against ${who(p.against)}`,
+      };
+    case "rainmaker_hold_broken":
+      return { color: theme.good, text: `${who(p.player)} has lost the machine — the rain stops` };
+    case "rainmaker_destroyed":
+      return {
+        color: theme.accent,
+        text: p.player
+          ? `${who(p.player)} has destroyed the machine. Nobody wins it now — not them, not anyone`
+          : "The machine is destroyed. Nobody wins it now",
+      };
+    case "rainmaker_won":
+      return { color: theme.accent, text: `${who(p.player)} holds the rain. The Ashlands are theirs` };
+    case "rainmaker_site_worked":
+      if (p.player !== you) return null;
+      return { color: theme.dim, text: `Working the site — ${p.turns} turn${p.turns === 1 ? "" : "s"} in` };
+    case "rainmaker_siege_force":
+      return { color: theme.accent, text: `${p.units} band${p.units === 1 ? "" : "s"} have mustered near ${place(p.hex)}` };
+    // Bookkeeping, not news. A board too small to seat the site properly is a
+    // note for whoever reads the log back, and an AI changing its mind about
+    // the line is not something the player is told directly — they read it off
+    // what that faction does next.
+    case "rainmaker_site_cramped":
+    case "rainmaker_disposition":
+      return null;
+
     // --- structures, supply, chips -------------------------------------
     case "post_built":
       return { color: factionColor(p.owner), text: `${who(p.owner)} built a listening post` };
