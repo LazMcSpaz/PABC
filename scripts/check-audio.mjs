@@ -47,6 +47,7 @@ const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } })
 
 const errors = [];
 const failedAudio = [];
+const musicRequests = [];
 const page = await ctx.newPage();
 page.on("pageerror", (e) => errors.push(e.message));
 page.on("console", (m) => {
@@ -54,6 +55,16 @@ page.on("console", (m) => {
 });
 page.on("response", (r) => {
   if (/\/assets\/audio\//.test(r.url()) && !r.ok()) failedAudio.push(`${r.status()} ${r.url()}`);
+});
+// An aborted request never produces a response, so the handler above cannot
+// see one. That is how a duplicate fetch of the theme — one of the pair left
+// to be cancelled by the browser — sat in the console unnoticed.
+page.on("requestfailed", (r) => {
+  if (!/\/assets\/audio\//.test(r.url())) return;
+  failedAudio.push(`${r.failure()?.errorText || "failed"} ${r.url().split("/").pop()}`);
+});
+page.on("request", (r) => {
+  if (/\/assets\/audio\/music\//.test(r.url())) musicRequests.push(r.url());
 });
 
 console.log(`\naudio checks against ${BASE}\n`);
@@ -67,6 +78,14 @@ check("menu scene plays", s.state === "playing", `state=${s.state}`);
 check("title song is the wtv4 cut", s.trackId === "main-theme", `trackId=${s.trackId}`);
 check("scene is menu", s.scene === "menu", `scene=${s.scene}`);
 check("serving the right file", /main-theme\.mp3$/.test(await audioSrc(page)), await audioSrc(page));
+
+// The theme is a 1.6 MB file and the menu plays exactly one cut. Two requests
+// for it here is the shape the abort came in — the preloader warming the very
+// track already streaming — so assert the shape, not just the symptom. Checked
+// before the playlist advances, since the theme legitimately recurs in the
+// in-game rotation later.
+const themeFetches = musicRequests.filter((u) => /main-theme\.mp3/.test(u)).length;
+check("the menu fetches its theme once", themeFetches <= 1, `${themeFetches} request(s)`);
 
 // ── 1b. sound is actually coming OUT ───────────────────────────────────────
 // Not "the player says playing" and not "the gain node reads 0.55" — both of
@@ -119,6 +138,11 @@ const fullPeak = await busPeak("music", 1400);
 check("the level actually scales the signal", fullPeak > musicPeak * 1.4, `0.55 → ${musicPeak.toFixed(3)}, 1.0 → ${fullPeak.toFixed(3)}`);
 await page.evaluate(() => window.__ashlandAudio.music.setVolume(0.55));
 await page.waitForTimeout(250);
+
+// Everything above is steady state: the page loaded and the menu played its
+// theme. Any request failure up to here is a real defect, not the cost of a
+// deliberate track change.
+const idleFailures = failedAudio.length;
 
 // ── 2. ten seconds of quiet between songs ──────────────────────────────────
 await endTrack(page);
@@ -331,29 +355,65 @@ await page.waitForTimeout(400);
 // standing on a location somebody else holds, on their own turn.
 await clearFired();
 const held = () => page.evaluate(() => window.__ashlandAudio.sfx._sustained.has("contestRoll"));
-const contestHex = await page.evaluate(() => {
+// Stage against candidate locations until one actually offers the button.
+// Betting on the first location the seed happens to give back made this check
+// fail about one run in three — the board is generated, so which locations the
+// player holds, and what else is standing on them, differs every time.
+const stageContest = (i) => page.evaluate((idx) => {
   const g = window.__ashland;
   const me = g.turnOrder[g.activeIndex];
   const other = g.turnOrder.find((f) => f !== me);
-  // Take a location the player already holds and hand it to someone else,
-  // rather than picking one they don't hold: a location they never held is
-  // fogged, and a fogged hex opens no window at all.
-  const loc = Object.values(g.locations).find((l) => l.controller === me);
+  // Locations the player already holds: one they never held is fogged, and a
+  // fogged hex opens no window at all. Control has two representations, and at
+  // the start of a game only the influence sections are populated — filtering
+  // on `controller` alone found nothing on roughly one seed in eight.
+  const mine = (l) =>
+    l.controller === me ||
+    (Array.isArray(l.sections) && l.sections.length && l.sections.every((x) => x === me));
+  const held = Object.values(g.locations).filter(mine);
   const u = Object.values(g.units).find((x) => x.owner === me);
-  if (!loc || !u) return null;
-  // The window derives "who holds this" from the influence sections, not
-  // from loc.controller, so both have to move.
+  // Last resort: wherever the player's unit already stands. Its own vision
+  // keeps that hex unfogged whoever holds it.
+  if (!held.length && u) {
+    const atUnit = Object.values(g.locations).find((l) => l.hexId === u.node);
+    if (atUnit) held.push(atUnit);
+  }
+  const loc = held[idx];
+  if (!loc || !u) {
+    return idx === 0
+      ? { error: `${held.length} candidate location(s), unit=${u ? u.uid : "none"}` }
+      : null;
+  }
+  // The window derives "who holds this" from the influence sections, not from
+  // loc.controller, so both have to move.
   loc.controller = other;
   if (Array.isArray(loc.sections)) loc.sections = loc.sections.map(() => other);
+  // Anything else standing here would take the hex's unit slot and hide the
+  // player's attacker from the view-model.
+  for (const x of Object.values(g.units)) if (x !== u && x.node === loc.hexId) x.node = null;
   u.node = loc.hexId;
   g.players[me].actions.remaining = 9;
   window.__ashlandBump?.();
-  return loc.hexId;
-});
+  return { hex: loc.hexId, candidates: held.length };
+}, i);
 
-if (contestHex && (await clickHex(contestHex))) {
-  const contestBtn = page.locator("button").filter({ hasText: /^Contest$/ }).first();
-  if (await contestBtn.count()) {
+let contestHex = null;
+let contestBtn = null;
+let stageError = "";
+for (let i = 0; i < 4; i++) {
+  const staged = await stageContest(i);
+  if (!staged) break;
+  if (staged.error) { stageError = staged.error; break; }
+  if (!(await clickHex(staged.hex))) continue;
+  const btn = page.locator("button").filter({ hasText: /^Contest$/ }).first();
+  if (await btn.count()) { contestHex = staged.hex; contestBtn = btn; break; }
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(200);
+  if (i + 1 >= staged.candidates) break;
+}
+
+if (contestHex) {
+  {
     check("nothing sounding before the roll", !(await held()));
     await contestBtn.click();
     // Attacking someone you are not at war with asks first.
@@ -376,11 +436,9 @@ if (contestHex && (await clickHex(contestHex))) {
     const stillWanted = await page.evaluate(() =>
       [...window.__ashlandAudio.sfx._heldWanted].includes("contestRoll"));
     check("closing the roll releases it", !stillWanted && !(await held()));
-  } else {
-    check("a conflict roll sounds the battle stinger", false, "no Contest button on the staged location");
   }
 } else {
-  check("a conflict roll sounds the battle stinger", false, "could not stage a contest");
+  check("a conflict roll sounds the battle stinger", false, `could not stage a contest — ${stageError || "no held location offered the button"}`);
 }
 await page.keyboard.press("Escape");
 await page.waitForTimeout(300);
@@ -424,7 +482,20 @@ await page.waitForTimeout(700);
 check("a herald banner appears", heraldStaged && (await page.getByText(/declares war on/i).count()) > 0);
 check("the diplomacy alert fires with it", (await fired()).includes("diplomacyAlert"), (await fired()).join(","));
 
-check("no audio asset 404s", failedAudio.length === 0, failedAudio.join(", "));
+// Two different questions, because they have two different answers.
+//
+// Nothing may fail while the menu just sits there playing its theme — that
+// window is steady state, and the duplicate-fetch bug lived exactly there.
+// `idleFailures` is snapshotted before the suite starts fast-forwarding.
+check("nothing fails while the menu just plays", idleFailures === 0, failedAudio.slice(0, 2).join(", "));
+
+// Across the whole run, aborts are allowed but nothing else is: assigning a
+// new src to a media element cancels whatever it was fetching, so every
+// deliberate skip aborts the outgoing track's download by design. A 404 or a
+// real network error is never by design.
+const hardFailures = failedAudio.filter((f) => !/ERR_ABORTED/.test(f));
+check("no audio asset 404s or network errors", hardFailures.length === 0, hardFailures.join(", "));
+
 check("no page errors", errors.length === 0, errors.slice(0, 2).join(" | "));
 
 // ── 8. the autoplay-blocked path, with the real policy on ──────────────────
