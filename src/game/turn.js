@@ -11,7 +11,7 @@ import { activePlayerId } from "./targeting.js";
 import { sweepDeferred } from "./deferred.js";
 import { evaluateTriggers } from "./triggers.js";
 import { evaluateConditionalBeats } from "./quests.js";
-import { tickClaim } from "./rainmaker.js";
+import { tickClaim, tickStages, tickSearch, openMyth, mythIsOpen } from "./rainmaker.js";
 import {
   applyOutputAndBuilds, chargeChipUpkeep, chargeUnitUpkeep, enforceLoyaltySlotCap,
 } from "./economy.js";
@@ -412,6 +412,12 @@ function runRoundEnd(state) {
   sweepReinforcements(state);
   evaluateTriggers(state);
   evaluateConditionalBeats(state);
+  // The Rainmaker's own round pulse. The myth surfaces on its own schedule
+  // whether or not anybody is looking for it — an ignored line is not a dormant
+  // one, and it still has to reach the site and force the public announcement.
+  if (!mythIsOpen(state) && state.round >= CONFIG.rainmaker.myth.earliestRound) openMyth(state);
+  tickStages(state);
+  tickSearch(state);
   tickClaim(state);
   expirePlacementMarkers(state);
   decayWorldCounters(state);

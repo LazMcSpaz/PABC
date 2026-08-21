@@ -33,6 +33,10 @@ export function recomputeStats(state) {
     }
     // §17.5 Logistics A1 (Forced March): +1 more Movement — ADDS to the entry.
     if (hasTechNode(state, unit.owner, "log-a1")) movement += 1;
+    // A permanent per-unit movement grant, currently the Rainmaker's salvaged
+    // vehicle (docs/rainmaker-questline-design.md §3). Its own field rather
+    // than a chip, because it is not a chip and takes no slot.
+    movement += unit.movementBonus || 0;
 
     unit.strength = Math.max(0, strength);
     movement = Math.max(0, movement);

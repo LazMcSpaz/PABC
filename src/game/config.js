@@ -383,12 +383,29 @@ export const CONFIG = {
       // finds it automatically, player included. The quest can never stall the
       // game, and a player who searched hardest must be able to win the ceiling.
       ceilingTurns: 6,
-      // Per-turn background accrual for an AI, scaled by its disposition. Below
-      // the rate a player achieves by walking, deliberately.
+      // ONE system, two resolutions. A player searches by walking: a base rate
+      // for having the map open at all, plus a share per unit actually inside
+      // the candidate area. An AI accrues a flat background counter and does no
+      // pathing whatsoever — deliberately below what a player achieves by
+      // looking, so the search is worth doing rather than worth waiting out.
+      baseRatePerTurn: 0.05,
+      perUnitRate: 0.08,
       aiRatePerTurn: 0.1,
+      // How wide the revealed candidate area is at each tier of progress, as a
+      // hex radius around the true site. The area only ever shrinks and always
+      // CONTAINS the site — so it can never rule out the answer, and a hex the
+      // player has stood on without finding anything is genuinely not it.
+      // `null` is the whole landmass.
+      narrowing: [
+        { at: 0, radius: null },
+        { at: 0.25, radius: 6 },
+        { at: 0.5, radius: 4 },
+        { at: 0.75, radius: 2 },
+      ],
     },
     stages: {
       researchTurns: 3,   // Stage 1, building the lab
+      regionTurns: 2,     // Stage 2, the deliberately anticlimactic interval
       siteTurns: 3,       // Stage 4, holding the hex
       installTurns: 4,    // Stage 6, fitting it in the capital
       // What the fast partial extraction at Stage 4 costs you later.

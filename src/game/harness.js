@@ -67,7 +67,9 @@ import {
   joinRainmaker, advanceStage, grantDevice, looseDevice, destroyDevice,
   onHolderEliminated, looseDeviceAt, deviceCarrier, isHaulingDevice, publicStanding,
   capitalHexOf, convoyHex, convoyLockedFor, claimConvoy, releaseClaim, tickClaim,
-  deviceMovedThisRound, reconcileCarrier,
+  deviceMovedThisRound, reconcileCarrier, openMyth, mythIsOpen, labHexOf,
+  candidateArea, searchRate, findSite, onUnitEnteredHex, tickSearch, tickStages,
+  rainmakerSightBonus,
 } from "./rainmaker.js";
 import { enforceLoyaltySlotCap, chargeChipUpkeep, slotCapacity, effectiveBuildCost, buildableChips, applyOutputAndBuilds, locationOutput, unitUpkeepFor, chargeUnitUpkeep } from "./economy.js";
 
@@ -7223,6 +7225,247 @@ line("\n  [Phase 32] the Rainmaker — the haul and the claim lock");
     mine.node = unit.node;
     const res2 = validateContest(g, { pid: x, params: { unit: mine.uid, target: unit.uid } });
     check("…while the claimant's own attack goes through", res2.ok === true);
+  }
+}
+
+
+// =====================================================================
+// Phase 33 — The Rainmaker, part 3: the parallel phase. Stages 0-3 run
+// side by side, nobody blocks anybody, and every stage pays something
+// kept whatever happens next (design §3). The search is one system with
+// two resolutions and one hard fairness guarantee (notes §6).
+// =====================================================================
+line("\n  [Phase 33] the Rainmaker — the parallel phase and the search");
+{
+  // Give `fid` a lab, the way Stage 1 asks for one.
+  const giveLab = (g, fid) => {
+    const loc = Object.values(g.locations).find((l) => l.controller === fid);
+    const uid = `lab-${fid}`;
+    g.chips[uid] = { uid, chipId: "labs", disabled: false };
+    loc.chips.push(uid);
+    return loc.hexId;
+  };
+
+  // --- the myth surfaces on its own schedule ---------------------------
+  {
+    const g = createGame({ seed, mapSize: "large" });
+    check("the myth is not open at the start of a game", mythIsOpen(g) === false);
+    g.round = CONFIG.rainmaker.myth.earliestRound;
+    openMyth(g);
+    check("it opens on its own once the game is old enough",
+      mythIsOpen(g) && g.log.some((e) => e.name === "rainmaker_myth"));
+    check("…and opening it twice does not re-announce it", openMyth(g) === false);
+  }
+
+  // --- stages 0-2 are a build task on a timer --------------------------
+  {
+    const g = createGame({ seed, mapSize: "large" });
+    const me = g.turnOrder[0];
+    joinRainmaker(g, me);
+    tickStages(g);
+    check("committing to the myth begins the research",
+      progressFor(g, me).stage === STAGE.RESEARCH);
+
+    // No lab, no research — however long you wait.
+    g.round += 20;
+    tickStages(g);
+    check("without a lab the research never completes, however long it takes",
+      progressFor(g, me).stage === STAGE.RESEARCH);
+
+    labHexOf(g, me) || giveLab(g, me);
+    check("a lab is found wherever the faction holds one", !!labHexOf(g, me));
+    progressFor(g, me).stageSince = g.round;
+    g.round += CONFIG.rainmaker.stages.researchTurns;
+    tickStages(g);
+    check("with a lab and the turns spent, the research resolves to a region",
+      progressFor(g, me).stage === STAGE.REGION);
+    check("…and the lab is kept, whatever happens to the rest of the line",
+      progressFor(g, me).retained.lab === true);
+
+    g.round += CONFIG.rainmaker.stages.regionTurns;
+    tickStages(g);
+    check("the region interval opens the search", progressFor(g, me).stage === STAGE.SEARCH);
+    check("…and pays the survey data, permanently",
+      progressFor(g, me).retained.sight === true
+      && rainmakerSightBonus(g, me) === CONFIG.rainmaker.retained.sightBonus);
+    const unit = Object.values(g.units).find((u) => u.owner === me);
+    check("…which every unit of that faction actually sees by",
+      unitVision(g, unit) > unitVision(g, { ...unit, owner: g.turnOrder[1] }));
+  }
+
+  // Stages run in parallel: three factions, three different stages, nobody
+  // blocking anybody.
+  {
+    const g = createGame({ seed, mapSize: "large" });
+    const [a, b, c] = g.turnOrder;
+    for (const f of [a, b, c]) { joinRainmaker(g, f); giveLab(g, f); }
+    tickStages(g);
+    g.round += CONFIG.rainmaker.stages.researchTurns;
+    tickStages(g);
+    check("everyone can research at once — nobody is locked out by anybody",
+      [a, b, c].every((f) => progressFor(g, f).stage === STAGE.REGION));
+    check("…and every one of them keeps their own lab",
+      [a, b, c].every((f) => progressFor(g, f).retained.lab === true));
+  }
+
+  // --- the fairness guarantee (notes §6) -------------------------------
+  // The rule most likely to be quietly violated: entering the hex finds it,
+  // that turn, always. This walks a unit on during the FIRST turn of the
+  // search, before any narrowing has happened at all.
+  {
+    const g = createGame({ seed, mapSize: "large" });
+    startTurn(g);
+    openMyth(g);
+    const me = activePlayerId(g);
+    joinRainmaker(g, me);
+    progressFor(g, me).stage = STAGE.SEARCH;
+    progressFor(g, me).search = 0;
+    const rm = rainmakerState(g);
+    const unit = Object.values(g.units).find((u) => u.owner === me);
+    const nb = (g.board.adjacency[rm.siteHex] || [])[0];
+    unit.node = nb;
+    unit.moveRemaining = unit.movement;
+    for (const u of Object.values(g.units)) {
+      if (u.uid !== unit.uid && u.node === rm.siteHex) u.node = nb;
+    }
+    const res = performAction(g, "move", { unit: unit.uid, to: rm.siteHex });
+    check("walking onto the site finds it, on the first turn of the search",
+      res.ok && rainmakerState(g).foundBy === me);
+    check("…and the site goes public to everybody the moment it is found",
+      publicStanding(g).siteHex === rm.siteHex);
+    check("…and the finder hauls a vehicle home for its trouble",
+      progressFor(g, me).retained.vehicle === true);
+  }
+
+  // A faction that never engaged the line still finds it by walking into it.
+  // There is no hidden gate in front of this rule of any kind.
+  {
+    const g = createGame({ seed, mapSize: "large" });
+    startTurn(g);
+    const me = activePlayerId(g);
+    const rm = rainmakerState(g);
+    check("before the myth surfaces there is nothing to find, so walking over it does nothing",
+      onUnitEnteredHex(g, { owner: me, uid: "u" }, rm.siteHex) === false
+      && rainmakerState(g).foundBy === null);
+    openMyth(g);
+    check("…and the wanderer had not engaged the line at all", progressFor(g, me) === null);
+    onUnitEnteredHex(g, { owner: me, uid: "u" }, rm.siteHex);
+    check("a faction with no interest in the myth still finds it by walking in",
+      rainmakerState(g).foundBy === me && progressFor(g, me).stage === STAGE.SEARCH);
+    check("…and gets no lab out of it — Stage 6 will still ask for one",
+      progressFor(g, me).retained.lab === false);
+  }
+
+  // --- narrowing ------------------------------------------------------
+  {
+    const g = createGame({ seed, mapSize: "large" });
+    const me = g.turnOrder[0];
+    joinRainmaker(g, me);
+    const rm = rainmakerState(g);
+    const p = progressFor(g, me);
+    p.search = 0;
+    const whole = candidateArea(g, me).length;
+    check("with no progress the candidate area is the whole landmass",
+      whole === Object.keys(g.board.hexes).length);
+    const sizes = [];
+    for (const at of [0.25, 0.5, 0.75]) {
+      p.search = at;
+      sizes.push(candidateArea(g, me).length);
+    }
+    check("progress shrinks the area, tier by tier",
+      sizes[0] < whole && sizes[1] < sizes[0] && sizes[2] < sizes[1]);
+    check("…and the true hex is inside it at every tier, so the answer is never ruled out",
+      [0, 0.25, 0.5, 0.75, 1].every((at) => {
+        p.search = at;
+        return candidateArea(g, me).includes(rm.siteHex);
+      }));
+  }
+
+  // --- two resolutions of one counter ----------------------------------
+  {
+    const g = createGame({ seed, mapSize: "large" });
+    const [human, ai] = g.turnOrder;
+    g.humanFactionId = human;
+    g.players[human].isAI = false;
+    g.players[ai].isAI = true;
+    for (const f of [human, ai]) { joinRainmaker(g, f); progressFor(g, f).stage = STAGE.SEARCH; }
+    // Put the human's units where it is actually looking.
+    const area = candidateArea(g, human);
+    let moved = 0;
+    for (const u of Object.values(g.units)) {
+      if (u.owner === human) { u.node = area[moved % area.length]; moved++; }
+    }
+    check("a player searching with units in the area outpaces a background counter",
+      searchRate(g, human) > searchRate(g, ai));
+    check("…and the AI's rate is a flat counter that ignores where its units are",
+      searchRate(g, ai) === CONFIG.rainmaker.search.aiRatePerTurn);
+  }
+
+  // --- the ceiling, which applies to everybody -------------------------
+  {
+    const g = createGame({ seed, mapSize: "large" });
+    const [a, b] = g.turnOrder;
+    for (const f of [a, b]) { joinRainmaker(g, f); progressFor(g, f).stage = STAGE.SEARCH; }
+    const rm = rainmakerState(g);
+    rm.searchOpenedRound = g.round;
+    progressFor(g, a).search = 0.9;
+    progressFor(g, b).search = 0.2;
+    tickSearch(g);
+    check("before the ceiling, searching only accumulates", rainmakerState(g).foundBy === null);
+    g.round += CONFIG.rainmaker.search.ceilingTurns;
+    tickSearch(g);
+    check("the ceiling hands it to whoever searched hardest, so nothing stalls",
+      rainmakerState(g).foundBy === a);
+  }
+
+  // …including a human. A player who searched most must be able to win the
+  // ceiling, not merely lose it more slowly than an AI.
+  {
+    const g = createGame({ seed, mapSize: "large" });
+    const [human, ai] = g.turnOrder;
+    g.humanFactionId = human;
+    g.players[human].isAI = false;
+    g.players[ai].isAI = true;
+    for (const f of [human, ai]) { joinRainmaker(g, f); progressFor(g, f).stage = STAGE.SEARCH; }
+    rainmakerState(g).searchOpenedRound = g.round;
+    progressFor(g, human).search = 0.8;
+    progressFor(g, ai).search = 0.3;
+    g.round += CONFIG.rainmaker.search.ceilingTurns;
+    tickSearch(g);
+    check("a player who searched hardest wins the ceiling too",
+      rainmakerState(g).foundBy === human);
+  }
+
+  // --- found benefits deplete (design §3) ------------------------------
+  {
+    const g = createGame({ seed, mapSize: "large" });
+    const [a, b, c] = g.turnOrder;
+    for (const f of [a, b, c]) joinRainmaker(g, f);
+    findSite(g, a, "test");
+    rainmakerState(g).foundBy = null; // three separate finds, for the ledger
+    findSite(g, b, "test");
+    rainmakerState(g).foundBy = null;
+    findSite(g, c, "test");
+    check("the first two finders haul a vehicle home",
+      progressFor(g, a).retained.vehicle === true && progressFor(g, b).retained.vehicle === true);
+    check("…and the third finds a site already picked over",
+      progressFor(g, c).retained.vehicle === false);
+  }
+
+  // The vehicle is permanent, so it outlives the truck it was handed to.
+  {
+    const g = createGame({ seed, mapSize: "large" });
+    const me = g.turnOrder[0];
+    joinRainmaker(g, me);
+    progressFor(g, me).retained.vehicle = true;
+    tickStages(g);
+    const first = progressFor(g, me).vehicleUnit;
+    check("the vehicle rides with a stack", !!first && g.units[first].movementBonus === 1);
+    delete g.units[first];
+    tickStages(g);
+    const heir = progressFor(g, me).vehicleUnit;
+    check("…and moves to another when that one is lost",
+      !!heir && heir !== first && g.units[heir].movementBonus === 1);
   }
 }
 

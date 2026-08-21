@@ -160,6 +160,7 @@ function blankProgress(fid, round) {
   return {
     fid,
     stage: STAGE.MYTH,
+    stageSince: round,
     joinedRound: round,
     // Stage 3 accumulation. The player's is spent walking; the AI's accrues.
     search: 0,
@@ -202,6 +203,7 @@ export function advanceStage(state, fid, to) {
   if (to <= p.stage) return false;
   const from = p.stage;
   p.stage = to;
+  p.stageSince = state.round;
   emit(state, "rainmaker_advanced", { player: fid, from, to });
   if (to >= STAGE.SITE) openExclusivePhase(state, fid);
   return true;
@@ -339,6 +341,203 @@ export function onHolderEliminated(state, fid) {
   const rm = rainmakerState(state);
   if (!rm || rm.device.owner !== fid) return false;
   return looseDevice(state, { reason: "holder eliminated" });
+}
+
+// --- the parallel phase (stages 0-3) ---------------------------------
+
+// Stage 0 is a hook, not a gate. It is offered to everybody at once, declining
+// costs nothing but the turns, and there is no lockout flag anywhere — a
+// faction may enter the line at any later point, from the top (notes §10).
+export function openMyth(state) {
+  const rm = rainmakerState(state);
+  if (!rm || rm.mythOpened || rm.phase === PHASE.ENDED) return false;
+  rm.mythOpened = state.round;
+  emit(state, "rainmaker_myth", { round: state.round });
+  return true;
+}
+
+export function mythIsOpen(state) {
+  return !!rainmakerState(state)?.mythOpened;
+}
+
+// A lab in any settlement this faction holds. Stage 1 builds one; Stage 6
+// demands one in the capital specifically, which is a different question asked
+// of the same building.
+export function labHexOf(state, fid, { capitalOnly = false } = {}) {
+  for (const loc of Object.values(state.locations || {})) {
+    if (loc.controller !== fid) continue;
+    if (capitalOnly && !(loc.chips || []).some((c) => state.chips?.[c]?.chipId === "capital")) continue;
+    const lab = (loc.chips || []).some((c) => {
+      const id = state.chips?.[c]?.chipId;
+      return (id === "labs" || id === "advanced-lab") && !state.chips[c]?.disabled;
+    });
+    if (lab) return loc.hexId;
+  }
+  return null;
+}
+
+// The parallel phase's own pulse. Stages 0-2 are a build task on a timer, so
+// they advance here rather than waiting for anybody to click anything: the myth
+// is a hook the faction has already taken by joining, the research is the lab,
+// and the region is an interval. Each pays its retained benefit on the way out,
+// which is what makes the line worth starting for a faction with no intention
+// of finishing it.
+export function tickStages(state) {
+  const rm = rainmakerState(state);
+  if (!rm || rm.phase === PHASE.ENDED) return;
+  const cfg = R().stages;
+  for (const p of Object.values(rm.progress)) {
+    if (p.hunting) continue;
+    const elapsed = state.round - (p.stageSince ?? p.joinedRound ?? state.round);
+    if (p.stage === STAGE.MYTH) {
+      // Committing IS the hook — a faction that joined has begun.
+      advanceStage(state, p.fid, STAGE.RESEARCH);
+    } else if (p.stage === STAGE.RESEARCH) {
+      // Two paths, one requirement: a lab you built, or a lab you took off
+      // somebody who built one. Both leave you holding a lab.
+      if (labHexOf(state, p.fid) && elapsed >= cfg.researchTurns) {
+        p.retained.lab = true;
+        advanceStage(state, p.fid, STAGE.REGION);
+      }
+    } else if (p.stage === STAGE.REGION) {
+      if (elapsed >= cfg.regionTurns) {
+        p.retained.sight = true;
+        advanceStage(state, p.fid, STAGE.SEARCH);
+      }
+    }
+  }
+  // The salvaged vehicle rides with one stack and outlives the unit it was
+  // handed to — a benefit described as permanent should not evaporate because
+  // the truck that carried it lost a fight.
+  for (const p of Object.values(rm.progress)) {
+    if (!p.retained.vehicle) continue;
+    if (p.vehicleUnit && state.units?.[p.vehicleUnit]) continue;
+    const heir = Object.values(state.units || {}).find((u) => u.owner === p.fid);
+    if (!heir) { p.vehicleUnit = null; continue; }
+    p.vehicleUnit = heir.uid;
+    heir.movementBonus = (heir.movementBonus || 0) + R().retained.moveBonus;
+  }
+}
+
+// --- the search (stage 3), one system with two resolutions ------------
+
+// Which tier of narrowing this much progress has bought.
+function narrowingRadius(progress) {
+  let radius = null;
+  for (const tier of R().search.narrowing) {
+    if (progress >= tier.at) radius = tier.radius;
+  }
+  return radius;
+}
+
+// The area a faction has narrowed the site down to. Centred on the TRUE hex and
+// only ever shrinking, which is what makes the two fairness rules hold at once:
+// the answer is always inside it, so nothing can rule the answer out; and a hex
+// the player has stood on without finding anything is genuinely not the site, so
+// excluding it later is not a lie. The player is never told "not here" about
+// anywhere — only that the area is smaller than it was.
+export function candidateArea(state, fid) {
+  const rm = rainmakerState(state);
+  if (!rm) return [];
+  const p = rm.progress[fid];
+  const radius = narrowingRadius(p?.search ?? 0);
+  if (radius == null) return Object.keys(state.board.hexes);
+  const d = bfsDistances(state.board.adjacency, rm.siteHex);
+  return Object.keys(state.board.hexes).filter((h) => (d[h] ?? Infinity) <= radius);
+}
+
+// How fast `fid` closes on it this round.
+//
+// A player searches by WALKING — a base rate for having the map open, plus a
+// share for every unit actually inside the candidate area. An AI accrues a flat
+// background counter and paths nothing at all, at a rate deliberately below what
+// a player gets for looking (design §5.3). Same counter, same ceiling, two
+// resolutions.
+export function searchRate(state, fid) {
+  const cfg = R().search;
+  if (state.players?.[fid]?.isAI) return cfg.aiRatePerTurn;
+  const area = new Set(candidateArea(state, fid));
+  let inArea = 0;
+  for (const u of Object.values(state.units || {})) {
+    if (u.owner === fid && area.has(u.node)) inArea++;
+  }
+  return cfg.baseRatePerTurn + inArea * cfg.perUnitRate;
+}
+
+// Somebody found it. The site goes PUBLIC immediately — the finder gets a free
+// step at the site and roughly two turns of uncontested access, but nobody ever
+// loses to a discovery they could not have seen coming (design §5.3).
+export function findSite(state, fid, how) {
+  const rm = rainmakerState(state);
+  if (!rm || rm.foundBy || rm.phase === PHASE.ENDED) return false;
+  const p = rm.progress[fid] || joinRainmaker(state, fid);
+  if (!p) return false;
+  rm.foundBy = fid;
+  rm.foundRound = state.round;
+  p.search = 1;
+  // The salvaged vehicle is a FOUND benefit, so it depletes: the first two
+  // finders haul something home and the third finds a picked-over site.
+  if (rm.vehiclesFound < R().retained.vehicleFinders) {
+    rm.vehiclesFound += 1;
+    p.retained.vehicle = true;
+  }
+  if (p.stage < STAGE.SEARCH) p.stage = STAGE.SEARCH;
+  emit(state, "rainmaker_found", { player: fid, hex: rm.siteHex, how, round: state.round });
+  return true;
+}
+
+// A unit walked onto a hex. THE fairness guarantee, and the rule the notes say
+// is most likely to be quietly violated: if the unit enters the site, the site
+// is found, that turn, always.
+//
+// No gate of any kind sits in front of this — not fog, not a unit type, not an
+// action, not a search-progress threshold, not whether the narrowing has reached
+// that region, and not whether the faction had engaged the line at all. A
+// faction that stumbles onto it while doing something else joins the line by
+// walking into it, which costs them nothing they had and gives them nothing they
+// have not earned: they still have no lab, and Stage 6 will ask for one.
+export function onUnitEnteredHex(state, unit, hex) {
+  const rm = rainmakerState(state);
+  if (!rm || rm.foundBy || rm.phase === PHASE.ENDED) return false;
+  if (hex !== rm.siteHex) return false;
+  // The ONE thing in front of the guarantee, and it is not a gate on the
+  // faction: before the myth surfaces there is nothing to find. Measured — with
+  // no such rule, 5 of 12 real games had the site walked over by an ordinary
+  // patrol in rounds 3 and 4, several rounds before the line was even offered,
+  // which skipped the entire parallel phase, its race and its retained benefits
+  // and handed the exclusive phase to whoever happened to be passing.
+  //
+  // Note what this is NOT: it is not per-faction, not per-stage, and not a
+  // progress threshold. Once the myth is public, a faction that declined it
+  // outright still finds the site by walking into it.
+  if (!rm.mythOpened) return false;
+  return findSite(state, unit.owner, "entered the hex");
+}
+
+// The round pulse: accrue, then check the ceiling.
+export function tickSearch(state) {
+  const rm = rainmakerState(state);
+  if (!rm || rm.foundBy || rm.phase === PHASE.ENDED) return;
+  const searchers = Object.values(rm.progress).filter((p) => p.stage >= STAGE.SEARCH && !p.hunting);
+  if (!searchers.length) return;
+  if (rm.searchOpenedRound == null) rm.searchOpenedRound = state.round;
+  for (const p of searchers) {
+    p.search = Math.min(1, p.search + searchRate(state, p.fid));
+  }
+  // The ceiling, which applies to the player exactly as it does to an AI: a
+  // player who has searched hardest must be able to win it. The line can never
+  // stall the game.
+  if (state.round - rm.searchOpenedRound < R().search.ceilingTurns) return;
+  const best = searchers.reduce((a, b) => (!a || b.search > a.search
+    || (b.search === a.search && b.fid < a.fid) ? b : a), null);
+  if (best) findSite(state, best.fid, "search ceiling");
+}
+
+// The +1 sight the survey data bought, permanent and non-stacking. Read by
+// visibility.js the same way the intel bonus is.
+export function rainmakerSightBonus(state, fid) {
+  const p = rainmakerState(state)?.progress?.[fid];
+  return p?.retained?.sight ? R().retained.sightBonus : 0;
 }
 
 // --- the haul (stage 5) ----------------------------------------------

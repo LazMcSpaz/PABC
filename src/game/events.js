@@ -59,7 +59,7 @@ export const EVENT_NAMES = new Set([
   "rainmaker_activated", "rainmaker_hold_broken", "rainmaker_won",
   "rainmaker_specialist_secured", "rainmaker_specialist_lost",
   "splinter_rose", "rainmaker_site_cramped",
-  "rainmaker_hauled", "rainmaker_delivered",
+  "rainmaker_hauled", "rainmaker_delivered", "rainmaker_myth",
   // Standing armies eat — 1 scrap per unit each Upkeep, 2 fully chipped.
   "unit_unsupplied", "unit_supplied",
   "build_priority_changed", "advance_checked",

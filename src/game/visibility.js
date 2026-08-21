@@ -16,6 +16,7 @@
 // concealed enemy can sit INSIDE your ZoC unseen. This module owns the
 // Vision/ghost sets; influence.js owns ZoC. They are never merged.
 import { CONFIG } from "./config.js";
+import { rainmakerSightBonus } from "./rainmaker.js";
 import { CHIPS, CAPITAL } from "./content.js";
 import { emit } from "./events.js";
 import { isElevation, isCover } from "./board.js";
@@ -80,6 +81,7 @@ export function unitVision(state, unit) {
     chipSum(state, unit.chips, "vision") +
     (unit.visionBonus || 0) +
     intelVisionBonus(state, unit.owner) +
+    rainmakerSightBonus(state, unit.owner) +
     (onElev ? CONFIG.fog.elevationVisionBonus : 0)
   );
 }
