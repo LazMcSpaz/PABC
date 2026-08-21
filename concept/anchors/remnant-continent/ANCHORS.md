@@ -179,6 +179,12 @@ Use for: Plainer construction at building scale — board siding against corruga
 Do not use for: the accretion depth §4 asks for — this is a single tidy structure without the three-generations-of-additions read, so it understates the logic and should be paired with `plainer-cart-01.jpg` rather than anchoring a settlement alone
 Added: 2026-08-11
 
+## wip-weather-machine-active-04.jpg
+URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/wip-weather-machine-active-04.jpg
+Use for: **NOT CANON, TEMPORARY** — the same object as `oldworld-weather-machine-01.jpg`, stood on end, installed and running. Kept as a working reference while the design changes; the number follows the author's own iteration, so a later pass lands as `-05`. What holds up: the seamless cone against a hand-built cradle of copper bus bars and ceramic insulators, the scale figures at the base, and the storm answering overhead
+Do not use for: **§3 RULE 3** — glowing apertures and visible electrical arcing are exactly what the doc forbids, which says advanced tech reads as precision and never as light. This is the anchor most likely to teach the model the wrong lesson about old-world power, so do not attach it to anything approved. Also **FRAMING**: dramatic dark interior lighting, the opposite of §15's clean flat grey
+Added: 2026-08-11
+
 ## wip-crossbow-01.jpg
 URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/wip-crossbow-01.jpg
 Use for: **NOT CANON, SUPERSEDED** — the stepping stone that produced `plainer-crossbow-01.jpg`, which carried its strap-reinforced limbs, cable string and turnbuckles forward and dropped the stock. Kept only as a record of that step; reach for the Plainer one instead
