@@ -18,6 +18,7 @@ import { makeUnit, nextMusterIndex } from "./setup.js";
 import { TECH_NODES, hasTechNode } from "./tech.js";
 import { destroyPost } from "./posts.js";
 import { blockadeAt, blockadeDefense, destroyBlockade } from "./blockades.js";
+import { convoyHex, convoyLockedFor, claimConvoy, releaseClaim, reconcileCarrier } from "./rainmaker.js";
 import { recomputeVp } from "./victory.js";
 
 const fail = (reason) => ({ ok: false, reason });
@@ -464,6 +465,8 @@ export function destroyUnit(state, unitUid, killerUid, ctx = {}) {
   const chips = dead.chips.filter((c) => state.chips[c]?.chipId !== "capital");
   delete state.units[unitUid];
   emit(state, "unit_destroyed", { unit: unitUid, owner: dead.owner, killer: killerUid || null });
+  // The device outlives whatever was carrying it, on the hex it was crossing.
+  reconcileCarrier(state, state.units);
   // §19 — the owner just lost a Vision source; refresh its sight quietly.
   if (state.visibility?.[dead.owner]) recomputeVisibility(state, dead.owner, { emitEvents: false });
 
@@ -633,6 +636,8 @@ function offerRetreat(state, unit, ctx, preferred) {
     const from = unit.node;
     unit.node = dest;
     emit(state, "unit_retreated", { unit: unit.uid, player: unit.owner, from, to: dest });
+    // An escort that breaks and runs does not take the Rainmaker with it.
+    reconcileCarrier(state, state.units);
   }
 }
 
@@ -653,6 +658,13 @@ export function validateContest(state, { pid, params }) {
   const unit = state.units[params.unit];
   if (!unit) return fail("no such unit");
   if (unit.owner !== pid) return fail("not your unit");
+  // Rainmaker notes §3 — the claim lock gates who else may ENGAGE a convoy in
+  // the open, never whether the convoy can be attacked at all and never on a
+  // settlement. Somebody else's window is the only thing it ever refuses.
+  const holder = convoyLockedFor(state, pid);
+  if (holder && unit.node === convoyHex(state)) {
+    return fail(`${holder} has the convoy engaged — wait for their window to close`);
+  }
   const t = resolveTarget(state, pid, unit, params);
   if (!t.ok) return t;
   return { ok: true };
@@ -665,6 +677,14 @@ export function runContest(state, { pid, params, ctx = {} }) {
   // §16.2 — declaring a contest ends this unit's movement for the turn
   // (no move-attack-move), whatever the outcome.
   unit.moveRemaining = 0;
+
+  // Engaging a convoy in the open IS the claim. It is not a separate move,
+  // because the design's whole cost of claiming early is that you committed —
+  // a claim you could take without attacking would cost nothing and block
+  // everyone behind you for free.
+  const convoy = convoyHex(state);
+  const claimingConvoy = !!convoy && unit.node === convoy && !state.locations?.[convoy];
+  if (claimingConvoy) claimConvoy(state, pid);
 
   // §9 step 1 — declare. Open the reaction window so replace-mode
   // Reactives may cancel the contest; on-mode subscribers fire when
@@ -897,6 +917,10 @@ export function runContest(state, { pid, params, ctx = {} }) {
     else if (t.kind === "raid") onRaidWon(state, pid, t.unit); // standing hook; retreat after attrition
   } else {
     emit(state, "contest_lost", { initiator: unit.uid, player: pid, ...detail });
+    // A claimant who engaged and was repulsed has had their go. The claim
+    // passes on immediately rather than at expiry — the road is clear for
+    // whoever was waiting behind them.
+    if (claimingConvoy) releaseClaim(state, "attacker repulsed");
   }
 
   const logStart = state.log.length;

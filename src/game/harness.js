@@ -9,7 +9,7 @@ import { emit } from "./events.js";
 import { recomputeStats, recomputeResearch, assignTechNode, effectiveVeteran } from "./stats.js";
 import { recomputeInfluence, zocOwner, inZoC } from "./influence.js";
 import { reinforcementRoute, bfsDistances, movementField, movementRoute } from "./board.js";
-import { passesFreely, movementBlockers, unitReach, unitIgnoresTerrain, supplyCutter, unitRailEdges } from "./movement.js";
+import { passesFreely, movementBlockers, unitReach, unitIgnoresTerrain, supplyCutter, unitRailEdges, hexIsFull } from "./movement.js";
 import { recomputeVisibility, isUnitVisibleTo, revealRegion, unitVision, isHexVisible, ensureAllVisibility } from "./visibility.js";
 import {
   ensureDiplomacy, menaceFromAttack, onAttack,
@@ -47,7 +47,7 @@ import { setStanding } from "./standing.js";
 import { factionDef, MINOR_FACTIONS } from "./content.js";
 import { activePlayerId } from "./targeting.js";
 import { FACTIONS, LOCATIONS, ABILITIES, REACTIVES, CHIPS, chipBlocksRail } from "./content.js";
-import { resolveSalvage } from "./contest.js";
+import { resolveSalvage, validateContest } from "./contest.js";
 import { readRivalIntel } from "./intel.js";
 import { postAt, isPostVisibleTo, chargePostUpkeep } from "./posts.js";
 import {
@@ -66,6 +66,8 @@ import {
   STAGE, PHASE, DEVICE, chooseSiteHex, rainmakerState, progressFor,
   joinRainmaker, advanceStage, grantDevice, looseDevice, destroyDevice,
   onHolderEliminated, looseDeviceAt, deviceCarrier, isHaulingDevice, publicStanding,
+  capitalHexOf, convoyHex, convoyLockedFor, claimConvoy, releaseClaim, tickClaim,
+  deviceMovedThisRound, reconcileCarrier,
 } from "./rainmaker.js";
 import { enforceLoyaltySlotCap, chargeChipUpkeep, slotCapacity, effectiveBuildCost, buildableChips, applyOutputAndBuilds, locationOutput, unitUpkeepFor, chargeUnitUpkeep } from "./economy.js";
 
@@ -7015,6 +7017,212 @@ line("\n  [Phase 31] the Rainmaker — contested state and the device");
         { pick: (arr) => arr[0] }, 1);
     } catch { threw = true; }
     check("a site that cannot reach every capital is an error, not a shrug", threw);
+  }
+}
+
+
+// =====================================================================
+// Phase 32 — The Rainmaker, part 2: the haul. One hex per turn with
+// nothing able to modify it (notes §2), and the claim lock, which gates
+// who else may engage and never whether the convoy can be attacked at
+// all (notes §3).
+// =====================================================================
+line("\n  [Phase 32] the Rainmaker — the haul and the claim lock");
+{
+  // A convoy standing in open country with every movement bonus in the game
+  // switched on. Returns the pieces each fixture needs.
+  const convoySetup = (sd = seed) => {
+    const g = createGame({ seed: sd, mapSize: "large" });
+    startTurn(g);
+    const me = activePlayerId(g);
+    const unit = Object.values(g.units).find((u) => u.owner === me);
+    // Put it somewhere with room to move, off any settlement.
+    const open = Object.keys(g.board.hexes).find((h) => !g.locations[h]
+      && (g.board.adjacency[h] || []).length >= 3
+      && !Object.values(g.units).some((u) => u.node === h));
+    unit.node = open;
+    unit.moveRemaining = unit.movement;
+    joinRainmaker(g, me);
+    grantDevice(g, me, { hex: open, carrierUid: unit.uid, reason: "extracted" });
+    return { g, me, unit };
+  };
+
+  // --- one hex per turn, and nothing modifies it ------------------------
+  {
+    const { g, me, unit } = convoySetup();
+    // Every bonus at once: pave the whole neighbourhood, hand the unit a big
+    // movement stat, and give it the terrain-ignoring chip a Landship carries.
+    // The retained +1 vehicle from Stage 3 is the immediate offender the notes
+    // name — a player who raced, lost, then stole the convoy.
+    unit.movement = 6;
+    unit.moveRemaining = 6;
+    for (const h of [unit.node, ...(g.board.adjacency[unit.node] || [])]) {
+      g.board.hexes[h].road = true;
+      g.board.hexes[h].rail = true;
+      g.board.hexes[h].elevation = false;
+      g.board.hexes[h].cover = false;
+    }
+    const field = unitReach(g, unit);
+    const nbrs = (g.board.adjacency[unit.node] || []).filter((h) => !hexIsFull(g, h, unit.uid));
+    check("a convoy reaches exactly its own neighbours, however much Movement it has",
+      Object.keys(field).length === nbrs.length
+      && nbrs.every((h) => h in field));
+    check("…and arriving spends the step whatever the road under it says",
+      Object.values(field).every((v) => v === 0));
+
+    const to = nbrs[0];
+    const ok = performAction(g, "move", { unit: unit.uid, to });
+    check("the device travels with its carrier", ok.ok
+      && rainmakerState(g).device.hex === to && unit.node === to);
+    check("…and the convoy has spent its step for the round",
+      deviceMovedThisRound(g) === true && Object.keys(unitReach(g, unit)).length === 0);
+    // The budget arithmetic alone is not what enforces this: hand the unit a
+    // fresh budget mid-turn, the way an effect might, and the convoy still
+    // does not get a second step.
+    unit.moveRemaining = 6;
+    check("…and a fresh movement budget mid-turn does not buy a second hex",
+      Object.keys(unitReach(g, unit)).length === 0);
+  }
+
+  // Rail is the other way a mover normally covers ground fast, and a station
+  // hop is not a neighbour — so it has to be gone, not merely expensive.
+  {
+    const { g, unit } = convoySetup();
+    const link = (g.board.rails || [])[0];
+    if (link) {
+      unit.node = link.a;
+      rainmakerState(g).device.hex = link.a;
+      const field = unitReach(g, unit);
+      check("a convoy standing on a station cannot take the train",
+        !(link.b in field) || (g.board.adjacency[link.a] || []).includes(link.b));
+    } else {
+      check("a convoy standing on a station cannot take the train", true);
+    }
+  }
+
+  // --- arriving home ----------------------------------------------------
+  {
+    const { g, me, unit } = convoySetup();
+    const home = capitalHexOf(g, me);
+    check("the haul's destination is the holder's own seat", !!home);
+    // Walk it in from the doorstep rather than simulating the whole journey.
+    const doorstep = (g.board.adjacency[home] || [])[0];
+    unit.node = doorstep;
+    rainmakerState(g).device.hex = doorstep;
+    rainmakerState(g).device.movedRound = null;
+    unit.moveRemaining = unit.movement;
+    for (const u of Object.values(g.units)) {
+      if (u.uid !== unit.uid && u.node === home) u.node = doorstep;
+    }
+    performAction(g, "move", { unit: unit.uid, to: home });
+    const rm = rainmakerState(g);
+    check("delivering it to the capital installs it and opens the fitting stage",
+      rm.device.status === DEVICE.INSTALLED && rm.device.hex === home
+      && progressFor(g, me).stage === STAGE.INSTALL);
+    check("…and the convoy stops being a convoy the moment it is inside",
+      convoyHex(g) === null && rm.device.carrierUid === null);
+  }
+
+  // --- the claim lock ---------------------------------------------------
+  {
+    const { g, me } = convoySetup();
+    const [x, y] = g.turnOrder.filter((f) => f !== me);
+    check("with nobody engaged, anyone may take the convoy on",
+      convoyLockedFor(g, x) === null && convoyLockedFor(g, y) === null);
+    claimConvoy(g, x);
+    check("the first faction to engage holds the field alone",
+      convoyLockedFor(g, y) === x && convoyLockedFor(g, x) === null);
+    check("…and the holder is never locked out of its own convoy",
+      convoyLockedFor(g, me) === null);
+    check("…and a second claimant cannot simply take the claim",
+      claimConvoy(g, y) === false && rainmakerState(g).claim.by === x);
+
+    // Failure passes the claim on immediately.
+    releaseClaim(g, "attacker repulsed");
+    check("a claimant who is repulsed releases the field to the next in line",
+      convoyLockedFor(g, y) === null && claimConvoy(g, y) === true);
+
+    // …and a claimant who never closes loses it when the window runs out,
+    // which is what stops the lock being used to shield the convoy.
+    const rm = rainmakerState(g);
+    rm.claim = { by: y, since: g.round };
+    g.round += CONFIG.rainmaker.transport.claimWindowRounds;
+    check("a claimant who never attacks loses the window on time",
+      convoyLockedFor(g, x) === null);
+    tickClaim(g);
+    check("…and the expired claim is cleared rather than left lying around",
+      rainmakerState(g).claim === null);
+  }
+
+  // --- the escort leaves, the device stays (notes §4) -------------------
+  // Found by running it: the AI's units retreat off lost contests, which moved
+  // a carrier without moving the device, and the device's next legitimate step
+  // then teleported it across the gap it had quietly accumulated.
+  {
+    const { g, unit } = convoySetup();
+    const where = unit.node;
+    const away = (g.board.adjacency[where] || [])[0];
+    unit.node = away; // a retreat, a redeploy, anything that is not a haul
+    reconcileCarrier(g, g.units);
+    const rm = rainmakerState(g);
+    check("an escort that withdraws leaves the device where it stood",
+      rm.device.status === DEVICE.LOOSE && rm.device.hex === where && rm.device.owner === null);
+  }
+  {
+    const { g, unit } = convoySetup();
+    const where = unit.node;
+    delete g.units[unit.uid]; // destroyed outright
+    reconcileCarrier(g, g.units);
+    check("a destroyed escort leaves the device on the hex it was crossing",
+      rainmakerState(g).device.status === DEVICE.LOOSE
+      && rainmakerState(g).device.hex === where);
+  }
+  {
+    const { g, unit } = convoySetup();
+    reconcileCarrier(g, g.units);
+    check("a carrier still standing with its device changes nothing",
+      rainmakerState(g).device.status === DEVICE.CARRIED
+      && rainmakerState(g).device.carrierUid === unit.uid);
+  }
+
+  // The lock is about exclusivity, never about safety. A convoy nobody has
+  // claimed is attackable by everybody — writing it the other way round makes
+  // the convoy safe by default, which is the inversion the notes warn about.
+  {
+    const { g, me } = convoySetup();
+    const others = g.turnOrder.filter((f) => f !== me);
+    check("an unclaimed convoy is exposed to every faction at once",
+      others.every((f) => convoyLockedFor(g, f) === null));
+    check("…and the device is on the board being hauled the whole time",
+      convoyHex(g) === rainmakerState(g).device.hex);
+  }
+
+  // Settlements are exempt entirely — that is the Stage 8 siege.
+  {
+    const { g, me } = convoySetup();
+    const [x, y] = g.turnOrder.filter((f) => f !== me);
+    const town = Object.values(g.locations)[0].hexId;
+    rainmakerState(g).device.hex = town;
+    claimConvoy(g, x);
+    check("nobody can lock a settlement — everyone may converge at once",
+      convoyLockedFor(g, x) === null && convoyLockedFor(g, y) === null);
+  }
+
+  // A contest declared on the convoy's hex by a faction outside the window is
+  // refused at the door, and the refusal names who has it.
+  {
+    const { g, me, unit } = convoySetup();
+    const [x, y] = g.turnOrder.filter((f) => f !== me);
+    claimConvoy(g, x);
+    const intruder = Object.values(g.units).find((u) => u.owner === y);
+    intruder.node = unit.node;
+    const res = validateContest(g, { pid: y, params: { unit: intruder.uid, target: unit.uid } });
+    check("a faction outside the window is refused the engagement",
+      res.ok === false && String(res.reason).includes(x));
+    const mine = Object.values(g.units).find((u) => u.owner === x);
+    mine.node = unit.node;
+    const res2 = validateContest(g, { pid: x, params: { unit: mine.uid, target: unit.uid } });
+    check("…while the claimant's own attack goes through", res2.ok === true);
   }
 }
 

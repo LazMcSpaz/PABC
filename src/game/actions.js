@@ -6,6 +6,7 @@ import { emit } from "./events.js";
 import { activePlayerId } from "./targeting.js";
 import { bfsDistances, reinforcementRoute } from "./board.js";
 import { unitReach, supplyCutter, unseenBlockers, hexIsFull } from "./movement.js";
+import { onCarrierMoved } from "./rainmaker.js";
 import { CONFIG } from "./config.js";
 import { FACTIONS, CHIPS, ABILITIES, chipDefOf, factionDef } from "./content.js";
 import { validateContest, runContest } from "./contest.js";
@@ -86,6 +87,10 @@ function runMove(state, { params, ctx }) {
       unit: unit.uid, player: unit.owner, hex: params.to, moveRemaining: unit.moveRemaining,
     });
   }
+  // The Rainmaker travels WITH its carrier and is not derived from it — the two
+  // come apart the moment the carrier dies, and a device whose position is
+  // "wherever my carrier is" has nowhere to be once there is no carrier.
+  onCarrierMoved(state, unit, params.to);
   unit.movedSinceUpkeep = true; // §16.6 fortify — moving voids "dug in"
   // movement/moveRemaining are snapshotted here (not left for a log
   // consumer to read off the live unit later) because both are mutable —

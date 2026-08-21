@@ -11,6 +11,7 @@ import { activePlayerId } from "./targeting.js";
 import { sweepDeferred } from "./deferred.js";
 import { evaluateTriggers } from "./triggers.js";
 import { evaluateConditionalBeats } from "./quests.js";
+import { tickClaim } from "./rainmaker.js";
 import {
   applyOutputAndBuilds, chargeChipUpkeep, chargeUnitUpkeep, enforceLoyaltySlotCap,
 } from "./economy.js";
@@ -411,6 +412,7 @@ function runRoundEnd(state) {
   sweepReinforcements(state);
   evaluateTriggers(state);
   evaluateConditionalBeats(state);
+  tickClaim(state);
   expirePlacementMarkers(state);
   decayWorldCounters(state);
   // §18.8/§18.12 — the diplomacy round cadence: Menace decay, Standing

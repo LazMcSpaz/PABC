@@ -341,6 +341,150 @@ export function onHolderEliminated(state, fid) {
   return looseDevice(state, { reason: "holder eliminated" });
 }
 
+// --- the haul (stage 5) ----------------------------------------------
+
+// A faction's seat, by hex. The convoy's destination, and the only place the
+// device can be installed.
+export function capitalHexOf(state, fid) {
+  for (const loc of Object.values(state.locations || {})) {
+    if (loc.controller !== fid) continue;
+    if ((loc.chips || []).some((c) => state.chips?.[c]?.chipId === "capital")) return loc.hexId;
+  }
+  return null;
+}
+
+// The hex the convoy is standing on, or null if there is no convoy — the device
+// is buried, installed, loose or gone. Everything that asks "is this the convoy"
+// goes through here so no caller has to remember which statuses count.
+export function convoyHex(state) {
+  const rm = rainmakerState(state);
+  if (!rm || rm.device.status !== DEVICE.CARRIED) return null;
+  return rm.device.hex;
+}
+
+// Has the device already taken its one step this round? Each faction acts once
+// per round, so per-round and per-turn are the same question asked from
+// different ends, and the round is the one that cannot be reset by anything
+// handing a unit a fresh movement budget mid-turn.
+export function deviceMovedThisRound(state) {
+  const rm = rainmakerState(state);
+  return !!rm && rm.device.movedRound === state.round;
+}
+
+// The carrier moved. Drag the device with it, spend the convoy's step for the
+// round, and check whether it just got home.
+//
+// The device is dragged rather than derived from the carrier's position because
+// the two come apart the moment the carrier dies: a device whose hex is "wherever
+// my carrier is" has nowhere to be once there is no carrier (notes §4).
+export function onCarrierMoved(state, unit, to) {
+  const rm = rainmakerState(state);
+  if (!rm || !isHaulingDevice(state, unit)) return false;
+  rm.device.hex = to;
+  rm.device.movedRound = state.round;
+  emit(state, "rainmaker_hauled", { player: unit.owner, unit: unit.uid, hex: to });
+  const home = capitalHexOf(state, rm.device.owner);
+  if (home && to === home) {
+    rm.device.status = DEVICE.INSTALLED;
+    rm.device.carrierUid = null;
+    rm.claim = null;
+    advanceStage(state, rm.device.owner, STAGE.INSTALL);
+    emit(state, "rainmaker_delivered", { player: rm.device.owner, hex: to });
+  }
+  return true;
+}
+
+// The carrier is no longer standing on the device. Whatever moved it — a
+// retreat off a lost contest, a redeploy, an effect nobody has written yet —
+// the device does not go with it: it is not cargo, and a beaten escort leaving
+// the field leaves the thing it was escorting behind (notes §4).
+//
+// A hook rather than a scan on every read, because the wrong answer here is
+// silent: a device whose hex is stale reads as being somewhere it is not, and
+// the next legitimate step teleports it across the gap.
+export function reconcileCarrier(state, unitsByUid) {
+  const rm = rainmakerState(state);
+  if (!rm || rm.device.status !== DEVICE.CARRIED || !rm.device.carrierUid) return false;
+  const carrier = unitsByUid[rm.device.carrierUid];
+  if (carrier && carrier.node === rm.device.hex) return false;
+  return looseDevice(state, {
+    hex: rm.device.hex,
+    reason: carrier ? "escort withdrew" : "escort destroyed",
+  });
+}
+
+// --- the claim lock (notes §3) ---------------------------------------
+
+// Three things this is NOT, each of which is the natural way to write it and
+// each of which is wrong:
+//
+//   * it is not vulnerability. The convoy is attackable from the moment it
+//     leaves the site until it is inside a capital, claim or no claim. Writing
+//     the lock as "attackable only while claimed" inverts the whole mechanism.
+//   * it is not a settlement rule. Any number of factions may converge on a
+//     settlement at once, which is the entire point of the Stage 8 siege.
+//   * it is not indefinite. A claimant who sits on the claim without attacking
+//     is griefing, so the window expires on its own.
+//
+// What it IS: a 2-round window in which only the claiming faction may engage,
+// so a stalled convoy produces sequential duels rather than a six-way scrum.
+
+// Why `fid` may not engage the convoy right now, or null if they may. A hex
+// that is not the convoy is never locked, and neither is a settlement.
+export function convoyLockedFor(state, fid) {
+  const rm = rainmakerState(state);
+  if (!rm) return null;
+  const hex = convoyHex(state);
+  if (!hex) return null;
+  if (state.locations?.[hex]) return null; // settlements are exempt entirely
+  const claim = rm.claim;
+  // The convoy's own owner is never locked out. The lock is about who may
+  // ENGAGE the convoy, and a holder fighting off whoever just walked onto its
+  // hex is not engaging it — it is the thing being engaged.
+  if (rm.device.owner === fid) return null;
+  if (!claim || claim.by === fid) return null;
+  if (state.round - claim.since >= R().transport.claimWindowRounds) return null;
+  return claim.by;
+}
+
+// The first faction to engage takes the field alone. Claiming is a side effect
+// of attacking rather than a separate move: the design's cost of claiming early
+// is that you have committed, and a claim you could take without attacking
+// would have no cost at all.
+export function claimConvoy(state, fid) {
+  const rm = rainmakerState(state);
+  if (!rm || !convoyHex(state)) return false;
+  if (convoyLockedFor(state, fid)) return false;
+  if (rm.claim?.by === fid) return true;
+  rm.claim = { by: fid, since: state.round };
+  emit(state, "rainmaker_claimed", { player: fid, hex: convoyHex(state) });
+  return true;
+}
+
+// Both ways a claim ends: the claimant engaged and was repulsed, or the window
+// ran out with nothing to show. Either way the next claimant may step up —
+// which is the release the notes ask to be defined explicitly, because a
+// claimant able to hold the lock by declining to attack turns a fairness
+// mechanism into a griefing tool.
+export function releaseClaim(state, reason) {
+  const rm = rainmakerState(state);
+  if (!rm?.claim) return false;
+  const { by } = rm.claim;
+  rm.claim = null;
+  emit(state, "rainmaker_claim_released", { player: by, reason });
+  return true;
+}
+
+// Round-end: expire a claim whose window has run out.
+export function tickClaim(state) {
+  const rm = rainmakerState(state);
+  if (!rm?.claim) return;
+  if (!convoyHex(state)) { releaseClaim(state, "no convoy"); return; }
+  if (state.round - rm.claim.since >= R().transport.claimWindowRounds) {
+    releaseClaim(state, "window expired");
+  }
+}
+
 // --- readers the rest of the game asks with ---------------------------
 
 // Is this hex carrying the loose device, for a unit that just arrived to claim?

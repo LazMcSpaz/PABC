@@ -13,6 +13,7 @@ import { CHIPS, ABILITIES, chipBlocksRail } from "./content.js";
 export { passesFreely, supplyCutter, hasRailAccess } from "./diplomacy.js";
 import { passesFreely, hasRailAccess } from "./diplomacy.js";
 import { isHexExplored, isHexVisible, isUnitVisibleTo, canSeeUnitAt } from "./visibility.js";
+import { isHaulingDevice, deviceMovedThisRound } from "./rainmaker.js";
 
 const BIG_BUDGET = 999; // budget-agnostic routing for display
 
@@ -220,8 +221,33 @@ export function hexIsFull(state, hex, exclude = null) {
   return unitsOnHex(state, hex, exclude) >= CONFIG.hexUnitCap;
 }
 
+// The convoy hauling the Rainmaker covers exactly one hex per turn, and NOTHING
+// modifies that (rainmaker notes §2): not roads, not rail, not the +1 movement
+// the holder may have earned racing for the thing, not terrain, not a chip, not
+// a tech, and not a modifier nobody has written yet.
+//
+// So this is built from the adjacency and nothing else, rather than by starting
+// from the ordinary field and subtracting the bonuses we happen to know about.
+// Default-deny is the whole point: the failure the notes describe is a player
+// who raced, lost, stole the convoy, and hauled it home at two hexes a turn on
+// the vehicle they earned racing for it.
+//
+// Everything that is not a movement bonus still applies. A full hex is still
+// full, and a blocked hex still stops the convoy dead — it is entered and the
+// step is over, which is what one hex per turn means anyway.
+function convoyField(state, unit) {
+  if (deviceMovedThisRound(state)) return {};
+  const out = {};
+  for (const nb of state.board.adjacency[unit.node] || []) {
+    if (hexIsFull(state, nb, unit.uid)) continue;
+    out[nb] = 0; // arriving spends the step, whatever the unit's Movement says
+  }
+  return out;
+}
+
 export function unitReach(state, unit) {
   if (!unit) return {};
+  if (isHaulingDevice(state, unit)) return convoyField(state, unit);
   const budget = unit.moveRemaining ?? unit.movement ?? 0;
   const opts = { ignoreUnits: unitPassesThroughUnits(state, unit), mover: unit };
   const scan = blockerScan(state, unit.owner, opts);
@@ -246,6 +272,12 @@ export function unitReach(state, unit) {
 // unitReach) — for the move-preview arrow. [start, …, dest] or null.
 export function unitMovePath(state, unit, dest) {
   if (!unit) return null;
+  // A convoy's route is never more than a single step, so there is no lane to
+  // draw around a mountain — and routing it through movementRoute would let the
+  // road costs it is meant to ignore back in through the preview.
+  if (isHaulingDevice(state, unit)) {
+    return dest in convoyField(state, unit) ? [unit.node, dest] : null;
+  }
   const budget = unit.moveRemaining ?? unit.movement ?? 0;
   return movementRoute(state, unit.node, budget, dest, {
     blockedThrough: movementBlockers(state, unit.owner, {
