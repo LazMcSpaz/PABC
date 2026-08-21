@@ -188,8 +188,16 @@ export default function RainmakerPanel({ rm, you, onAct, standingOnDevice }) {
             <Btn onClick={() => onAct("takeDevice")}>Pick it up</Btn>
             {/* The pressure valve. It ends the line for EVERY faction and there
                 is no second one, so it is deliberately the loudest button here
-                and it asks before it fires. */}
-            <Btn danger onClick={() => onAct("destroyDevice")}>Destroy it</Btn>
+                — and it is priced, which is what keeps it a decision rather
+                than a spite button. */}
+            <Btn
+              danger
+              onClick={() => onAct("destroyDevice")}
+              disabled={!!rm.destroyBlocker}
+              reason={rm.destroyBlocker || undefined}
+            >
+              Destroy it ({rm.destroyCost})
+            </Btn>
           </>
         )}
       </div>

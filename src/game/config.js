@@ -440,6 +440,16 @@ export const CONFIG = {
     },
     // What the device pays once it is switched on, and not one turn before.
     output: { scrapPerTurn: 4 },
+    // Denying it to everybody. Priced very high on purpose (design §6): a
+    // faction that cannot win it may rationally prefer that nobody does, and
+    // that should be a real decision with a real cost rather than a spite
+    // button. Measured unpriced, an AI blocker destroyed the device in 10 of 30
+    // games — it was simply the cheapest thing to do with a hex it was
+    // standing on.
+    destroyCost: 25,
+    // How much further than the nearest rival a blocker's own haul has to be
+    // before denying the thing to everybody beats trying to win with it.
+    denialHaulMargin: 3,
     siege: {
       // How far out the splinter musters. Never on the capital itself: an army
       // that materialises inside the walls is a coup, not a siege, and the

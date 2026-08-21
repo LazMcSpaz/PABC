@@ -311,9 +311,28 @@ export function looseDevice(state, { hex = null, reason = "escort lost" } = {}) 
 // respawn, no second device, and — the part that goes wrong — no AI background
 // counters left running toward something that no longer exists. Every record is
 // closed here rather than left for each system to notice on its own.
-export function destroyDevice(state, byFid, { reason = "destroyed" } = {}) {
+// What it costs `fid` to end the line for everybody, and whether they can pay.
+// A faction with no seat at all (an engine-driven destruction) pays nothing,
+// which is the only way `byFid` is ever null.
+export function destroyBlocker(state, fid) {
+  const rm = rainmakerState(state);
+  if (!rm || rm.device.status === DEVICE.DESTROYED) return "there is nothing left to destroy";
+  if (!fid) return null;
+  const have = state.players?.[fid]?.resource || 0;
+  if (have < R().destroyCost) return `it takes ${R().destroyCost} scrap to be sure of it`;
+  return null;
+}
+
+export function destroyDevice(state, byFid, { reason = "destroyed", free = false } = {}) {
   const rm = rainmakerState(state);
   if (!rm || rm.device.status === DEVICE.DESTROYED) return false;
+  if (!free && destroyBlocker(state, byFid)) return false;
+  if (!free && byFid && state.players?.[byFid]) {
+    state.players[byFid].resource -= R().destroyCost;
+    emit(state, "resource_spent", {
+      player: byFid, resource: "Resource", amount: R().destroyCost, source: "rainmaker-denial",
+    });
+  }
   rm.device.status = DEVICE.DESTROYED;
   rm.device.owner = null;
   rm.device.carrierUid = null;

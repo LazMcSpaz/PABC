@@ -9,6 +9,7 @@ import {
   STAGE, PHASE, DEVICE, rainmakerState, progressFor, publicStanding,
   candidateArea, specialistStanding, rainmakerCountdown, siegeIntent,
   installBlocker, installTurnsNeeded, capitalHexOf, convoyHex, mythIsOpen,
+  destroyBlocker,
 } from "../game/rainmaker.js";
 import { dispositionOf } from "../game/rainmakerAi.js";
 import { locationActionCapacity } from "../game/turn.js";
@@ -1202,6 +1203,9 @@ function rainmakerView(state, viewer) {
       }
       : null,
     convoyHex: seesDevice ? convoyHex(state) : null,
+    // What ending the line for everybody costs, and why you cannot right now.
+    destroyCost: CONFIG.rainmaker.destroyCost,
+    destroyBlocker: viewer ? destroyBlocker(state, viewer) : null,
     claim: rm.claim ? { by: rm.claim.by, since: rm.claim.since } : null,
     specialist: sp,
     hold: rm.activatedBy

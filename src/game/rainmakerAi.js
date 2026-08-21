@@ -27,7 +27,7 @@ import {
   STAGE, PHASE, DEVICE, rainmakerState, progressFor, joinRainmaker,
   capitalHexOf, labHexOf, convoyHex, looseDeviceAt, mythIsOpen,
   extractEarly, hireSpecialist, seizeSpecialist, specialistStanding,
-  activate, installBlocker, deviceCarrier, siegeIntent,
+  activate, installBlocker, deviceCarrier, siegeIntent, destroyBlocker,
 } from "./rainmaker.js";
 
 export const DISPOSITION = { PURSUE: "pursue", BLOCK: "block", IGNORE: "ignore", SELL: "sell" };
@@ -166,6 +166,39 @@ export function manageRainmaker(state, pid, api) {
 
 // Does this faction need a lab it does not have? Stage 1 wants one anywhere;
 // Stage 6 wants one in the capital specifically and will not start without it.
+// Would taking it be hopeless? Measured as the haul: from where the device is
+// lying, how much further is this faction's capital than the nearest rival's.
+// Carrying a one-hex-per-turn convoy past somebody who is closer to home than
+// you are is not a plan, and a faction in that position would rather nobody had
+// the thing at all.
+//
+// Position rather than money, and that took two measurements to get right.
+// Denial was free at first and blockers ended the line in 10 of 30 games — it
+// was simply the cheapest thing to do with a hex they were standing on. Pricing
+// it at 25, 60, even 120 scrap changed nothing, because AI factions sit on a
+// median 734 scrap by the late game and any "very high" price is noise to them.
+// Gating on affording a lab instead swung it to 0 of 30 for the same reason:
+// they can always afford one. The price is still right — it is a real cost to a
+// PLAYER, who spends constantly — but what makes an AI think twice has to be
+// whether it could plausibly win the race instead.
+function hopelessHaul(state, pid) {
+  const rm = rainmakerState(state);
+  const home = capitalHexOf(state, pid);
+  if (!home) return true; // nowhere to take it
+  const d = bfsDistances(state.board.adjacency, rm.device.hex);
+  const mine = d[home] ?? Infinity;
+  let nearest = Infinity;
+  for (const fid of Object.keys(state.players || {})) {
+    if (fid === pid || state.players[fid]?.eliminated) continue;
+    const theirs = capitalHexOf(state, fid);
+    const dist = theirs ? (d[theirs] ?? Infinity) : Infinity;
+    if (dist < nearest) nearest = dist;
+  }
+  if (!Number.isFinite(mine)) return true;
+  if (!Number.isFinite(nearest)) return false;
+  return mine > nearest + CONFIG.rainmaker.denialHaulMargin;
+}
+
 function wantsLab(state, pid, p) {
   if (p.stage === STAGE.INSTALL) return installBlocker(state, pid) === "no lab in the capital";
   if (p.stage <= STAGE.RESEARCH) return !labHexOf(state, pid);
@@ -235,10 +268,8 @@ export function claimLooseDevice(state, pid, api) {
     .sort((a, b) => (b.strength || 0) - (a.strength || 0))[0];
   if (!here) return false;
   const kind = dispositionOf(state, pid);
-  // A blocker who cannot realistically finish the line would rather nobody did.
-  // It is an expensive, deliberate act, so it takes a faction that has already
-  // decided its game is stopping somebody else's.
-  if (kind === DISPOSITION.BLOCK && !labHexOf(state, pid)) {
+  // Take it, or end it.
+  if (kind === DISPOSITION.BLOCK && hopelessHaul(state, pid) && !destroyBlocker(state, pid)) {
     return api.destroy(state, pid);
   }
   return api.take(state, pid, here);

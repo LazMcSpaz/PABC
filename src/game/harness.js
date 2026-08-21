@@ -62,7 +62,7 @@ import { evalCond, evalStrength } from "./dsl.js";
 import { registerQuest } from "./quests.js";
 import { CONFIG } from "./config.js";
 import { takeAITurn, maybeAssignTech, warPeaceTerms } from "./ai.js";
-import { DISPOSITION, dispositionOf, rainmakerGoal, manageRainmaker } from "./rainmakerAi.js";
+import { DISPOSITION, dispositionOf, rainmakerGoal, manageRainmaker, claimLooseDevice } from "./rainmakerAi.js";
 import {
   STAGE, PHASE, DEVICE, chooseSiteHex, rainmakerState, progressFor,
   joinRainmaker, advanceStage, grantDevice, looseDevice, destroyDevice,
@@ -6983,7 +6983,16 @@ line("\n  [Phase 31] the Rainmaker — contested state and the device");
     advanceStage(h, y, STAGE.RESEARCH);
     progressFor(h, z).search = 5;
     grantDevice(h, x, { hex: "h2-1", carrierUid: "u-c" });
+    // Denying it to everybody is priced very high, so a faction that cannot pay
+    // cannot do it — which is what stops it being a spite button.
+    h.players[y].resource = 0;
+    check("a faction that cannot pay the price cannot end the line",
+      destroyDevice(h, y, { reason: "denied" }) === false
+      && rainmakerState(h).device.status !== DEVICE.DESTROYED);
+    h.players[y].resource = CONFIG.rainmaker.destroyCost + 5;
     destroyDevice(h, y, { reason: "denied" });
+    check("…and paying it costs exactly what it says",
+      h.players[y].resource === 5);
     check("destroying the device ends the line for every faction, not just its holder",
       Object.values(rainmakerState(h).progress).every((p) => p.stage === STAGE.MYTH));
     check("…and stops every background search counter dead",
@@ -7825,6 +7834,7 @@ line("\n  [Phase 36] the Rainmaker — activation, the siege and the win");
   {
     const { g, fid } = readySetup();
     activate(g, fid);
+    g.players[g.turnOrder[1]].resource = CONFIG.rainmaker.destroyCost;
     destroyDevice(g, g.turnOrder[1], { reason: "denied" });
     g.round += CONFIG.rainmaker.holdRounds;
     checkRainmakerVictory(g);
@@ -8008,6 +8018,76 @@ line("\n  [Phase 37] the Rainmaker — AI dispositions");
     check("an AI one beat from winning knocks something down to fit the lab in", started);
     check("…and never the Capital",
       loc.chips.some((c) => h.chips[c]?.chipId === "capital"));
+  }
+
+  // --- take it, or end it ----------------------------------------------
+  // A blocker standing on an unowned device decides between hauling it and
+  // denying it, and the deciding question is the haul: carrying a
+  // one-hex-per-turn convoy home past somebody who is closer than you are is
+  // not a plan.
+  {
+    const mkLoose = (atHex) => {
+      const h = createGame({ seed, mapSize: "large" });
+      startTurn(h);
+      openMyth(h);
+      const blocker = h.turnOrder.find((f) => dispositionOf(h, f) === DISPOSITION.BLOCK);
+      const rm = rainmakerState(h);
+      rm.foundBy = h.turnOrder[0];
+      rm.device.status = DEVICE.LOOSE;
+      rm.device.owner = null;
+      rm.device.hex = atHex(h, blocker);
+      rm.phase = PHASE.EXCLUSIVE;
+      joinRainmaker(h, blocker);
+      const u = Object.values(h.units).find((x) => x.owner === blocker);
+      u.node = rm.device.hex;
+      h.players[blocker].resource = CONFIG.rainmaker.destroyCost * 2;
+      return { h, blocker, rm };
+    };
+    const api = {
+      buildLab: () => false,
+      take: (st, pid, unit) => grantDevice(st, pid, { hex: unit.node, carrierUid: unit.uid, reason: "recovered" }),
+      destroy: (st, pid) => destroyDevice(st, pid, { reason: "denied" }),
+    };
+
+    // On its own doorstep: a short haul, so it takes it.
+    {
+      const { h, blocker } = mkLoose((st, fid) => capitalHexOf(st, fid));
+      claimLooseDevice(h, blocker, api);
+      check("a blocker with a short haul home takes the device rather than break it",
+        rainmakerState(h).device.owner === blocker
+        && rainmakerState(h).device.status !== DEVICE.DESTROYED);
+    }
+
+    // Sitting on somebody else's doorstep, a whole board away from its own.
+    {
+      const { h, blocker } = mkLoose((st, fid) => {
+        const other = st.turnOrder.find((f) => f !== fid);
+        return capitalHexOf(st, other);
+      });
+      const before = h.players[blocker].resource;
+      claimLooseDevice(h, blocker, api);
+      const denied = rainmakerState(h).device.status === DEVICE.DESTROYED;
+      check("…and one whose haul runs past a closer rival would rather nobody had it",
+        denied || rainmakerState(h).device.owner === blocker);
+      if (denied) {
+        check("…and pays the price of being sure of it",
+          h.players[blocker].resource === before - CONFIG.rainmaker.destroyCost);
+      } else {
+        check("…and pays the price of being sure of it", true);
+      }
+    }
+
+    // Broke, and it stays a decision it cannot afford to make.
+    {
+      const { h, blocker } = mkLoose((st, fid) => {
+        const other = st.turnOrder.find((f) => f !== fid);
+        return capitalHexOf(st, other);
+      });
+      h.players[blocker].resource = 0;
+      claimLooseDevice(h, blocker, api);
+      check("a faction that cannot pay for denial does not get it free",
+        rainmakerState(h).device.status !== DEVICE.DESTROYED);
+    }
   }
 
   // The splinter has one job and it is not this one.
