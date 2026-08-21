@@ -69,7 +69,9 @@ import {
   capitalHexOf, convoyHex, convoyLockedFor, claimConvoy, releaseClaim, tickClaim,
   deviceMovedThisRound, reconcileCarrier, openMyth, mythIsOpen, labHexOf,
   candidateArea, searchRate, findSite, onUnitEnteredHex, tickSearch, tickStages,
-  rainmakerSightBonus,
+  rainmakerSightBonus, tickSite, extractDevice, extractEarly,
+  installBlocker, installTurnsNeeded, tickInstall, onSettlementCaptured,
+  hireSpecialist, seizeSpecialist, specialistStanding, tickSpecialist,
 } from "./rainmaker.js";
 import { enforceLoyaltySlotCap, chargeChipUpkeep, slotCapacity, effectiveBuildCost, buildableChips, applyOutputAndBuilds, locationOutput, unitUpkeepFor, chargeUnitUpkeep } from "./economy.js";
 
@@ -7466,6 +7468,276 @@ line("\n  [Phase 33] the Rainmaker — the parallel phase and the search");
     const heir = progressFor(g, me).vehicleUnit;
     check("…and moves to another when that one is lost",
       !!heir && heir !== first && g.units[heir].movementBonus === 1);
+  }
+}
+
+
+// =====================================================================
+// Phase 34 — The Rainmaker, part 4: the site. Three turns standing on a
+// hex everybody can see, which is the first moment the leader is a
+// stationary target — and the beat where the exclusive phase opens.
+// =====================================================================
+line("\n  [Phase 34] the Rainmaker — the site, and the moment it becomes exclusive");
+{
+  // A found site with `fid`'s crew standing on it and nobody else's.
+  const siteSetup = (sd = seed) => {
+    const g = createGame({ seed: sd, mapSize: "large" });
+    startTurn(g);
+    openMyth(g);
+    const fid = g.turnOrder[0];
+    const rm = rainmakerState(g);
+    joinRainmaker(g, fid);
+    findSite(g, fid, "test");
+    const crew = Object.values(g.units).filter((u) => u.owner === fid);
+    for (const u of Object.values(g.units)) {
+      if (u.owner !== fid && u.node === rm.siteHex) u.node = (g.board.adjacency[rm.siteHex] || [])[0];
+    }
+    crew[0].node = rm.siteHex;
+    return { g, fid, rm, crew };
+  };
+
+  // --- three turns on site --------------------------------------------
+  {
+    const { g, fid, rm } = siteSetup();
+    tickSite(g);
+    check("standing on a found site starts the work, and puts you at the site stage",
+      progressFor(g, fid).stage === STAGE.SITE);
+    check("…and the finder's free step counts toward it",
+      progressFor(g, fid).siteTurns === 2);
+    check("…which is what opens the exclusive phase for everybody",
+      rainmakerState(g).phase === PHASE.EXCLUSIVE);
+    tickSite(g);
+    check("three turns on site lifts the device",
+      rainmakerState(g).device.status === DEVICE.CARRIED
+      && progressFor(g, fid).stage === STAGE.TRANSPORT);
+    check("…onto a unit that was actually standing there",
+      g.units[rainmakerState(g).device.carrierUid]?.owner === fid);
+    check("…undamaged, because they did it properly",
+      rainmakerState(g).device.damaged === false);
+  }
+
+  // Losing the hex loses the work. The whole point of the beat is that it
+  // pins you somewhere everyone can see.
+  {
+    const { g, fid, rm, crew } = siteSetup();
+    tickSite(g);
+    const before = progressFor(g, fid).siteTurns;
+    crew[0].node = (g.board.adjacency[rm.siteHex] || [])[0];
+    tickSite(g);
+    check("walking off the site loses the work done on it",
+      before > 0 && progressFor(g, fid).siteTurns === 0
+      && rainmakerState(g).device.status === DEVICE.BURIED);
+  }
+
+  // Two factions on the hex are fighting over it, not studying it.
+  {
+    const { g, fid, rm } = siteSetup();
+    const rival = g.turnOrder[1];
+    const theirs = Object.values(g.units).find((u) => u.owner === rival);
+    theirs.node = rm.siteHex;
+    tickSite(g);
+    check("a contested site makes progress for nobody",
+      (progressFor(g, fid)?.siteTurns || 0) === 0
+      && rainmakerState(g).device.status === DEVICE.BURIED);
+  }
+
+  // --- the second path: take it now, pay for it later ------------------
+  {
+    const { g, fid } = siteSetup();
+    check("there is no rushing a site nobody has worked yet", extractEarly(g, fid) === false);
+    tickSite(g);
+    check("…but a crew that has been on it can pull the device out in a hurry",
+      extractEarly(g, fid) === true);
+    check("…which gets it moving early and damaged",
+      rainmakerState(g).device.status === DEVICE.CARRIED
+      && rainmakerState(g).device.damaged === true
+      && progressFor(g, fid).stage === STAGE.TRANSPORT);
+  }
+
+  // A hunter who storms the site takes it the same way — the exclusive phase
+  // converted their line, and this is what taking it means.
+  {
+    const { g, fid, rm, crew } = siteSetup();
+    tickSite(g);
+    const raider = g.turnOrder[1];
+    check("the rival is hunting, not pursuing", progressFor(g, raider)?.hunting !== false);
+    crew[0].node = (g.board.adjacency[rm.siteHex] || [])[0];
+    const theirs = Object.values(g.units).find((u) => u.owner === raider);
+    theirs.node = rm.siteHex;
+    for (let i = 0; i < CONFIG.rainmaker.stages.siteTurns; i++) tickSite(g);
+    check("a hunter who drives the crew off and holds the hex gets the device",
+      rainmakerState(g).device.owner === raider
+      && progressFor(g, raider).stage === STAGE.TRANSPORT);
+    check("…and starts the haul with nothing else — no lab, no head start",
+      progressFor(g, raider).retained.lab === false
+      && progressFor(g, raider).installTurns === 0);
+  }
+
+  // Extraction needs somebody to carry it. A faction with no unit on the hex
+  // cannot lift it however much progress it has.
+  {
+    const { g, fid, rm, crew } = siteSetup();
+    crew[0].node = (g.board.adjacency[rm.siteHex] || [])[0];
+    check("nobody on the hex, nobody to carry it", extractDevice(g, fid) === false);
+  }
+}
+
+
+// =====================================================================
+// Phase 35 — The Rainmaker, part 5: the installation and the specialist.
+// The vulture toll (design §5.6) and the cheapest sabotage lever in the
+// design (§5.7, notes §9).
+// =====================================================================
+line("\n  [Phase 35] the Rainmaker — the installation and the specialist");
+{
+  const giveLab = (g, hexId, id = "labs") => {
+    const uid = `lab-${hexId}`;
+    g.chips[uid] = { uid, chipId: id, disabled: false };
+    g.locations[hexId].chips.push(uid);
+    return uid;
+  };
+
+  // A holder standing in its own capital with the device delivered.
+  const homeSetup = (sd = seed) => {
+    const g = createGame({ seed: sd, mapSize: "large" });
+    startTurn(g);
+    openMyth(g);
+    const fid = g.turnOrder[0];
+    joinRainmaker(g, fid);
+    const home = capitalHexOf(g, fid);
+    grantDevice(g, fid, { hex: home, carrierUid: null, reason: "test" });
+    const rm = rainmakerState(g);
+    rm.device.status = DEVICE.INSTALLED;
+    rm.device.hex = home;
+    advanceStage(g, fid, STAGE.INSTALL);
+    return { g, fid, home, rm };
+  };
+
+  // --- the vulture toll ------------------------------------------------
+  {
+    const { g, fid, home } = homeSetup();
+    check("without a lab in the capital, the fitting cannot even begin",
+      installBlocker(g, fid) === "no lab in the capital");
+    tickInstall(g);
+    tickInstall(g);
+    check("…and waiting does not help — nothing accrues at all",
+      progressFor(g, fid).installTurns === 0);
+    giveLab(g, home);
+    check("building one at full price clears the gate", installBlocker(g, fid) === null);
+    for (let i = 0; i < CONFIG.rainmaker.stages.installTurns; i++) tickInstall(g);
+    check("four turns of fitting brings up the specialist problem",
+      progressFor(g, fid).stage === STAGE.SPECIALIST);
+  }
+
+  // A lab somewhere else in the empire is not a lab in the capital.
+  {
+    const { g, fid, home } = homeSetup();
+    const other = Object.values(g.locations).find((l) => l.controller === fid && l.hexId !== home);
+    if (other) {
+      giveLab(g, other.hexId);
+      check("a lab in another city does not count — it has to be the destination",
+        installBlocker(g, fid) === "no lab in the capital" && !!labHexOf(g, fid));
+    } else check("a lab in another city does not count — it has to be the destination", true);
+  }
+
+  // Stage 4's second path is paid for here.
+  {
+    const { g, fid, home, rm } = homeSetup();
+    giveLab(g, home);
+    check("an undamaged device fits in the ordinary time",
+      installTurnsNeeded(g) === CONFIG.rainmaker.stages.installTurns);
+    rm.device.damaged = true;
+    check("…and one pulled out in a hurry costs the difference now",
+      installTurnsNeeded(g)
+        === CONFIG.rainmaker.stages.installTurns + CONFIG.rainmaker.stages.damagedInstallPenalty);
+    for (let i = 0; i < CONFIG.rainmaker.stages.installTurns; i++) tickInstall(g);
+    check("…so the ordinary four turns are not enough for a damaged one",
+      progressFor(g, fid).stage === STAGE.INSTALL);
+    for (let i = 0; i < CONFIG.rainmaker.stages.damagedInstallPenalty; i++) tickInstall(g);
+    check("…and the extra turns finish it", progressFor(g, fid).stage === STAGE.SPECIALIST);
+  }
+
+  // Storming the capital takes the device and nothing else.
+  {
+    const { g, fid, home } = homeSetup();
+    giveLab(g, home);
+    for (let i = 0; i < CONFIG.rainmaker.stages.installTurns; i++) tickInstall(g);
+    const raider = g.turnOrder[1];
+    const theirs = Object.values(g.units).find((u) => u.owner === raider);
+    theirs.node = home;
+    onSettlementCaptured(g, home, raider);
+    check("storming the capital takes the Rainmaker with the city",
+      rainmakerState(g).device.owner === raider);
+    check("…and the captor is at the start of its OWN haul, not at the victim's stage",
+      progressFor(g, raider).stage === STAGE.TRANSPORT
+      && progressFor(g, raider).installTurns === 0);
+    check("…on a unit that was actually in the assault",
+      rainmakerState(g).device.carrierUid === theirs.uid);
+    check("…and the victim has lost the line, not just the city",
+      progressFor(g, fid).stage === STAGE.MYTH);
+  }
+
+  // --- the specialist ---------------------------------------------------
+  {
+    const { g, fid, home } = homeSetup();
+    giveLab(g, home);
+    for (let i = 0; i < CONFIG.rainmaker.stages.installTurns; i++) tickInstall(g);
+    const rival = g.turnOrder[1];
+    g.players[fid].scrap = 100;
+    g.players[rival].scrap = 100;
+
+    check("nobody has the specialist to begin with", specialistStanding(g).heldBy === null);
+    check("…and nothing anywhere hints that a second one exists — not even a false flag",
+      !("onBackup" in specialistStanding(g)) && !("availableFrom" in specialistStanding(g)));
+
+    const cost = specialistStanding(g).cost;
+    check("paying secures them", hireSpecialist(g, fid) === true
+      && specialistStanding(g).heldBy === fid && g.players[fid].scrap === 100 - cost);
+    check("…and the next bid costs more than the last",
+      specialistStanding(g).cost > cost);
+
+    tickSpecialist(g);
+    check("the holder of the device plus the specialist is ready to switch on",
+      progressFor(g, fid).stage === STAGE.ACTIVATION);
+
+    // The whole point of the lever: a rival with money and no army takes them
+    // back off the leader.
+    check("a rival can outbid the leader and take them away",
+      hireSpecialist(g, rival) === true && specialistStanding(g).heldBy === rival);
+    check("…and being poached does NOT surface a backup — they are unavailable, not gone",
+      !("onBackup" in specialistStanding(g)));
+  }
+
+  // Path two: take rather than pay.
+  {
+    const { g, fid } = homeSetup();
+    const rival = g.turnOrder[1];
+    g.players[fid].scrap = 0;
+    check("a faction with no scrap cannot buy them", hireSpecialist(g, fid) === false);
+    check("…but can take them, given the weight",
+      seizeSpecialist(g, fid, CONFIG.rainmaker.specialist.seizeDifficulty) === true
+      && specialistStanding(g).heldBy === fid);
+  }
+
+  // A botched seizure is the ONLY door to the backup, and the backup is worse.
+  {
+    const { g, fid } = homeSetup();
+    const before = specialistStanding(g).cost;
+    let tries = 0;
+    while (!specialistStanding(g).onBackup && tries++ < 200) {
+      seizeSpecialist(g, fid, 0);
+    }
+    check("a botched seizure can kill them, and that is what surfaces a second name",
+      specialistStanding(g).onBackup === true
+      && g.log.some((e) => e.name === "rainmaker_specialist_lost"));
+    check("…and the backup is worse — dearer, and not available yet",
+      specialistStanding(g).cost > before
+      && specialistStanding(g).availableFrom > g.round);
+    g.players[fid].scrap = 500;
+    check("…so the leader cannot simply hire them the same turn",
+      hireSpecialist(g, fid) === false);
+    g.round = specialistStanding(g).availableFrom;
+    check("…until the delay is served", hireSpecialist(g, fid) === true);
   }
 }
 

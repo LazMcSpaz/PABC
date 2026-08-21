@@ -482,6 +482,10 @@ export function findSite(state, fid, how) {
     p.retained.vehicle = true;
   }
   if (p.stage < STAGE.SEARCH) p.stage = STAGE.SEARCH;
+  // One free step at the site, banked until the finder actually gets a crew
+  // there — spending it the moment it is granted would burn it on a hex they
+  // are not standing on.
+  p.siteBonus = 1;
   emit(state, "rainmaker_found", { player: fid, hex: rm.siteHex, how, round: state.round });
   return true;
 }
@@ -538,6 +542,79 @@ export function tickSearch(state) {
 export function rainmakerSightBonus(state, fid) {
   const p = rainmakerState(state)?.progress?.[fid];
   return p?.retained?.sight ? R().retained.sightBonus : 0;
+}
+
+// --- the site (stage 4), where the exclusive phase opens --------------
+
+// Who has units standing on the site right now.
+function factionsOnSite(state) {
+  const rm = rainmakerState(state);
+  const here = new Set();
+  for (const u of Object.values(state.units || {})) {
+    if (u.node === rm.siteHex) here.add(u.owner);
+  }
+  return [...here].sort();
+}
+
+// Lift the device off the site and put it on somebody's shoulders.
+//
+// `damaged` is the fast partial extraction: it buys turns here and spends more
+// of them at the installation, which is the second path Stage 4 owes the
+// two-path rule. It is set AFTER the grant, because taking the device
+// deliberately clears the previous holder's counters and this is not one of
+// them — it is a property of the device, not of anyone's progress.
+export function extractDevice(state, fid, { damaged = false } = {}) {
+  const rm = rainmakerState(state);
+  if (!rm || rm.device.status !== DEVICE.BURIED) return false;
+  let best = null;
+  for (const u of Object.values(state.units || {})) {
+    if (u.owner !== fid || u.node !== rm.siteHex) continue;
+    if (!best || u.strength > best.strength) best = u;
+  }
+  if (!best) return false;
+  grantDevice(state, fid, {
+    hex: rm.siteHex, carrierUid: best.uid,
+    reason: damaged ? "extracted in a hurry" : "extracted",
+  });
+  rm.device.damaged = !!damaged;
+  emit(state, "rainmaker_extracted", { player: fid, hex: rm.siteHex, damaged: !!damaged });
+  return true;
+}
+
+// The second path at Stage 4: take it now and pay for it later. Available once
+// the crew has been on site at all, so it is a shortcut rather than a way to
+// skip the beat entirely.
+export function extractEarly(state, fid) {
+  const rm = rainmakerState(state);
+  const p = rm?.progress?.[fid];
+  if (!p || p.stage !== STAGE.SITE || (p.siteTurns || 0) < 1) return false;
+  return extractDevice(state, fid, { damaged: true });
+}
+
+// The round pulse for the site. Understanding the thing before it can be moved
+// is what makes its holder a stationary, publicly known target for the first
+// time — so presence is the whole requirement, and losing the hex loses the
+// work.
+export function tickSite(state) {
+  const rm = rainmakerState(state);
+  if (!rm || !rm.foundBy || rm.device.status !== DEVICE.BURIED) return;
+  if (rm.phase === PHASE.ENDED) return;
+  const here = factionsOnSite(state);
+  for (const p of Object.values(rm.progress)) {
+    if (!here.includes(p.fid)) p.siteTurns = 0;
+  }
+  // Two factions standing on it are fighting over it, not studying it.
+  if (here.length !== 1) return;
+  const fid = here[0];
+  const p = rm.progress[fid] || joinRainmaker(state, fid);
+  if (!p) return;
+  if (p.stage < STAGE.SITE) advanceStage(state, fid, STAGE.SITE);
+  // The finder's head start — one free step, plus the couple of turns of
+  // uncontested access that being first to the hex buys on its own.
+  p.siteTurns = (p.siteTurns || 0) + 1 + (p.siteBonus || 0);
+  p.siteBonus = 0;
+  emit(state, "rainmaker_site_worked", { player: fid, turns: p.siteTurns });
+  if (p.siteTurns >= R().stages.siteTurns) extractDevice(state, fid);
 }
 
 // --- the haul (stage 5) ----------------------------------------------
@@ -610,6 +687,171 @@ export function reconcileCarrier(state, unitsByUid) {
     hex: rm.device.hex,
     reason: carrier ? "escort withdrew" : "escort destroyed",
   });
+}
+
+// --- the installation (stage 6) --------------------------------------
+
+// The vulture toll. A lab in the DESTINATION CAPITAL, at full cost and full
+// duration, whatever route you took to be standing here — built at Stage 1, or
+// built now because you skipped Stage 1 and took the device off somebody who
+// did not. It does not forbid the vulture strategy; it prices it, and prices it
+// at the worst possible moment, when the holder is publicly known and standing
+// still (design §6).
+export function installBlocker(state, fid) {
+  const rm = rainmakerState(state);
+  const p = rm?.progress?.[fid];
+  if (!p) return "not in the line";
+  if (rm.device.owner !== fid || rm.device.status !== DEVICE.INSTALLED) return "the device is not home";
+  const home = capitalHexOf(state, fid);
+  if (!home || rm.device.hex !== home) return "the device is not in the capital";
+  if (!labHexOf(state, fid, { capitalOnly: true })) return "no lab in the capital";
+  return null;
+}
+
+// How long the fitting takes for this holder. A device pulled out in a hurry
+// costs the difference here, which is where Stage 4's second path is paid for.
+export function installTurnsNeeded(state) {
+  const rm = rainmakerState(state);
+  const cfg = R().stages;
+  return cfg.installTurns + (rm?.device?.damaged ? cfg.damagedInstallPenalty : 0);
+}
+
+export function tickInstall(state) {
+  const rm = rainmakerState(state);
+  if (!rm || rm.phase === PHASE.ENDED) return;
+  const fid = rm.device.owner;
+  if (!fid) return;
+  const p = rm.progress[fid];
+  if (!p || p.stage !== STAGE.INSTALL) return;
+  if (installBlocker(state, fid)) return; // the lab is not there yet — nothing happens
+  p.installTurns = (p.installTurns || 0) + 1;
+  emit(state, "rainmaker_installing", { player: fid, turns: p.installTurns, needed: installTurnsNeeded(state) });
+  if (p.installTurns >= installTurnsNeeded(state)) advanceStage(state, fid, STAGE.SPECIALIST);
+}
+
+// Storming the capital is the other way to take the device, and it takes it the
+// same way the convoy does: the object and nothing else. The captor is holding
+// it in somebody else's city, so they are at Stage 5 with their own haul ahead
+// of them (notes §1).
+export function onSettlementCaptured(state, hexId, victor) {
+  const rm = rainmakerState(state);
+  if (!rm || rm.device.hex !== hexId) return false;
+  if (rm.device.status === DEVICE.DESTROYED || rm.device.owner === victor) return false;
+  let best = null;
+  for (const u of Object.values(state.units || {})) {
+    if (u.owner !== victor || u.node !== hexId) continue;
+    if (!best || u.strength > best.strength) best = u;
+  }
+  return grantDevice(state, victor, {
+    hex: hexId, carrierUid: best?.uid || null, reason: "stormed the capital",
+  });
+}
+
+// --- the specialist (stage 7) ----------------------------------------
+
+// Lazily created, so the record cannot be read off a fresh game and mined for
+// what is coming. The backup in particular is not merely hidden from the UI —
+// it does not exist as an object until the primary is permanently gone
+// (notes §9).
+function specialistState(state) {
+  const rm = rainmakerState(state);
+  if (!rm) return null;
+  rm.specialist = rm.specialist || {
+    heldBy: null,
+    cost: R().specialist.hireCost,
+    dead: false,
+    onBackup: false,
+    availableFrom: null,
+  };
+  return rm.specialist;
+}
+
+// Everything a faction is allowed to know about the specialist. Deliberately
+// says nothing at all about a backup — not a reserved slot, not a count, not a
+// flag — until one is actually in play.
+export function specialistStanding(state) {
+  const sp = rainmakerState(state)?.specialist;
+  if (!sp) return { heldBy: null, cost: R().specialist.hireCost, engaged: false };
+  const out = { heldBy: sp.heldBy, cost: sp.cost, engaged: true };
+  // The PRESENCE of these keys is the reveal. Reporting `onBackup: false`
+  // before one exists would be exactly the hint notes §9 forbids — not merely
+  // absent from the UI, absent from anything a player can observe or infer —
+  // and a caller reading a defined-but-false flag has already learned that a
+  // second name is a thing this game has.
+  if (sp.onBackup) {
+    out.onBackup = true;
+    if (sp.availableFrom != null) out.availableFrom = sp.availableFrom;
+  }
+  return out;
+}
+
+// The primary is gone for good. This is the ONLY thing that surfaces a second
+// name, and "gone for good" is a narrow set: dead. Being held by a rival is not
+// it — that is someone you cannot reach today and may outbid tomorrow.
+function revealBackup(state, reason) {
+  const sp = specialistState(state);
+  if (sp.onBackup) return false;
+  sp.onBackup = true;
+  sp.dead = false;
+  sp.heldBy = null;
+  sp.cost = Math.round(R().specialist.hireCost * R().specialist.backupCostMultiplier);
+  sp.availableFrom = state.round + R().specialist.backupDelayTurns;
+  emit(state, "rainmaker_specialist_lost", { reason });
+  return true;
+}
+
+function specialistReachable(state) {
+  const sp = specialistState(state);
+  if (sp.dead) return false;
+  if (sp.availableFrom != null && state.round < sp.availableFrom) return false;
+  return true;
+}
+
+// Path one: pay. Outbidding takes them off whoever has them, which is what
+// makes this a lever for a faction with money and no army.
+export function hireSpecialist(state, fid) {
+  const sp = specialistState(state);
+  if (!specialistReachable(state)) return false;
+  if (sp.heldBy === fid) return true;
+  const player = state.players?.[fid];
+  if (!player || (player.scrap || 0) < sp.cost) return false;
+  player.scrap -= sp.cost;
+  const from = sp.heldBy;
+  sp.heldBy = fid;
+  sp.cost += R().specialist.outbidStep;
+  emit(state, "rainmaker_specialist_secured", { player: fid, from: from || null, how: "hired" });
+  return true;
+}
+
+// Path two: take. The faction's military weight against a fixed bar — and a
+// botched attempt can kill them, which is the one door to the backup.
+export function seizeSpecialist(state, fid, strength) {
+  const sp = specialistState(state);
+  if (!specialistReachable(state)) return false;
+  if (sp.heldBy === fid) return true;
+  const cfg = R().specialist;
+  if (strength >= cfg.seizeDifficulty) {
+    const from = sp.heldBy;
+    sp.heldBy = fid;
+    sp.cost += cfg.outbidStep;
+    emit(state, "rainmaker_specialist_secured", { player: fid, from: from || null, how: "taken" });
+    return true;
+  }
+  if (state.rng.next() < cfg.seizeKillChance) revealBackup(state, "killed in a botched seizure");
+  return false;
+}
+
+// Stage 7 clears when the faction holding the device also holds the specialist.
+export function tickSpecialist(state) {
+  const rm = rainmakerState(state);
+  if (!rm || rm.phase === PHASE.ENDED) return;
+  const fid = rm.device.owner;
+  const p = fid && rm.progress[fid];
+  if (!p || p.stage !== STAGE.SPECIALIST) return;
+  const sp = rm.specialist;
+  if (!sp || sp.heldBy !== fid) return;
+  p.specialist = sp.onBackup ? "backup" : "primary";
+  advanceStage(state, fid, STAGE.ACTIVATION);
 }
 
 // --- the claim lock (notes §3) ---------------------------------------

@@ -418,6 +418,28 @@ export const CONFIG = {
       // How long the first faction to engage a convoy holds the field alone.
       claimWindowRounds: 2,
     },
+    // Stage 7's specialist. They belong to no faction, hold no ground, and are
+    // secured by outbidding whoever has them or by taking them — the cheapest
+    // non-military sabotage lever in the design, and a trailing player's real
+    // way to stall a leader they cannot fight.
+    specialist: {
+      hireCost: 12,
+      // Every transfer costs more than the last, so a bidding war is a war of
+      // attrition rather than a permanent tax on one faction.
+      outbidStep: 6,
+      // Taking instead of paying: the faction's military weight against a fixed
+      // bar. The second path, for a build that has soldiers and no scrap.
+      seizeDifficulty: 10,
+      // A botched seizure can kill them, which is the ONLY route to the backup.
+      // Poaching never is: someone a rival has is unavailable to you, not gone.
+      seizeKillChance: 0.34,
+      // The backup is worse. If the two were equivalent, removing the primary
+      // would cost a rival real resources for no effect.
+      backupCostMultiplier: 1.75,
+      backupDelayTurns: 2,
+    },
+    // What the device pays once it is switched on, and not one turn before.
+    output: { scrapPerTurn: 4 },
     // Three rounds holding the switched-on device, matching how a dominion
     // victory resolves. Same number on purpose: two win conditions that ask you
     // to hold a position should ask for the same length of nerve.

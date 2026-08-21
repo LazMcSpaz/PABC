@@ -11,7 +11,10 @@ import { activePlayerId } from "./targeting.js";
 import { sweepDeferred } from "./deferred.js";
 import { evaluateTriggers } from "./triggers.js";
 import { evaluateConditionalBeats } from "./quests.js";
-import { tickClaim, tickStages, tickSearch, openMyth, mythIsOpen } from "./rainmaker.js";
+import {
+  tickClaim, tickStages, tickSearch, tickSite, tickInstall, tickSpecialist,
+  openMyth, mythIsOpen,
+} from "./rainmaker.js";
 import {
   applyOutputAndBuilds, chargeChipUpkeep, chargeUnitUpkeep, enforceLoyaltySlotCap,
 } from "./economy.js";
@@ -418,6 +421,9 @@ function runRoundEnd(state) {
   if (!mythIsOpen(state) && state.round >= CONFIG.rainmaker.myth.earliestRound) openMyth(state);
   tickStages(state);
   tickSearch(state);
+  tickSite(state);
+  tickInstall(state);
+  tickSpecialist(state);
   tickClaim(state);
   expirePlacementMarkers(state);
   decayWorldCounters(state);

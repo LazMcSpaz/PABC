@@ -18,7 +18,10 @@ import { makeUnit, nextMusterIndex } from "./setup.js";
 import { TECH_NODES, hasTechNode } from "./tech.js";
 import { destroyPost } from "./posts.js";
 import { blockadeAt, blockadeDefense, destroyBlockade } from "./blockades.js";
-import { convoyHex, convoyLockedFor, claimConvoy, releaseClaim, reconcileCarrier } from "./rainmaker.js";
+import {
+  convoyHex, convoyLockedFor, claimConvoy, releaseClaim, reconcileCarrier,
+  onSettlementCaptured,
+} from "./rainmaker.js";
 import { recomputeVp } from "./victory.js";
 
 const fail = (reason) => ({ ok: false, reason });
@@ -375,6 +378,12 @@ function captureLocation(state, loc, victor) {
   loc.buildPriority = "blockade"; // rail doc §3.4 — a captor inherits the default
   loc.poolTarget = null;          // §2.2 — a captured city pools nowhere until told to
   emit(state, "location_captured", { hex: loc.hexId, controller: victor, from });
+
+  // Storming a capital with the Rainmaker in it takes the Rainmaker. Like every
+  // other way it changes hands, the captor gets the object and nothing else —
+  // and is now holding it in somebody else's city, with their own haul ahead of
+  // them.
+  onSettlementCaptured(state, loc.hexId, victor);
 
   // §16.5 severed supply — any in-transit reinforcement whose origin was
   // this Location is stranded: it becomes a fresh, chip-less unit (cap 4)
