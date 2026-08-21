@@ -20,6 +20,9 @@ const HISTORY = "History";
 const MAJOR = "Major Factions";
 const MINOR = "Minor Factions";
 const GIFTS = "Perceptive Gifts";
+const TITLES = "Titles & Roles";
+const INST = "Institutions & Instruments";
+const CUSTOMS = "Customs & Places";
 
 export const REPO_WIKI_ENTRIES = {
   // ── Technology & Vehicles ─────────────────────────────────────────────────
@@ -45,7 +48,7 @@ A landship should not be confused with a [[land vessel]], which is merely a vehi
     imagePath: null,
     body: `A specialist is a person who understands the machines of the old world as no one else does, the sort who can coax a dead console to light, restore a stalled engine, or rouse a [[landship]] that has sat silent for a lifetime. They belong to no faction. A specialist asked how they came by the knowledge will say only that they wanted it: that they went looking, chased down old texts, and learned what others could not be bothered to.
 
-Because there are so few of them, and so much depends on them, a specialist is among the most valuable people alive, and among the least free. Many are held rather than employed, passed from one holder to the next the way a possession is passed. Around each moves a small retinue of hired guards, an escort paid out of the specialist's own earnings and charged with delivering them intact to whoever has claimed them next.`,
+Because there are so few of them, and so much depends on them, a specialist is among the most valuable people alive, and among the least free. Many are held rather than employed, passed from one holder to the next the way a possession is passed. Around each moves a small retinue of hired guards, an [[escort]] paid out of the specialist's own earnings and charged with delivering them intact to whoever has claimed them next.`,
   },
 
   "land-vessel": {
@@ -58,7 +61,7 @@ Because there are so few of them, and so much depends on them, a specialist is a
 
 [[Versari]] vessels run on the sun. They are light by necessity, since every pound is a pound the panels must carry, and they falter under long cloud and carry little. [[Grand Lakers|Laker]] vessels are old machines of the manufacturing cities, stripped and rebuilt and kept running on [[ethanol]] the Lakers distill themselves, which binds how far they range to how much fuel they can make. The [[Goldgrass Coalition|Goldgrass]] and the [[Free Plainers]] keep to horse and wagon, with relays of fresh animals staged along the routes they use most. This is slower than an engine, but fed by grass that grows back.
 
-All of them move at the pace of the worst ground between here and there. Overland travel is measured in patience, and a ford or an old roadbed can decide a season.`,
+All of them move at the pace of the worst ground between here and there. Overland travel is measured in patience, and a [[Waystation and Ford|ford]] or an [[The Grade|old roadbed]] can decide a season.`,
   },
 
   "sun-runner": {
@@ -98,7 +101,7 @@ Some knowledge did survive whole. Wireless speech across distance has worked sin
     aliases: [],
     category: TECH,
     imagePath: null,
-    body: `Scrap is the salvage the whole era is built on, the metal, wire, glass, and working parts pulled from the ruins and the wrecks. It is the base of every trade that matters: what a smith reforges, what a [[specialist]] reworks, what a faction spends to better its [[land vessel|vessels]] and its tools. It is also finite. Nothing new is being made, only found, and the easy finds are long gone, so scrap is hoarded, fought over, and paid out carefully. Where the [[Goldgrass Coalition|Goldgrass]] halls keep wealth in printed notes, most of the continent keeps it in scrap.`,
+    body: `Scrap is the salvage the whole era is built on, the metal, wire, glass, and working parts pulled from the ruins and the wrecks. It is the base of every trade that matters: what a smith reforges, what a [[specialist]] reworks, what a faction spends to better its [[land vessel|vessels]] and its tools. It is also finite. Nothing new is being made, only found, and the easy finds are long gone, so scrap is hoarded, fought over, and paid out carefully. Where the [[Goldgrass Coalition|Goldgrass]] [[hall|halls]] keep wealth in [[Notes, Tallies, and Barter|printed notes]], most of the continent keeps it in scrap.`,
   },
 
   // ── History ───────────────────────────────────────────────────────────────
@@ -167,7 +170,7 @@ The Reapers no longer exist under that name. What they became are the [[Free Pla
 
 Their society is ranked and the ranks are permanent, worn as tattoos that cannot be removed or hidden. Seniority carries authority, and a scholar long established is heeded over one newly raised. There is a growing sense among them that a scholar's worth can be counted in the number who follow him, though this is not yet how the faction settles its questions.
 
-Their strength is knowledge. No other people can read the old world as they can, restore what it left, or teach it onward. Their weakness is the field. They are not many, they are not warriors, and they cannot hold ground by force against people who can. In dealing they are indirect and often underhanded, preferring an obligation quietly held to a bargain plainly struck, which makes them useful to everyone and trusted by no one.`,
+Their strength is knowledge. No other people can read the old world as they can, restore what it left, or teach it onward. Their weakness is the field. They are not many, they are not warriors, and they cannot hold ground by force against people who can. In dealing they are indirect and often underhanded, preferring [[debt|an obligation quietly held]] to a bargain plainly struck, which makes them useful to everyone and trusted by no one.`,
   },
 
   "grand-lakers": {
@@ -193,7 +196,7 @@ Their strength is what they make and what they can endure. Their casting and met
     imagePath: null,
     body: `The Goldgrass Coalition is an alliance of farming communities across the grass country of the middle continent, and it is the food of the continent. It came together out of settlements that survived [[The Pole Shift|the shift]] largely on their own, in country that shook and flooded less than most, on the strength of knowing how to work land and feed themselves.
 
-They take that survival as the proof of their way of living. Their culture is communal because getting through those years required neighbors, and it holds labor, provision, and good dealing as the things that matter. They are a coalition and not a state: member communities keep their own affairs, and what binds them is agreement rather than command. Their mercantile halls, their notes and tallies, and their village offices are described in their own entries.
+They take that survival as the proof of their way of living. Their culture is communal because getting through those years required neighbors, and it holds labor, provision, and good dealing as the things that matter. They are a coalition and not a state: member communities keep their own affairs, and what binds them is agreement rather than command. Their [[hall|mercantile halls]], their [[Notes, Tallies, and Barter|notes and tallies]], and their [[headwoman|village offices]] are described in their own entries.
 
 Their strength is that everyone needs them. They produce food and fine handcraft at a scale no one else approaches, which makes them the ally every faction would like to have. Their weakness is that they cannot defend it. Their fighting men are levied farmers rather than soldiers, and their neighbors know it, so the same abundance that makes them desirable as friends makes them worth taking from. Being needed has never protected them from being pressed.`,
   },
@@ -204,9 +207,9 @@ Their strength is that everyone needs them. They produce food and fine handcraft
     aliases: ["free plainers", "plainers", "free plainer"],
     category: MAJOR,
     imagePath: null,
-    body: `The Free Plainers hold scattered country across the plains under barons and lords, in something close to a feudal arrangement, and they are less a faction than a great many local powers wearing one name.
+    body: `The Free Plainers hold scattered country across the plains under [[baron|barons]] and lords, in something close to a feudal arrangement, and they are less a faction than a great many local powers wearing one name.
 
-Their stock is mixed. Some of their holders descend from the powerful of the old world, who came up from [[The Shelters|their shelters]] expecting authority and found that the offices and machinery that had granted it were gone, so that they had to become personal and cunning about power instead. Their descendants inherited the estates without necessarily inheriting the edge that won them, and a baron who never had to fight for what he holds is often blunt where his grandfather was sharp. Others rose the other way, mercenary captains out of [[The Reapers|the Reapers]] who gathered enough followers to take a holding and keep it. Both roads end at the same chair and the two are long since blended.
+Their stock is mixed. Some of their holders descend from the powerful of the old world, who came up from [[The Shelters|their shelters]] expecting authority and found that the offices and machinery that had granted it were gone, so that they had to become personal and cunning about power instead. Their descendants inherited the estates without necessarily inheriting the edge that won them, and a baron who never had to fight for what he holds is often blunt where his grandfather was sharp. Others rose the other way, mercenary captains out of [[The Reapers|the Reapers]] who gathered enough followers to take a [[holding]] and keep it. Both roads end at the same chair and the two are long since blended.
 
 What they hold in common is the conviction that freedom comes before everything and that those with strength and cunning ought to rule. They celebrate the individual over the group and produce champions rather than institutions. Their strength is that they cannot be pinned down, being everywhere and answerable to no center. Their weakness is the same fact. They have no unity to call on, no body that can commit them to anything, and they will fight enemies and betray allies alike rather than let themselves be put under anyone.`,
   },
@@ -322,6 +325,253 @@ The same capacity turns up in those who spend their lives reading rooms and nego
     body: `Field reading is the warrior's version, kept chiefly by the [[Dambarans]] and honored openly in [[Grand Lakers|Laker]] military culture. It is the sense of violence before it arrives: knowing where a room is about to break, reading the shape of a fight while it is still forming, standing in the right place a moment before there is any reason to.
 
 Warrior traditions have carried something like it for as long as anyone has records of, and it is taught as much as it is inherited, in the sense that the training brings it out in those who have it. Commanders whose decisions look prophetic afterward are the celebrated cases. The Dambarans regard it as inseparable from the rest of their discipline and do not make a mystery of it.`,
+  },
+
+  // ── Titles & Roles ────────────────────────────────────────────────────────
+
+  "factor": {
+    id: "factor",
+    term: "Factor",
+    aliases: ["factors"],
+    category: TITLES,
+    imagePath: null,
+    body: `A factor is a [[hall]]'s agent in the field, carrying delegated authority to price goods, make contracts, and settle accounts on the hall's behalf without sending back for approval. What the factor commits, the hall is held to.
+
+The office covers an enormous range. A junior factor may work a folding table at the edge of a market, buying grain in small lots against a book. A senior one may arrive in person, with an [[escort]], to conclude something a hall has been arranging for a season. Both bind the hall equally in principle, though a counterparty who cannot tell the difference will usually find out.
+
+The appointment is made by the hall and can be withdrawn by it. A factor's word binds the hall for as long as the appointment stands, which is why the ending of one is announced as carefully as the making.`,
+  },
+
+  "baron": {
+    id: "baron",
+    term: "Baron",
+    aliases: ["barons", "barony", "baronies"],
+    category: TITLES,
+    imagePath: null,
+    body: `A baron is a [[Free Plainers|Free Plainer]] holder who has taken the title rather than received it. There is no body among the Plainers that grants it, no authority that could withhold it, and none that could take it away. A man is a baron because he says so and because enough armed men agree.
+
+What stands behind the title is the [[holding]]: a walled estate, the ground around it, and more men than the word itself would suggest. That is the whole of it. The interesting thing about a Plainer barony is not that the title is empty, which everyone knows, but that it is honored anyway. In country with no court and no crown, a title backed by a wall and a garrison is as good as one backed by a charter, and rather more reliable.`,
+  },
+
+  "colonel": {
+    id: "colonel",
+    term: "Colonel",
+    aliases: [],
+    category: TITLES,
+    imagePath: null,
+    body: `Colonel is a rank from an organization that no longer exists. Where it survives, it survives in one of two ways: carried down from the old service structures that came up out of [[The Shelters|the shelters]], or given informally to a man whose conduct has earned it from the people around him.
+
+It is worth setting beside the Plainer [[baron|baronies]]. One title is claimed by the man who holds it and honored by others because he can enforce it. The other is often refused by the man it is applied to and used by everyone else regardless. Which of the two commands more actual obedience is not a settled question, and the answer tends to depend on which side of a wall you are standing.`,
+  },
+
+  "headwoman": {
+    id: "headwoman",
+    term: "Headwoman",
+    aliases: ["headwomen"],
+    category: TITLES,
+    imagePath: null,
+    body: `A headwoman is the authority of a single [[Goldgrass Coalition|Goldgrass]] village, either elected by it or simply grown into the position through the community's consent. Her power over her own village is real. She holds its common fund, speaks for it in dealings with [[hall|halls]] and neighbors, and settles what needs settling within it.
+
+Her power ends at the village boundary and it ends at the bottom of the fund. A village fund is one fund, and it will do one thing. A headwoman choosing to spend it has chosen against every other thing it might have done, and she will hear about that choice for years. The office carries a great deal of responsibility and very little reach, which is the ordinary shape of authority in a coalition of communities that have not surrendered anything to a center.`,
+  },
+
+  "steward": {
+    id: "steward",
+    term: "Steward",
+    aliases: ["stewards"],
+    category: TITLES,
+    imagePath: null,
+    body: `A steward keeps a household's or a granary's accounts, holds the stores, and records what comes in and goes out.
+
+In practice the office decides far more than its description suggests. The steward controls what is written down, in what quantity, and in which currency it is reckoned. A store recorded in [[Notes, Tallies, and Barter|notes]] and a store recorded in [[scrap]] are the same grain and not the same asset. A steward who is trusted is rarely checked, and a steward who is checked is usually being checked too late. Households that have learned this the hard way keep the counting and the holding in separate hands, and most households have not learned it.`,
+  },
+
+  "the-trades": {
+    id: "the-trades",
+    term: "The Trades",
+    aliases: ["trades"],
+    category: TITLES,
+    imagePath: null,
+    body: `Certain trades are not background in this era. They make decisions, and they are dealt with as powers in their own right.
+
+A settlement with one smith has a strategic asset and a man who knows he is one. The same is true of a joiner where timber work must hold, and of a quartermaster who knows what a column actually has rather than what its commander believes it has. These people are courted, retained, and occasionally taken. What separates a trade from a mere occupation here is whether the thing can be done by someone else within reach, and for a great many settlements the answer is no.`,
+  },
+
+  // ── Institutions & Instruments ────────────────────────────────────────────
+
+  "hall": {
+    id: "hall",
+    term: "Hall",
+    aliases: ["halls", "mercantile hall", "mercantile halls"],
+    category: INST,
+    imagePath: null,
+    body: `A hall is a [[Goldgrass Coalition|Goldgrass]] mercantile institution, and it is the most commonly used and least explained term in the grass country. A hall issues currency, extends credit, holds contracts, hires labor and armed men, and stands behind the word of its [[factor|factors]].
+
+It is not a government. It commands no territory and no allegiance, and it cannot compel a village to do anything. It is also not a guild, since it is not an association of one trade protecting its own. It is closer to a house that deals in obligation: it makes promises that are good, and its whole standing rests on their continuing to be good.
+
+Halls are the practical machinery of the Coalition, doing much of what a state would do in a place that has no state. A Coalition that cannot levy effectively can still move grain across the continent, because the halls move it.`,
+  },
+
+  "the-seat": {
+    id: "the-seat",
+    term: "The Seat",
+    aliases: ["seat"],
+    category: INST,
+    imagePath: null,
+    body: `The seat is where a holder's rulings are handed down. It is not a building and not a room. It is the office itself, and a holder carries it wherever he happens to be sitting when he decides something.
+
+Because the seat is an office rather than a place, it can be contested by anyone who begins doing the same work and is heeded. A woman hearing disputes in her own front room for a fee is not committing an offense against anything. She is offering the same service in competition, and if people bring their disputes to her instead, the practical content of the seat has moved regardless of who holds the name of it.`,
+  },
+
+  "assize": {
+    id: "assize",
+    term: "Assize",
+    aliases: ["assizes"],
+    category: INST,
+    imagePath: null,
+    body: `An assize is a sitting at which disputes are heard, called for the purpose and ended when the business is done. It gathers the parties, whatever witnesses can be produced, and whoever will be doing the deciding.
+
+There is no standing court anywhere on the continent, which is why the word describes an event rather than an institution. An assize happens because someone with enough standing calls one and enough people agree to attend.`,
+  },
+
+  "holding": {
+    id: "holding",
+    term: "Holding",
+    aliases: ["holdings"],
+    category: INST,
+    imagePath: null,
+    body: `A holding is the basic unit of land tenure: the ground, what stands on it, and what is owed on account of it.
+
+The obligations travel with the ground. A holding that passes to a new hand passes with its [[debt|debts]], its standing contracts, and whatever was promised by whoever held it before, and the new holder inherits the lot whether or not he knew of them. This is the ordinary way arrangements outlive the people who made them, and it is a common way for a person to find himself bound to a bargain he never struck and would never have made.`,
+  },
+
+  "notes-tallies-barter": {
+    id: "notes-tallies-barter",
+    term: "Notes, Tallies, and Barter",
+    aliases: ["notes", "note", "tally", "tallies", "barter"],
+    category: INST,
+    imagePath: null,
+    body: `Three ways of settling a debt, used side by side.
+
+Most of the continent barters. Goods move against goods, and [[scrap]] is the closest thing to a universal medium, since everyone can use it and it is running out everywhere at the same rate.
+
+The [[Goldgrass Coalition|Goldgrass]] halls issue printed notes. A note is a promise by the [[hall]] that issued it, redeemable at that hall, and worth what people believe about that hall. Notes travel far beyond the grass country because they are light and because hall credit has generally been good, and they are discounted the further they get from home.
+
+A tally is written by a holder against a reserve kept with a hall. It is a private instrument backed by someone else's stock, and its worth depends on two beliefs holding at once: that the holder is good for it, and that the reserve exists as claimed. When a tally is presented and the reserve is not there, what happens next is a matter between the holder and whoever is holding the paper, and there is no court to take it to.`,
+  },
+
+  "debt": {
+    id: "debt",
+    term: "Debt",
+    aliases: ["debts"],
+    category: INST,
+    imagePath: null,
+    body: `Debt means two different things depending on who is owed.
+
+The [[Goldgrass Coalition|Goldgrass]] kind is written. It is entered in a book, it has terms, and it can be sold, inherited, or presented for payment by someone the debtor has never met.
+
+The [[Versari]] kind is not written anywhere. Nothing is recorded, no term is set, and no sum is named. The obligation is simply remembered, by people whose profession is remembering, and it is called in at a moment of the creditor's choosing for an amount the creditor decides is proportionate. A written debt can be discharged. An unwritten one is discharged when the holder says it is.`,
+  },
+
+  "levy": {
+    id: "levy",
+    term: "Levy",
+    aliases: ["levies", "levied"],
+    category: INST,
+    imagePath: null,
+    body: `A levy is how a coalition without an army raises men. Villages send what they can spare, for a season or for a stated purpose, and the men come as they are.
+
+It shows. A levy carries farm tools as often as arms, knows the ground it grew up on and none beyond it, and counts the weeks until harvest the entire time it is away. Levied men will fight hard for their own country and are difficult to keep in the field once the immediate danger has passed, because every one of them has work waiting that no one else is doing. This is the reason the [[Goldgrass Coalition|Coalition]]'s numbers on paper and its strength in the field are two different figures.`,
+  },
+
+  "claim": {
+    id: "claim",
+    term: "Claim",
+    aliases: ["claims"],
+    category: INST,
+    imagePath: null,
+    body: `A claim is a [[Free Plainers|Free Plainer]] assertion of right to land. It is made by declaring it, and it is maintained by holding the ground.
+
+There is no court to hear a claim, no register to record it, and no body with authority to decide between two of them. Three legitimate claims can therefore exist over the same quarter section at once, each perfectly sound by its own account, and all three claimants may be entirely sincere. Such matters are settled by negotiation, purchase, marriage, or force, and the settlement lasts exactly as long as the party who won it can keep it.`,
+  },
+
+  "escort": {
+    id: "escort",
+    term: "Escort",
+    aliases: ["escorts"],
+    category: INST,
+    imagePath: null,
+    body: `An escort is the retained guard that moves with a [[specialist]]. It is not usually hired by the specialist.
+
+The arrangement runs the other way: the party currently holding a specialist's services hires the escort, retains it until the specialist is delivered to whoever has them next, and takes the cost out of the specialist's earnings. The escort's duty is to deliver its charge intact, which means protecting the specialist from harm and from departure with equal diligence. A great deal of the continent's most valuable knowledge travels in this fashion, guarded and not free.`,
+  },
+
+  // ── Customs & Places ──────────────────────────────────────────────────────
+
+  "hollow": {
+    id: "hollow",
+    term: "The Hollow",
+    aliases: ["hollow", "hollows"],
+    category: CUSTOMS,
+    imagePath: null,
+    body: `A hollow is the [[Croppers|Cropper]] settlement form: a community set into low ground rather than raised on it, worked outward from the center. The arrangement suits how they hold land and how they gather, and it makes their settlements notably hard to see across flat country until one is nearly in among them.`,
+  },
+
+  "the-rite": {
+    id: "the-rite",
+    term: "The Rite",
+    aliases: ["rite"],
+    category: CUSTOMS,
+    imagePath: null,
+    body: `The [[Croppers]]' central observance. It has a season and an hour, both fixed, and the hour is not the one an outsider would guess. There is a second hour that can be named if someone asks properly, and asking properly is most of the difficulty.
+
+The rite is conducted in the open and is not concealed, but it is not performed for observers either, and interrupting one is taken seriously. Those who have watched from a distance generally report that nothing much appears to happen.`,
+  },
+
+  "numerals-not-words": {
+    id: "numerals-not-words",
+    term: "Numerals, Not Words",
+    aliases: [],
+    category: CUSTOMS,
+    imagePath: null,
+    body: `A building convention: a crew cuts its count into the ridge beam and never its names. A beam reading nine means nine hands raised the roof, and that is the whole of the record.
+
+The reason given is that the building outlasts the names and it is dishonest to put on it a claim it cannot keep. What lasts is the fact of the work and the number who did it. Reading old beams is one of the few ways to judge how large a settlement's working population was at the time a thing was built, which makes the convention useful to more people than intended it.`,
+  },
+
+  "the-grade": {
+    id: "the-grade",
+    term: "The Grade",
+    aliases: ["grade"],
+    category: CUSTOMS,
+    imagePath: null,
+    body: `The grade is old road, treated as a resource class rather than a route. Where the surface has gone the bed beneath it often has not: still level, still draining, still holding a line across country that would otherwise have to be fought through.
+
+It is used in three ways at once. It is traveled, because a column on grade moves faster than a column off it. It is quarried, for the stone and material in it. And it is fought over, since a stretch of good grade is worth more than the ground on either side of it. Quarrying a grade destroys it for travel, which is a decision someone makes locally and everyone downstream lives with.`,
+  },
+
+  "waystation-and-ford": {
+    id: "waystation-and-ford",
+    term: "Waystation and Ford",
+    aliases: ["waystation", "waystations", "ford", "fords"],
+    category: CUSTOMS,
+    imagePath: null,
+    body: `The two pieces of infrastructure that shape overland movement.
+
+A waystation is a fixed stopping point on a route, holding water, shelter, and whatever an operator provides. Routes exist where waystations exist, because the distance between them sets what a day's travel can be.
+
+A ford is where a crossing is possible, and crossings are rare enough that they decide the shape of a campaign. Everything moving through a region converges on the same few, which makes a ford the natural place to trade, to levy a toll, or to wait for someone. A column that cannot cross where it intended may lose a great deal of time going to where it can.`,
+  },
+
+  "foundry-cast-mark": {
+    id: "foundry-cast-mark",
+    term: "The Foundry and the Cast Mark",
+    aliases: ["foundry", "foundries", "cast mark"],
+    category: CUSTOMS,
+    imagePath: null,
+    body: `[[Grand Lakers|Laker]] manufacturing identity, and a matter of pride rather than record keeping.
+
+A foundry forms its numerals raised in the mold itself rather than stamping them afterward, so the mark is part of the casting and cannot be removed without destroying the piece. The seam is left unground. A Laker will tell you that grinding a seam is hiding the work, and that a piece with its seam showing is a piece whose maker is willing to be known by it. The practical consequence is that Laker work is identifiable to its foundry across the continent and long after the people who cast it are gone.`,
   },
 };
 
