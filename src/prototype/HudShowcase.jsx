@@ -21,6 +21,14 @@ const MOCK_ENCOUNTER = {
   ],
 };
 
+// Art is optional on every encounter and beat, so the modal has two layouts
+// to look-pass, not one. A leader portrait stands in for encounter art here
+// purely because it is already 2:3 — no encounter art is authored yet.
+const MOCK_ENCOUNTER_ART = {
+  ...MOCK_ENCOUNTER,
+  imagePath: `${import.meta.env.BASE_URL}assets/portraits/factions/versari/versari_leader_1.webp`,
+};
+
 // Mock tech-wheel state for the showcase: Doctrine + Vanguard already held
 // (so Killing Blow / Turrets are now reachable), Industry held too. One
 // point left to spend — assignable nodes pulse, locked nodes stay dim.
@@ -95,21 +103,27 @@ export default function HudShowcase({ onExit }) {
         {panel === "diplomacy" && <TitledWindow key="diplomacy" title="Diplomacy" icon={ICON.diplomacy} onClose={() => setPanel(null)}>
           <p className="pc-prose" style={{ margin: 0, fontSize: 13, lineHeight: 1.6, color: C.textDim }}>Broker deals, pacts and coalitions with rival factions — manage reputation, and deal with every rival by treaty or by force.</p>
         </TitledWindow>}
-        {panel === "encounter" && (
-          <EncounterModal
-            key="encounter"
-            encounter={MOCK_ENCOUNTER}
-            choices={MOCK_ENCOUNTER.choices}
-            eligibleIds={MOCK_ENCOUNTER.choices.map((c) => c.id)}
-            redrawsLeft={1}
-            onRedraw={() => {}}
-            onPick={() => setPanel(null)}
-          />
-        )}
+        {(panel === "encounter" || panel === "encounterArt") && (() => {
+          const enc = panel === "encounterArt" ? MOCK_ENCOUNTER_ART : MOCK_ENCOUNTER;
+          return (
+            <EncounterModal
+              key={panel}
+              encounter={enc}
+              choices={enc.choices}
+              eligibleIds={enc.choices.map((c) => c.id)}
+              redrawsLeft={1}
+              onRedraw={() => {}}
+              onPick={() => setPanel(null)}
+            />
+          );
+        })()}
       </AnimatePresence>
       <div style={{ position: "absolute", bottom: 18, left: 24, color: C.textFaint, zIndex: 20, display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 6 }}>
         <div style={{ fontFamily: C.font, fontSize: 11, letterSpacing: 3, textTransform: "uppercase" }}>HUD Look Pass · v2</div>
-        <button className="hud-int" onClick={() => setPanel("encounter")} style={{ fontFamily: C.font, fontSize: 10.5, letterSpacing: 1.6, textTransform: "uppercase", color: C.holoHi, background: "rgba(86,211,198,0.08)", border: `1px solid ${C.holo}66`, borderRadius: 5, padding: "5px 12px", cursor: "pointer" }}>Encounter preview</button>
+        <div style={{ display: "flex", gap: 6 }}>
+          <button className="hud-int" onClick={() => setPanel("encounter")} style={{ fontFamily: C.font, fontSize: 10.5, letterSpacing: 1.6, textTransform: "uppercase", color: C.holoHi, background: "rgba(86,211,198,0.08)", border: `1px solid ${C.holo}66`, borderRadius: 5, padding: "5px 12px", cursor: "pointer" }}>Encounter · no art</button>
+          <button className="hud-int" onClick={() => setPanel("encounterArt")} style={{ fontFamily: C.font, fontSize: 10.5, letterSpacing: 1.6, textTransform: "uppercase", color: C.holoHi, background: "rgba(86,211,198,0.08)", border: `1px solid ${C.holo}66`, borderRadius: 5, padding: "5px 12px", cursor: "pointer" }}>Encounter · with art</button>
+        </div>
         {onExit && <button className="hud-int" onClick={onExit} style={{ fontFamily: C.font, fontSize: 11, letterSpacing: 1.5, textTransform: "uppercase", color: C.textDim, background: "transparent", border: `1px solid ${C.steelHi}`, borderRadius: 5, padding: "5px 14px", cursor: "pointer" }}>← Back to game</button>}
       </div>
     </div>
