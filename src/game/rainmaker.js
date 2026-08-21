@@ -26,6 +26,7 @@
 import { CONFIG } from "./config.js";
 import { emit } from "./events.js";
 import { bfsDistances } from "./board.js";
+import { factionDef, registerRuntimeFaction } from "./content.js";
 
 // The line, start to finish. Numbered so "further along" is a comparison and
 // the UI can draw a bar; named so nothing downstream reads a bare integer.
@@ -814,8 +815,14 @@ export function hireSpecialist(state, fid) {
   if (!specialistReachable(state)) return false;
   if (sp.heldBy === fid) return true;
   const player = state.players?.[fid];
-  if (!player || (player.scrap || 0) < sp.cost) return false;
-  player.scrap -= sp.cost;
+  // Scrap lives on `resource` — the fixtures for this were setting a `scrap`
+  // field nobody reads, which is exactly the kind of green test that hides a
+  // free hire.
+  if (!player || (player.resource || 0) < sp.cost) return false;
+  player.resource -= sp.cost;
+  emit(state, "resource_spent", {
+    player: fid, resource: "Resource", amount: sp.cost, source: "rainmaker-specialist",
+  });
   const from = sp.heldBy;
   sp.heldBy = fid;
   sp.cost += R().specialist.outbidStep;
@@ -924,6 +931,238 @@ export function tickClaim(state) {
   if (state.round - rm.claim.since >= R().transport.claimWindowRounds) {
     releaseClaim(state, "window expired");
   }
+}
+
+// --- activation, the siege, and the hold (stage 8) --------------------
+
+// Everything the switch does, and it does all of it at once. If these can come
+// apart — production a round before the clock, or the siege arriving late — the
+// balance breaks in the holder's favour, because the whole anti-runaway design
+// rests on the device paying NOTHING until the moment it is contested
+// (notes §8).
+export function activate(state, fid) {
+  const rm = rainmakerState(state);
+  const p = rm?.progress?.[fid];
+  if (!p || p.stage !== STAGE.ACTIVATION || rm.activatedBy) return false;
+  if (rm.device.owner !== fid || rm.device.status !== DEVICE.INSTALLED) return false;
+  const home = capitalHexOf(state, fid);
+  if (!home || rm.device.hex !== home) return false;
+
+  rm.activatedBy = fid;
+  rm.activatedRound = state.round;
+  // Everyone hears it, and everyone hears it now — the final siege has to be
+  // foreseeable rather than a gotcha, because the player can lose to this.
+  emit(state, "rainmaker_activated", {
+    player: fid, hex: home, round: state.round, holdRounds: R().holdRounds,
+  });
+  raiseSiege(state, fid);
+  return true;
+}
+
+// The device pays nothing before the switch. Not reduced output, not partial
+// irrigation, nothing — the single most important balance rule in the design
+// and the most tempting to soften when Stages 4-7 feel unrewarding. They are
+// supposed to feel unrewarding.
+export function rainmakerOutput(state, fid) {
+  const rm = rainmakerState(state);
+  if (!rm || rm.activatedBy !== fid) return 0;
+  if (rm.device.status !== DEVICE.INSTALLED) return 0;
+  return R().output.scrapPerTurn;
+}
+
+// Who is coming, and roughly how heavy. Symmetrical on purpose (design §7): the
+// holder sees what is coming, and the attackers see that they are not alone,
+// which turns converging on a defended capital into a decision rather than a
+// reflex.
+export function siegeIntent(state) {
+  const rm = rainmakerState(state);
+  if (!rm?.activatedBy) return null;
+  const holder = rm.activatedBy;
+  const committed = [];
+  for (const fid of Object.keys(state.players || {})) {
+    if (fid === holder || state.players[fid]?.eliminated) continue;
+    if (!state.rainmakerSiege?.includes(fid)) continue;
+    let weight = 0;
+    for (const u of Object.values(state.units || {})) if (u.owner === fid) weight += u.strength || 0;
+    committed.push({ fid, weight });
+  }
+  committed.sort((a, b) => b.weight - a.weight || a.fid.localeCompare(b.fid));
+  return { holder, hex: rm.device.hex, committed, round: rm.activatedRound };
+}
+
+// The siege is made of RIVALS. The spawn is a floor and nothing more — it
+// exists so a runaway leader with no surviving neighbours still gets tested
+// rather than winning uncontested.
+function raiseSiege(state, holder) {
+  // Somebody sworn to the holder is not going to besiege them. Read through the
+  // diplomacy layer rather than reimplemented here — "allied" has to mean the
+  // same thing to the siege as it does to the dominion condition, or a leader
+  // could be simultaneously unopposed and not unopposed.
+  const rivals = Object.keys(state.players || {}).filter((f) =>
+    f !== holder && !state.players[f]?.eliminated && !alliedToHolder(state, f, holder));
+  state.rainmakerSiege = rivals;
+  emit(state, "rainmaker_siege", { holder, besiegers: rivals });
+  if (!rivals.length) {
+    const splinter = raiseSplinter(state, holder);
+    if (splinter) state.rainmakerSiege = [splinter];
+  }
+}
+
+// Sworn to the holder, by pact or by vassalage. Injected rather than imported:
+// this module is reached from movement.js and contest.js, both of which
+// diplomacy.js sits above, and the codebase already resolves that shape by
+// handing the reader down (see victory.js `registerAllyReader`).
+let allyReader = () => false;
+export function registerRainmakerAllyReader(fn) {
+  if (typeof fn === "function") allyReader = fn;
+}
+
+// Making a unit is setup.js's job, and setup.js seeds this module — so the
+// factory is handed down rather than imported, for the same reason the ally
+// reader is.
+let unitFactory = null;
+export function registerUnitFactory(fn) {
+  if (typeof fn === "function") unitFactory = fn;
+}
+function alliedToHolder(state, fid, holder) {
+  try { return !!allyReader(state, fid, holder); } catch { return false; }
+}
+
+// Nobody left to test the holder, so somebody splits off to do it. A splinter of
+// a real faction rather than a nameless mob — and never a splinter of the
+// player's own house, which would read as the game inventing a grievance for
+// them: the player's Versari gets a Free Plainer baron instead.
+//
+// It cannot be dealt with diplomatically. That is the point of a floor: a
+// runaway leader who can buy off everything has already proved they can, so the
+// last test is one that money does not answer.
+export function raiseSplinter(state, holder) {
+  const rm = rainmakerState(state);
+  if (!rm || rm.splinterId) return null;
+  const human = state.humanFactionId;
+  const parentId = human === "versari" ? "plainers" : "versari";
+  const parent = factionDef(parentId);
+  const id = `${parentId}-splinter`;
+  registerRuntimeFaction({
+    id,
+    name: parentId === "versari" ? "The Korad Schism" : "The Free Baronies",
+    color: parent?.color || "#9a9a9a",
+    tier: "splinter",
+    scope: "global",
+    playable: false,
+    // Every diplomatic entry point asks this before offering anything.
+    undiplomatic: true,
+    temperament: "warlord",
+    aggression: 1,
+    trust: 0,
+    grudge: 1,
+    sociability: 0,
+    victoryLean: "conquest",
+    expansion: 0.5,
+    unitNames: parentId === "versari"
+      ? ["Schism Column", "Broken Adjuncts", "Korad Dissenters", "The Recusants"]
+      : ["Baron's Levy", "Free Riders", "Dust Barons", "Flatwind Irregulars"],
+  });
+  rm.splinterId = id;
+  seatSplinter(state, id, holder);
+  // Sized against the holder's own army: the floor exists to TEST a runaway
+  // leader, and a fixed force is either no test at all or an execution,
+  // depending on how far they ran.
+  let power = 0;
+  for (const u of Object.values(state.units || {})) if (u.owner === holder) power += u.strength || 0;
+  const per = Math.max(1, CONFIG.unit.baseStrength);
+  const cfg = R().siege;
+  const count = Math.max(cfg.minUnits,
+    Math.min(cfg.maxUnits, Math.round((power * cfg.strengthShare) / per)));
+  spawnSplinterForce(state, id, holder, count);
+  emit(state, "splinter_rose", { faction: id, against: holder, from: parentId, units: count });
+  return id;
+}
+
+// Give the splinter a seat, a standing row and an army. It is a real faction
+// from here on — it takes turns, it is seen, it is fought — which is why it is
+// built out of the same pieces every other faction is rather than as a special
+// case the rest of the engine has to know about.
+function seatSplinter(state, id, holder) {
+  const seed = state.players[holder];
+  state.players[id] = {
+    id, factionId: id, isAI: true, isMinor: false, splinter: true,
+    menace: 0, honor: 0, resource: 0, vp: 0, bankedVp: 0,
+    tech: seed?.tech ?? 1,
+    actions: { remaining: 0, max: 0 },
+    research: 0, permanentResearch: 0, techLevel: seed?.techLevel ?? 1, techWheel: [],
+    unitCap: 99, hand: [],
+    tracks: { trust: 0, reputation: 0, alignment: 0 },
+    flags: {}, activeQuests: {}, completedQuests: {}, encounterCooldowns: {},
+  };
+  // Seated immediately AFTER the holder, so the holder gets the full turn of
+  // warning the design insists on before anything arrives (design §7).
+  const at = state.turnOrder.indexOf(holder);
+  state.turnOrder.splice(at + 1, 0, id);
+  if (state.activeIndex > at) state.activeIndex += 1;
+
+  state.factionStanding[id] = {};
+  for (const f of state.turnOrder) {
+    state.factionStanding[id][f] = f === holder ? -100 : 0;
+    if (state.factionStanding[f]) state.factionStanding[f][id] = 0;
+  }
+}
+
+// The units the splinter brings, placed on open ground within reach of the
+// capital but never on it — an army that materialises inside the walls is not a
+// siege, it is a coup, and the holder is owed a turn to redeploy.
+export function spawnSplinterForce(state, id, holder, count) {
+  const home = capitalHexOf(state, holder);
+  if (!home || !unitFactory) return [];
+  const d = bfsDistances(state.board.adjacency, home);
+  const ring = Object.keys(state.board.hexes)
+    .filter((h) => d[h] === R().siege.spawnDistance && !state.locations[h])
+    .sort();
+  if (!ring.length) return [];
+  const made = [];
+  for (let i = 0; i < count; i++) {
+    const hex = ring[i % ring.length];
+    const uid = `${id}-u${i}`;
+    const u = unitFactory(state, uid, id, hex);
+    if (!u) continue;
+    state.units[uid] = u;
+    made.push(uid);
+  }
+  emit(state, "rainmaker_siege_force", { faction: id, units: made.length, hex: ring[0] });
+  return made;
+}
+
+// How many rounds are left on the Rainmaker's clock, or null if it is not
+// running. Same shape as the dominion countdown, because they race each other.
+export function rainmakerCountdown(state) {
+  const rm = rainmakerState(state);
+  if (!rm?.activatedBy || rm.activatedRound == null) return null;
+  return Math.max(0, R().holdRounds - (state.round - rm.activatedRound));
+}
+
+// The clock. Broken by anything that takes the settlement or the device — both
+// of which already clear `activatedBy` where they happen, so this only has to
+// ask whether the holder is still standing where it switched the thing on.
+export function checkRainmakerVictory(state) {
+  const rm = rainmakerState(state);
+  if (!rm || state.winnerId || !rm.activatedBy) return;
+  const fid = rm.activatedBy;
+  const home = capitalHexOf(state, fid);
+  const stillHolding = !state.players[fid]?.eliminated
+    && rm.device.status === DEVICE.INSTALLED
+    && rm.device.owner === fid
+    && home && rm.device.hex === home;
+  if (!stillHolding) {
+    rm.activatedBy = null;
+    rm.activatedRound = null;
+    state.rainmakerSiege = [];
+    emit(state, "rainmaker_hold_broken", { player: fid });
+    return;
+  }
+  if (state.round - rm.activatedRound < R().holdRounds) return;
+  state.winnerId = fid;
+  rm.phase = PHASE.ENDED;
+  emit(state, "rainmaker_won", { player: fid, round: state.round });
 }
 
 // --- readers the rest of the game asks with ---------------------------

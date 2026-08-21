@@ -8,6 +8,7 @@
 // build action (actions.js), the Upkeep loop (turn.js), the capture path
 // (contest.js), and the HUD exposures (engineAdapter.js).
 import { CONFIG } from "./config.js";
+import { rainmakerOutput } from "./rainmaker.js";
 import { CHIPS, chipDefOf } from "./content.js";
 import { emit } from "./events.js";
 import { recomputeStats, recomputeResearch } from "./stats.js";
@@ -392,6 +393,18 @@ export function applyOutputAndBuilds(state, pid) {
     state.players[pid].resource += banked;
     emit(state, "resource_gained", {
       player: pid, resource: "Resource", amount: banked, source: "output",
+    });
+  }
+
+  // The Rainmaker, and not one drop before it is switched on (rainmaker notes
+  // §8). Emitted separately from city Output so the log says where it came
+  // from — and so that "the device is paying" is visible in the feed the round
+  // it starts, which is also the round everyone comes for it.
+  const rain = rainmakerOutput(state, pid);
+  if (rain > 0) {
+    state.players[pid].resource += rain;
+    emit(state, "resource_gained", {
+      player: pid, resource: "Resource", amount: rain, source: "rainmaker",
     });
   }
   // §3.2 Toll Booth — a blockade's own income, emitted separately from city

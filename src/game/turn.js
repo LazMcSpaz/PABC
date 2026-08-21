@@ -13,13 +13,14 @@ import { evaluateTriggers } from "./triggers.js";
 import { evaluateConditionalBeats } from "./quests.js";
 import {
   tickClaim, tickStages, tickSearch, tickSite, tickInstall, tickSpecialist,
-  openMyth, mythIsOpen,
+  openMyth, mythIsOpen, checkRainmakerVictory, registerRainmakerAllyReader,
+  registerUnitFactory,
 } from "./rainmaker.js";
 import {
   applyOutputAndBuilds, chargeChipUpkeep, chargeUnitUpkeep, enforceLoyaltySlotCap,
 } from "./economy.js";
 import {
-  runDiplomacyRound, vassalsOf, arePacted, adjustMenace, sweepTrespass,
+  runDiplomacyRound, vassalsOf, arePacted, vassalLord, adjustMenace, sweepTrespass,
   checkDominion, dominionStanding,
 } from "./diplomacy.js";
 import { holdsLocation } from "./control.js";
@@ -29,6 +30,7 @@ import { hasTechNode } from "./tech.js";
 import { chargePostUpkeep } from "./posts.js";
 import { chargeBlockadeUpkeep } from "./blockades.js";
 import { bankVp, recomputeVp, registerAllyReader } from "./victory.js";
+import { makeUnit, nextMusterIndex } from "./setup.js";
 import { CHIPS, LOCATIONS, ABILITIES, factionDef } from "./content.js";
 
 // Sum a numeric chip field across a Location's installed, non-dormant
@@ -425,6 +427,7 @@ function runRoundEnd(state) {
   tickInstall(state);
   tickSpecialist(state);
   tickClaim(state);
+  checkRainmakerVictory(state);
   expirePlacementMarkers(state);
   decayWorldCounters(state);
   // §18.8/§18.12 — the diplomacy round cadence: Menace decay, Standing
@@ -494,3 +497,14 @@ registerAllyReader((state, fid) => {
   const st = dominionStanding(state, fid);
   return { allied: st.allied, vassals: st.vassals };
 });
+
+// The Rainmaker's siege asks the same question from the other side — is this
+// faction sworn to the holder, and therefore not coming for them. Same reason
+// it is injected: rainmaker.js is reached from movement.js and contest.js,
+// which diplomacy.js sits above.
+registerRainmakerAllyReader((state, fid, holder) =>
+  arePacted(state, fid, holder) || vassalLord(state, fid) === holder);
+
+// …and the same for making a unit, which setup.js owns.
+registerUnitFactory((state, uid, owner, node) =>
+  makeUnit(uid, owner, node, null, nextMusterIndex(state, owner)));

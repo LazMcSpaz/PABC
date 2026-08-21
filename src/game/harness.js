@@ -72,6 +72,8 @@ import {
   rainmakerSightBonus, tickSite, extractDevice, extractEarly,
   installBlocker, installTurnsNeeded, tickInstall, onSettlementCaptured,
   hireSpecialist, seizeSpecialist, specialistStanding, tickSpecialist,
+  activate, rainmakerOutput, rainmakerCountdown, checkRainmakerVictory,
+  siegeIntent, raiseSplinter,
 } from "./rainmaker.js";
 import { enforceLoyaltySlotCap, chargeChipUpkeep, slotCapacity, effectiveBuildCost, buildableChips, applyOutputAndBuilds, locationOutput, unitUpkeepFor, chargeUnitUpkeep } from "./economy.js";
 
@@ -7683,8 +7685,8 @@ line("\n  [Phase 35] the Rainmaker — the installation and the specialist");
     giveLab(g, home);
     for (let i = 0; i < CONFIG.rainmaker.stages.installTurns; i++) tickInstall(g);
     const rival = g.turnOrder[1];
-    g.players[fid].scrap = 100;
-    g.players[rival].scrap = 100;
+    g.players[fid].resource = 100;
+    g.players[rival].resource = 100;
 
     check("nobody has the specialist to begin with", specialistStanding(g).heldBy === null);
     check("…and nothing anywhere hints that a second one exists — not even a false flag",
@@ -7692,7 +7694,7 @@ line("\n  [Phase 35] the Rainmaker — the installation and the specialist");
 
     const cost = specialistStanding(g).cost;
     check("paying secures them", hireSpecialist(g, fid) === true
-      && specialistStanding(g).heldBy === fid && g.players[fid].scrap === 100 - cost);
+      && specialistStanding(g).heldBy === fid && g.players[fid].resource === 100 - cost);
     check("…and the next bid costs more than the last",
       specialistStanding(g).cost > cost);
 
@@ -7712,7 +7714,7 @@ line("\n  [Phase 35] the Rainmaker — the installation and the specialist");
   {
     const { g, fid } = homeSetup();
     const rival = g.turnOrder[1];
-    g.players[fid].scrap = 0;
+    g.players[fid].resource = 0;
     check("a faction with no scrap cannot buy them", hireSpecialist(g, fid) === false);
     check("…but can take them, given the weight",
       seizeSpecialist(g, fid, CONFIG.rainmaker.specialist.seizeDifficulty) === true
@@ -7733,11 +7735,145 @@ line("\n  [Phase 35] the Rainmaker — the installation and the specialist");
     check("…and the backup is worse — dearer, and not available yet",
       specialistStanding(g).cost > before
       && specialistStanding(g).availableFrom > g.round);
-    g.players[fid].scrap = 500;
+    g.players[fid].resource = 500;
     check("…so the leader cannot simply hire them the same turn",
       hireSpecialist(g, fid) === false);
     g.round = specialistStanding(g).availableFrom;
     check("…until the delay is served", hireSpecialist(g, fid) === true);
+  }
+}
+
+
+// =====================================================================
+// Phase 36 — The Rainmaker, part 6: activation, the siege, the hold, and
+// the third way to win. Three things fire as one event (notes §8), and
+// the device pays nothing at all before it does.
+// =====================================================================
+line("\n  [Phase 36] the Rainmaker — activation, the siege and the win");
+{
+  // A holder one step from the switch.
+  const readySetup = (sd = seed, opts = {}) => {
+    const g = createGame({ seed: sd, mapSize: "large" });
+    startTurn(g);
+    openMyth(g);
+    const fid = opts.fid || g.turnOrder[0];
+    joinRainmaker(g, fid);
+    const home = capitalHexOf(g, fid);
+    grantDevice(g, fid, { hex: home, carrierUid: null, reason: "test" });
+    const rm = rainmakerState(g);
+    rm.device.status = DEVICE.INSTALLED;
+    rm.device.hex = home;
+    advanceStage(g, fid, STAGE.INSTALL);
+    advanceStage(g, fid, STAGE.SPECIALIST);
+    advanceStage(g, fid, STAGE.ACTIVATION);
+    return { g, fid, home, rm };
+  };
+
+  // --- the device pays nothing until the switch ------------------------
+  {
+    const { g, fid } = readySetup();
+    check("a device sitting installed and unswitched pays nothing at all",
+      rainmakerOutput(g, fid) === 0);
+    check("…and there is no clock running", rainmakerCountdown(g) === null);
+    activate(g, fid);
+    check("switching it on starts paying", rainmakerOutput(g, fid) === CONFIG.rainmaker.output.scrapPerTurn);
+    check("…starts the clock in the same event",
+      rainmakerCountdown(g) === CONFIG.rainmaker.holdRounds);
+    check("…and calls everybody down on the holder in the same event",
+      g.log.some((e) => e.name === "rainmaker_activated" && e.payload.player === fid)
+      && g.log.some((e) => e.name === "rainmaker_siege" && e.payload.holder === fid));
+    check("…and nobody else is paid by it", rainmakerOutput(g, g.turnOrder[1]) === 0);
+    check("switching on twice is not a thing", activate(g, fid) === false);
+  }
+
+  // --- the hold --------------------------------------------------------
+  {
+    const { g, fid } = readySetup();
+    activate(g, fid);
+    checkRainmakerVictory(g);
+    check("holding it for a moment is not holding it", g.winnerId === null);
+    g.round += CONFIG.rainmaker.holdRounds - 1;
+    checkRainmakerVictory(g);
+    check("…nor is holding it for one round short", g.winnerId === null
+      && rainmakerCountdown(g) === 1);
+    g.round += 1;
+    checkRainmakerVictory(g);
+    check("three rounds of holding it wins the game",
+      g.winnerId === fid && g.log.some((e) => e.name === "rainmaker_won"));
+  }
+
+  // Losing the city mid-clock breaks the hold, and the clock does not carry.
+  {
+    const { g, fid, home, rm } = readySetup();
+    activate(g, fid);
+    g.round += CONFIG.rainmaker.holdRounds - 1;
+    const raider = g.turnOrder[1];
+    const theirs = Object.values(g.units).find((u) => u.owner === raider);
+    theirs.node = home;
+    onSettlementCaptured(g, home, raider);
+    checkRainmakerVictory(g);
+    check("taking the city on the last turn of the clock stops the win dead",
+      g.winnerId === null && rainmakerCountdown(g) === null);
+    check("…and the captor inherits no part of that clock",
+      rainmakerState(g).activatedBy === null && progressFor(g, raider).stage === STAGE.TRANSPORT);
+    check("…and the device stops paying the moment it changes hands",
+      rainmakerOutput(g, fid) === 0 && rainmakerOutput(g, raider) === 0);
+  }
+
+  // Destroying it mid-clock ends the whole line rather than handing anyone a win.
+  {
+    const { g, fid } = readySetup();
+    activate(g, fid);
+    destroyDevice(g, g.turnOrder[1], { reason: "denied" });
+    g.round += CONFIG.rainmaker.holdRounds;
+    checkRainmakerVictory(g);
+    check("a device destroyed on the clock wins nobody anything",
+      g.winnerId === null && rainmakerOutput(g, fid) === 0);
+  }
+
+  // --- the siege is made of rivals -------------------------------------
+  {
+    const { g, fid } = readySetup();
+    activate(g, fid);
+    const intent = siegeIntent(g);
+    check("the siege is the live rivals, named before anything arrives",
+      intent.committed.length === g.turnOrder.filter((f) => f !== fid).length);
+    check("…with a weight against each, so converging is a decision not a reflex",
+      intent.committed.every((c) => typeof c.weight === "number"));
+    check("…and no splinter is raised while there is somebody to do the job",
+      rainmakerState(g).splinterId == null);
+  }
+
+  // …and the floor, for a leader who has already bought off the whole board.
+  {
+    const { g, fid } = readySetup();
+    for (const f of g.turnOrder.filter((x) => x !== fid)) formPact(g, fid, f, "test");
+    activate(g, fid);
+    const rm = rainmakerState(g);
+    check("a leader with nobody left to oppose them still gets tested",
+      !!rm.splinterId && g.log.some((e) => e.name === "splinter_rose"));
+    check("…by a faction with a seat, a grudge and an army",
+      g.players[rm.splinterId] && g.turnOrder.includes(rm.splinterId)
+      && Object.values(g.units).some((u) => u.owner === rm.splinterId));
+    check("…which musters outside the walls, not inside them",
+      Object.values(g.units).every((u) => u.owner !== rm.splinterId || u.node !== capitalHexOf(g, fid)));
+    check("…and cannot be bought, allied, vassalized or made peace with",
+      formPact(g, fid, rm.splinterId, "test") === false
+      && makePeace(g, fid, rm.splinterId, "test") === false
+      && vassalize(g, fid, rm.splinterId, "test") === false
+      && wouldAccept(g, rm.splinterId, { proposer: fid, recipient: rm.splinterId, give: [], get: [] }) === false);
+    check("…and it is never a splinter of the player's own house",
+      rm.splinterId.startsWith(g.humanFactionId === "versari" ? "plainers" : "versari"));
+    check("…and it takes its turn after the holder, so the warning is real",
+      g.turnOrder.indexOf(rm.splinterId) === g.turnOrder.indexOf(fid) + 1);
+  }
+
+  // A splinter is raised once, ever.
+  {
+    const { g, fid } = readySetup();
+    const first = raiseSplinter(g, fid);
+    check("the floor is raised once and only once",
+      !!first && raiseSplinter(g, fid) === null);
   }
 }
 

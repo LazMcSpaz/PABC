@@ -9,7 +9,7 @@
 // the AI-to-AI engine is deterministic thresholds, so it never perturbs the
 // contest RNG stream.
 import { CONFIG } from "./config.js";
-import { FACTIONS, MINOR_FACTIONS, factionDef, LOCATIONS, CHIPS } from "./content.js";
+import { FACTIONS, MINOR_FACTIONS, factionDef, isUndiplomatic, LOCATIONS, CHIPS } from "./content.js";
 import { emit, registerEventHook } from "./events.js";
 import { getStanding, adjustStanding, setStanding, standingTier } from "./standing.js";
 import { bfsDistances, reinforcementRoute } from "./board.js";
@@ -564,6 +564,15 @@ export function areNeighbours(state, a, b) {
 
 // May `a` engage `b` diplomatically/militarily given scope? A local faction
 // only engages neighbours; globals engage anyone.
+// A faction that will not be talked to at all. Deliberately NOT folded into
+// mayEngage, which gates military reach as well: the splinter that rises
+// against a Rainmaker holder has to be fightable, it just cannot be bought,
+// allied, vassalized or made peace with. Every diplomatic entry point asks
+// this; nothing military does.
+export function dealsBarred(a, b) {
+  return isUndiplomatic(a) || isUndiplomatic(b);
+}
+
 export function mayEngage(state, a, b) {
   const aLocal = factionDef(a)?.scope === "local";
   const bLocal = factionDef(b)?.scope === "local";
@@ -810,6 +819,7 @@ export function dealValue(state, fid, deal) {
 
 // Would `fid` accept `deal`? Net value ≥ 0 AND hard gates (§18.8).
 export function wouldAccept(state, fid, deal) {
+  if (dealsBarred(fid, deal?.proposer) || dealsBarred(fid, deal?.recipient)) return false;
   const other = deal.proposer === fid ? deal.recipient : deal.proposer;
   // Hard gate: a pact / deep promise needs the proposer past rep gates.
   const hasDeepPromise = [...(deal.give || []), ...(deal.get || [])].some(
@@ -1098,6 +1108,7 @@ function refusalReason(state, fid, deal) {
 }
 
 export function tableOffer(state, from, to, deal, meta = {}) {
+  if (dealsBarred(from, to)) return null;
   ensureDiplomacy(state);
   const offer = {
     id: `offer-${from}-${to}-${state.round}-${state.diplomacy.offers.length}`,
@@ -1327,6 +1338,7 @@ function resolveUltimatums(state) {
 
 // --- applying a struck deal (§18.6 atomic) --------------------------
 export function applyDeal(state, deal, cause = "deal") {
+  if (dealsBarred(deal?.proposer, deal?.recipient)) return false;
   // transfer each side's items
   transferItems(state, deal.proposer, deal.recipient, deal.give);
   transferItems(state, deal.recipient, deal.proposer, deal.get);
@@ -1478,6 +1490,7 @@ export function truceBetween(state, a, b) {
 const truceKey = (a, b) => [a, b].sort().join("|");
 
 export function makePeace(state, a, b, cause = "peace") {
+  if (dealsBarred(a, b)) return false;
   const before = state.diplomacy.wars.length;
   state.diplomacy.wars = state.diplomacy.wars.filter(
     (w) => !((w.a === a && w.b === b) || (w.a === b && w.b === a)),
@@ -1517,6 +1530,7 @@ export function dontAllyPledge(state, a, b) {
 }
 
 export function formPact(state, a, b, cause = "pact") {
+  if (dealsBarred(a, b)) return false;
   if (arePacted(state, a, b)) return false;
   // Either side may have promised a third party it would not ally this one.
   // Honouring it is the default; breaking it is a deliberate act that runs
@@ -2201,6 +2215,7 @@ export function mediate(state, mediator, a, b) {
 
 // §18.9 Vassalize — subordinate `vassal` to `lord` (a formal sub-state).
 export function vassalize(state, lord, vassal, cause = "vassalized") {
+  if (dealsBarred(lord, vassal)) return false;
   const previous = vassalLord(state, vassal);
   if (previous === lord) return false;
   // A faction serves ONE lord. `state.diplomacy.vassals` is keyed by vassal so

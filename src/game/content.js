@@ -98,8 +98,29 @@ export const MINOR_FACTIONS = {
 // Combined faction lookup — resolves a faction id to its def whether major
 // or minor. The diplomacy layer (standing, valuation, AI) reads through
 // this so it never has to branch on tier.
+// Factions that did not exist when the game started. A splinter raised by the
+// Rainmaker's activation is a real faction with real units, so every reader
+// that resolves a faction id has to find it — and there is exactly one lookup,
+// so registering it here is the whole of the wiring.
+export const RUNTIME_FACTIONS = {};
+export function registerRuntimeFaction(def) {
+  if (!def?.id) return null;
+  RUNTIME_FACTIONS[def.id] = def;
+  return def;
+}
+export function clearRuntimeFactions() {
+  for (const k of Object.keys(RUNTIME_FACTIONS)) delete RUNTIME_FACTIONS[k];
+}
+
 export function factionDef(fid) {
-  return FACTIONS[fid] || MINOR_FACTIONS[fid] || null;
+  return FACTIONS[fid] || MINOR_FACTIONS[fid] || RUNTIME_FACTIONS[fid] || null;
+}
+
+// A faction nobody can talk to. The splinter that rises against a Rainmaker
+// holder wants one thing and will not be bought off it, so every diplomatic
+// entry point asks this before offering anything.
+export function isUndiplomatic(fid) {
+  return !!factionDef(fid)?.undiplomatic;
 }
 
 // strategicValue drives garrison Strength and chip slots (see config).

@@ -440,6 +440,18 @@ export const CONFIG = {
     },
     // What the device pays once it is switched on, and not one turn before.
     output: { scrapPerTurn: 4 },
+    siege: {
+      // How far out the splinter musters. Never on the capital itself: an army
+      // that materialises inside the walls is a coup, not a siege, and the
+      // holder is owed the full turn of warning the design insists on.
+      spawnDistance: 2,
+      // Sized against the holder's own army rather than a flat number — the
+      // floor exists to TEST a runaway leader, and a fixed force is either no
+      // test at all or an execution depending on how far they ran.
+      strengthShare: 0.75,
+      minUnits: 2,
+      maxUnits: 6,
+    },
     // Three rounds holding the switched-on device, matching how a dominion
     // victory resolves. Same number on purpose: two win conditions that ask you
     // to hold a position should ask for the same length of nerve.
