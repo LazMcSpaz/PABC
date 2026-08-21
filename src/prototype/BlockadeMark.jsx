@@ -18,6 +18,12 @@
 //
 // Sized off HEX_W rather than in pixels, so it holds its proportion of a hex
 // if the tiles are ever re-exported at a different resolution.
+//
+// `angle` is the bearing of the road under it, and the mark is laid ACROSS
+// that. It used to be drawn flat whatever the road did, which meant a
+// barricade on a road running north-south lay ALONG the road rather than
+// blocking it — scenery beside the route rather than the thing standing in
+// it.
 import { ownerColor } from "./data.js";
 import { HEX_W } from "./hexProjection.js";
 
@@ -25,16 +31,21 @@ const W = HEX_W * 0.3;
 const H = HEX_W * 0.095;
 const CASING = "rgba(4,8,12,0.88)";
 
-export default function BlockadeMark({ x, y, blockade }) {
+export default function BlockadeMark({ x, y, blockade, angle = 0 }) {
   const col = ownerColor(blockade.owner);
   const left = x - W / 2;
   const top = y - H / 2;
   const r = H * 0.22;
+  // Square across the road, and never upside down: past a quarter turn the
+  // mark is flipped back so its uprights always read the same way up.
+  let a = ((angle + 90) % 180 + 180) % 180;
+  if (a > 90) a -= 180;
+  const across = `rotate(${a.toFixed(1)} ${x.toFixed(1)} ${y.toFixed(1)})`;
 
   if (!blockade.done) {
     const frac = blockade.cost > 0 ? Math.min(1, blockade.progress / blockade.cost) : 0;
     return (
-      <g>
+      <g transform={across}>
         <rect x={left} y={top} width={W} height={H} rx={r}
           fill={CASING} stroke={CASING} strokeWidth={4} />
         {/* progress fills from the left, so "nearly done" reads without
@@ -50,7 +61,7 @@ export default function BlockadeMark({ x, y, blockade }) {
   }
 
   return (
-    <g style={{ filter: `drop-shadow(0 0 5px ${col}88)` }}>
+    <g transform={across} style={{ filter: `drop-shadow(0 0 5px ${col}88)` }}>
       <rect x={left - 2} y={top - 2} width={W + 4} height={H + 4} rx={r}
         fill={CASING} />
       <rect x={left} y={top} width={W} height={H} rx={r}

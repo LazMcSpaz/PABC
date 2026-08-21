@@ -78,7 +78,12 @@ const staged = await page.evaluate(() => {
   );
   g.world = g.world || {};
   g.world.blockades = g.world.blockades || {};
-  g.world.blockades[road] = { hex: road, owner: me, done: true, paid: true, progress: 4, cost: 4, chips: [], builder: null };
+  // Keyed `hex|edge`: a hex holds one blockade per road leaving it.
+  const roadEdge = (g.board.adjacency[road] || []).find((n) => g.board.hexes[n]?.road) || null;
+  g.world.blockades[`${road}|${roadEdge}`] = {
+    hex: road, edge: roadEdge, owner: me, done: true, paid: true,
+    progress: 4, cost: 4, chips: [], builder: null,
+  };
   const plain = Object.keys(g.board.hexes).find(
     (h) => !g.locations[h] && h !== road && (!vis || vis.has(h)),
   );

@@ -670,8 +670,8 @@ line("\n  [Terrain] movement costs (forest +1, mountains halt)");
   }
 }
 
-// --- §16.2 graded ground — road and rail negate terrain, and cost half ---
-line("\n  [Paved] road and rail: half a hex, and no terrain cost");
+// --- §16.2 the network: half a hex on easy ground, EASED terrain on rough ---
+line("\n  [Paved] road and rail: half a hex where it is a lane, eased where it is a pass");
 {
   const PAVED = CONFIG.movement.pavedCost;
   const mk = (B, C) => ({
@@ -681,16 +681,26 @@ line("\n  [Paved] road and rail: half a hex, and no terrain cost");
     },
   });
   const forestRoad = movementField(mk({ cover: true, road: true }, {}), "A", 2);
-  check("a road through forest costs half a hex, not forestCost",
-    forestRoad.B === 2 - PAVED && "C" in forestRoad);
-  const mtnRoad = movementField(mk({}, { elevation: true, road: true }), "A", 3);
-  check("a road through a mountain neither halts nor costs a whole hex",
-    mtnRoad.C === 3 - 1 - PAVED && "D" in mtnRoad);
-  // Rail track is graded ground too, with or without a road beside it.
+  const M = CONFIG.movement;
+  // Rough ground is EASED, not deleted: a road over a pass is still a pass.
+  check(`a road through forest costs ${M.roadForestCost}, not forestCost`,
+    forestRoad.B === 2 - M.roadForestCost && "C" in forestRoad);
+  const mtnRoad = movementField(mk({}, { elevation: true, road: true }), "A", 4);
+  check("a road over a mountain does NOT halt (D reachable beyond it)",
+    "D" in mtnRoad);
+  check(`…but it still costs ${M.roadMountainCost}, not 1`,
+    mtnRoad.C === 4 - 1 - M.roadMountainCost);
+  check("a road halves forest's toll rather than waiving it",
+    M.roadForestCost === M.forestCost / 2);
+  // …and on EASY ground, which is where a lane is actually a lane, it is half
+  // a hex. These two rules met in a merge and both survived, because they are
+  // about different ground.
+  const openRoad = movementField(mk({ road: true }, {}), "A", 2);
+  check("a road across open ground costs half a hex",
+    openRoad.B === 2 - PAVED);
   const railOnly = movementField(mk({ rail: true }, { rail: true }), "A", 2);
-  check("rail hexes are graded ground on their own",
+  check("rail is graded ground on its own, with no road beside it",
     railOnly.B === 2 - PAVED && railOnly.C === 2 - PAVED * 2);
-  // A toll is a surcharge on top, and a lane does not waive it.
   const tolled = movementField(mk({ road: true }, {}), "A", 2,
     { extraCost: new Map([["B", 1]]) });
   check("a toll rides on top of the half-hex, it is not absorbed by it",
@@ -699,6 +709,52 @@ line("\n  [Paved] road and rail: half a hex, and no terrain cost");
   const g = createGame({ seed });
   const roads = Object.values(g.board.hexes).filter((h) => h.road).length;
   check("setup lays a road network", roads > 0);
+
+  // The SHAPE of what setup lays, over enough boards to mean something.
+  //
+  // `road` is a per-hex boolean, so connectivity — for the renderer and for
+  // the supply walk in blockades.js alike — is "adjacent hexes that both carry
+  // road". Two corridors passing through neighbouring hexes are therefore
+  // welded into a ladder, which is why assignRoads routes each corridor over
+  // the ones already laid instead of independently. These guard that: without
+  // the reuse discount the rungs come back, and without the terrain cost the
+  // corridors drive straight over the high ground they are supposed to skirt.
+  {
+    const seeds = [424242, 7, 991, 4711, 8123, 20260821, 31337, 55555];
+    let hexes = 0, tri = 0, rough = 0, islands = 0;
+    for (const s of seeds) for (const mapSize of [null, "medium", "huge"]) {
+      const b = createGame({ seed: s, mapSize }).board;
+      const road = Object.keys(b.hexes).filter((h) => b.hexes[h].road);
+      const on = new Set(road);
+      hexes += road.length;
+      rough += road.filter((h) => b.hexes[h].elevation || b.hexes[h].cover).length;
+      // A triangle of mutually adjacent road hexes is one rung of a ladder.
+      for (const a of road) for (const x of b.adjacency[a] || []) {
+        if (!on.has(x) || x <= a) continue;
+        for (const c of b.adjacency[x] || []) {
+          if (on.has(c) && c > x && (b.adjacency[a] || []).includes(c)) tri++;
+        }
+      }
+      // One network, not several — supply and blockades both assume it.
+      const seen = new Set([road[0]]);
+      const q = [road[0]];
+      for (let i = 0; i < q.length; i++) for (const nb of b.adjacency[q[i]] || []) {
+        if (on.has(nb) && !seen.has(nb)) { seen.add(nb); q.push(nb); }
+      }
+      if (seen.size !== road.length) islands++;
+    }
+    const n = seeds.length * 3;
+    // Was 7.7 per board when every corridor took its own independent path.
+    check(`roads join instead of running parallel (${(tri / n).toFixed(1)} rungs/board)`,
+      tri / n < 5);
+    // Was 3.6. A road over rough ground deletes that terrain from the game.
+    check(`roads skirt rough ground (${(rough / n).toFixed(1)} rough road hexes/board)`,
+      rough / n < 2);
+    check("every board's road network is one connected piece", islands === 0);
+    check(`the network stays small enough to be worth having (${(hexes / n).toFixed(1)} hexes/board)`,
+      hexes / n < 30);
+  }
+
 }
 
 // --- §16.2 blockade — foreign units / enemy Locations halt movement ---
@@ -5267,25 +5323,29 @@ line("\n  [Phase 11] text-token resolver");
     return unitReach(g18, walker);
   };
 
+  const M18 = CONFIG.movement;
   check("mountain, unpaved: enterable but terminal (0 movement remains)",
     stage({ elevation: true })[mtHex] === 0);
-  check("…a road over it neither halts nor costs a whole hex",
-    stage({ elevation: true, road: true })[mtHex] === 3 - PAVED);
+  check(`…a road over it does not halt, and costs ${M18.roadMountainCost}`,
+    stage({ elevation: true, road: true })[mtHex] === 3 - M18.roadMountainCost);
   check("…and rail over it does the same — a cutting is a cutting",
-    stage({ elevation: true, rail: true })[mtHex] === 3 - PAVED);
+    stage({ elevation: true, rail: true })[mtHex] === 3 - M18.roadMountainCost);
   check("forest, unpaved: costs forestCost to enter",
-    stage({ cover: true })[mtHex] === 3 - CONFIG.movement.forestCost);
-  check("…a road through it costs half a hex",
-    stage({ cover: true, road: true })[mtHex] === 3 - PAVED);
+    stage({ cover: true })[mtHex] === 3 - M18.forestCost);
+  check(`…a road through it costs ${M18.roadForestCost}`,
+    stage({ cover: true, road: true })[mtHex] === 3 - M18.roadForestCost);
   check("open ground costs a whole hex", stage({})[mtHex] === 2);
+  check("…and half a hex once it is paved",
+    stage({ road: true })[mtHex] === 3 - PAVED);
 
   // The headline: a column that stays on the network covers twice the ground.
+  // On EASY ground — the lane, not the pass, which is the half the merge with
+  // "roads ease terrain rather than deleting it" left intact.
   {
     const g = createGame({ seed: 181 });
     startTurn(g);
     const p = g.turnOrder[g.activeIndex];
     const u = Object.values(g.units).find((x) => x.owner === p);
-    // Lay a clean lane out from the unit: a chain of paved, flat, empty hexes.
     const busy = (h) => Object.values(g.units).some((x) => x.node === h && x.uid !== u.uid);
     const lane = [u.node];
     while (lane.length < 6) {
@@ -5303,8 +5363,8 @@ line("\n  [Phase 11] text-token resolver");
     check("2 Movement carries you FOUR hexes down a lane",
       lane.length >= 5 && paved[lane[4]] === 0 && paved[lane[3]] === 0.5);
     // …and two across country, which is what makes the lane worth taking.
-    // Strip the WHOLE board, not just the lane: leaving a neighbouring road
-    // in place hands the walker a cheaper way round and the comparison stops
+    // Strip the WHOLE board, not just the lane: leaving a neighbouring road in
+    // place hands the walker a cheaper way round and the comparison stops
     // being about the lane at all.
     for (const hex of Object.values(g.board.hexes)) { hex.road = false; hex.rail = false; }
     u.moveRemaining = 2;
@@ -5312,6 +5372,7 @@ line("\n  [Phase 11] text-token resolver");
     check("…and only TWO across open ground",
       open[lane[2]] === 0 && open[lane[3]] === undefined && open[lane[4]] === undefined);
   }
+
 }
 
 // Phase 19 — diplomacy robustness pass: standing baselines (drift toward

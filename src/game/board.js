@@ -109,9 +109,12 @@ export function isCover(hex) {
   return !!(hex && hex.cover);
 }
 // §16.2 roads — a per-hex MOVEMENT modifier (not its own terrain). A road
-// negates terrain movement cost and never halts, even through forest or
-// mountain. Roads do NOT affect cover/visibility — a road through a forest
-// still conceals and a mountain still blocks sight.
+// EASES terrain cost: a road through a forest costs 1 instead of 2, and a road
+// over a mountain costs 2 and does not halt, instead of halting outright. It
+// does not make rough ground free — see CONFIG.movement for why that matters.
+// On EASY ground it is quicker still: half a hex (`isPaved` below).
+// Roads do NOT affect cover/visibility — a road through a forest still
+// conceals and a mountain still blocks sight.
 export function isRoad(hex) {
   return !!(hex && hex.road);
 }
@@ -133,7 +136,9 @@ export function isPaved(hex) {
 //   • forest (cover): costs CONFIG.movement.forestCost (default 2 = "−1 speed")
 //   • mountain (elevation): you may step ONTO one (≥1 point) but it HALTS the
 //     move (arrive with 0) — "speed 1, no matter what"; no passing through.
-//   • road: negates the above — costs 1, never halts (fast lane / chokepoint).
+//   • road: EASES the above rather than deleting it — forest costs
+//     roadForestCost (1) and a mountain costs roadMountainCost (2) without
+//     halting. A road is a fast lane and a chokepoint; it is not a bulldozer.
 //   • everything else: 1.
 //   • `blockedThrough` (a Set of hexIds): you may ENTER such a hex but it HALTS
 //     you there (a foreign unit's blockade, or an enemy Location §16.2) — the
@@ -163,10 +168,13 @@ function expandMovement(state, start, budget, blocked, ignoreTerrain, extraCost,
   const adj = state.board.adjacency;
   const hexes = state.board.hexes;
   // A Landship-class mover (chip `ignoresTerrain`) treats every hex as
-  // road-grade: forest costs 1, mountains do not halt. Blockade halts and
-  // per-hex budget still apply — it drives over terrain, not through armies.
-  const halts = CONFIG.movement.mountainHalts && !ignoreTerrain;
-  const forestCost = ignoreTerrain ? 1 : CONFIG.movement.forestCost;
+  // road-grade — the same eased costs a road gives, everywhere, whether or not
+  // one was ever laid. Blockade halts and per-hex budget still apply: it
+  // drives over terrain, not through armies.
+  const mv = CONFIG.movement;
+  const forestCost = mv.forestCost;
+  const easedForest = mv.roadForestCost ?? 1;
+  const easedMountain = mv.roadMountainCost ?? 1;
   const best = { [start]: budget };
   const arrive = { [start]: budget };
   const prev = { [start]: null };
@@ -186,18 +194,28 @@ function expandMovement(state, start, budget, blocked, ignoreTerrain, extraCost,
     const rem = best[cur];
     if (rem <= 0) continue; // out of movement — also how halting hexes (rem 0) stop
     for (const nb of adj[cur] || []) {
+      // A laid surface — road OR rail. Both are ground somebody levelled
+      // before the collapse, and a cutting through a mountain is a cutting
+      // whether it carries sleepers or tarmac.
       const paved = isPaved(hexes[nb]);
-      const mountain = halts && isElevation(hexes[nb]) && !paved; // graded ground negates the halt
+      // …or a mover that carries its own road-grade with it (Landship,
+      // Pathfinders). It gets the EASED terrain costs everywhere, but not the
+      // paved discount on open ground: it is not a road-layer.
+      const graded = paved || ignoreTerrain;
+      const high = isElevation(hexes[nb]);
+      // A mountain halts unless it is graded — the road switchbacks over it.
+      const mountain = mv.mountainHalts && high && !graded;
       // Toll Gate (MOVE_TAX): a per-hex surcharge layered on top of the
       // terrain cost — a lane doesn't waive a toll.
       const toll = extraCost ? extraCost.get(nb) || 0 : 0;
-      // Graded ground is half a hex. Everything else: a mountain you are
-      // entering costs 1 (and halts below), forest costs `forestCost`, open
-      // ground 1. A Landship (`ignoreTerrain`) drives over terrain — forest
-      // drops to 1 and mountains stop halting — but it is not a road-layer, so
-      // it pays the full 1 off the network.
-      const base = paved ? CONFIG.movement.pavedCost
-        : (mountain ? 1 : (isCover(hexes[nb]) ? forestCost : 1));
+      // A halting mountain's own cost is nominal: the halt is what it costs
+      // you. Rough ground pays its terrain, eased or not — a road over a pass
+      // is still a pass. The half-hex is for EASY ground, which is where a
+      // lane is actually a lane.
+      let base;
+      if (high) base = graded ? easedMountain : 1;
+      else if (isCover(hexes[nb])) base = graded ? easedForest : forestCost;
+      else base = paved ? mv.pavedCost : 1;
       const cost = base + toll;
       if (rem < cost) continue; // not enough movement to enter
       // A mountain (no road) or a blockaded hex halts you on entry: enter, stop.
@@ -297,8 +315,32 @@ export function shortestPathHexes(adjacency, a, b) {
 //     with unreachable islands would silently break supply and blockade.
 //
 // Links are undirected and deduplicated, so A→B and B→A lay one road. Every
-// link stamps `road` along a shortest hex path, so roads remain a per-hex
-// terrain property exactly as before; only which hexes get stamped changes.
+// link stamps `road` along a hex path, so roads remain a per-hex terrain
+// property exactly as before; only which hexes get stamped changes.
+//
+// HOW each corridor is routed matters as much as which links exist, because
+// `road` is a per-hex boolean and everything downstream — the renderer, and
+// the supply walk in blockades.js — reads connectivity as "adjacent hexes that
+// both carry road". Two corridors that pass through neighbouring hexes are
+// therefore welded into a ladder: rung after rung of road connecting two lanes
+// that were never one road. It reads as a lattice rather than a network, and
+// no real road system looks like that, because a second route joins the
+// existing road rather than running one field over from it.
+//
+// So corridors are laid ONE AT A TIME over the state left by the ones before,
+// and each is routed by cost rather than by hop count:
+//
+//   * ground that already carries road is cheap (`CONFIG.roads.reuseCost`), so
+//     a later corridor merges into an existing trunk and shares it instead of
+//     laying a parallel lane beside it;
+//   * rough ground is dear (`CONFIG.roads.terrainCost`), so roads run round a
+//     ridge or a wood the way a surveyor would rather than straight over it.
+//
+// The second one is also a movement fix, not only a looks fix: a road EASES a
+// mountain's halt and a forest's toll (`expandMovement`), so every rough hex a
+// corridor crosses is a rough hex that plays softer than it looks. Routing
+// around them keeps roads as fast lanes through open country rather than as a
+// discount on the terrain they happen to cross.
 export function assignRoads(adjacency, hexes, settlementHexes, valueOfHex = () => "medium") {
   const nodes = [...new Set(settlementHexes)].filter((h) => hexes[h]);
   if (nodes.length < 2) return [];
@@ -346,10 +388,65 @@ export function assignRoads(adjacency, hexes, settlementHexes, valueOfHex = () =
     union(best.a, best.b);
   }
 
-  for (const [a, b] of links.values()) {
-    for (const hex of shortestPathHexes(adjacency, a, b)) hexes[hex].road = true;
+  // Shortest links first: they lay the short local stubs that the longer
+  // cross-country routes then have something to join. (Longest-first was
+  // measured too, and leaves noticeably more parallel lanes.) Sorted by hop
+  // count then by key, so the order never depends on discovery order.
+  const ordered = [...links.values()].sort((p, q) => {
+    const dp = distFrom(p[0])[p[1]] ?? Infinity;
+    const dq = distFrom(q[0])[q[1]] ?? Infinity;
+    return (dp - dq) || (`${p[0]}|${p[1]}` < `${q[0]}|${q[1]}` ? -1 : 1);
+  });
+  for (const [a, b] of ordered) {
+    for (const hex of roadPath(adjacency, hexes, a, b)) hexes[hex].road = true;
   }
   return [...links.values()];
+}
+
+// The cheapest route for a road between two settlements, over the network as
+// it stands. Dijkstra rather than BFS because the whole point is that steps
+// are not all worth the same: existing road is nearly free, rough ground is
+// expensive, open country is the unit.
+//
+// Ties break on hex id, so a given board always lays the same roads — a road
+// network that reshuffled between two runs of the same seed would take the
+// board's determinism with it.
+function roadPath(adjacency, hexes, a, b) {
+  if (a === b) return [a];
+  const cfg = CONFIG.roads || {};
+  const reuse = cfg.reuseCost ?? 1;
+  const rough = cfg.terrainCost || {};
+  const stepCost = (id) => {
+    const h = hexes[id];
+    if (!h) return Infinity;
+    if (h.road) return reuse;
+    if (h.elevation) return rough.mountain ?? 1;
+    if (h.cover) return rough.forest ?? 1;
+    return 1;
+  };
+
+  const dist = { [a]: 0 };
+  const prev = { [a]: null };
+  const settled = new Set();
+  for (;;) {
+    let cur = null;
+    for (const id of Object.keys(dist)) {
+      if (settled.has(id)) continue;
+      if (cur === null || dist[id] < dist[cur] - 1e-9
+        || (Math.abs(dist[id] - dist[cur]) < 1e-9 && id < cur)) cur = id;
+    }
+    if (cur === null || cur === b) break;
+    settled.add(cur);
+    for (const nb of adjacency[cur] || []) {
+      const d = dist[cur] + stepCost(nb);
+      if (!Number.isFinite(d)) continue;
+      if (dist[nb] === undefined || d < dist[nb] - 1e-9) { dist[nb] = d; prev[nb] = cur; }
+    }
+  }
+  if (dist[b] === undefined) return [];
+  const path = [];
+  for (let c = b; c != null; c = prev[c]) path.unshift(c);
+  return path;
 }
 
 // Rail — docs/rail-road-blockade-design.md §2. NOT player-built: it is

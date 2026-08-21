@@ -10,20 +10,14 @@ import { useMemo } from "react";
 import { FACTIONS, ownerColor, theme } from "./data.js";
 import { HEX_W, HEX_H } from "./hexProjection.js";
 import { radialBox, hasRadial } from "./radialGeometry.js";
-import { slotPos, chooseSlots } from "./boardSlots.js";
+import { slotPos, chooseSlots, capacityFor } from "./boardSlots.js";
 import {
   spriteFor, variantFor, spriteStyle, spriteScale, hitBoxStyle, drawnBox, ensureIdleKeyframes,
 } from "./unitSprites.js";
 
-// Tokens stand on the near apron of the top face, not out on the terrain.
-// Baked art carries no depth buffer, so nothing knows how tall the ground is
-// under an arbitrary point — a token over a summit would float or sink. The
-// apron is the one region that is the ground plane on every tile in the set.
-//
-// Slots are laid out symmetrically about the centre for however many tokens
-// are actually present, so a lone unit stands in the middle of its tile
-// instead of clinging to one edge. `y` bows inward with `x` to follow the
-// apron's near boundary.
+// Tokens stand in a ring on the top face — see boardSlots.js for why, and for
+// the geometry. Positions come back ordered back to front, and they are painted
+// in that order, so a nearer unit overlaps a farther one the way the tiles do.
 export { slotPos, chooseSlots } from "./boardSlots.js";
 
 // Sprite-sheet token. Drawn for any faction that has unit art built into
@@ -38,7 +32,7 @@ export { slotPos, chooseSlots } from "./boardSlots.js";
 function SpriteToken({ unit, spec, faction, selected, pos, onClick, dim, ready }) {
   ensureIdleKeyframes(spec);
   const s = spriteScale(spec);
-  const style = spriteStyle(spec, variantFor(unit, spec), { uid: unit.uid });
+  const style = spriteStyle(spec, variantFor(unit, spec), { uid: unit.uid, facing: pos.facing });
   // Ground ellipse, squashed to the projection. §6 of the pipeline doc keeps
   // shadows out of the render precisely so this can scale with the board. It
   // tracks the unit's footprint, so a vehicle's contact patch is wider.
@@ -246,7 +240,7 @@ export function GhostToken({ ghost, slot = 0, count = 1, pos: posIn }) {
 // know their own drawn extent; the fallback disc is a 27 px circle sitting on
 // its slot point.
 //
-// One hex can hold a mix of models — a walking squad beside a landship — and the
+// One hex can hold a mix of models — a walking squad beside a vehicle — and the
 // slot chooser takes a single box for the group, so use the largest present.
 // Overstating it only makes the group avoid radials a little more eagerly.
 function tokenBox(occupants) {
@@ -257,6 +251,34 @@ function tokenBox(occupants) {
   }
   if (widest) return (x, y) => drawnBox(widest, x, y);
   return (x, y) => ({ x0: x - 15, x1: x + 15, y0: y - 30, y1: y + 3 });
+}
+
+// What a hex shows when it holds more than it can draw. Sits at the front of
+// the ring, where nothing else stands, so it never covers a unit.
+function OverflowBadge({ count }) {
+  return (
+    <div
+      title={`${count} more unit${count === 1 ? "" : "s"} on this hex`}
+      style={{
+        position: "absolute",
+        left: 0,
+        top: HEX_H * 0.46,
+        transform: "translate(-50%, -50%)",
+        padding: "1px 6px",
+        borderRadius: 9,
+        background: "rgba(8,10,12,0.86)",
+        border: `1px solid ${theme.accent}aa`,
+        color: theme.text,
+        fontFamily: theme.fontDisplay,
+        fontSize: 11,
+        fontWeight: 700,
+        whiteSpace: "nowrap",
+        pointerEvents: "none",
+      }}
+    >
+      {`+${count}`}
+    </div>
+  );
 }
 
 // One positioned group per hex, so token slots stay relative to a hex centre.
@@ -287,13 +309,19 @@ export default function BoardTokens({ order, hexes, units, centers, selectedUnit
         const here = (hex.unitIds || []).map((id) => units[id]).filter(Boolean);
         const ghosts = hex.ghosts || [];
         if (!here.length && !ghosts.length) return null;
-        const unitSlots = chooseSlots(here.length, c, occluders, tokenBox(here));
+        // How many actually fit depends on how wide they are: a hex holds ten
+        // infantry but only six tier-2 vehicles before they start hiding each other.
+        // The rest become a count rather than an unreadable heap.
+        const probe = tokenBox(here)(0, 0);
+        const drawn = here.slice(0, capacityFor((probe.x1 - probe.x0) / 2));
+        const overflow = here.length - drawn.length;
+        const unitSlots = chooseSlots(drawn.length, c, occluders, tokenBox(drawn));
         // Ghosts are remembered enemies, drawn as discs — there is no model to
         // size them from, so tokenBox falls through to the disc box.
         const ghostSlots = chooseSlots(ghosts.length, c, occluders, tokenBox(null));
         return (
-          <div key={`tok-${hexId}`} style={{ position: "absolute", left: c.x, top: c.y }}>
-            {here.map((u, i) => (
+          <div key={`tok-${hexId}`} data-hex-tokens={hexId} style={{ position: "absolute", left: c.x, top: c.y }}>
+            {drawn.map((u, i) => (
               <UnitToken
                 key={u.uid}
                 unit={u}
@@ -307,6 +335,7 @@ export default function BoardTokens({ order, hexes, units, centers, selectedUnit
             {ghosts.map((g, i) => (
               <GhostToken key={`ghost-${i}`} ghost={g} pos={ghostSlots[i]} />
             ))}
+            {overflow > 0 && <OverflowBadge count={overflow} />}
           </div>
         );
       })}

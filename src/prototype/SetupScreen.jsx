@@ -310,6 +310,9 @@ function Toggle({ value, onChange, label, desc }) {
       <button
         onClick={() => onChange(!value)}
         className="hud-int"
+        role="switch"
+        aria-checked={value}
+        aria-label={label}
         style={{
           flexShrink: 0,
           width: 42, height: 22,

@@ -19,7 +19,7 @@ import {
   unitUpkeepFor,
 } from "../game/economy.js";
 import { recruitCapBonus } from "../game/actions.js";
-import { blockadeAt, supplyStatus, blockadeSlotsUsed, blockadeIncome } from "../game/blockades.js";
+import { blockadeAt, blockadesOn, supplyStatus, blockadeSlotsUsed, blockadeIncome } from "../game/blockades.js";
 import { supplyCutter } from "../game/movement.js";
 import { postAt } from "../game/posts.js";
 import { isUnitVisibleTo } from "../game/visibility.js";
@@ -405,14 +405,19 @@ export function adaptState(state) {
     // down behind your back, so a remembered one would be a lie. A site under
     // construction reports `done: false` so the board can show it as scaffolding
     // rather than as something that already stops you.
-    const bl = live ? state.world?.blockades?.[h.id] : null;
-    if (bl) {
-      hex.blockade = {
+    // A hex holds one blockade per road out of it, so this is a list. `blockade`
+    // stays as the first of them for the panels that only ask whether the tile
+    // is held; the board draws them all, one per road.
+    const bls = live ? blockadesOn(state, h.id) : [];
+    if (bls.length) {
+      hex.blockades = bls.map((bl) => ({
         owner: bl.owner,
+        edge: bl.edge,
         done: !!bl.done,
         progress: bl.progress || 0,
         cost: bl.cost,
-      };
+      }));
+      [hex.blockade] = hex.blockades;
     }
     const loot = state.hexLoot?.[h.id];
     if (live && loot?.length) {

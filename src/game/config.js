@@ -70,6 +70,11 @@ export const CONFIG = {
     veteranStrengthCap: 8, // §16.7 combining (deferred)
   },
   baseUnitCap: 3, // v0.2 §16.3 — cap = baseUnitCap + Training Grounds
+  // How many units may stand on one hex, counting every owner. A stack past
+  // this cannot be told apart on the board — the tile runs out of room to draw
+  // them at a legible size (docs/unit-model-pipeline.md §10.1) — and a rule the
+  // display cannot show is a rule players cannot plan around.
+  hexUnitCap: 10,
   startingUnits: 2, // v0.2 §16.3
   unitRecruitCost: 6, // v0.2 §16.3 — was 10
 
@@ -78,22 +83,47 @@ export const CONFIG = {
   // §16.2 terrain movement — per-hex entry costs over the base 1/hex.
   // Forest (cover) costs extra; mountains (elevation) HALT a move (you may
   // climb onto one but advance no further that turn — "speed 1 in mountains").
-  // (Roads, when added, will reduce these.)
+  //
+  // A road EASES rough ground; it does not delete it. That distinction is the
+  // whole reason terrain survives contact with the road network: a road that
+  // makes a mountain cost the same as open grass has removed the mountain from
+  // the game, and once a third of the board carries road, a third of the
+  // board's terrain stops mattering. A road through a mountain is a winding
+  // road — it gets you over, it does not make the climb free.
   movement: {
     forestCost: 2,     // entering a cover/forest hex costs this (vs 1) — "−1 speed"
     mountainHalts: true, // entering an elevation/mountain hex ends the move
-    // A graded surface — road OR rail — costs this to enter instead of 1, so a
+    // Two rules that met in a merge, both kept, because they are about
+    // different ground.
+    //
+    // GRADED SURFACE — road or rail — costs `pavedCost` instead of 1, so a
     // column that stays on the network covers twice the ground: 2 Movement is
     // two hexes cross-country and four down a lane. That is what makes the
     // network worth routing along, worth holding, and worth cutting.
     //
-    // It replaces an earlier `roadStartBonus: +1 Movement if you began the
-    // turn on a road`, which was a patch for the same complaint (roads only
-    // differed from open ground on the map's few forest/mountain hexes) and
-    // paid out whether or not you then USED the road. Halving the hexes pays
-    // for the distance actually travelled on them, and it makes a long lane
-    // better than a short one, which a flat start bonus never did.
+    // …but a road EASES rough ground rather than deleting it. A lane across
+    // the plains is quick; a road over a pass is still a pass. So the paved
+    // discount applies to easy ground only, and a crossing costs the eased
+    // terrain price:
+    //
+    //   open + paved      0.5
+    //   forest + paved    roadForestCost (1, against 2 unpaved)
+    //   mountain + paved  roadMountainCost (2, and no halt — the halt is what
+    //                     a mountain really costs, and easing it is the point)
+    //
+    // Corridors are routed AROUND rough ground (assignRoads), so a road rarely
+    // crosses it at all — high ground about one board in thirty. The crossings
+    // that do happen still cost something.
     pavedCost: 0.5,
+    // What ROAD-GRADE rough ground costs — a road, or a Landship-class mover
+    // (chip `ignoresTerrain`), which the engine defines as road-grade too.
+    // Roughly half the toll in each case, never none.
+    roadForestCost: 1,   // forest is 2 without one
+    roadMountainCost: 2, // a mountain otherwise halts you outright
+    // No `roadStartBonus`. It granted +1 Movement for BEGINNING the turn on a
+    // road — a patch for roads not being worth much, which paying per hex
+    // travelled fixes properly. Keeping both would pay twice for the same
+    // complaint and make 2 Movement carry a unit six hexes rather than four.
   },
 
   // v0.2 §16.4 attrition
@@ -146,6 +176,29 @@ export const CONFIG = {
   // board yields a bare spanning chain.
   roads: {
     linksByValue: { low: 1, medium: 1, high: 2, veryHigh: 2 },
+    // What one hex of corridor costs to route through, when a road is being
+    // laid (assignRoads). These are ROUTING weights, not movement costs.
+    //
+    // reuseCost — ground that already carries road. Well under 1, so a later
+    // corridor will detour to merge with an existing trunk rather than lay a
+    // second lane a hex away from it. That is what stops the network reading
+    // as a lattice: `road` is a per-hex boolean, so two lanes running side by
+    // side are welded into a ladder by adjacency alone. Raise it towards 1 for
+    // more independent, more redundant routes; lower it for a network that
+    // funnels harder onto shared trunks.
+    reuseCost: 0.3,
+    // terrainCost — rough ground. Roads run round a ridge rather than over it,
+    // which is what a surveyor does when there is a valley to follow, and also
+    // keeps rough ground rough: a road EASES what it crosses (see
+    // CONFIG.movement), so a corridor driven straight over the high ground
+    // softens exactly the terrain the map put there to matter.
+    //
+    // Measured: at mountain 4 a road crosses high ground on about one board in
+    // thirty; dropping it to 3 or 2.5 barely moves that, because there is
+    // nearly always a way round. So the few that do happen are genuine passes
+    // — the one gap in a ridge — which is the right place for a road and the
+    // right place for a chokepoint.
+    terrainCost: { forest: 2, mountain: 4 },
   },
 
   // Rail (docs/rail-road-blockade-design.md §2). Pre-collapse trunk line,

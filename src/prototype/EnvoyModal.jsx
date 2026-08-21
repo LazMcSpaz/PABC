@@ -4,6 +4,7 @@
 // takes an answer, so the player can actually maneuver out of the threat:
 // hear them out, buy goodwill, or tell them where to put it.
 import React from "react";
+import { useSfxOn } from "../audio/AudioProvider.jsx";
 import { C } from "./HudChrome.jsx";
 import { portraitFor } from "./factionPortraits.js";
 
@@ -63,6 +64,17 @@ const ULTIMATUM_OPENER = {
 };
 
 export default function EnvoyModal({ audience, onRespond }) {
+  // The envoy's arrival gets a cue. This modal seizes the whole screen, and a
+  // player mid-board-scan should hear it land rather than discover it. Keyed
+  // on the audience id so a second one queued behind the first announces
+  // itself too, while re-renders of the same one stay silent.
+  //
+  // It sits on the SHARED entry point rather than on the warning face alone,
+  // which is where it arrived from main: an offer and a demand seize the
+  // screen exactly as hard as a protest does.
+  // Called before the early return — a hook may not be conditional.
+  useSfxOn(audience?.id ?? audience?.offer?.id ?? audience?.ultimatum?.id ?? null, "envoyArrival");
+
   if (!audience) return null;
   const kind = audience.kind === "offer" || audience.kind === "ultimatum" ? audience.kind : "warning";
   if (kind === "offer") return <OfferAudience o={audience.offer} onRespond={onRespond} />;
@@ -214,6 +226,7 @@ function UltimatumAudience({ u, onRespond }) {
 }
 
 function WarningAudience({ warning, onRespond }) {
+
   const coalition = warning.kind === "coalition";
   const temperament = warning.temperament || "honorable";
   const who = warning.fromName || "The powers";

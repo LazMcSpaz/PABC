@@ -145,6 +145,34 @@ Three things read `hasRailAccess`:
   stations. Sharing a rival's track is commerce; pooling your industrial output
   into their city is not the same promise.
 
+### §3.1 as built — one blockade per road, facing home
+
+A hex holds one blockade **per road leaving it**, not one blockade. A tile the
+road runs straight through takes two; a T-junction takes three; a dead end
+takes one. The capacity is the shape of the road network at that hex, because
+what you are closing is a road — a tile cannot hold more barricades than it has
+ways out.
+
+Records are keyed `hex|edge`, the edge being the neighbour the road runs
+toward. `blockadeAt(state, hex)` still answers with one of them, which is the
+whole question for every caller that only asks whether the tile is held;
+`blockadesOn` returns the set.
+
+**Which road a blockade takes is not a free choice.** It stands on the road
+facing its owner's nearest settlement — the first step of the same supply path
+§3.4 already computes. Anywhere else and a rival could build on the same hex
+*between* your barricade and your own settlement, sitting on the supply line
+behind the thing you built to protect it. Facing home also separates rivals
+naturally: two factions blockading one junction take different roads, because
+their settlements lie in different directions. If the home road is already
+closed, the build falls back to any free road rather than failing.
+
+**Blocking stays per hex.** Part 1 makes a blockade a garrison holding a tile,
+not a gate on one border, and movement halts a mover entering the hex. Two
+blockades on a junction therefore make it harder to CLEAR rather than
+differently shaped: each is separately contestable, separately upgraded and
+separately paid for, and a contest brings down one of them, not all.
+
 ### The blockade UI — a place, not a unit ability
 
 A blockade is selected on the map like a settlement and opens **its own
@@ -304,13 +332,21 @@ play; there is no salvage.
 ## Why this started
 
 Road today (`src/game/board.js`) is free-for-anyone terrain infrastructure —
-it never halts, even through mountain or forest, and there's no ownership
-check on it: any faction's units benefit, not just whoever's territory it's
-in. A rail line with the same effect would just be road reskinned.
+it eases rough ground for anyone crossing it, and there's no ownership check:
+any faction's units benefit, not just whoever's territory it's in. A rail line
+with the same effect would just be road reskinned.
 
-(Since 2026-08-20 both road and rail also cost half a hex to enter — see
-§2.5. That is shared between them by design; what still separates rail is the
-station hop, running rights, and production pooling, none of which road has.)
+(At the time this was written a road *negated* terrain outright — 1 MP to
+enter, never halting, through mountain and forest alike. Two changes have
+since landed on top of each other, and both survived because they are about
+different ground. A road HALVES a rough crossing rather than waiving it —
+forest 1 rather than 2, mountain 2 and no halt rather than a dead stop —
+because a road that made a mountain cost the same as open grass had removed
+the mountain from the game, and roads reach a third of the board. And on EASY
+ground a graded surface, road *or* rail, costs half a hex — see §2.5 — because
+that is where a lane is actually a lane. What still separates rail from road
+is the station hop, running rights, and production pooling, none of which road
+has.)
 
 **Rail is NOT player-built.** An earlier pass in this doc differentiated rail
 by making it something a faction constructs and owns; that is overruled. Rail
@@ -323,7 +359,7 @@ So the differentiation has to come from what rail *does*, and it still does:
 | | Road | Rail |
 |---|---|---|
 | Shape | continuous terrain, most of the map | sparse links between specific settlement pairs |
-| Movement | 1 MP per hex, never halts | **1 MP for the whole hop**, however far apart the endpoints |
+| Movement | 1 MP over open ground; halves rough ground rather than deleting it | **1 MP for the whole hop**, however far apart the endpoints |
 | Economy | none | **production pooling** between the two settlements it joins |
 | Access | anyone | gated on controlling the endpoints (§2.3) |
 
@@ -521,12 +557,27 @@ makes station ownership a live question early.
 = 0.5`). A column that stays on the network covers twice the ground: 2
 Movement is two hexes cross-country and **four** down a lane.
 
-That is the whole rule, and it applies to road and rail alike — both are
-surfaces somebody levelled before the collapse, so both are quick to march
+That is the rule on EASY ground, and it applies to road and rail alike — both
+are surfaces somebody levelled before the collapse, so both are quick to march
 down and neither halts you. A cutting through a mountain is a cutting whether
-it carries sleepers or tarmac. Graded ground still negates terrain the way
-road always did: no forest surcharge, no mountain halt. A toll (`MOVE_TAX`)
-rides on top and is not absorbed by the surface.
+it carries sleepers or tarmac.
+
+**But a lane is not a bulldozer.** Merged 2026-08-21 with "roads ease terrain
+instead of deleting it", which landed on main in parallel and argued the
+opposite case about rough ground — correctly. Both rules stand, because they
+are about different ground:
+
+| ground | unpaved | paved |
+|---|---|---|
+| open | 1 | **`pavedCost` (0.5)** |
+| forest | `forestCost` (2) | `roadForestCost` (1) |
+| mountain | 1 **and halts** | `roadMountainCost` (2), no halt |
+
+So a lane across the plains carries you twice as far, and a road over a pass
+still gets you over the pass and no further. Corridors are routed AROUND rough
+ground anyway (`assignRoads`), so the crossings are rare — high ground on about
+one board in thirty. A toll (`MOVE_TAX`) rides on top and is not absorbed by
+the surface, whatever the ground.
 
 It **replaces** `roadStartBonus` (+1 Movement for beginning the turn on a
 road), which was a patch for the same complaint — roads otherwise differed

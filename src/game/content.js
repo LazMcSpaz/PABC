@@ -186,7 +186,7 @@ export const CHIPS = {
   // --- unit chips: Movement line ---
   navigator: { id: "navigator", name: "Navigator", kind: "unit", statType: "movement", slots: 1, techLevel: 1, cost: 3, movement: 1, buildCost: 3, loyaltyReq: 0, upgradesTo: "troop-carrier", desc: "+1 Movement" },
   "troop-carrier": { id: "troop-carrier", name: "Troop Carrier", kind: "unit", statType: "movement", slots: 1, techLevel: 2, cost: 6, movement: 2, buildCost: 6, loyaltyReq: 3, desc: "+2 Movement — the whole squad rides" },
-  landship: { id: "landship", name: "Landship", kind: "unit", statType: "movement", slots: 2, techLevel: 3, cost: 12, movement: 3, buildCost: 12, loyaltyReq: 6, upkeep: 2, ignoresTerrain: true, railIncompatible: true, desc: "+3 Movement; ignores terrain (forest costs 1, mountains do not halt)" },
+  landship: { id: "landship", name: "Landship", kind: "unit", statType: "movement", slots: 2, techLevel: 3, cost: 12, movement: 3, buildCost: 12, loyaltyReq: 6, upkeep: 2, ignoresTerrain: true, railIncompatible: true, desc: "+3 Movement; rough ground plays road-grade (forest 1, mountains 2, no halt)" },
   // --- unit chips: Vision line (no T3 — sight is an area; docs/chip-set-v0.1.md) ---
   "field-glass": { id: "field-glass", name: "Field Glass", kind: "unit", statType: "vision", slots: 1, techLevel: 1, cost: 3, vision: 1, buildCost: 3, loyaltyReq: 0, upgradesTo: "spotter-net", desc: "+1 Vision range" },
   "spotter-net": { id: "spotter-net", name: "Spotter Net", kind: "unit", statType: "vision", slots: 1, techLevel: 2, cost: 6, vision: 1, detection: 1, buildCost: 6, loyaltyReq: 3, desc: "+1 Vision and +1 Detection — finds what hides" },
@@ -221,7 +221,7 @@ export const CHIPS = {
   // --- special unit chips: buildable (docs/chip-set-v0.1.md) ---
   // No statType — specials compete for bay slots but not stat families.
   "field-medics": { id: "field-medics", name: "Field Medics", kind: "unit", slots: 1, techLevel: 2, cost: 4, buildCost: 4, loyaltyReq: 3, healAnywhere: 1, desc: "Heals +1 at Upkeep anywhere, not only on a held Location" },
-  pathfinders: { id: "pathfinders", name: "Pathfinders", kind: "unit", slots: 1, techLevel: 2, cost: 5, buildCost: 5, loyaltyReq: 3, ignoresTerrain: true, desc: "Forest costs 1 to enter; mountains don't halt the move" },
+  pathfinders: { id: "pathfinders", name: "Pathfinders", kind: "unit", slots: 1, techLevel: 2, cost: 5, buildCost: 5, loyaltyReq: 3, ignoresTerrain: true, desc: "Rough ground plays road-grade: forest 1, mountains 2 and no halt" },
   rearguard: { id: "rearguard", name: "Rearguard", kind: "unit", slots: 1, techLevel: 2, cost: 4, buildCost: 4, loyaltyReq: 3, retreatBonus: 1, routSpillImmune: true, desc: "On losing a contest, may retreat 2 hexes; never takes rout spill damage" },
   trailwise: { id: "trailwise", name: "Trailwise", kind: "unit", slots: 1, techLevel: 1, cost: 3, buildCost: 3, loyaltyReq: 0, encounterRedraws: 1, desc: "Discard an encounter this unit triggers and draw again" },
   "entrenching-tools": { id: "entrenching-tools", name: "Entrenching Tools", kind: "unit", slots: 1, techLevel: 1, cost: 3, buildCost: 3, loyaltyReq: 0, fortifyBonus: 1, desc: "+1 to this unit's fortify bonus" },

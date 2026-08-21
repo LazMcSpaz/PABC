@@ -128,8 +128,9 @@ export function createGame({
   // existing seed-dependent test — is byte-for-byte unchanged.
   assignTerrainFeatures(makeRng((seed ^ 0x9e3779b9) >>> 0), hexes);
   // §16.2 — lay road corridors between the faction capitals (deterministic
-  // MST over the start hexes). Roads negate terrain movement cost along the
-  // lane (a fast, contestable highway); cover/visibility are unaffected.
+  // MST over the start hexes). Roads EASE terrain movement cost along the lane
+  // — half the toll, not none (a fast, contestable highway that still has to
+  // climb the mountain); cover/visibility are unaffected.
   // Roads tie settlements together, not just capitals — see assignRoads. The
   // value lookup drives how many links each one gets, so a city is a hub and a
   // town is a stop on the way.
