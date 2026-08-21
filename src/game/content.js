@@ -49,7 +49,7 @@ export const FACTIONS = {
     tier: "major", scope: "global", playable: true,
     temperament: "opportunist", aggression: 0.5, trust: 0.3, grudge: 0.3, sociability: 0.65,
     victoryLean: "opportunist", expansion: 0.6,
-    unitNames: ["Dustriders", "Scrap Runners", "Flatwind Raiders", "Ashland Rovers"],
+    unitNames: ["Dustriders", "Scrap Runners", "Flatwind Raiders", "Shortgrass Rovers"],
   },
 };
 

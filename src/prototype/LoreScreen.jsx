@@ -738,7 +738,7 @@ function ReaderPane({ entry, isEmpty, backStack, onBack, onSelectEntry }) {
                 }}
               >
                 Nothing has been recovered and filed here yet. What the
-                Ashlands remember of itself is still out on the map, in
+                continent remembers of itself is still out on the map, in
                 the hands of people who have no reason to share it.
               </div>
 

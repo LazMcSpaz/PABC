@@ -150,7 +150,7 @@ export function ownerColor(ownerId) {
 }
 
 // The engine is deliberately theme-free, so every resource event carries the
-// generic key ("Resource", "Research", "VP") rather than the Ashlands name for
+// generic key ("Resource", "Research", "VP") rather than the setting's name for
 // it. That key is an engine identifier, not player-facing copy — printing it
 // raw is how the turn feed ended up saying "+5 resource (output)" for what the
 // rest of the UI, down to the icon beside it, calls scrap. Translate here, at
