@@ -172,6 +172,71 @@ const damaged = await deviceState({ status: "carried", owner: "me", damaged: tru
 check("a damaged device still draws, so a rival can see what it is chasing is hurt",
   damaged?.status === "carried", JSON.stringify(damaged));
 
+// It faces the way it is travelling — which is to say, away from the hex it
+// just came from. Checked against the screen geometry rather than against a
+// table of expected rows, so it still means something if the board's squash or
+// the sheet's row order ever changes.
+const facings = await page.evaluate(async () => {
+  const g = window.__ashland;
+  const R = await import("/PABC/src/game/rainmaker.js");
+  const { buildHexGeometry } = await import("/PABC/src/prototype/hexProjection.js");
+  const byRow = {};
+  for (const h of Object.values(g.board.hexes)) (byRow[h.row] ||= []).push(h);
+  const rows = Object.keys(byRow).map(Number).sort((a, b) => a - b)
+    .map((r) => byRow[r].sort((a, b) => a.col - b.col).map((h) => h.id));
+  const geom = buildHexGeometry(rows);
+  const ROWS = ["s", "se", "e", "ne", "n", "nw", "w", "sw"];
+  const rm = R.rainmakerState(g);
+  const centre = Object.keys(g.board.hexes)
+    .find((h) => (g.board.adjacency[h] || []).length >= 5 && !g.locations[h]);
+  rm.device.status = "carried";
+  rm.device.owner = g.humanFactionId;
+  rm.device.hex = centre;
+  rm.phase = "exclusive";
+  rm.foundBy = g.humanFactionId;
+  g.rules.fogOfWar = false;
+  g.visibility = {};
+  const out = [];
+  for (const from of g.board.adjacency[centre] || []) {
+    rm.device.fromHex = from;
+    window.__ashlandBump();
+    await new Promise((r) => setTimeout(r, 220));
+    const el = document.querySelector("[data-rainmaker]");
+    let facing = null;
+    for (const c of el?.querySelectorAll("div") || []) {
+      const st = getComputedStyle(c);
+      if (st.backgroundImage && /weather_machine/.test(st.backgroundImage)) {
+        facing = ROWS[Math.round(-parseFloat(st.backgroundPositionY) / parseFloat(st.height))];
+      }
+    }
+    const a = geom.centers[from];
+    const b = geom.centers[centre];
+    out.push({ from, dx: b.x - a.x, dy: b.y - a.y, facing });
+  }
+  return out;
+});
+// Travelling rightward must face an east-ish row, downward a south-ish row, and
+// so on. The compass letters carry the claim, so this reads them.
+const wrong = facings.filter(({ dx, dy, facing }) => {
+  if (!facing) return true;
+  if (dx > 5 && !/e$/.test(facing)) return true;
+  if (dx < -5 && !/w$/.test(facing)) return true;
+  if (dy > 5 && !/^s/.test(facing)) return true;
+  if (dy < -5 && !/^n/.test(facing)) return true;
+  return false;
+});
+check("the machine faces the way it is travelling, away from where it came from",
+  facings.length >= 5 && wrong.length === 0,
+  wrong.length
+    ? wrong.map((w) => `${w.from}: ${w.dx.toFixed(0)},${w.dy.toFixed(0)} -> ${w.facing}`).join(" | ")
+    : facings.map((f) => f.facing).join(","));
+// Every step it takes is between adjacent hexes, so the two end-on rows of an
+// eight-way sheet cannot come up. Recorded rather than asserted — it is a fact
+// about a six-neighbour grid, not a defect.
+check("…using six of the sheet's eight rows, which is all a hex grid can ask for",
+  new Set(facings.map((f) => f.facing)).size === facings.length,
+  [...new Set(facings.map((f) => f.facing))].sort().join(","));
+
 // Fog: the design promises routes stay unknown until within sight range, so a
 // board drawn from omniscient state would break that quietly.
 const hidden = await page.evaluate(async () => {

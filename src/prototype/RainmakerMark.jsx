@@ -24,11 +24,14 @@
 //   loose      nobody's. Pulsing, and the ground mark is gone.
 //   installed  in a capital. Raining once it is switched on.
 import { ownerColor } from "./data.js";
-import { HEX_W } from "./hexProjection.js";
+import { HEX_H, HEX_W } from "./hexProjection.js";
 import { facingFor } from "./boardSlots.js";
 import { structureFor, spriteStyle, spriteScale, ensureIdleKeyframes } from "./unitSprites.js";
 
-const DEPTH_SQUASH = 0.62; // the board's vertical squash, as blockadeStance uses
+// The board's vertical squash. DERIVED, the way blockadeStance derives it —
+// hardcoding the number would silently start pointing the machine the wrong way
+// if the tiles were ever re-exported at a different aspect.
+const DEPTH_SQUASH = HEX_H / HEX_W;
 
 let keyframesInstalled = false;
 function ensureMarkKeyframes() {

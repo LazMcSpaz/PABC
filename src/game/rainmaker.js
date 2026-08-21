@@ -262,6 +262,13 @@ export function grantDevice(state, fid, { hex, carrierUid = null, reason = "seiz
 
   const p = rm.progress[fid] || joinRainmaker(state, fid);
   rm.device.owner = fid;
+  // `fromHex` means "the hex immediately before this one", and the art reads a
+  // heading off it. Handing the device to somebody somewhere else would leave a
+  // stale one pointing at a place it never travelled from, so a move that is
+  // not a haul clears it rather than lying about where it came from. Every
+  // caller today grants in place — extraction, recovery, storming a capital —
+  // but the invariant should not depend on that staying true.
+  if (hex != null && hex !== rm.device.hex) rm.device.fromHex = null;
   rm.device.hex = hex ?? rm.device.hex;
   rm.device.carrierUid = carrierUid;
   // `loose` means UNOWNED — that is the whole of what the word is for, and the
