@@ -1177,6 +1177,7 @@ export default function Prototype({ config, onNewGame }) {
         color={UI_FACTIONS[state.youId]?.color}
         vp={you.vp}
         vpGoal={state.vpGoal}
+        dominion={state.diplomacy?.recognition || null}
         actions={you.actions}
         round={state.round}
         onEndTurn={onEndTurn}

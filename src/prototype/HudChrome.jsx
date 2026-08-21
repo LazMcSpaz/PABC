@@ -283,7 +283,7 @@ function CompactStat({ icon, value, color }) {
 // name, VP/Actions dials); at phone width those clusters collide. This
 // swaps to a plain three-row rectangular bar: faction/settings, a row of
 // icon+value stats, then a full-width End Turn button underneath.
-function CompactTopBar({ scrap, upkeep, units, tech, name, color = C.red, vp, vpGoal, actions, round, onEndTurn, endDisabled, onSettings }) {
+function CompactTopBar({ scrap, upkeep, units, tech, name, color = C.red, vp, vpGoal, dominion, actions, round, onEndTurn, endDisabled, onSettings }) {
   return (
     <div style={{
       position: "absolute", top: 0, left: 0, right: 0, height: COMPACT_HUD_H, zIndex: 30,
@@ -310,7 +310,7 @@ function CompactTopBar({ scrap, upkeep, units, tech, name, color = C.red, vp, vp
         />
         <CompactStat icon={ICON.units} value={`${units.n}/${units.cap}`} color={RES.units.color} />
         <CompactStat icon={ICON.research} value={`L${tech.level}`} color={RES.tech.color} />
-        <CompactStat icon={ICON.vp} value={`${vp}/${vpGoal}`} color={C.gold} />
+        <CompactStat icon={ICON.vp} value={dominion ? `${dominion.score}/${dominion.threshold}` : `${vp}`} color={C.gold} />
         <CompactStat icon={ICON.shield} value={`${actions.remaining}/${actions.max}`} color={C.red} />
       </div>
       <button className="hud-int" onClick={endDisabled ? undefined : onEndTurn} disabled={endDisabled}
@@ -335,7 +335,7 @@ export function TopBar(props) {
   return <DesktopTopBar {...props} />;
 }
 
-function DesktopTopBar({ scrap, upkeep, units, tech, name, color = C.red, vp, vpGoal, actions, round, onEndTurn, endDisabled, onSettings }) {
+function DesktopTopBar({ scrap, upkeep, units, tech, name, color = C.red, vp, vpGoal, dominion, actions, round, onEndTurn, endDisabled, onSettings }) {
   const H = 60;
   const clip = "polygon(0 0, 100% 0, 100% 60px, 78% 60px, 72% 28px, 28% 28px, 22% 60px, 0 60px)";
   const outline = "M0 0 L100 0 L100 60 L78 60 L72 28 L28 28 L22 60 L0 60 Z";
@@ -381,9 +381,22 @@ function DesktopTopBar({ scrap, upkeep, units, tech, name, color = C.red, vp, vp
 
       {/* right flare — VP + Actions dials, End Turn beneath */}
       <div style={{ position: "absolute", right: 16, top: 0, height: H, display: "flex", alignItems: "center", gap: 14, pointerEvents: "auto" }}>
-        <DialCell label="Victory">
-          <Dial size={46} accent={C.gold} progress={vpGoal ? vp / vpGoal : 0}>
-            <DialFace icon={ICON.vp} value={vp} valueColor={C.gold} iconSize={15} valueSize={15} />
+        {/* The dial races the WIN CONDITION — how many rivals are dealt with —
+            not the score. It used to fill toward a VP threshold that turned
+            out not to be a conquest condition at all; VP is the end-of-game
+            standing now and nothing fills toward it. */}
+        <DialCell label={dominion?.roundsLeft != null ? `${dominion.roundsLeft} to win` : "Dominion"}>
+          <Dial
+            size={46}
+            accent={dominion?.roundsLeft != null ? C.holo : C.gold}
+            progress={dominion?.threshold ? dominion.score / dominion.threshold : 0}
+            glow={dominion?.met}
+          >
+            <DialFace
+              value={dominion ? `${dominion.score}/${dominion.threshold}` : vp}
+              valueColor={dominion?.met ? C.holoHi : C.text}
+              valueSize={15}
+            />
           </Dial>
         </DialCell>
         <ActionPips roster={actions.roster} />

@@ -561,10 +561,12 @@ function LandingView({ dip, onSelectFaction, onAction, onClose }) {
             <RepStat label="Honor" value={dip.honor.toFixed(1)} color="#5fc27a" sub="kept your word" />
             <RepStat label="Threat" value={dip.threat.toFixed(1)} color={dip.threat > 6 ? "#d2453f" : C.holoHi} sub="coalition risk" />
             <RepStat
-              label="Recognition"
+              label="Dominion"
               value={`${rec.score}/${rec.threshold}`}
               color={rec.met ? "#5fc27a" : "#c9b24e"}
-              sub={rec.met ? "Victory!" : `${rec.contributors?.length || 0} backing`}
+              sub={rec.roundsLeft != null
+                ? `${rec.roundsLeft} to victory`
+                : `${rec.outstanding?.length || 0} still to deal with`}
             />
           </div>
         </Card>
@@ -685,8 +687,11 @@ const BACKING_COLOR = {
   backs: "#5fc27a", warming: "#c9b24e", cold: "rgba(143,246,234,0.45)",
   blocked: "#d2913c", coalition: "#d2453f",
 };
+// "BACKS YOU" was the language of a Recognition score somebody could lend you
+// weight toward. The question now is simply whether this faction is dealt
+// with — allied, sworn, or gone.
 const BACKING_LABEL = {
-  backs: "BACKS YOU", warming: "WARMING", cold: "COLD",
+  backs: "DEALT WITH", warming: "WARMING", cold: "OUTSTANDING",
   blocked: "DISTRUSTS", coalition: "COALITION",
 };
 function RecognitionCard({ rec }) {
@@ -695,12 +700,26 @@ function RecognitionCard({ rec }) {
   const hasSpy = backing.some((b) => b.detail);
   return (
     <Card>
-      <SectionLabel>Path to Recognition</SectionLabel>
+      <SectionLabel>The Road to Victory</SectionLabel>
       <div className="pc-prose" style={{ fontSize: 11, lineHeight: 1.5, color: "rgba(143,246,234,0.6)", marginBottom: 8 }}>
-        Reach <b style={{ color: C.holoHi }}>{rec.threshold}</b> backing to win outright.
-        A vassal counts double an ally. The first time each power backs you,
-        you bank <b style={{ color: "#e8c95a" }}>+{rec.summitVp} VP</b>.
+        You win when every faction still standing is your ally, your vassal, or
+        gone — by conquest, by diplomacy, or any mix of the two. Then hold it
+        for <b style={{ color: C.holoHi }}>{rec.holdRounds}</b> rounds.
+        {" "}<b style={{ color: rec.met ? "#5fc27a" : C.holoHi }}>{rec.score}</b> of{" "}
+        <b style={{ color: C.holoHi }}>{rec.threshold}</b> dealt with.
       </div>
+      {rec.roundsLeft != null && (
+        <div style={{
+          fontFamily: C.font, fontSize: 11, letterSpacing: 1, marginBottom: 8,
+          padding: "6px 8px", borderRadius: 5,
+          color: "#08100f", fontWeight: 700,
+          background: `linear-gradient(180deg, ${C.holoHi}, ${C.holo})`,
+        }}>
+          {rec.roundsLeft > 0
+            ? `Hold it — ${rec.roundsLeft} round${rec.roundsLeft === 1 ? "" : "s"} to victory`
+            : "The board is yours"}
+        </div>
+      )}
       <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
         {backing.map((b) => (
           <div key={b.id} style={{
@@ -712,13 +731,7 @@ function RecognitionCard({ rec }) {
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <span style={{ fontFamily: C.font, fontSize: 11.5, fontWeight: 700, flex: 1, color: "#f4efe2" }}>
                 {b.name}
-                {rec.summits?.includes(b.id) && (
-                  <span title="Summit VP banked" style={{ color: "#e8c95a", marginLeft: 6 }}>★</span>
-                )}
               </span>
-              {b.weight > 0 && (
-                <span style={{ fontFamily: C.font, fontSize: 10.5, fontWeight: 700, color: "#5fc27a" }}>+{b.weight}</span>
-              )}
               <span style={{
                 fontFamily: C.font, fontSize: 8.5, fontWeight: 700, letterSpacing: 1,
                 color: BACKING_COLOR[b.status],

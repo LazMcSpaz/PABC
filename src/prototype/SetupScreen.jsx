@@ -10,9 +10,7 @@
 //   mapSize:       string   — "small"|"medium"|"large"|"huge"
 //   factionCount:  number   — integer 2..4
 //   victory: {
-//     conquest:     boolean  — reach 12 VP (§14.1; always-available path)
-//     recognition:  boolean  — diplomacy/Recognition victory (§18.10)
-//     elimination:  boolean  — last faction standing
+//     dominion:  boolean  — every surviving faction allied, vassal or gone
 //   }
 //   encounters: {
 //     field: number  — 0..1 frequency
@@ -77,21 +75,15 @@ export function locationsFor(sizeId, densityIndex) {
   return tiers[Math.max(0, Math.min(tiers.length - 1, densityIndex))];
 }
 
+// One condition, not three. Conquest / Recognition / Elimination turned out to
+// be three names for three faces of the same thing — every faction still
+// standing is dealt with — and only one of the three code paths honoured its
+// own switch anyway.
 const VICTORY_CONDITIONS = [
   {
-    id: "conquest",
-    label: "Conquest",
-    desc: "Reach 12 Victory Points — the always-available path (§14.1).",
-  },
-  {
-    id: "recognition",
-    label: "Recognition",
-    desc: "Diplomacy victory: earn Recognition from enough factions (§18.10).",
-  },
-  {
-    id: "elimination",
-    label: "Elimination",
-    desc: "Last faction standing — all rivals eliminated.",
+    id: "dominion",
+    label: "Dominion",
+    desc: "Win when every surviving faction is your ally, your vassal, or gone — then hold it for 3 rounds. Off: the game never ends on its own.",
   },
 ];
 
@@ -509,7 +501,7 @@ export default function SetupScreen({ onStart, onBack }) {
   const [densityIndex, setDensityIndex] = useState(1); // medium
 
   // victory conditions — all on by default; guard: ≥1 must stay enabled
-  const [victory, setVictory] = useState({ conquest: true, recognition: true, elimination: true });
+  const [victory, setVictory] = useState({ dominion: true });
 
   // advanced settings (collapsible)
   const [advOpen, setAdvOpen] = useState(false);

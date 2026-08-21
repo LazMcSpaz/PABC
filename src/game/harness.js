@@ -36,6 +36,8 @@ import {
   ultimatumsFor, ultimatumCooldown,
   // §6.10 the round trip — offers, counters, patience
   counterOffer, tableOffer, offersFor, answerOffer, asksThisRound,
+  // the one win condition
+  dominionStanding, dominionMet, checkDominion, dominionCountdown, releaseVassal, aiAcceptsPact,
   // §3.2 Locations as deal items — ceding ground
   locationWorth, cedeBlocker, cedeableLocations, cedeLocation, resolveProposal,
 } from "./diplomacy.js";
@@ -778,29 +780,23 @@ line("\n  [Setup] every faction gets the same number of home Locations");
 // something, not merely that the default still works.
 line("\n  [Setup] Rule switches from the start screen");
 {
-  // Victory: turning a condition off removes a way to END the game, never a
-  // way to score.
+  // VP no longer ends anything. It is the end-of-game standing, and a faction
+  // sitting on a mountain of it wins nothing by that alone.
   {
-    const g = createGame({ seed, rules: { victory: { conquest: false } } });
+    const g = createGame({ seed });
     const me = g.turnOrder[0];
-    g.players[me].bankedVp = CONFIG.vpThreshold * 2;
+    g.players[me].bankedVp = CONFIG.vpThreshold * 5;
     recomputeVp(g);
-    check("victory: conquest off — VP still accrues but nobody wins on it",
+    check("a pile of VP wins nothing — it is a score, not a condition",
       g.players[me].vp >= CONFIG.vpThreshold && !g.winnerId);
-
-    const on = createGame({ seed });
-    on.players[on.turnOrder[0]].bankedVp = CONFIG.vpThreshold * 2;
-    recomputeVp(on);
-    check("victory: conquest on — the same VP does win",
-      on.winnerId === on.turnOrder[0]);
   }
 
-  // Elimination: last-standing stops ending the game, but eliminations still
-  // happen.
+  // The pure-conquest face of the one condition: wipe the board and there is
+  // nobody left who is not dealt with, so it lands at once — no hold, because
+  // there is nobody left to break it.
   {
     const stage = (rules) => {
       const g = createGame({ seed, rules });
-      // Wipe everyone but the first player off the board.
       for (const pid of g.turnOrder.slice(1)) {
         for (const uid of Object.keys(g.units)) if (g.units[uid].owner === pid) delete g.units[uid];
         for (const loc of Object.values(g.locations)) {
@@ -811,10 +807,10 @@ line("\n  [Setup] Rule switches from the start screen");
       startTurn(g); endTurn(g);
       return g;
     };
-    check("victory: elimination on — outliving everyone ends it",
-      !!stage(undefined).winnerId);
-    check("victory: elimination off — the board empties but the game runs on",
-      !stage({ victory: { elimination: false } }).winnerId);
+    check("outliving everyone wins immediately — nothing left to hold against",
+      stage(undefined).winnerId === createGame({ seed }).turnOrder[0]);
+    check("…and the toggle switches the whole condition off",
+      !stage({ victory: { dominion: false } }).winnerId);
   }
 
   // Fog: OFF leaves the per-faction records empty, which every reader already
@@ -848,10 +844,16 @@ line("\n  [Setup] Rule switches from the start screen");
   // otherwise every headless caller and the rest of this harness shifts.
   {
     const g = createGame({ seed });
-    check("defaults: every condition live, fog on, world cadence at the config default",
-      g.rules.victory.conquest && g.rules.victory.recognition && g.rules.victory.elimination &&
+    check("defaults: the condition is live, fog on, world cadence at the config default",
+      g.rules.victory.dominion === true &&
       g.rules.fogOfWar === true &&
       g.rules.worldEncountersPerRound === CONFIG.encounters.worldPerRound);
+    // The three old switches were three names for one thing. Any of them still
+    // turns it off, so a saved setup or an older caller keeps working.
+    for (const legacy of ["conquest", "recognition", "elimination"]) {
+      check(`…and the legacy "${legacy}" switch still turns it off`,
+        createGame({ seed, rules: { victory: { [legacy]: false } } }).rules.victory.dominion === false);
+    }
   }
 }
 
@@ -3556,27 +3558,93 @@ line("\n§18 DIPLOMACY CAPSTONE");
       vassalLord(g, "croppers") == null && atWar(g, "croppers", "versari"));
   }
 
-  // --- Recognition victory + its Menace/Honor gate (§18.10) ---
+  // --- the win condition: everyone dealt with, and it has to HOLD ---
   {
-    const g = createGame({ seed, humanFactionId: "versari", minors: ["tempest", "croppers"] });
-    // convert three factions into vassals (weight 2 each = 6 ≥ threshold 6)
-    for (const f of ["goldgrass", "croppers", "tempest"]) vassalize(g, "versari", f, "test");
-    const sc = recognitionScore(g, "versari");
-    check("Recognition reaches the threshold via vassals (Allied=1, Vassal=2)",
-      sc.total >= CONFIG.diplomacy.recognition.threshold);
-    check("Recognition victory is reachable (winner set on the check)",
-      (() => { const gg = g; gg.winnerId = null; ensureDiplomacy(gg); runDiplomacyRound(gg); return gg.winnerId === "versari"; })());
-    // gate: a notorious bully loses Recognition (Menace over Tolerance)
-    const g2 = createGame({ seed, humanFactionId: "versari", minors: ["tempest", "croppers"] });
-    for (const f of ["goldgrass", "croppers", "tempest"]) vassalize(g2, "versari", f, "test");
-    g2.players.versari.menace = 99;
-    check("Recognition is GATED by Menace (a bully cannot be acknowledged)",
-      !recognitionMet(g2, "versari"));
-    const g3 = createGame({ seed, humanFactionId: "versari", minors: ["tempest", "croppers"] });
-    for (const f of ["goldgrass", "croppers", "tempest"]) vassalize(g3, "versari", f, "test");
-    g3.players.versari.honor = -99;
-    check("Recognition is GATED by Honor (a liar cannot be acknowledged)",
-      !recognitionMet(g3, "versari"));
+    const HOLD = CONFIG.victory.holdRounds;
+    const mk = () => {
+      const g = createGame({ seed, humanFactionId: "versari", minors: ["tempest", "croppers"] });
+      ensureDiplomacy(g);
+      return g;
+    };
+    const others = (g) => factionIds(g).filter((f) => f !== "versari");
+
+    // Nothing dealt with, nothing won.
+    {
+      const g = mk();
+      const st = dominionStanding(g, "versari");
+      check("with rivals unaccounted for, the condition is not met",
+        !st.met && st.outstanding.length === others(g).length);
+    }
+
+    // All vassals — the submission face.
+    {
+      const g = mk();
+      for (const f of others(g)) vassalize(g, "versari", f, "test");
+      check("every rival a vassal meets it", dominionMet(g, "versari"));
+    }
+
+    // A mix of allies and vassals — the case no previous version could express.
+    {
+      const g = mk();
+      const list = others(g);
+      vassalize(g, "versari", list[0], "test");
+      for (const f of list.slice(1)) formPact(g, "versari", f, "test");
+      const st = dominionStanding(g, "versari");
+      check("…and so does a MIX of allies and vassals",
+        st.met && st.vassals.length === 1 && st.allied.length === list.length - 1);
+    }
+
+    // The hold: reaching it starts a clock, and only time wins.
+    {
+      const g = mk();
+      for (const f of others(g)) vassalize(g, "versari", f, "test");
+      checkDominion(g);
+      check("reaching it does not win on the spot — it starts a clock",
+        !g.winnerId && dominionCountdown(g, "versari") === HOLD);
+      for (let i = 0; i < HOLD - 1; i += 1) { g.round += 1; checkDominion(g); }
+      check("…which is still running one round short", !g.winnerId);
+      g.round += 1; checkDominion(g);
+      check(`…and lands after ${HOLD} rounds held`, g.winnerId === "versari");
+    }
+
+    // …and a rival who breaks away stops it. This is the whole point of the
+    // hold: a bloodless win is a position you defend, not a switch you flip.
+    {
+      const g = mk();
+      for (const f of others(g)) vassalize(g, "versari", f, "test");
+      checkDominion(g);
+      g.round += 1; checkDominion(g);
+      releaseVassal(g, others(g)[0], "rebellion");
+      checkDominion(g);
+      check("a rival breaking away stops the clock", !g.winnerId && dominionCountdown(g, "versari") === null);
+      check("…and it restarts from the top, not from where it left off",
+        (() => {
+          vassalize(g, "versari", others(g)[0], "retaken");
+          checkDominion(g);
+          return dominionCountdown(g, "versari") === HOLD;
+        })());
+    }
+
+    // A faction serves ONE lord, so two rivals can never both count it.
+    {
+      const g = mk();
+      for (const f of others(g)) vassalize(g, "versari", f, "test");
+      vassalize(g, "goldgrass", "tempest", "steal");
+      check("taking a vassal takes it from its old lord — nobody shares one",
+        vassalLord(g, "tempest") === "goldgrass" && !dominionMet(g, "versari"));
+      check("…and the old lord's tribute goes with it",
+        g.diplomacy.agreements.filter((a) => a.vassalTribute === "tempest").length === 1);
+    }
+
+    // The reputation gates still bite, one level down: a bully cannot GET the
+    // pacts and submissions in the first place, so the condition needs no gate
+    // of its own.
+    {
+      const g = mk();
+      g.players.versari.menace = 99;
+      check("a notorious bully cannot get the alliances it would need",
+        !aiAcceptsPact(g, "goldgrass", "versari"));
+    }
   }
 
   // --- minors respect scope:"local" (§18.4.1) ---
@@ -4773,36 +4841,36 @@ line("\n  [Phase 11] text-token resolver");
   // holdings and score for the vassal. An overlord's reward is tribute and the
   // recognition summit, not a share of ground it does not hold.
 
-  // -- alliance trickle: a majority of the other MAJORS unlocks it, and
-  // past that bar it pays PER allied major (breadth scales, as Dominion
-  // does for cities — the fix for diplomacy's flat ceiling).
+  // -- diplomacy is HELD, like territory. The trickle it replaced paid +1 per
+  // allied major every round forever once you were pacted with a majority: it
+  // was 77% of all banked VP across 20 games and let a faction win holding no
+  // ground at all. An alliance is worth its score while it stands, and worth
+  // nothing the moment it doesn't.
   const gT = createGame({ seed: 143 });
   startTurn(gT);
   const dip = gT.turnOrder[gT.activeIndex];
   const majors14 = gT.turnOrder.filter((f) => f !== dip && factionDef(f)?.tier === "major");
-  // pre-mark summit dividends so these checks measure ONLY the trickle.
-  gT.diplomacy.recognizedEver = { [dip]: [...majors14] };
-  for (const m of majors14) gT.diplomacy.recognizedEver[m] = [dip];
-  // One ally out of three others is NOT a majority — nothing pays.
+  const SC = CONFIG.victory.score;
+  const base = gT.players[dip].vp;
   formPact(gT, dip, majors14[0]);
-  const vpMinority = gT.players[dip].vp;
+  recomputeVp(gT);
+  check("held diplomacy: one ally is worth its score at once — no majority bar",
+    gT.players[dip].vp === base + SC.allied);
+  // …and it does not pay again just because a round went by.
   cycleTo(gT, dip);
-  check("alliance trickle: a single ally is below the majority bar — pays nothing",
-    majors14.length < 2 || gT.players[dip].vp === vpMinority);
-  // A second ally clears the bar and pays for BOTH.
-  formPact(gT, dip, majors14[1]);
-  const vpTwo = gT.players[dip].vp;
-  cycleTo(gT, dip);
-  check("alliance trickle: past the majority bar it pays per allied major",
-    gT.players[dip].vp === vpTwo + 2 * CONFIG.victory.allianceTrickle);
-  // A third ally scales it again.
-  if (majors14[2]) {
-    formPact(gT, dip, majors14[2]);
-    const vpThree = gT.players[dip].vp;
-    cycleTo(gT, dip);
-    check("alliance trickle: each further ally adds another step",
-      gT.players[dip].vp === vpThree + 3 * CONFIG.victory.allianceTrickle);
-  }
+  recomputeVp(gT);
+  check("…and it does not pay again next round",
+    gT.players[dip].vp === base + SC.allied);
+  // A vassal is worth more than an ally.
+  vassalize(gT, dip, majors14[1], "test");
+  recomputeVp(gT);
+  check("…a vassal is worth more than an ally",
+    gT.players[dip].vp === base + SC.allied + SC.vassal && SC.vassal > SC.allied);
+  // Lose the alliance, lose the score — the half a banked model could not do.
+  breakPact(gT, dip, majors14[0], "test");
+  recomputeVp(gT);
+  check("…and losing the alliance loses the score with it",
+    gT.players[dip].vp === base + SC.vassal);
 
   // -- elimination: a stripped faction is flagged, skipped, and excluded;
   // last faction standing wins outright.
@@ -5305,18 +5373,24 @@ line("\n  [Phase 11] text-token resolver");
   check("patronage is minors-only: an uncornered major never bends the knee",
     !aiAcceptsVassalage(g2, weakMajor, lord));
 
-  // --- summit VP: first-time backers pay once, ever ---
+  // --- taking a vassal is worth its score, and only while you keep it ---
+  // The "summit dividend" this replaced banked 1 VP the first time each
+  // faction ever backed you — permanently, whether or not the arrangement
+  // survived. Score is held now, so a vassal you lose is a vassal you stop
+  // counting.
   const lp = g2.players[lord];
   const vpBefore = lp.vp;
   const res19 = performDiplomacy(g2, lord, "vassalize", { faction: minor });
   check("patronage: the vassalize verb lands peacefully end-to-end", res19.ok && res19.accepted === true);
-  check("summit: the first-time backer banks summit VP for the lord",
-    lp.vp === vpBefore + CONFIG.diplomacy.recognition.summitVp
-    && (g2.diplomacy.recognizedEver[lord] || []).includes(minor));
+  recomputeVp(g2);
+  check("a new vassal is worth its score to the lord",
+    lp.vp === vpBefore + CONFIG.victory.score.vassal);
   checkRecognitionVictory(g2);
-  check("summit: re-checking never double-pays", lp.vp === vpBefore + CONFIG.diplomacy.recognition.summitVp);
-  const summitLog = g2.log.filter((e) => e.name === "recognition_summit" && e.payload.player === lord);
-  check("summit: recognition_summit emitted exactly once for the pair", summitLog.length === 1);
+  recomputeVp(g2);
+  check("…and re-checking never pays twice", lp.vp === vpBefore + CONFIG.victory.score.vassal);
+  releaseVassal(g2, minor, "test");
+  recomputeVp(g2);
+  check("…and releasing it takes the score back", lp.vp === vpBefore);
 }
 
 // Phase 20 — diplomacy tuning (2026-08-13 playtest log): coalitions never

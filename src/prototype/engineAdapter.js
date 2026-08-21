@@ -30,6 +30,7 @@ import {
   aiAcceptsPact, aiAcceptsVassalage, aiAcceptsPeace, wouldAccept, passesRepGates,
   denounceCooldown, denounceWarrant, denounceGrounds, grievanceWeight, grievancesAgainst,
   reputationLog, settleableWeight, unitsInTerritory, ultimatumCooldown,
+  dominionStanding, dominionCountdown,
   tradeRouteOpen,
   cedeableLocations, locationWorth,
   asksThisRound, flowRounds, promiseRounds,
@@ -541,6 +542,8 @@ export function adaptState(state) {
     phase: state.phase,
     youId: state.humanFactionId,
     activeId: state.turnOrder[state.activeIndex],
+    // No longer a goal — VP is the end-of-game standing. Kept on the view
+    // model so the HUD dial can still show a scale until it is redesigned.
     vpGoal: CONFIG.vpThreshold,
     techThresholds: [...CONFIG.tech.researchThresholds],
     maxTechLevel: CONFIG.tech.maxLevel,
@@ -833,20 +836,32 @@ function adaptDiplomacy(state, viewer) {
     menace: me?.menace || 0,
     honor: me?.honor ?? CONFIG.diplomacy.honor.start,
     threat: Math.round(threatScore(state, viewer) * 10) / 10,
-    recognition: {
-      score: rec.total,
-      threshold: CONFIG.diplomacy.recognition.threshold,
-      contributors: rec.contributors,
-      met: rec.total >= CONFIG.diplomacy.recognition.threshold,
-      // Per-faction backing checklist — WHO backs your claim and, for the
-      // rest, a coarse why-not. Coarse status is common knowledge; the
-      // precise numbers behind it (their exact Standing toward you, their
-      // Menace tolerance / Honor floor) are Spy Ring product.
-      backing: recognitionBacking(state, viewer, spyRing),
-      // Summit VP already banked (first-time backers, once each per game).
-      summits: [...(dip.recognizedEver?.[viewer] || [])],
-      summitVp: CONFIG.diplomacy.recognition.summitVp,
-    },
+    // The win condition: every surviving faction eliminated, your ally, or
+    // your vassal — held for `holdRounds`. It used to be a weighted score
+    // against a threshold of 6, which never once decided a game.
+    recognition: (() => {
+      const st = dominionStanding(state, viewer);
+      const left = dominionCountdown(state, viewer);
+      return {
+        allied: st.allied,
+        vassals: st.vassals,
+        outstanding: st.outstanding,
+        // How many rivals are dealt with, out of how many are still alive.
+        score: st.allied.length + st.vassals.length,
+        threshold: st.others.length,
+        contributors: [...st.vassals, ...st.allied],
+        met: st.met,
+        // The clock: null until the arrangement is complete, then counting
+        // down while it holds. This is the player's warning that somebody is
+        // about to win, and their window to do something about it.
+        holdRounds: CONFIG.victory.holdRounds,
+        roundsLeft: left,
+        // Per-faction checklist — WHO is dealt with and, for the rest, a
+        // coarse why-not. Coarse status is common knowledge; the precise
+        // numbers behind it are Spy Ring product.
+        backing: recognitionBacking(state, viewer, spyRing),
+      };
+    })(),
     // Where your own numbers came from, act by act.
     receipts: {
       menace: repReceipts(state, viewer, "menace"),
@@ -1090,40 +1105,44 @@ function describeDealItem(it, state) {
   return "something";
 }
 
-// Recognition checklist — one row per other faction, mirroring
-// recognitionScore's gates exactly so the screen never lies about the
-// score. Coarse `status`/`hint` are common knowledge; `detail` (exact
-// Standing and gate numbers) rides only with the Spy Ring.
+// The victory checklist — one row per other faction, mirroring
+// `dominionStanding` EXACTLY, so the screen can never disagree with the
+// condition about who is dealt with.
+//
+// It used to mirror the retired weighted Recognition instead, which asked for
+// Allied *regard* on top of a pact and applied a reputation gate of its own —
+// so a pacted-but-merely-friendly rival read as "warming" on screen while the
+// engine counted them. The gates still bite, one level up: a bully cannot get
+// the pact in the first place.
+//
+// Coarse `status`/`hint` are common knowledge; `detail` (exact Standing and
+// gate numbers) rides only with the Spy Ring.
 function recognitionBacking(state, viewer, spyRing) {
-  const rc = CONFIG.diplomacy.recognition;
   const tiers = CONFIG.diplomacy.tiers;
   const me = state.players[viewer];
   const coal = coalitionAgainst(state, viewer);
   return factionIds(state).filter((f) => f !== viewer).map((f) => {
     const def = factionDef(f) || {};
     const s = getStanding(state, f, viewer);
-    const isVassal = vassalLord(state, f) === viewer;
-    const allied = arePacted(state, f, viewer) && standingTier(s) === "allied";
-    const gatesPass = passesRepGates(state, f, viewer);
-    let status, weight = 0, hint;
-    if (coal && coal.members.includes(f)) {
-      status = "coalition";
-      hint = "Marches in the coalition against you — lends your claim nothing while it stands.";
-    } else if (!gatesPass) {
-      status = "blocked";
-      hint = "Your reputation fails their gates — too much Menace for their tolerance, or your Honor sits below their floor.";
-    } else if (isVassal) {
-      status = "backs"; weight = rc.vassalWeight;
-      hint = "Your vassal — full backing.";
-    } else if (allied) {
-      status = "backs"; weight = rc.alliedWeight;
-      hint = "A sworn ally at Allied regard — backs your claim.";
+    let status, hint;
+    if (state.players[f]?.eliminated) {
+      status = "backs";
+      hint = "Gone from the board — dealt with.";
+    } else if (vassalLord(state, f) === viewer) {
+      status = "backs";
+      hint = "Your vassal — dealt with.";
     } else if (arePacted(state, f, viewer)) {
-      status = "warming";
-      hint = "Pacted, but their regard hasn't reached Allied yet.";
+      status = "backs";
+      hint = "Your ally — dealt with.";
+    } else if (coal && coal.members.includes(f)) {
+      status = "coalition";
+      hint = "Marches in the coalition against you. They will not deal while it stands.";
+    } else if (!passesRepGates(state, f, viewer)) {
+      status = "blocked";
+      hint = "Your reputation fails their gates — too much Menace for their tolerance, or your Honor sits below their floor. They will not ally you, and you cannot make them submit by talking.";
     } else {
       status = "cold";
-      hint = "No pact — courtship hasn't begun.";
+      hint = "Neither ally nor vassal. Court them, subdue them, or take their ground.";
     }
     const detail = spyRing ? {
       standing: s,
@@ -1133,7 +1152,7 @@ function recognitionBacking(state, viewer, spyRing) {
       yourHonor: me?.honor ?? CONFIG.diplomacy.honor.start,
       theirFloor: Math.round(trustFloor(state, f) * 10) / 10,
     } : null;
-    return { id: f, name: def.name || f, tier: def.tier || "major", status, weight, hint, detail };
+    return { id: f, name: def.name || f, tier: def.tier || "major", status, hint, detail };
   });
 }
 

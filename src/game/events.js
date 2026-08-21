@@ -88,6 +88,9 @@ export const EVENT_NAMES = new Set([
   "offer_tabled", "offer_accepted", "offer_declined", "offer_lapsed", "offer_pestered",
   // The grievance ledger — what was done to you, and what it takes to settle.
   "grievance_recorded", "grievances_settled",
+  // The win condition: every surviving faction eliminated, allied or vassal.
+  // `reached` starts the hold clock, `lost` stops it, `won` ends the game.
+  "dominion_reached", "dominion_lost", "dominion_won",
   // Reputation is what the board saw. Some things it doesn't.
   "attack_unwitnessed",
   // §6.11 ultimatums — the verb between asking and attacking.

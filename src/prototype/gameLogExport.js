@@ -261,7 +261,8 @@ export function buildGameLogText(state) {
     "=== ASHLAND CONQUEST — PLAYTEST LOG ===",
     `Exported: ${new Date().toISOString()}`,
     `Round reached: ${state.round}`,
-    `Victory threshold: ${CONFIG.vpThreshold} VP`,
+    "Victory: every surviving faction allied, vassal or gone — held for "
+      + `${CONFIG.victory.holdRounds} rounds. VP is the closing standing, not a target.`,
     `Winner: ${state.winnerId ? factionName(state.winnerId) : "none — session ended mid-game"}`,
     "",
     "--- Factions ---",

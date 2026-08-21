@@ -55,39 +55,44 @@ export function settlementVp(state, fid) {
   return n;
 }
 
-// Recompute every faction's total from the board and bank, emit on any change,
-// and latch a winner if one has crossed the threshold.
+// The diplomatic half of the score: what your standing in the world is worth.
+// HELD, exactly like territory — you show it while the relationship stands and
+// lose it the moment it doesn't. It replaced a per-round trickle that paid +1
+// per ally every round forever, which was 77% of all banked VP and let a
+// faction win holding no ground at all.
 //
-// Call this after ANYTHING that moves control or Loyalty. It is cheap (one
-// pass over the Locations per faction) and idempotent, so calling it twice
-// costs nothing and missing a call is the only real failure mode.
+// Injected rather than imported: diplomacy.js already imports this module, so
+// asking it back for the pact list would close a cycle. turn.js supplies the
+// reader.
+let readAllies = null;
+export function registerAllyReader(fn) { readAllies = fn; }
+
+export function diplomacyVp(state, fid) {
+  if (!readAllies) return 0;
+  const sc = CONFIG.victory.score;
+  const { allied = [], vassals = [] } = readAllies(state, fid) || {};
+  return allied.length * sc.allied + vassals.length * sc.vassal;
+}
+
+// Recompute every faction's score from the board, its friends and the bank.
+//
+// This no longer decides anything. VP is the end-of-game standing — "how did
+// I do" — and nothing reads it as a win condition. Call it after anything
+// that moves control, Loyalty or an alliance; it is cheap and idempotent.
 export function recomputeVp(state, { emitEvents = true } = {}) {
   for (const pid of Object.keys(state.players)) {
     const p = state.players[pid];
     if (!p) continue;
-    const next = (p.bankedVp || 0) + settlementVp(state, pid);
+    const next = (p.bankedVp || 0) + settlementVp(state, pid) + diplomacyVp(state, pid);
     if (next === p.vp) continue;
     const from = p.vp;
     p.vp = next;
     if (emitEvents) emit(state, "vp_changed", { player: pid, from, to: next });
   }
-  // Winner check runs after every total is current, so a simultaneous swing
-  // cannot hand the game to whoever happened to be recomputed first.
-  if (!state.winnerId) {
-    for (const pid of state.turnOrder) {
-      const p = state.players[pid];
-      if (!p || factionDef(pid)?.tier !== "major") continue; // minors never win
-      // Conquest can be switched off at setup. Doing so removes a way to END
-      // the game, never a way to score — VP keeps accruing and the scoreboard
-      // still reads, there is just no line to cross.
-      if (state.rules?.victory?.conquest === false) break;
-      if (p.vp >= CONFIG.vpThreshold) { state.winnerId = pid; break; }
-    }
-  }
 }
 
-// Add to the accumulating half (recognition, encounters, the alliance
-// trickle), then re-total. The one entry point for VP that is NOT held.
+// Add to the accumulating half (encounter and quest grants), then re-total.
+// The one entry point for VP that is NOT held.
 export function bankVp(state, pid, amount, source) {
   const p = state.players[pid];
   if (!p || !amount) return;

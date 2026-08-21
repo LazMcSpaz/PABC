@@ -2,6 +2,8 @@
 // The engine reads gameplay numbers from here — never hard-code them.
 
 export const CONFIG = {
+  // Kept only as the label on the end-of-game score. Nothing reads it as a
+  // win condition any more — see `victory` below.
   vpThreshold: 12,
   // Per-entity actions (docs/vp-and-actions-design.md §2/§4): every unit
   // and Location gets 1 action per turn; the old global pool survives as a
@@ -14,10 +16,29 @@ export const CONFIG = {
   // vpReward for as long as it holds the place — full value while Loyalty is
   // OVER half the counter, half (floored) below. Dominion's per-Upkeep tick and
   // the one-off capture bounty are both gone; the scoreboard is the map.
+  // Victory is ONE condition with three faces: every surviving faction is
+  // eliminated, your ally, or your vassal. Win it by conquest, by diplomacy,
+  // or — the interesting case — by any mix of the two.
+  //
+  // What it replaced: a VP threshold labelled "conquest" that had nothing to
+  // do with conquering. Across 20 AI-only games it ended every single one,
+  // the winner held 29% of the board on average, and one winner held NOTHING
+  // — 12 points banked from an alliance drip while holding zero cities. The
+  // separate Recognition and last-standing conditions never fired once.
   victory: {
-    // The one faucet that was never about territory, so it still accumulates:
-    // paid PER allied major, once you're pacted with a majority of them.
-    allianceTrickle: 1,
+    // The arrangement has to HOLD for this many consecutive rounds before it
+    // wins. Allying your way to a bloodless victory should be a position you
+    // have to defend for a moment, not a switch that flips the instant the
+    // last signature dries — rivals get a window to denounce you, break a
+    // partner away, or simply attack.
+    //
+    // It only applies while rivals are still ALIVE to break it. Kill everyone
+    // and you have won; there is nothing left to hold against.
+    holdRounds: 3,
+    // Score, purely for the end-of-game standing. Nothing here wins anything.
+    // Both are HELD, like territory: you show them while the relationship
+    // stands and lose them when it doesn't.
+    score: { allied: 2, vassal: 3 },
   },
 
   // §18.2 Loyalty — the 8-slice centre pie that replaces foothold/decay.

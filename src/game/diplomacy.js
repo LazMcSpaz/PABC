@@ -2195,7 +2195,14 @@ export function mediate(state, mediator, a, b) {
 
 // §18.9 Vassalize — subordinate `vassal` to `lord` (a formal sub-state).
 export function vassalize(state, lord, vassal, cause = "vassalized") {
-  if (vassalLord(state, vassal) === lord) return false;
+  const previous = vassalLord(state, vassal);
+  if (previous === lord) return false;
+  // A faction serves ONE lord. `state.diplomacy.vassals` is keyed by vassal so
+  // the record could only ever name one — but everything HUNG off that record
+  // was additive, so a lord who took another's vassal left the old lord's
+  // tribute flow and vassal-pact standing, and the vassal paid both. Release
+  // the old bond properly before forming the new one.
+  if (previous) releaseVassal(state, vassal, "vassal-taken");
   // a vassal cannot keep a pact with the lord's enemies
   state.diplomacy.vassals[vassal] = lord;
   state.diplomacy.resentment[vassal] = 0;
@@ -2309,48 +2316,91 @@ export function recognitionScore(state, pid) {
   return { total, contributors };
 }
 
+// --- the win condition ------------------------------------------------
+//
+// ONE condition with three faces: every surviving faction is eliminated, your
+// ally, or your vassal. Win it by conquest, by diplomacy, or by any mix —
+// which is the interesting case, and the one no previous version of this game
+// could express.
+//
+// `survivors` excludes the eliminated, so wiping the board satisfies it
+// vacuously. A faction serves one lord (state.diplomacy.vassals is keyed by
+// vassal), so two rivals cannot both count the same vassal.
+export function dominionStanding(state, pid) {
+  const others = factionIds(state).filter(
+    (f) => f !== pid && !state.players[f]?.eliminated,
+  );
+  const allied = [], vassals = [], outstanding = [];
+  for (const f of others) {
+    if (vassalLord(state, f) === pid) vassals.push(f);
+    else if (arePacted(state, pid, f)) allied.push(f);
+    else outstanding.push(f);
+  }
+  return { others, allied, vassals, outstanding, met: outstanding.length === 0 };
+}
+
+export function dominionMet(state, pid) {
+  return dominionStanding(state, pid).met;
+}
+
+// Latch a winner once the arrangement has HELD for `holdRounds` consecutive
+// rounds. The hold is what makes a bloodless win a position you defend rather
+// than a switch you flip: rivals get a window to denounce you, break a partner
+// away, or attack. It does not apply when nobody is left to break it — kill
+// everyone and you have won, there is nothing to hold against.
+export function checkDominion(state) {
+  if (state.winnerId) return;
+  if (state.rules?.victory?.dominion === false) return;
+  const held = state.diplomacy.dominionSince = state.diplomacy.dominionSince || {};
+  for (const pid of factionIds(state)) {
+    if (state.players[pid]?.eliminated) continue;
+    const st = dominionStanding(state, pid);
+    if (!st.met) {
+      if (held[pid] != null) {
+        delete held[pid];
+        emit(state, "dominion_lost", { player: pid, outstanding: st.outstanding });
+      }
+      continue;
+    }
+    // Nobody left to hold it against.
+    if (!st.others.length) { state.winnerId = pid; emit(state, "dominion_won", { player: pid, by: "conquest" }); return; }
+    if (held[pid] == null) {
+      held[pid] = state.round;
+      emit(state, "dominion_reached", { player: pid, allied: st.allied, vassals: st.vassals });
+      continue;
+    }
+    if (state.round - held[pid] >= CONFIG.victory.holdRounds) {
+      state.winnerId = pid;
+      emit(state, "dominion_won", { player: pid, by: st.vassals.length && st.allied.length ? "mixed" : st.allied.length ? "diplomacy" : "submission" });
+      return;
+    }
+  }
+}
+
+// How many rounds are left on `pid`'s clock, or null if it is not running.
+export function dominionCountdown(state, pid) {
+  const at = state.diplomacy?.dominionSince?.[pid];
+  if (at == null) return null;
+  return Math.max(0, CONFIG.victory.holdRounds - (state.round - at));
+}
+
 export function recognitionMet(state, pid) {
   if (!state.players[pid]) return false;
   return recognitionScore(state, pid).total >= D().recognition.threshold;
 }
 
-// Win-condition gate — sets winnerId on a met Recognition (parallel to the
-// VP-12 path). Called from the round-end pipeline + after deals/vassalage.
-// Also pays the SUMMIT dividend: the first time each faction EVER backs a
-// major, that major banks summitVp — so diplomacy feeds the same VP race
-// conquest does instead of being all-or-nothing at the threshold. Once per
-// backer per game (kept in recognizedEver; losing and re-winning a backer
-// doesn't pay twice). The VP winner check is inline — turn.js imports this
-// module, so awardVp can't be imported here without a cycle.
+// Kept as a NAME the rest of the codebase already calls at every point where
+// the political situation moves — it now runs the one win condition
+// (checkDominion) rather than a second, different one of its own.
+//
+// What it used to be: a weighted Recognition threshold (allied 1, vassal 2,
+// reach 6) that latched a winner in parallel with the VP threshold — plus a
+// "summit dividend" that banked 1 VP the first time each faction ever backed
+// you. Across 20 AI-only games it never once decided a game, because the
+// alliance trickle always crossed the VP line first. Both are gone: alliances
+// and vassals are worth a HELD score, and there is a single condition.
 export function checkRecognitionVictory(state) {
-  if (state.winnerId) return;
-  // Recognition can be switched off at setup. The score still moves and the
-  // Hall of Powers still shows the path — it just no longer ends the game,
-  // and the summit VP below keeps paying, since that is scoring rather than
-  // winning.
-  const recognitionWins = state.rules?.victory?.recognition !== false;
-  const rc = D().recognition;
-  for (const pid of factionIds(state)) {
-    const sc = recognitionScore(state, pid);
-    if (state.diplomacy.recognition[pid] !== sc.total) {
-      state.diplomacy.recognition[pid] = sc.total;
-      emit(state, "recognition_changed", { player: pid, value: sc.total, contributors: sc.contributors });
-    }
-    const p = state.players[pid];
-    if (rc.summitVp && p && factionDef(pid)?.tier === "major") {
-      const ever = state.diplomacy.recognizedEver[pid] = state.diplomacy.recognizedEver[pid] || [];
-      for (const backer of sc.contributors) {
-        if (ever.includes(backer)) continue;
-        ever.push(backer);
-        // Banked, not held — a summit you were granted stays granted.
-        p.bankedVp = (p.bankedVp || 0) + rc.summitVp;
-        emit(state, "recognition_summit", { player: pid, backer, vp: rc.summitVp });
-        recomputeVp(state);
-        if (state.winnerId) return;
-      }
-    }
-    if (recognitionWins && sc.total >= rc.threshold) { state.winnerId = pid; return; }
-  }
+  checkDominion(state);
 }
 
 // --- coalitions (§18.8) ---------------------------------------------

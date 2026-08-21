@@ -12,7 +12,7 @@ import { recomputeStats, recomputeResearch, citadelGarrison, effectiveVeteran } 
 import { recomputeInfluence } from "./influence.js";
 import { recomputeVisibility, recomputeVisibilityFor, isUnitVisibleTo } from "./visibility.js";
 import { onLocationCaptured, onRaidWon } from "./standing.js";
-import { onAttack } from "./diplomacy.js";
+import { onAttack, checkDominion } from "./diplomacy.js";
 import { makeUnit, nextMusterIndex } from "./setup.js";
 import { TECH_NODES, hasTechNode } from "./tech.js";
 import { destroyPost } from "./posts.js";
@@ -632,16 +632,15 @@ function offerRetreat(state, unit, ctx, preferred) {
 }
 
 // A player wins immediately at the VP threshold (§3 / §14.1). Checked
-// after every contest so an Obstacle outcome or capture reward that
-// crosses 12 ends the game at once.
+// after every contest, because taking a city can be the move that leaves every
+// surviving rival your ally, your vassal, or dead.
+//
+// This used to be a VP-threshold check of its own — one of THREE copies of the
+// win condition, each with different rules: this one ignored the setup toggle
+// that was supposed to switch it off, and ignored the major/minor filter the
+// copy in victory.js applied. There is one condition now, in one place.
 function checkVictory(state) {
-  if (state.winnerId) return;
-  for (const p of Object.values(state.players)) {
-    if (p.vp >= CONFIG.vpThreshold) {
-      state.winnerId = p.id;
-      break;
-    }
-  }
+  checkDominion(state);
 }
 
 // --- action handlers (plugged into performAction's dispatcher) -------

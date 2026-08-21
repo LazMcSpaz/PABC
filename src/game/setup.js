@@ -352,10 +352,17 @@ export function createGame({
     // Rule switches, normalised once here so every reader gets a complete
     // object and no site has to cope with a partial or missing `rules`.
     rules: {
+      // One condition now — every surviving faction eliminated, allied or
+      // vassal — so one switch. `conquest` / `recognition` / `elimination`
+      // were three toggles over what turned out to be three faces of the same
+      // thing, and only one of the three code paths honoured its own switch.
+      // Any of the old names still turns it off, so a saved setup or an older
+      // caller keeps working.
       victory: {
-        conquest: rules?.victory?.conquest !== false,
-        recognition: rules?.victory?.recognition !== false,
-        elimination: rules?.victory?.elimination !== false,
+        dominion: rules?.victory?.dominion !== false
+          && rules?.victory?.conquest !== false
+          && rules?.victory?.recognition !== false
+          && rules?.victory?.elimination !== false,
       },
       fogOfWar: rules?.fogOfWar !== false,
       worldEncountersPerRound: rules?.encounters?.world ?? CONFIG.encounters.worldPerRound,
