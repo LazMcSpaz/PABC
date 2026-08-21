@@ -198,5 +198,65 @@ console.log("\n--- the home road being taken does not block the build ---");
   check("and it is a real road", arms.includes(b.edge));
 }
 
+console.log("\n--- a finished enemy blockade still cuts a supply line ---");
+// The regression this file exists to prevent: blockades used to be keyed by hex
+// id, and `routeCutter` looked one up that way. Under composite keys that
+// lookup silently found nothing, so enemy blockades stopped severing supply
+// entirely — and nothing else in the suite noticed.
+{
+  const { routeCutter } = await import("../src/game/diplomacy.js");
+  const g = fresh();
+  const arms = shapeRoads(g, hub, 2);
+  // routeCutter answers for units too, and a fresh board has them. Clear the
+  // units so this measures the blockade and nothing else.
+  g.units = {};
+  const victim = arms[0];
+  const b = startBlockade(g, "lakers", victim, "u9");
+  const cuts = routeCutter(g, ["versari"]);
+  check("a construction site does not cut", !cuts(victim), "only a finished one blocks");
+  b.done = true;
+  check("a finished enemy blockade cuts", cuts(victim),
+    "found by scanning records, not by indexing on hex");
+  check("it does not cut a hex it is not on", !cuts(hub));
+  const ownCuts = routeCutter(g, ["lakers"]);
+  check("your own blockade never cuts your line", !ownCuts(victim));
+}
+
+console.log("\n--- building still requires a road link to a settlement you own ---");
+// The connection is checked on the HEX, before any road is chosen, so choosing
+// a different road never smuggles in an unsupplied blockade.
+{
+  const { ACTIONS } = await import("../src/game/actions.js");
+  const validate = ACTIONS["build-blockade"].validate;
+  const { makeUnit } = await import("../src/game/setup.js");
+  const g = fresh();
+  const arms = shapeRoads(g, hub, 3);
+  for (const l of Object.values(g.locations)) l.controller = null;
+  // Build wants a crew on the hex, and that check comes before the supply one,
+  // so put one there or the test never reaches the rule it is about.
+  g.units = {};
+  const crew = g.nextId("unit");
+  g.units[crew] = makeUnit(crew, "versari", hub, "versari");
+  g.players.versari.resource = 999;
+  const ctx = { pid: "versari", player: g.players.versari, params: { hex: hub } };
+
+  const orphan = validate(g, ctx);
+  check("no settlement reachable by road: refused", !orphan.ok, orphan.reason);
+  check("and it says so", /road connection|settlement/.test(orphan.reason || ""), orphan.reason);
+
+  // Give it a home, then let a rival take the homeward road first.
+  g.locations[arms[0]] = g.locations[arms[0]]
+    || { hexId: arms[0], controller: null, chips: [], sections: [] };
+  g.locations[arms[0]].controller = "versari";
+  startBlockade(g, "lakers", hub, "u9", arms[0]);
+  const supplied = validate(g, ctx);
+  check("with a home, and the home road taken, the build is still allowed",
+    supplied.ok || !/road connection|settlement/.test(supplied.reason || ""),
+    supplied.ok ? "allowed" : supplied.reason);
+  check("the connection is judged on the hex, not on the chosen road",
+    freeRoadEdges(g, hub).length === 2,
+    "falling back to another road cannot smuggle in an unsupplied blockade");
+}
+
 console.log(`\n${failures ? `${failures} FAILED` : "all blockade-capacity tests passed"}`);
 process.exit(failures ? 1 : 0);

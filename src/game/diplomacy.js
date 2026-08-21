@@ -821,8 +821,14 @@ export function routeCutter(state, parties) {
     for (const u of Object.values(state.units)) {
       if (u.node === hexId && severs(u.owner)) return true;
     }
-    const b = state.world?.blockades?.[hexId];
-    return !!(b?.done && severs(b.owner));
+    // Blockades are keyed `hex|edge` — a hex holds one per road out of it — so
+    // this has to scan for any barricade standing on the hex rather than look
+    // one up by hex id. Indexing by hex silently found nothing, which stopped
+    // enemy blockades cutting supply lines at all.
+    for (const b of Object.values(state.world?.blockades || {})) {
+      if (b.hex === hexId && b.done && severs(b.owner)) return true;
+    }
+    return false;
   };
 }
 
