@@ -116,6 +116,11 @@ function HoloSegments({ svgW, svgH, cx, cy, ri, ro, accent = C.holo, segments, p
               onMouseEnter={() => setHover(i)}
               onMouseLeave={() => setHover((h) => (h === i ? -1 : h))}
               onClick={s.onClick}
+              // Audio-only hook. These are <path>s, not buttons, so the
+              // global click cue has nothing else to recognise them by — and
+              // tagging them .hud-int instead would apply that class's
+              // translateY to an SVG path and visibly shift the segment.
+              data-sfx={s.onClick ? "select" : undefined}
             />
           );
         })}
@@ -132,6 +137,9 @@ function HoloSegments({ svgW, svgH, cx, cy, ri, ro, accent = C.holo, segments, p
             onMouseEnter={() => setHover(i)}
             onMouseLeave={() => setHover((h) => (h === i ? -1 : h))}
             onClick={s.onClick}
+            // The icon/label layer sits over the <path> and takes the click a
+            // player actually aims at, so the audio hook has to be on both.
+            data-sfx={s.onClick ? "select" : undefined}
             style={{ position: "absolute", left: x, top: y, transform: on ? "translate(-50%,-50%) scale(1.12)" : "translate(-50%,-50%)", transition: "transform .14s cubic-bezier(.2,.9,.3,1.4)", display: "flex", flexDirection: "column", alignItems: "center", gap: 1, pointerEvents: s.onClick ? "auto" : "none", cursor: s.onClick ? "pointer" : "default", textShadow: "0 1px 3px rgba(0,0,0,0.85)" }}
           >
             {s.icon && (

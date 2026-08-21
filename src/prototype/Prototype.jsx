@@ -15,6 +15,8 @@ import {
   TopBar, MenuOrb, RadialMenu, LocationWindow, BlockadeWindow, EconomyLedger, TitledWindow, ICON, C as HUD, COMPACT_HUD_H,
 } from "./HudChrome.jsx";
 import { useIsPhone } from "./useViewport.js";
+import { useSfxHold, useSfxOn, useSfxOnChange } from "../audio/AudioProvider.jsx";
+import VolumeSliders from "../audio/VolumeSliders.jsx";
 import { createGame } from "../game/setup.js";
 import { startTurn, endTurn } from "../game/turn.js";
 import { performAction } from "../game/actions.js";
@@ -1003,6 +1005,57 @@ export default function Prototype({ config, onNewGame }) {
     [tick, encounterPrompt?.encounter?.recipient],
   );
 
+  // Detail windows announce themselves with a whoosh. Two keys rather than
+  // one, because a unit panel and a location window can be open at the same
+  // time and a single key would let the second one slide in silently. The
+  // conditions mirror the render below exactly — the cue has to fire when a
+  // window actually appears, not merely when something is selected (an
+  // ordinary terrain hex opens nothing). Simultaneous fires collapse in the
+  // sfx player's retrigger guard, so this never doubles up.
+  const selectedUnitForPanel = selectedUnitId && state.units[selectedUnitId] ? selectedUnitId : null;
+  const selectedHexForWindow = (() => {
+    const h = selectedHexId ? state.hexes[selectedHexId] : null;
+    if (!h || h.fog !== "visible") return null;
+    return h.type === "location" || h.blockade ? selectedHexId : null;
+  })();
+  useSfxOnChange(selectedUnitForPanel && `unit:${selectedUnitForPanel}`, "windowOpen");
+  useSfxOnChange(selectedHexForWindow && `hex:${selectedHexForWindow}`, "windowOpen");
+
+  // Whatever the radial menu opened gets the same window cue — the diplomacy
+  // drawer, the tech wheel, and the Units / Economy / Settings panels. One key
+  // rather than four hooks: onMenuPick opens exactly one of these at a time,
+  // and a single key means switching straight from one to another still reads
+  // as a new window opening.
+  const radialDestination =
+    showDiplomacy ? "diplomacy"
+    : showTechWheel ? "tech"
+    : menuPanel ? `panel:${menuPanel}`
+    : null;
+  useSfxOnChange(radialDestination, "windowOpen");
+  // Herald banners — the small, option-less callouts at the top of the screen
+  // announcing what the powers just did to each other. Keyed on the newest
+  // banner's id: they arrive in batches and the retrigger guard collapses a
+  // batch into one hit, which is what a batch should sound like.
+  // (The envoy audience gets its own, heavier cue, fired from EnvoyModal.)
+  useSfxOn(heralds.length ? heralds[heralds.length - 1].id : null, "diplomacyAlert");
+
+  // The radial menu hums while it is open and waiting on a choice. It stops
+  // the moment a sector is picked — onMenuPick closes the radial before it
+  // opens anything, and the extra clauses hold even if a panel is opened by
+  // some other route while the radial is still up.
+  useSfxHold(menuOpen && !menuPanel && !showTechWheel && !showDiplomacy, "radialAmbience");
+
+  // The battle under a conflict roll — both surfaces that show one. The
+  // player's own contest gets the dramatised overlay; an AI's gets a fast
+  // popup during the turn replay. Held rather than fired, so the stinger is
+  // released with the roll instead of running on over whatever comes next,
+  // and so two contests in quick succession cannot stack. `terse` overlays
+  // ("Unit lost") are aftermath, not a roll, so they are excluded.
+  const contestRollOnScreen =
+    !!contestViz ||
+    (replay.activeOverlays || []).some((o) => o.kind === "contest" && !o.terse);
+  useSfxHold(contestRollOnScreen, "contestRoll");
+
   return (
     <WikiProvider entries={WIKI_ENTRIES} openEntry={openWikiEntry}>
     <TokenProvider resolve={resolveText}>
@@ -1166,7 +1219,20 @@ export default function Prototype({ config, onNewGame }) {
 
       {menuPanel === "settings" && (
         <TitledWindow key="settings" title="Settings" onClose={() => setMenuPanel(null)}>
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 16 }}>
+            <span style={{ fontFamily: HUD.font, fontSize: 13, fontWeight: 700, letterSpacing: 0.6, color: HUD.text }}>
+              Volume
+            </span>
+            <p className="pc-prose" style={{ margin: "0 0 8px", fontSize: 12, lineHeight: 1.5, color: HUD.textDim }}>
+              The score and the interface run on separate levels — turn either
+              one down without losing the other. Both are remembered between
+              sessions.
+            </p>
+            {/* Same component the corner audio widget uses, so the two can
+                never disagree about what these are called or where they sit. */}
+            <VolumeSliders />
+          </div>
+          <div style={{ borderTop: `1px solid ${theme.border}`, paddingTop: 14, display: "flex", flexDirection: "column", gap: 6 }}>
             <span style={{ fontFamily: HUD.font, fontSize: 13, fontWeight: 700, letterSpacing: 0.6, color: HUD.text }}>
               AI turn speed
             </span>
