@@ -49,6 +49,11 @@ export const CONFIG = {
     veteranStrengthCap: 8, // §16.7 combining (deferred)
   },
   baseUnitCap: 3, // v0.2 §16.3 — cap = baseUnitCap + Training Grounds
+  // How many units may stand on one hex, counting every owner. A stack past
+  // this cannot be told apart on the board — the tile runs out of room to draw
+  // them at a legible size (docs/unit-model-pipeline.md §10.1) — and a rule the
+  // display cannot show is a rule players cannot plan around.
+  hexUnitCap: 10,
   startingUnits: 2, // v0.2 §16.3
   unitRecruitCost: 6, // v0.2 §16.3 — was 10
 

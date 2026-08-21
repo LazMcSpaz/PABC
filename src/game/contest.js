@@ -12,6 +12,7 @@ import { recomputeStats, recomputeResearch, citadelGarrison, effectiveVeteran } 
 import { recomputeInfluence } from "./influence.js";
 import { recomputeVisibility, recomputeVisibilityFor, isUnitVisibleTo } from "./visibility.js";
 import { onLocationCaptured, onRaidWon } from "./standing.js";
+import { hexIsFull } from "./movement.js";
 import { onAttack } from "./diplomacy.js";
 import { makeUnit } from "./setup.js";
 import { TECH_NODES, hasTechNode } from "./tech.js";
@@ -595,6 +596,10 @@ export function loseBaseStrength(state, unitUid, n, killerUid, ctx, note) {
 // hostile player, not a still-garrisoned neutral Location.
 function validRetreatHexes(state, unit) {
   return (state.board.adjacency[unit.node] || []).filter((hex) => {
+    // A full hex has no room for one more, however it is arrived at. Without
+    // this the stacking cap would leak: losing a contest would be a way to put
+    // an eleventh unit on a tile.
+    if (hexIsFull(state, hex, unit.uid)) return false;
     const loc = state.locations[hex];
     if (!loc) return true; // terrain / encounter
     if (loc.controller && loc.controller !== unit.owner) return false;

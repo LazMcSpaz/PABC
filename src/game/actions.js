@@ -5,7 +5,7 @@
 import { emit } from "./events.js";
 import { activePlayerId } from "./targeting.js";
 import { bfsDistances, reinforcementRoute } from "./board.js";
-import { unitReach, supplyCutter, unseenBlockers } from "./movement.js";
+import { unitReach, supplyCutter, unseenBlockers, hexIsFull } from "./movement.js";
 import { CONFIG } from "./config.js";
 import { FACTIONS, CHIPS, ABILITIES, chipDefOf, factionDef } from "./content.js";
 import { validateContest, runContest } from "./contest.js";
@@ -53,6 +53,10 @@ function validateMove(state, { pid, params }) {
   // v0.2 §16.2 — Move spends the per-turn move budget (not Actions), consumed
   // by terrain entry costs and roads, and stopped by blockades (a non-passing
   // foreign unit / enemy Location halts you on that hex).
+  // Said before the range check, because unitReach prunes full hexes out of the
+  // field and "out of range" would be a lie about a hex two steps away.
+  if (hexIsFull(state, params.to, unit.uid))
+    return fail(`that hex is full (${CONFIG.hexUnitCap} units)`);
   const field = unitReach(state, unit);
   if (!(params.to in field))
     return fail(`out of range (moves left ${unit.moveRemaining})`);
@@ -186,6 +190,9 @@ function validateRecruit(state, { pid, player, params }) {
   if (capBonus < 1) return fail("requires a chip that unlocks recruiting");
   if (player.resource < recruitCostAt(state, loc)) return fail("not enough scrap");
   if (ownedUnitCount(state, pid) >= CONFIG.baseUnitCap + capBonus) return fail("unit cap reached");
+  // A recruit appears on the Location's own hex, so it is subject to the same
+  // stacking cap as a unit walking in.
+  if (hexIsFull(state, loc.hexId)) return fail(`that hex is full (${CONFIG.hexUnitCap} units)`);
   return { ok: true };
 }
 

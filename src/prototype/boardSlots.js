@@ -17,6 +17,7 @@
 // baked tile art carries no depth buffer, so a token parked on a painted summit
 // would read as floating.
 import { HEX_W, HEX_H, HEX_FLAT } from "./hexProjection.js";
+import { CONFIG } from "../game/config.js";
 
 // Ring radii, as fractions of hex width and height, plus how far forward of the
 // hex centre the ring sits. RX is sized so a tier-2 vehicle at the ring's widest
@@ -40,9 +41,15 @@ const PER_RING = 6;
 // blur — "the spaces in between", one step closer to the middle.
 const INNER_SCALE = 0.5;
 
-// A hex draws at most this many units. Beyond it the tile has no room left that
-// keeps anyone legible, so the rest become a count badge.
-export const MAX_DRAWN = 10;
+// A hex draws at most this many units, and it is the ENGINE's stacking cap
+// rather than a display constant of its own. The two exist for the same reason
+// — the tile runs out of room to draw a bigger stack legibly — so reading the
+// rule here means the board can never promise a capacity the rules do not
+// allow, or hide units the rules do.
+//
+// The badge is still worth keeping: a hex can hold fewer than the cap when the
+// units on it are wide (see capacityFor), and it is the honest way to say so.
+export const MAX_DRAWN = CONFIG.hexUnitCap;
 
 // Rotations tried when a radial is in the way. The ring keeps its even spacing
 // and turns as a whole, so units dodge the radial without bunching up.

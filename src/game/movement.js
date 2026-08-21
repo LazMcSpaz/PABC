@@ -200,6 +200,26 @@ function restrictToFallback(state, unit, field) {
   return out;
 }
 
+// --- stacking ---------------------------------------------------------
+// How many units stand on `hex`, every owner counted. Enemies only share a hex
+// in passing (arriving on one starts a contest), so this is normally one side's
+// stack, but the cap is on the tile rather than on a player: it exists because
+// the tile runs out of room to draw them, and the board does not care who owns
+// what it cannot show.
+export function unitsOnHex(state, hex, exclude = null) {
+  let n = 0;
+  for (const u of Object.values(state.units)) {
+    if (u.node === hex && u.uid !== exclude) n++;
+  }
+  return n;
+}
+
+// Is `hex` full? `exclude` lets a unit already standing there be discounted, so
+// a mover never blocks itself.
+export function hexIsFull(state, hex, exclude = null) {
+  return unitsOnHex(state, hex, exclude) >= CONFIG.hexUnitCap;
+}
+
 export function unitReach(state, unit) {
   if (!unit) return {};
   const budget = unit.moveRemaining ?? unit.movement ?? 0;
@@ -212,6 +232,12 @@ export function unitReach(state, unit) {
     extraCost: tollTaxedHexes(state, unit.owner),
     railEdges: unitRailEdges(state, unit),
   });
+  // A full hex may still be walked THROUGH — the cap is about what can stand
+  // on a tile, not about the road across it — so this prunes destinations after
+  // the field is built rather than treating a full hex as impassable.
+  for (const hex in field) {
+    if (hexIsFull(state, hex, unit.uid)) delete field[hex];
+  }
   if (!unit.checked || !unit.turnStartNode) return field;
   return restrictToFallback(state, unit, field);
 }

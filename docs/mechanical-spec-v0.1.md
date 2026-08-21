@@ -2386,6 +2386,24 @@ Two **independent** gates, **both** required, plus a free slot:
   visible even early), **greyed** if **either** Tech Level **or** Loyalty is
   short, with the reason.
 
+### 20.6a Stacking — ten units to a hex
+
+A hex holds at most **ten units**, counting every owner
+(`CONFIG.hexUnitCap`). Enforced on every path a unit can arrive by: a full
+hex leaves the movement field, so it is neither offered by the UI nor pathed
+to by the AI; Move and Recruit refuse it by name; and a beaten unit cannot
+retreat into one.
+
+A full hex may still be **crossed**. The cap is about what may stand on a
+tile, not about the road over it, so it prunes destinations rather than
+making the hex impassable.
+
+The number is a display limit made into a rule. Past ten, a tile has no room
+left to draw units at a size anyone can tell apart
+(`docs/unit-model-pipeline.md` §10.1), and a rule the board cannot show is a
+rule players cannot plan around. `boardSlots.js` reads `CONFIG.hexUnitCap`
+directly so the two can never drift.
+
 ### 20.7 Rush-building
 
 - A player may spend **banked scrap** to add to (or complete) a city's
