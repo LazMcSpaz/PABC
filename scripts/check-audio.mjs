@@ -68,6 +68,58 @@ check("title song is the wtv4 cut", s.trackId === "main-theme", `trackId=${s.tra
 check("scene is menu", s.scene === "menu", `scene=${s.scene}`);
 check("serving the right file", /main-theme\.mp3$/.test(await audioSrc(page)), await audioSrc(page));
 
+// ── 1b. sound is actually coming OUT ───────────────────────────────────────
+// Not "the player says playing" and not "the gain node reads 0.55" — both of
+// those were true for the entire time the music was silent. The element sits
+// upstream of the gain node, so its own volume can be zero while every piece
+// of state downstream looks perfect. Only tapping the bus catches that.
+await page.evaluate(() => {
+  const m = window.__ashlandAudio.music;
+  const an = m.ctx.createAnalyser();
+  an.fftSize = 2048;
+  m.gain.connect(an);
+  window.__an = an;
+  window.__anBuf = new Float32Array(an.fftSize);
+});
+const busPeak = (which, ms) =>
+  page.evaluate(async ([w, d]) => {
+    const an = w === "sfx" ? window.__sfxAn : window.__an;
+    const buf = window.__anBuf;
+    let pk = 0;
+    const t0 = Date.now();
+    while (Date.now() - t0 < d) {
+      await new Promise((r) => setTimeout(r, 20));
+      an.getFloatTimeDomainData(buf);
+      for (const v of buf) { const a = Math.abs(v); if (a > pk) pk = a; }
+    }
+    return pk;
+  }, [which, ms]);
+
+// Seek past the theme's soft intro so a healthy reading is unambiguous.
+await page.evaluate(() => { window.__ashlandAudio.music.audio.currentTime = 40; });
+await page.waitForTimeout(500);
+const musicPeak = await busPeak("music", 1400);
+check("the music bus carries signal", musicPeak > 0.02, `peak=${musicPeak.toFixed(4)}`);
+
+const elemVol = await page.evaluate(() => window.__ashlandAudio.music.audio.volume);
+check(
+  "the element feeding the graph is at unity",
+  elemVol === 1,
+  `audio.volume=${elemVol} (anything below 1 attenuates before the gain node)`,
+);
+
+await page.evaluate(() => window.__ashlandAudio.music.setVolume(0));
+await page.waitForTimeout(350);
+const zeroPeak = await busPeak("music", 700);
+check("volume 0 silences the bus", zeroPeak < 0.001, `peak=${zeroPeak.toFixed(4)}`);
+
+await page.evaluate(() => window.__ashlandAudio.music.setVolume(1));
+await page.waitForTimeout(350);
+const fullPeak = await busPeak("music", 1400);
+check("the level actually scales the signal", fullPeak > musicPeak * 1.4, `0.55 → ${musicPeak.toFixed(3)}, 1.0 → ${fullPeak.toFixed(3)}`);
+await page.evaluate(() => window.__ashlandAudio.music.setVolume(0.55));
+await page.waitForTimeout(250);
+
 // ── 2. ten seconds of quiet between songs ──────────────────────────────────
 await endTrack(page);
 s = await status(page);
@@ -143,6 +195,21 @@ for (const cue of ["uiSelect", "windowOpen", "envoyArrival", "diplomacyAlert", "
   }, cue);
   check(`${cue} cue decodes`, !!loaded, loaded ? `${loaded.dur.toFixed(2)}s @ ${loaded.rate}Hz` : "not decoded");
 }
+
+// The effects bus, same treatment. A held cue rather than a one-shot: a 0.16s
+// blip can slip between analyser polls and read as silence when it is fine.
+await page.evaluate(() => {
+  const s = window.__ashlandAudio.sfx;
+  const an = window.__ashlandAudio.music.ctx.createAnalyser();
+  an.fftSize = 2048;
+  s._bus().connect(an);
+  window.__sfxAn = an;
+});
+await page.evaluate(() => window.__ashlandAudio.sfx.hold("contestRoll"));
+const sfxPeak = await busPeak("sfx", 1400);
+await page.evaluate(() => window.__ashlandAudio.sfx.release("contestRoll"));
+await page.waitForTimeout(500);
+check("the effects bus carries signal", sfxPeak > 0.02, `peak=${sfxPeak.toFixed(4)}`);
 
 // ── 7. cues fire on the moments they belong to ─────────────────────────────
 // Wrap play() rather than listening for sound: what we care about is that the

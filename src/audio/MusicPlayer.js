@@ -472,7 +472,7 @@ export class MusicPlayer {
       this.ctx = ctx;
       this.source = ctx.createMediaElementSource(this.audio);
       this.gain = ctx.createGain();
-      this.gain.gain.value = 0;
+      this.gain.gain.value = this._target();
       this.source.connect(this.gain);
       this.gain.connect(ctx.destination);
     } catch {
@@ -480,8 +480,13 @@ export class MusicPlayer {
       this.gain = null;
       return;
     }
+    // Routed through the graph the element is a *source*, not an output: its
+    // own volume has to sit at unity or it attenuates everything downstream,
+    // gain node or no gain node. This also repairs the element if the
+    // fallback path in _applyLevel got to it first.
+    this.audio.volume = 1;
+    this.audio.muted = false;
     resumeAudioContext();
-    this._applyLevel(0);
   }
 
   _target() {
@@ -494,6 +499,14 @@ export class MusicPlayer {
   }
 
   _applyLevel(ms) {
+    // Build the graph before choosing which knob is the real one. Without
+    // this, the first level change of the session lands on the element
+    // fallback below and pins audio.volume to 0 (the fade envelope starts
+    // closed) — and once the graph is up, every later change goes to the gain
+    // node instead, so nothing ever re-opens the element. The result is a
+    // player that reports "playing" with a gain of 0.55 and emits silence,
+    // which is exactly as undebuggable as it sounds.
+    this._ensureGraph();
     const target = this._target();
     if (this.gain && this.ctx) {
       const t = this.ctx.currentTime;
