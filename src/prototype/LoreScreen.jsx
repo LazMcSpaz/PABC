@@ -83,9 +83,11 @@ export default function LoreScreen({ onBack }) {
   }
 
   return (
-    // Full-screen wrapper — same radial bg as SetupScreen / TitleScreen
+    // Full-screen wrapper — same radial bg as SetupScreen / TitleScreen.
+    // The scan raster lives on a dedicated overlay child below, NOT on this
+    // wrapper: .hud-screen-scan sets pointer-events:none, which on the
+    // container itself would make the whole screen unclickable.
     <div
-      className="hud-screen-scan"
       style={{
         position: "relative",
         width: "100vw",
@@ -103,6 +105,8 @@ export default function LoreScreen({ onBack }) {
         boxSizing: "border-box",
       }}
     >
+      <div className="hud-screen-scan" />
+
       {/* ── page header ─────────────────────────────────────────────────── */}
       <motion.div
         initial={{ opacity: 0, y: -12 }}
