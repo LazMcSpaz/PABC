@@ -187,10 +187,17 @@ This is a genuine upgrade over the current black/50%-dim treatment.
 Roads connect **settlements**, not just capitals: every Location is road-linked
 to its nearest neighbour, and `high`/`veryHigh` ones also to their second
 nearest, with cluster-bridging links added afterwards so the network is always
-connected (`assignRoads`, `CONFIG.roads.linksByValue`). That takes the network
-from ~11 road hexes of 30 to ~17, and it is what gives the blockade design its
-teeth — "an uninterrupted road connection to the nearest owned settlement"
-(rail/blockade doc §3) only means something if such a connection exists.
+connected (`assignRoads`, `CONFIG.roads.linksByValue`). That is what gives the
+blockade design its teeth — "an uninterrupted road connection to the nearest
+owned settlement" (rail/blockade doc §3) only means something if such a
+connection exists.
+
+Corridors are laid one at a time and routed by COST, not hop count: ground that
+already carries road is cheap and rough ground is dear (`CONFIG.roads`). A
+later corridor therefore merges into an existing trunk instead of laying a
+parallel lane a hex away from it — which matters because `road` is a per-hex
+boolean, so two lanes side by side get welded into a ladder by adjacency alone
+and the network reads as a lattice. See §11.
 
 `hex.road` is a per-hex boolean, not an edge list, so `routeGeometry.js`
 recovers a drawable network by linking each road hex to its road neighbours —
@@ -682,6 +689,58 @@ The layer stack, the blend split and the LOD collapse are all unchanged from
 §9; zoomed out the routes now get their own brighter, wider spec, because at
 0.6 zoom a 1.9px line at half opacity is a rumour, and what you read down there
 is where the network goes.
+
+## 11. Road generation: a network, not a lattice (2026-08-21)
+
+Roads came out as a mesh — parallel lanes cross-linked rung after rung, a shape
+no real road system takes. Two separate causes, both in generation rather than
+in the drawing:
+
+**`road` is a per-hex boolean.** `assignRoads` returns its A→B links and
+`setup.js` throws them away, so connectivity — for the renderer AND for the
+supply walk in `blockades.js` — is recovered as "adjacent hexes that both carry
+road". Two corridors passing through neighbouring hexes are welded into a
+ladder. The rungs are not a drawing artefact: the renderer's adjacency was
+checked hex-for-hex against `state.board.adjacency`, and the engine's own
+supply BFS will happily take them.
+
+**Each corridor was routed independently**, by unweighted shortest path, with
+no knowledge of the roads already laid. Nothing pulled a second route onto an
+existing one, so it would run a field over instead.
+
+The fix is to lay corridors one at a time over the state left by the ones
+before, routed by cost (`roadPath`, a deterministic Dijkstra) rather than by
+hop count:
+
+- **existing road is cheap** (`CONFIG.roads.reuseCost`, 0.3) — a later corridor
+  detours to merge with a trunk and share it;
+- **rough ground is dear** (`CONFIG.roads.terrainCost`, forest 2 / mountain 4)
+  — roads run round a ridge the way a surveyor would.
+
+The second is a movement fix as much as a looks fix. A road negates a
+mountain's halt and a forest's toll (`expandMovement`), so every rough hex a
+corridor crossed was a rough hex that stopped playing like rough ground.
+
+Measured over 30 generated boards (10 seeds × 3 sizes):
+
+| | before | after |
+|---|---|---|
+| road hexes | 25.8 (36% of board) | 24.0 (33%) |
+| of which open country (not a settlement) | 13.5 | 11.7 |
+| drawn links | 33.0 | 26.2 |
+| triangles (the rungs) | 7.70 | 2.90 |
+| rough hexes carrying road | 3.6 | 1.0 |
+| boards with a disconnected road network | 0 | 0 |
+
+Per size, triangles go 6.1 → 2.8 (test map), 6.3 → 1.3 (medium), 12.3 → 4.6
+(huge). What survives is the occasional genuine junction, which is what a real
+network has.
+
+Note what this does NOT change: roads are still a per-hex boolean, so the
+remaining adjacencies are still real connections that supply and blockades
+honour. Storing the actual links (as rail already does, `state.board.rails`)
+would let both the renderer and the supply walk follow roads rather than infer
+them — a bigger change, and a rules change, so it is not made here.
 
 ## 8. What this does not change
 

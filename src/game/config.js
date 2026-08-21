@@ -118,6 +118,22 @@ export const CONFIG = {
   // board yields a bare spanning chain.
   roads: {
     linksByValue: { low: 1, medium: 1, high: 2, veryHigh: 2 },
+    // What one hex of corridor costs to route through, when a road is being
+    // laid (assignRoads). These are ROUTING weights, not movement costs.
+    //
+    // reuseCost — ground that already carries road. Well under 1, so a later
+    // corridor will detour to merge with an existing trunk rather than lay a
+    // second lane a hex away from it. That is what stops the network reading
+    // as a lattice: `road` is a per-hex boolean, so two lanes running side by
+    // side are welded into a ladder by adjacency alone. Raise it towards 1 for
+    // more independent, more redundant routes; lower it for a network that
+    // funnels harder onto shared trunks.
+    reuseCost: 0.3,
+    // terrainCost — rough ground. Roads run round a ridge rather than over it,
+    // which is both what a surveyor does and a movement lever: a road negates
+    // a mountain's halt and a forest's toll, so a corridor driven straight
+    // over the high ground quietly deletes that terrain from the game.
+    terrainCost: { forest: 2, mountain: 4 },
   },
 
   // Rail (docs/rail-road-blockade-design.md §2). Pre-collapse trunk line,

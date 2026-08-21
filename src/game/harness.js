@@ -676,6 +676,51 @@ line("\n  [Roads] negate terrain movement cost (forest + mountain)");
   const g = createGame({ seed });
   const roads = Object.values(g.board.hexes).filter((h) => h.road).length;
   check("setup lays a road network between capitals", roads > 0);
+
+  // The SHAPE of what setup lays, over enough boards to mean something.
+  //
+  // `road` is a per-hex boolean, so connectivity — for the renderer and for
+  // the supply walk in blockades.js alike — is "adjacent hexes that both carry
+  // road". Two corridors passing through neighbouring hexes are therefore
+  // welded into a ladder, which is why assignRoads routes each corridor over
+  // the ones already laid instead of independently. These guard that: without
+  // the reuse discount the rungs come back, and without the terrain cost the
+  // corridors drive straight over the high ground they are supposed to skirt.
+  {
+    const seeds = [424242, 7, 991, 4711, 8123, 20260821, 31337, 55555];
+    let hexes = 0, tri = 0, rough = 0, islands = 0;
+    for (const s of seeds) for (const mapSize of [null, "medium", "huge"]) {
+      const b = createGame({ seed: s, mapSize }).board;
+      const road = Object.keys(b.hexes).filter((h) => b.hexes[h].road);
+      const on = new Set(road);
+      hexes += road.length;
+      rough += road.filter((h) => b.hexes[h].elevation || b.hexes[h].cover).length;
+      // A triangle of mutually adjacent road hexes is one rung of a ladder.
+      for (const a of road) for (const x of b.adjacency[a] || []) {
+        if (!on.has(x) || x <= a) continue;
+        for (const c of b.adjacency[x] || []) {
+          if (on.has(c) && c > x && (b.adjacency[a] || []).includes(c)) tri++;
+        }
+      }
+      // One network, not several — supply and blockades both assume it.
+      const seen = new Set([road[0]]);
+      const q = [road[0]];
+      for (let i = 0; i < q.length; i++) for (const nb of b.adjacency[q[i]] || []) {
+        if (on.has(nb) && !seen.has(nb)) { seen.add(nb); q.push(nb); }
+      }
+      if (seen.size !== road.length) islands++;
+    }
+    const n = seeds.length * 3;
+    // Was 7.7 per board when every corridor took its own independent path.
+    check(`roads join instead of running parallel (${(tri / n).toFixed(1)} rungs/board)`,
+      tri / n < 5);
+    // Was 3.6. A road over rough ground deletes that terrain from the game.
+    check(`roads skirt rough ground (${(rough / n).toFixed(1)} rough road hexes/board)`,
+      rough / n < 2);
+    check("every board's road network is one connected piece", islands === 0);
+    check(`the network stays small enough to be worth having (${(hexes / n).toFixed(1)} hexes/board)`,
+      hexes / n < 30);
+  }
 }
 
 // --- §16.2 blockade — foreign units / enemy Locations halt movement ---
