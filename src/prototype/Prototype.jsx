@@ -15,6 +15,7 @@ import {
   TopBar, MenuOrb, RadialMenu, LocationWindow, BlockadeWindow, EconomyLedger, TitledWindow, ICON, C as HUD, COMPACT_HUD_H,
 } from "./HudChrome.jsx";
 import { useIsPhone } from "./useViewport.js";
+import { useSfxLoop, useSfxOnChange } from "../audio/AudioProvider.jsx";
 import { createGame } from "../game/setup.js";
 import { startTurn, endTurn } from "../game/turn.js";
 import { performAction } from "../game/actions.js";
@@ -1002,6 +1003,31 @@ export default function Prototype({ config, onNewGame }) {
     }),
     [tick, encounterPrompt?.encounter?.recipient],
   );
+
+  // Detail windows announce themselves with a whoosh. Two keys rather than
+  // one, because a unit panel and a location window can be open at the same
+  // time and a single key would let the second one slide in silently. The
+  // conditions mirror the render below exactly — the cue has to fire when a
+  // window actually appears, not merely when something is selected (an
+  // ordinary terrain hex opens nothing). Simultaneous fires collapse in the
+  // sfx player's retrigger guard, so this never doubles up.
+  const selectedUnitForPanel = selectedUnitId && state.units[selectedUnitId] ? selectedUnitId : null;
+  const selectedHexForWindow = (() => {
+    const h = selectedHexId ? state.hexes[selectedHexId] : null;
+    if (!h || h.fog !== "visible") return null;
+    return h.type === "location" || h.blockade ? selectedHexId : null;
+  })();
+  useSfxOnChange(selectedUnitForPanel && `unit:${selectedUnitForPanel}`, "windowOpen");
+  useSfxOnChange(selectedHexForWindow && `hex:${selectedHexForWindow}`, "windowOpen");
+  // The diplomacy drawer gets its own, heavier cue — it is a screen, not a
+  // panel. (The envoy audience has a third, fired from EnvoyModal itself.)
+  useSfxOnChange(showDiplomacy ? "diplomacy" : null, "diplomacyOpen");
+
+  // The radial menu hums while it is open and waiting on a choice. It stops
+  // the moment a sector is picked — onMenuPick closes the radial before it
+  // opens anything, and the extra clauses hold even if a panel is opened by
+  // some other route while the radial is still up.
+  useSfxLoop(menuOpen && !menuPanel && !showTechWheel && !showDiplomacy, "radialAmbience");
 
   return (
     <WikiProvider entries={WIKI_ENTRIES} openEntry={openWikiEntry}>
