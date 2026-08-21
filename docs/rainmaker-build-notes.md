@@ -28,8 +28,8 @@ numbers behind each of those decisions.*
 | Feed lines | `src/prototype/EventFeed.jsx` |
 
 **Verification.** `node src/game/harness.js` — phases 31–37 are the Rainmaker
-(891 passing overall). `node scripts/check-rainmaker-ui.mjs` drives the real
-app (19 checks): it fires all 25 rainmaker events with their real payloads and
+(902 passing overall). `node scripts/check-rainmaker-ui.mjs` drives the real
+app (22 checks): it fires all 25 rainmaker events with their real payloads and
 fails on a raw event name or a feed line missing its faction, checks the device
 draws in each state and does NOT draw where the viewer cannot see it, and clicks
 every button in the panel.
@@ -44,7 +44,7 @@ line that ends for everybody at once.
 
 ## 2. Departures from the spec, and the measurement behind each
 
-Everything else is implemented as written. These five are not.
+Everything else is implemented as written. These six are not.
 
 ### 2.1 The site's distance floor scales with the board
 
@@ -108,9 +108,13 @@ stage, including the lab.
 over twenty ordinary rounds is full — three chips in three slots — so the device
 came home to a city with nowhere to put the thing the design requires.
 
-An AI one beat from winning now knocks down the cheapest thing it owns to fit
-the lab in, and never the Capital. Nothing about the requirement was softened.
-**After: an AI wins the game outright via the Rainmaker in 3 of 20.**
+The first fix was for an AI one beat from winning to knock down the cheapest
+thing it owned. **After: an AI won the game outright via the Rainmaker in 3 of
+20** — the requirement itself untouched.
+
+That fix is superseded by §2.6, which measured the same squeeze from the
+player's side and found it universal rather than occasional. Nothing demolishes
+anything now.
 
 ### 2.5 Denial is decided by position, not by price
 
