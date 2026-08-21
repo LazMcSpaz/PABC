@@ -1,4 +1,4 @@
-// LoreScreen.jsx — full-screen Lore / in-game wiki browser for Ashland Conquest.
+// LoreScreen.jsx — full-screen Lore / in-game wiki browser for The Remnant Continent.
 // Reads the merged WIKI_ENTRIES (repo-authored + editor-exported).
 // Renders a robust skeleton that degrades gracefully when empty and becomes a
 // fully functional two-column wiki browser as entries are authored in the
@@ -131,7 +131,7 @@ export default function LoreScreen({ onBack }) {
             fontWeight: 600,
           }}
         >
-          ◇ Ashland Conquest · Intelligence Archive ◇
+          ◇ The Remnant Continent · Intelligence Archive ◇
         </div>
         <div
           style={{
@@ -280,7 +280,7 @@ export default function LoreScreen({ onBack }) {
           userSelect: "none",
         }}
       >
-        ▸ Ashland Conquest · Lore Archive · Intelligence Database
+        ▸ The Remnant Continent · Lore Archive · Intelligence Database
       </div>
     </div>
   );

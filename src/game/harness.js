@@ -64,7 +64,7 @@ const armyUpkeep = (g, pid) => Object.values(g.units)
   .reduce((n, u) => n + unitUpkeepFor(g, u), 0);
 
 const game = createGame({ seed });
-line(`\n=== Ashland Conquest — engine harness (seed ${seed}) ===`);
+line(`\n=== The Remnant Continent — engine harness (seed ${seed}) ===`);
 
 // --- board ---
 line("\nBOARD  (loc[CTRL]  ~encounter~  wasteland;  * = unit)");

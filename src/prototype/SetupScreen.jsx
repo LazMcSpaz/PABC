@@ -918,7 +918,7 @@ export default function SetupScreen({ onStart, onBack }) {
         textTransform: "uppercase", color: "rgba(143,246,234,0.28)",
         zIndex: 1,
       }}>
-        ▸ Ashland Conquest · v0.2 demo · Holographic build
+        ▸ The Remnant Continent · v0.2 demo · Holographic build
       </div>
     </div>
   );

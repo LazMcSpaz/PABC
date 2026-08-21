@@ -404,7 +404,7 @@ function LandingView({ dip, onSelectFaction, onAction, onClose }) {
       }}>
         {/* Reputation block — your aggregate scores. */}
         <Card>
-          <SectionLabel>Your Standing in the Ashlands</SectionLabel>
+          <SectionLabel>Your Standing on the Continent</SectionLabel>
           <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
             <RepStat label="Menace" value={dip.menace.toFixed(1)} color="#d2913c" sub="aggression weight" />
             <RepStat label="Honor" value={dip.honor.toFixed(1)} color="#5fc27a" sub="kept your word" />

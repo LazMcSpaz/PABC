@@ -1,4 +1,4 @@
-# Ashland Conquest
+# The Remnant Continent
 
 > Explore. Contest. Conquer.
 
