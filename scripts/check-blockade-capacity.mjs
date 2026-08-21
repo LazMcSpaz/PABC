@@ -11,7 +11,7 @@ import { createGame } from "../src/game/setup.js";
 import { startTurn } from "../src/game/turn.js";
 import {
   startBlockade, blockadesOn, blockadeAt, blockadeCapacity, roadEdgesOf,
-  freeRoadEdges, destroyBlockade, activeBlockadesOn, blockadeKey,
+  freeRoadEdges, destroyBlockade, activeBlockadesOn, blockadeKey, supplyEdgeFor,
 } from "../src/game/blockades.js";
 
 let failures = 0;
@@ -140,6 +140,62 @@ console.log("\n--- keys stay unique ---");
   const keys = Object.keys(g.world.blockades);
   check("one record per road", keys.length === 3, keys.join(" "));
   check("keys are hex|edge", keys.every((k) => k === blockadeKey(hub, k.split("|")[1])));
+}
+
+console.log("\n--- a blockade stands on the road facing home ---");
+// You barricade the near side of the tile. Anywhere else and a rival can build
+// on the same hex BETWEEN your barricade and your own settlement, sitting on
+// the supply line behind the thing you built to protect it.
+{
+  const g = fresh();
+  const arms = shapeRoads(g, hub, 3);
+  // Put a settlement one step down each arm in turn and check the blockade
+  // follows it. Only the road toward home should ever be chosen.
+  for (const home of arms) {
+    for (const k of Object.keys(g.world.blockades)) delete g.world.blockades[k];
+    for (const l of Object.values(g.locations)) l.controller = null;
+    g.locations[home] = g.locations[home]
+      || { hexId: home, controller: null, chips: [], sections: [] };
+    g.locations[home].controller = "versari";
+    check(`settlement toward ${home}: blockade takes that road`,
+      supplyEdgeFor(g, "versari", hub) === home,
+      supplyEdgeFor(g, "versari", hub));
+    const b = startBlockade(g, "versari", hub, "u1");
+    check(`  and startBlockade records it`, b.edge === home, b.edge);
+  }
+}
+
+console.log("\n--- two factions cannot wedge in behind each other ---");
+{
+  const g = fresh();
+  const arms = shapeRoads(g, hub, 3);
+  for (const l of Object.values(g.locations)) l.controller = null;
+  // Homes in opposite directions.
+  for (const [hex, who] of [[arms[0], "versari"], [arms[1], "lakers"]]) {
+    g.locations[hex] = g.locations[hex] || { hexId: hex, controller: null, chips: [], sections: [] };
+    g.locations[hex].controller = who;
+  }
+  const mine = startBlockade(g, "versari", hub, "u1");
+  const theirs = startBlockade(g, "lakers", hub, "u2");
+  check("each faces its own settlement",
+    mine.edge === arms[0] && theirs.edge === arms[1],
+    `versari -> ${mine.edge}, lakers -> ${theirs.edge}`);
+  check("neither sits on the other's road home", mine.edge !== theirs.edge,
+    "no barricade lands between a rival's blockade and its settlement");
+}
+
+console.log("\n--- the home road being taken does not block the build ---");
+{
+  const g = fresh();
+  const arms = shapeRoads(g, hub, 3);
+  for (const l of Object.values(g.locations)) l.controller = null;
+  g.locations[arms[0]] = g.locations[arms[0]]
+    || { hexId: arms[0], controller: null, chips: [], sections: [] };
+  g.locations[arms[0]].controller = "versari";
+  startBlockade(g, "lakers", hub, "u2", arms[0]); // a rival got there first
+  const b = startBlockade(g, "versari", hub, "u1");
+  check("falls back to a free road", b.edge && b.edge !== arms[0], b.edge);
+  check("and it is a real road", arms.includes(b.edge));
 }
 
 console.log(`\n${failures ? `${failures} FAILED` : "all blockade-capacity tests passed"}`);

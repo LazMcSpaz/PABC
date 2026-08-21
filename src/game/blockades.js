@@ -90,6 +90,30 @@ export function freeRoadEdges(state, hex) {
   return roadEdgesOf(state, hex).filter((e) => !taken.has(e));
 }
 
+// Which road a blockade of `owner`'s should stand on: the one pointing HOME,
+// toward their nearest settlement by road.
+//
+// You barricade the near side of the tile, not the far side. Put it anywhere
+// else and a rival can build on the same hex BETWEEN your barricade and your
+// own settlement — sitting on your supply line, behind the thing you built to
+// protect it — which is nonsense. Facing home also means two factions
+// blockading the same junction naturally take different roads, because their
+// settlements lie in different directions.
+//
+// Falls back to any free road when there is no supply path (an unsupplied
+// blockade cannot be built through the action layer, but startBlockade is also
+// called by tests and scenarios) or when the home road is already closed.
+export function supplyEdgeFor(state, owner, hex) {
+  const free = freeRoadEdges(state, hex);
+  if (!free.length) return null;
+  // roadSupplyPath returns [hex, ...steps, settlement], so the first step is
+  // the neighbour the road runs to on the way home.
+  const path = roadSupplyPath(state, owner, hex);
+  const homeward = path && path.length > 1 ? path[1] : null;
+  if (homeward && free.includes(homeward)) return homeward;
+  return free[0];
+}
+
 // The blockade on `hex` only if it is finished AND paid — the phase that
 // actually blocks, defends and sees. Construction sites do none of those
 // things, and neither does a position whose upkeep went unpaid: an unpaid
@@ -244,9 +268,9 @@ export function supplyStatus(state, pid, hex, isCut) {
 // the supply line, the builder and the cost; this creates the state.
 export function startBlockade(state, owner, hex, builderUid, edge = null) {
   state.world.blockades = state.world.blockades || {};
-  // Callers that do not name a road get the first free one, so every existing
-  // call site keeps working and a hex with one road needs no extra argument.
-  const road = edge ?? freeRoadEdges(state, hex)[0] ?? null;
+  // Callers that do not name a road get the one facing the owner's nearest
+  // settlement, so a barricade always stands on the near side of the tile.
+  const road = edge ?? supplyEdgeFor(state, owner, hex);
   const b = {
     owner,
     hex,

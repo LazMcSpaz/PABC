@@ -36,12 +36,15 @@ export function roadNeighbours(hexId, rows, hexes) {
   return nb.filter((n) => carriesRoad(hexes[n])).sort();
 }
 
-// Which of a hex's roads a blockade sits on.
+// Which of a hex's roads a blockade sits on, when the blockade does not say.
 //
-// The one running most toward the camera. That is the stretch with the most
-// room in front of it and the least chance of a neighbouring tile's art
-// crowding it, and it is stable: ties break on the neighbour id, so a blockade
-// never hops between roads as the board re-renders.
+// It normally does: the engine picks the road facing its owner's nearest
+// settlement at build time (blockades.js supplyEdgeFor) and stores it, so this
+// is a fallback for a record with no edge rather than the usual path.
+//
+// The fallback takes the road running most toward the camera — the stretch with
+// the most room in front of it — and is stable, ties breaking on neighbour id,
+// so a blockade never hops between roads as the board re-renders.
 export function pickSegment(hexId, rows, hexes, centers) {
   const here = centers[hexId];
   if (!here) return null;

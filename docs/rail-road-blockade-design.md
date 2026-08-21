@@ -128,6 +128,34 @@ Three things read `hasRailAccess`:
   stations. Sharing a rival's track is commerce; pooling your industrial output
   into their city is not the same promise.
 
+### §3.1 as built — one blockade per road, facing home
+
+A hex holds one blockade **per road leaving it**, not one blockade. A tile the
+road runs straight through takes two; a T-junction takes three; a dead end
+takes one. The capacity is the shape of the road network at that hex, because
+what you are closing is a road — a tile cannot hold more barricades than it has
+ways out.
+
+Records are keyed `hex|edge`, the edge being the neighbour the road runs
+toward. `blockadeAt(state, hex)` still answers with one of them, which is the
+whole question for every caller that only asks whether the tile is held;
+`blockadesOn` returns the set.
+
+**Which road a blockade takes is not a free choice.** It stands on the road
+facing its owner's nearest settlement — the first step of the same supply path
+§3.4 already computes. Anywhere else and a rival could build on the same hex
+*between* your barricade and your own settlement, sitting on the supply line
+behind the thing you built to protect it. Facing home also separates rivals
+naturally: two factions blockading one junction take different roads, because
+their settlements lie in different directions. If the home road is already
+closed, the build falls back to any free road rather than failing.
+
+**Blocking stays per hex.** Part 1 makes a blockade a garrison holding a tile,
+not a gate on one border, and movement halts a mover entering the hex. Two
+blockades on a junction therefore make it harder to CLEAR rather than
+differently shaped: each is separately contestable, separately upgraded and
+separately paid for, and a contest brings down one of them, not all.
+
 ### The blockade UI — a place, not a unit ability
 
 A blockade is selected on the map like a settlement and opens **its own
