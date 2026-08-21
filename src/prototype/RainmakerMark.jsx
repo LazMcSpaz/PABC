@@ -6,44 +6,68 @@
 // status icon hung off an escort would vanish the moment that escort died,
 // which is precisely the case the whole design turns on.
 //
-// The dedicated sprite is in progress and will be supplied. What is here is a
-// placeholder built the same way BlockadeMark is — plain SVG, one element at
-// either level of detail, with a dark casing so a faction-coloured mark does
-// not disappear into that faction's own tinted ground. Swapping in the art
-// means replacing the <svg> body and nothing else: position, states and the
-// data attribute all stay.
+// The art is the Oldworld weather machine — the first asset in this game with
+// no owner at all, filed under the `neutral` pseudo-faction and drawn from the
+// same sprite machinery as a unit or a tollbooth (see
+// docs/weather-machine-pipeline-asks.md). It carries NO owner colour by
+// ruling: pale hull, wood cradle, black wheels. So whose it is has to be said
+// some other way, and it is said underneath — a faction-coloured contact
+// ellipse on the ground, the way the board already marks who holds a place.
+// Tinting the machine itself would be inventing livery for a thing that
+// predates every faction on the map.
 //
 // Four states, and they must read differently at a glance because they mean
 // completely different things to whoever is looking:
 //
-//   buried     at the site, not yet lifted. Nobody owns it.
-//   carried    on the road, in its holder's colour. This is the vulnerable one.
-//   loose      nobody's. Drawn cold and pulsing — first unit there takes it.
-//   installed  in a capital. Ringed when it is switched on and the clock runs.
+//   buried     at the site, not yet lifted. No ground mark — nobody owns it.
+//   carried    on the road, facing its travel, over its holder's colour.
+//   loose      nobody's. Pulsing, and the ground mark is gone.
+//   installed  in a capital. Raining once it is switched on.
 import { ownerColor } from "./data.js";
 import { HEX_W } from "./hexProjection.js";
+import { facingFor } from "./boardSlots.js";
+import { structureFor, spriteStyle, spriteScale, ensureIdleKeyframes } from "./unitSprites.js";
 
-const R = HEX_W * 0.13;
-const CASING = "rgba(4,8,12,0.9)";
-const LOOSE = "#cfd8dc";
+const DEPTH_SQUASH = 0.62; // the board's vertical squash, as blockadeStance uses
 
 let keyframesInstalled = false;
-function ensureKeyframes() {
+function ensureMarkKeyframes() {
   if (keyframesInstalled || typeof document === "undefined") return;
   keyframesInstalled = true;
   const el = document.createElement("style");
   el.textContent = `
-@keyframes rainmaker-loose { 0%,100% { opacity: .55 } 50% { opacity: 1 } }
-@keyframes rainmaker-live { 0%,100% { transform: scale(1) } 50% { transform: scale(1.09) } }`;
+@keyframes rainmaker-loose { 0%,100% { opacity: .6 } 50% { opacity: 1 } }
+@keyframes rainmaker-rain { 0% { opacity: 0; transform: translateY(-4px) } 40% { opacity: .9 } 100% { opacity: 0; transform: translateY(10px) } }`;
   document.head.appendChild(el);
 }
 
-export default function RainmakerMark({ x, y, device, running = false }) {
+// Which way the carts are pointing: the bearing of the last step it took.
+// Unsquashed first, because the board's vertical squash would otherwise pull
+// every heading toward the horizontal and the machine would face east on a
+// journey that was mostly north.
+function facingOf(device, centers) {
+  const from = device.fromHex && centers[device.fromHex];
+  const to = centers[device.hex];
+  if (!from || !to || (from.x === to.x && from.y === to.y)) return "s";
+  return facingFor(Math.atan2((to.y - from.y) / DEPTH_SQUASH, to.x - from.x));
+}
+
+export default function RainmakerMark({ x, y, device, running = false, centers = {} }) {
   if (!device || !Number.isFinite(x) || !Number.isFinite(y)) return null;
-  ensureKeyframes();
+  const spec = structureFor("neutral", "weather_machine");
+  if (!spec) return null;
+  ensureIdleKeyframes(spec);
+  ensureMarkKeyframes();
+
   const loose = device.status === "loose";
-  const col = loose ? LOOSE : ownerColor(device.owner) || LOOSE;
-  const size = R * 2;
+  const held = !loose && device.owner ? ownerColor(device.owner) : null;
+  const style = spriteStyle(spec, "base", {
+    uid: `rainmaker-${device.hex}`,
+    facing: facingOf(device, centers),
+  });
+  // The ground mark is sized off the machine's own footprint, so it sits under
+  // the thing rather than under a guess about it.
+  const foot = spec.footprintMetres * spec.pixelsPerMetre * spriteScale(spec);
 
   return (
     <div
@@ -54,47 +78,69 @@ export default function RainmakerMark({ x, y, device, running = false }) {
         : `The Rainmaker${running ? " — running" : ""}`}
       style={{
         position: "absolute",
-        left: x - R,
-        top: y - R,
-        width: size,
-        height: size,
+        left: x,
+        top: y,
+        width: 0,
+        height: 0,
         pointerEvents: "none",
-        animation: loose
-          ? "rainmaker-loose 1.6s ease-in-out infinite"
-          : running ? "rainmaker-live 2.2s ease-in-out infinite" : undefined,
+        animation: loose ? "rainmaker-loose 1.7s ease-in-out infinite" : undefined,
       }}
     >
-      <svg width={size} height={size} viewBox="0 0 100 100" style={{ display: "block", overflow: "visible" }}>
-        {/* Casing first, so the mark holds its shape over any ground. */}
-        <circle cx="50" cy="50" r="42" fill={CASING} />
-        {/* A condenser: a squat drum under a collecting dish. Placeholder — the
-            silhouette is what has to be recognisable at a glance from across
-            the board, so the real sprite should keep this shape. */}
-        <path
-          d="M22 40 Q50 20 78 40 L68 46 Q50 32 32 46 Z"
-          fill={col}
-          stroke={CASING}
-          strokeWidth="3"
-          strokeLinejoin="round"
-        />
-        <rect x="38" y="46" width="24" height="26" rx="4" fill={col} stroke={CASING} strokeWidth="3" />
-        <line x1="50" y1="30" x2="50" y2="46" stroke={col} strokeWidth="5" strokeLinecap="round" />
-        {/* Rain, only when it is actually making any. Before the switch it
-            produces nothing at all, and the board should not imply otherwise. */}
-        {running && (
-          <g stroke={col} strokeWidth="4" strokeLinecap="round" opacity="0.9">
-            <line x1="36" y1="76" x2="33" y2="88" />
-            <line x1="50" y1="78" x2="47" y2="92" />
-            <line x1="64" y1="76" x2="61" y2="88" />
-          </g>
-        )}
-        {/* Damaged in a hurried extraction — a visible cost for a visible
-            shortcut, so a rival can see what they are chasing is hurt. */}
-        {device.damaged && (
-          <path d="M62 42 L54 57 L62 57 L52 72" fill="none" stroke="#ffb74d" strokeWidth="5"
-            strokeLinecap="round" strokeLinejoin="round" />
-        )}
-      </svg>
+      {/* Whose it is, on the ground rather than on the machine. */}
+      {held && (
+        <div style={{
+          position: "absolute",
+          left: -foot / 2,
+          top: -(foot * DEPTH_SQUASH) / 2,
+          width: foot,
+          height: foot * DEPTH_SQUASH,
+          borderRadius: "50%",
+          border: `2px solid ${held}`,
+          boxShadow: `0 0 12px ${held}66, inset 0 0 14px ${held}33`,
+          background: `radial-gradient(ellipse at 50% 50%, ${held}22, transparent 70%)`,
+        }} />
+      )}
+
+      <div style={{ position: "absolute", left: 0, top: 0, ...style }} />
+
+      {/* Rain, only when it is actually making any. Before the switch it
+          produces nothing at all, and the board must not imply otherwise —
+          that is the design's single most important balance rule. */}
+      {running && (
+        <div style={{ position: "absolute", left: -foot * 0.3, top: -foot * 0.1, width: foot * 0.6, height: foot * 0.5 }}>
+          {[0, 1, 2, 3].map((i) => (
+            <div
+              key={i}
+              style={{
+                position: "absolute",
+                left: `${12 + i * 24}%`,
+                top: 0,
+                width: 2,
+                height: "42%",
+                borderRadius: 2,
+                background: "rgba(190,225,235,0.95)",
+                animation: `rainmaker-rain ${0.9 + i * 0.13}s linear infinite`,
+                animationDelay: `-${i * 0.22}s`,
+              }}
+            />
+          ))}
+        </div>
+      )}
+
+      {/* Torn loose in a hurry — a visible cost for a visible shortcut, so a
+          rival can see that what they are chasing is hurt. */}
+      {device.damaged && (
+        <svg
+          width={foot * 0.34}
+          height={foot * 0.34}
+          viewBox="0 0 40 40"
+          style={{ position: "absolute", left: foot * 0.16, top: -foot * 0.34 }}
+        >
+          <circle cx="20" cy="20" r="17" fill="rgba(6,10,14,0.85)" />
+          <path d="M23 9 L14 22 L21 22 L16 32" fill="none" stroke="#ffb74d"
+            strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      )}
     </div>
   );
 }

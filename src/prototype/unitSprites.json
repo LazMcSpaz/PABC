@@ -465,6 +465,7 @@
         "sheetHeight": 2048,
         "pixelsPerMetre": 18.3,
         "footprintMetres": 14.4,
+        "livery": "none",
         "anchor": [
           160,
           176
@@ -481,8 +482,7 @@
         ],
         "variants": {
           "base": {
-            "sheet": "neutral/neutral_weather_machine_sheet.webp",
-            "mask": "neutral/neutral_weather_machine_mask.webp"
+            "sheet": "neutral/neutral_weather_machine_sheet.webp"
           }
         }
       }

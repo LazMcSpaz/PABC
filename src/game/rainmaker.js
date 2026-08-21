@@ -694,6 +694,11 @@ export function deviceMovedThisRound(state) {
 export function onCarrierMoved(state, unit, to) {
   const rm = rainmakerState(state);
   if (!rm || !isHaulingDevice(state, unit)) return false;
+  // Where it came from, so the art can face the way the carts are pointing.
+  // Recorded rather than derived: once the device is put down there is no
+  // carrier left to ask, and a convoy that forgets its heading the moment it
+  // stops would spin to face south in the middle of the road.
+  rm.device.fromHex = rm.device.hex;
   rm.device.hex = to;
   rm.device.movedRound = state.round;
   emit(state, "rainmaker_hauled", { player: unit.owner, unit: unit.uid, hex: to });

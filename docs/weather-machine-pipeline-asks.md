@@ -1,5 +1,35 @@
 # Oldworld weather machine — what the asset needs from the pipeline
 
+> **Answered, 2026-08-21.** All three asks are implemented and the asset is on
+> the board. The shape landed on: the source json declares `"livery": "none"`,
+> and what the manifest carries is the *consequence* — no `mask` key at all —
+> so every reader downstream needs no notion of livery, only "is there a mask".
+> `build-units.mjs` skips the existence check and the copy (and now fails loudly
+> if an asset declares `livery: "none"` and ships a mask anyway);
+> `check-unit-art.py` skips the load and the livery computation, printing
+> `ownerless — no livery` instead of `0.0%`; `weather_machine` is in
+> `NON_UNIT_KEYS`. The all-black placeholder mask is deleted.
+>
+> **A fourth site this document did not catch:** `check-unit-sprites.mjs` also
+> walks `[sheet, mask]` per variant and reported `mask: will not decode` for the
+> missing file. Same fix, same rule.
+>
+> **On §3's open question** — `neutral` pseudo-faction, kept. Nothing enumerates
+> `manifest.units`; every read is `manifest.units?.[faction]` with a known id, so
+> the placement costs nothing, where a section beside `units` would put a branch
+> in every reader for one asset. `NON_UNIT_KEYS` is what stops it being
+> selectable, which is the half that actually mattered.
+>
+> **§4 needed no action** — 14.4 stands, and `build-units.mjs`'s below-anchor
+> check passes it with 10px of margin rather than 0.7.
+>
+> Where it is drawn: `src/prototype/RainmakerMark.jsx`. Because the asset carries
+> no owner colour, whose it is is said on the GROUND — a faction-coloured contact
+> ellipse sized off `footprintMetres`, absent entirely when nobody holds it.
+> Facing comes from the bearing of the convoy's last step, recorded on the device
+> as `fromHex` rather than derived from the carrier, because once the machine is
+> put down there is no carrier left to ask.
+
 Written for the game side. Nothing here is a defect report: `check-unit-art.py`,
 `build-units.mjs` and `unitSprites.js` were written for a world where every drawn thing
 belongs to a faction, and that was true of everything that had shipped. The weather

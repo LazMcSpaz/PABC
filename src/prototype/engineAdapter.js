@@ -1173,6 +1173,7 @@ function rainmakerView(state, viewer) {
         status: rm.device.status,
         owner: rm.device.owner,
         hex: seesDevice ? rm.device.hex : null,
+        fromHex: seesDevice ? rm.device.fromHex || null : null,
         damaged: !!rm.device.damaged,
         carrier: rm.device.carrierUid || null,
       }

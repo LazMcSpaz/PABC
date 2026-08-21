@@ -80,14 +80,19 @@ def check_one(name, spec, files):
     ax, ay = spec["anchor"]
 
     sheet = np.asarray(Image.open(os.path.join(ASSETS, files["sheet"])).convert("RGBA")).astype(np.int16)
-    mask = np.asarray(Image.open(os.path.join(ASSETS, files["mask"])).convert("RGB")).astype(np.int16)
+    # No mask key means the manifest is declaring an asset nobody owns (see
+    # build-units.mjs). Derived from the manifest rather than a name list,
+    # because a name list needs editing again for the next ownerless asset.
+    mask = None
+    if "mask" in files:
+        mask = np.asarray(Image.open(os.path.join(ASSETS, files["mask"])).convert("RGB")).astype(np.int16)
     A = sheet[..., 3]
 
     notes = []
     if sheet.shape[1] != spec["sheetWidth"] or sheet.shape[0] != spec["sheetHeight"]:
         problems.append(f"{name}: sheet is {sheet.shape[1]}x{sheet.shape[0]}, manifest says "
                         f"{spec['sheetWidth']}x{spec['sheetHeight']}")
-    if mask.shape[:2] != sheet.shape[:2]:
+    if mask is not None and mask.shape[:2] != sheet.shape[:2]:
         problems.append(f"{name}: mask is {mask.shape[1]}x{mask.shape[0]}, sheet is {sheet.shape[1]}x{sheet.shape[0]}")
 
     partial = 100.0 * ((A > 0) & (A < 255)).sum() / A.size
@@ -97,12 +102,19 @@ def check_one(name, spec, files):
                         f"which will dark-fringe the glow edges")
 
     sil = A > 0
-    livery = 100.0 * ((mask[..., 0] > 127) & sil).sum() / max(1, sil.sum())
-    if livery < LIVERY_FLOOR:
-        problems.append(f"{name}: livery is {livery:.1f}% of the silhouette, under the {LIVERY_FLOOR:.0f}% floor (§8)")
-    stray = ((mask[..., 0] > 127) & ~sil).sum()
-    if stray:
-        notes.append(f"{stray}px of mask outside the silhouette")
+    # The floor is right for anything a player must recognise as THEIRS. It
+    # cannot apply to something nobody owns, so an ownerless asset is not
+    # measured against it and reports no share rather than 0.0%.
+    livery = None
+    if mask is not None:
+        livery = 100.0 * ((mask[..., 0] > 127) & sil).sum() / max(1, sil.sum())
+        if livery < LIVERY_FLOOR:
+            problems.append(f"{name}: livery is {livery:.1f}% of the silhouette, under the {LIVERY_FLOOR:.0f}% floor (§8)")
+        stray = ((mask[..., 0] > 127) & ~sil).sum()
+        if stray:
+            notes.append(f"{stray}px of mask outside the silhouette")
+    else:
+        notes.append("ownerless — no livery")
 
     clipped = 0
     row_off = []
@@ -144,7 +156,8 @@ def check_one(name, spec, files):
         warnings.append(f"{name}: row 0 art reaches {reach_below:.0f}px below the anchor, past the "
                         f"{half_w * SIN_ELEVATION:.0f}px its footprint projects")
 
-    print(f"{name:34s} {partial:6.2f} {livery:5.1f} {row0:+6.1f} {drift:6.1f} {clipped:4d}  {'; '.join(notes)}")
+    liv = f"{livery:5.1f}" if livery is not None else "    -"
+    print(f"{name:34s} {partial:6.2f} {liv} {row0:+6.1f} {drift:6.1f} {clipped:4d}  {'; '.join(notes)}")
 
 
 if __name__ == "__main__":

@@ -64,7 +64,17 @@ const BOMBARD_CHIP = "bombard";
 
 // Everything in art/units that is not a unit model. Tollbooths are blockade art
 // and are selected by hex, never by a unit's chips.
-const NON_UNIT_KEYS = new Set(["tollbooth"]);
+// Keys under `units` that are not units, and must never be reachable by any
+// chip combination. The tollbooth is a structure with an owner; the weather
+// machine is an Oldworld quest object with no owner at all, filed under the
+// `neutral` pseudo-faction (docs/weather-machine-pipeline-asks.md §3).
+//
+// `neutral` rather than a section beside `units`: nothing enumerates
+// `manifest.units` — every read is `manifest.units?.[faction]` with a known id —
+// so the placement costs nothing, where a new section would put a branch in
+// every reader for one asset. What the placement does NOT do is make it
+// selectable, and that is this set's job.
+const NON_UNIT_KEYS = new Set(["tollbooth", "weather_machine"]);
 
 function hasChip(unit, id) {
   return (unit?.chips || []).includes(id);

@@ -357,7 +357,11 @@ const served = await page.evaluate(async ({ base, assets }) => {
   });
   const bad = [];
   for (const a of assets) {
-    for (const [kind, rel] of [["sheet", a.sheet], ["mask", a.mask]]) {
+    // No mask key means the manifest is declaring an asset nobody owns — there
+    // is no owner region to tint, so there is nothing to author and nothing to
+    // serve (docs/weather-machine-pipeline-asks.md).
+    const files = a.mask ? [["sheet", a.sheet], ["mask", a.mask]] : [["sheet", a.sheet]];
+    for (const [kind, rel] of files) {
       const url = `${base}/${rel}`;
       const r = await fetch(url).catch(() => null);
       if (!r || !r.ok) { bad.push(`${a.id} ${kind}: HTTP ${r ? r.status : "failed"}`); continue; }
@@ -368,8 +372,9 @@ const served = await page.evaluate(async ({ base, assets }) => {
   }
   return bad;
 }, { base: await page.evaluate(() => new URL(document.baseURI).origin + new URL(document.baseURI).pathname.replace(/\/$/, "") + "/assets/units"), assets: allAssets });
+const fileCount = allAssets.reduce((n, a) => n + (a.mask ? 2 : 1), 0);
 check("every sheet and mask serves and decodes", served.length === 0,
-  served.length ? served.slice(0, 3).join(" | ") : `${allAssets.length * 2} files across ${Object.keys(MANIFEST.units).length} factions`);
+  served.length ? served.slice(0, 3).join(" | ") : `${fileCount} files across ${Object.keys(MANIFEST.units).length} factions`);
 
 check("no console/page errors", errors.length === 0, errors.slice(0, 2).join(" | ") || "clean");
 

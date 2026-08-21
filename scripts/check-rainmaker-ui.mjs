@@ -134,9 +134,40 @@ async function deviceState(setup) {
 const carried = await deviceState({ status: "carried", owner: "me", fog: false });
 check("a device being hauled draws on the board, in its holder's name",
   carried?.status === "carried" && carried.owner !== "none", JSON.stringify(carried));
+
+// It draws the actual weather-machine art, not a stand-in. The placeholder it
+// replaced was an inline SVG, and a regression to one would still satisfy every
+// other check here.
+const art = await page.evaluate(() => {
+  const el = document.querySelector("[data-rainmaker]");
+  if (!el) return null;
+  for (const c of el.querySelectorAll("div")) {
+    const bg = getComputedStyle(c).backgroundImage;
+    if (bg && bg !== "none" && /url\(/.test(bg)) return bg;
+  }
+  return null;
+});
+check("…using the weather-machine sheet rather than a stand-in",
+  !!art && /neutral\/neutral_weather_machine_sheet\.webp/.test(art), art || "no sprite");
+// The asset carries no owner colour by ruling, so whose it is has to be said on
+// the ground rather than on the machine.
+const ground = await page.evaluate(() => {
+  const el = document.querySelector("[data-rainmaker]");
+  return [...(el?.querySelectorAll("div") || [])]
+    .some((c) => getComputedStyle(c).borderRadius === "50%" && getComputedStyle(c).borderTopWidth !== "0px");
+});
+check("…with the holder marked underneath it, never painted onto it", ground === true);
 const loose = await deviceState({ status: "loose", owner: null, fog: false });
 check("a device nobody holds draws too — that is the whole point of it",
   loose?.status === "loose" && loose.owner === "none", JSON.stringify(loose));
+// A device nobody holds gets no ground mark — that IS the reading.
+const looseGround = await page.evaluate(() => {
+  const el = document.querySelector("[data-rainmaker]");
+  return [...(el?.querySelectorAll("div") || [])]
+    .some((c) => getComputedStyle(c).borderRadius === "50%" && getComputedStyle(c).borderTopWidth !== "0px");
+});
+check("…and an unowned one is marked for nobody", looseGround === false);
+
 const damaged = await deviceState({ status: "carried", owner: "me", damaged: true, fog: false });
 check("a damaged device still draws, so a rival can see what it is chasing is hurt",
   damaged?.status === "carried", JSON.stringify(damaged));

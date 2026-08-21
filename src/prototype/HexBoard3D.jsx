@@ -143,6 +143,7 @@ export default function HexBoard3D({
             y={geom.centers[state.rainmaker.device.hex].y}
             device={state.rainmaker.device}
             running={state.rainmaker.hold?.by === state.rainmaker.device.owner}
+            centers={geom.centers}
           />
         </div>
       )}

@@ -22,5 +22,6 @@
   "sheetWidth": 3200,
   "sheetHeight": 2048,
   "footprintMetres": 14.4,
-  "pixelsPerMetre": 18.3
+  "pixelsPerMetre": 18.3,
+  "livery": "none"
 }

@@ -51,6 +51,9 @@ const BASE_VARIANT = "base";
 const SHARED_KEYS = [
   "frameWidth", "frameHeight", "frames", "fps", "loop",
   "sheetWidth", "sheetHeight", "pixelsPerMetre", "footprintMetres",
+  // Whether the thing has an owner at all. One variant tinted and another not
+  // would make a unit lose its colours the moment it promoted.
+  "livery",
 ];
 
 const problems = [];
@@ -142,13 +145,30 @@ async function buildFaction(dirName) {
         );
       }
 
+      // `livery: "none"` in the source json declares an asset NOBODY owns — the
+      // Oldworld weather machine is the first (docs/weather-machine-pipeline-asks.md).
+      // There is no owner region to tint, so there is no mask to author, and
+      // requiring one is not merely a lint failure: this step runs on predev and
+      // prebuild, and a missing file short-circuits main() before the manifest is
+      // written, breaking `npm run dev` for everyone.
+      //
+      // The declaration is a source-side word; what the manifest carries is its
+      // consequence — no `mask` key at all. Readers downstream then need no
+      // notion of livery, only "is there a mask".
+      const ownerless = meta.livery === "none";
       const sheet = `${stem}_sheet.webp`;
       const mask = `${stem}_mask.webp`;
-      for (const img of [sheet, mask]) {
+      const images = ownerless ? [sheet] : [sheet, mask];
+      for (const img of images) {
         if (!existsSync(path.join(dir, img))) { fail(`${faction}/${unit}/${v}: missing ${img}`); continue; }
         await copyFile(path.join(dir, img), path.join(OUT, faction, img));
       }
-      variants[v] = { sheet: `${faction}/${sheet}`, mask: `${faction}/${mask}` };
+      if (ownerless && existsSync(path.join(dir, mask))) {
+        fail(`${faction}/${unit}/${v}: declares livery "none" but ships ${mask} — delete it or drop the declaration`);
+      }
+      variants[v] = ownerless
+        ? { sheet: `${faction}/${sheet}` }
+        : { sheet: `${faction}/${sheet}`, mask: `${faction}/${mask}` };
     }
 
     if (!shared) continue;

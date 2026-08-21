@@ -29,7 +29,7 @@ numbers behind each of those decisions.*
 
 **Verification.** `node src/game/harness.js` — phases 31–37 are the Rainmaker
 (902 passing overall). `node scripts/check-rainmaker-ui.mjs` drives the real
-app (22 checks): it fires all 25 rainmaker events with their real payloads and
+app (25 checks): it fires all 25 rainmaker events with their real payloads and
 fails on a raw event name or a feed line missing its faction, checks the device
 draws in each state and does NOT draw where the viewer cannot see it, and clicks
 every button in the panel.
@@ -207,9 +207,12 @@ nobody had it.
 
 ## 4. Known gaps
 
-- **Art.** `RainmakerMark.jsx` is a placeholder built so the dedicated sprite
-  drops in by replacing the SVG body — position, states and the data attribute
-  all stay.
+- ~~**Art.**~~ Landed. `RainmakerMark.jsx` draws the Oldworld weather machine
+  from the shared sprite machinery (`art/units/neutral/`), facing the bearing of
+  its last step, over a faction-coloured contact ellipse — the asset carries no
+  owner colour by ruling, so the holder is marked on the ground rather than
+  painted onto the machine. See `docs/weather-machine-pipeline-asks.md` for the
+  three pipeline changes it needed, and a fourth that document did not catch.
 - **The unresolved-game rate is high** (20 of 30 at round 70). That is largely
   inherited: before the Rainmaker existed, 11 of 24 games ran past round 60. The
   Rainmaker resolves some of them without dominating, but it is not a fix for
