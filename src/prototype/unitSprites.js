@@ -49,13 +49,26 @@ function rowFor(spec, facing) {
 }
 
 // Movement chips promote a unit's model: the squad walks, then rides a tier-1
-// vehicle, then a tier-2. Keyed off installed chips rather than effective Movement,
-// for the same reason the strength flag is — see variantFor.
-//
-// The Landship chip is +3 and has no model of its own — the tier-2 art is a
-// canopied troop carrier, not a landship — so it clamps onto tier 2 rather than
-// falling back to infantry, which would read as a demotion.
+// vehicle, then a tier-2, then crews a landship. Keyed off installed chips
+// rather than effective Movement, for the same reason the strength flag is —
+// see variantFor.
 const MOVEMENT_TIERS = ["infantry", "vehicle_t1", "vehicle_t2"];
+
+// Two chips have a model of their own rather than a tier: Landship swaps the
+// whole vehicle, Bombard swaps the arrangement. Both fill BOTH chip bays
+// (CONFIG.unit.baySlots is 2, and each is `slots: 2`), so neither can ever be
+// combined with another upgrade — which is what lets them be read as a plain
+// override instead of being folded into the movement and strength totals.
+const LANDSHIP_CHIP = "landship";
+const BOMBARD_CHIP = "bombard";
+
+// Everything in art/units that is not a unit model. Tollbooths are blockade art
+// and are selected by hex, never by a unit's chips.
+const NON_UNIT_KEYS = new Set(["tollbooth"]);
+
+function hasChip(unit, id) {
+  return (unit?.chips || []).includes(id);
+}
 
 function chipTotals(unit) {
   let str = 0;
@@ -74,12 +87,21 @@ function chipTotals(unit) {
 export function unitKeyFor(faction, unit) {
   const have = manifest.units?.[faction];
   if (!have) return null;
+  // The Landship chip has its own hull; without that art fall back down the
+  // tiers rather than to infantry, which would read as a demotion.
+  if (hasChip(unit, LANDSHIP_CHIP) && have.landship) return "landship";
   const { mov } = chipTotals(unit);
   const want = Math.min(mov, MOVEMENT_TIERS.length - 1);
   for (let i = want; i >= 0; i--) {
     if (have[MOVEMENT_TIERS[i]]) return MOVEMENT_TIERS[i];
   }
-  return Object.keys(have)[0] || null;
+  // Minor factions ship infantry only, so never fall through to a tollbooth.
+  return MOVEMENT_TIERS.find((k) => have[k]) || null;
+}
+
+// Board art that is not a unit — currently just the tollbooth a blockade draws.
+export function structureFor(faction, key) {
+  return (NON_UNIT_KEYS.has(key) && manifest.units?.[faction]?.[key]) || null;
 }
 
 export function spriteFor(faction, unit) {
@@ -105,6 +127,9 @@ export function hasSprite(faction) {
 export function variantFor(unit, spec) {
   const veteran = !!unit?.veteran;
   const strong = chipTotals(unit).str > 0;
+  // Bombard is a siege piece with its own silhouette and no veteran cut, so it
+  // wins over promotion: a veteran crew still reads as "that is the bombard".
+  if (hasChip(unit, BOMBARD_CHIP) && spec?.variants?.bombard) return "bombard";
   const order = veteran && strong ? ["vet_str", "vet", "std_str", "std"]
     : veteran ? ["vet", "std"]
     : strong ? ["std_str", "std"]

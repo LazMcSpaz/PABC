@@ -30,6 +30,7 @@ import HexTile from "./HexTile.jsx";
 import FlatTileLayer from "./FlatTileLayer.jsx";
 import FloatingControlMeter from "./FloatingControlMeter.jsx";
 import RouteNetwork from "./RouteNetwork.jsx";
+import BlockadeSprites from "./BlockadeSprites.jsx";
 import BoardTokens from "./BoardTokens.jsx";
 import { LOD_FLAT, useBoardLod } from "./boardLod.js";
 import { buildHexGeometry, eastRimHexes, paintOrder, topFacePolygon } from "./hexProjection.js";
@@ -104,6 +105,14 @@ export default function HexBoard3D({
         centers={geom.centers}
         width={geom.width}
         height={geom.height}
+      />
+
+      {/* Blockades stand on their road, between the route lines and the units,
+          so a unit posted at one reads as being in front of it. */}
+      <BlockadeSprites
+        rows={state.rows}
+        hexes={state.hexes}
+        centers={geom.centers}
       />
 
       <BoardTokens

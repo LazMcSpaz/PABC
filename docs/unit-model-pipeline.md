@@ -212,6 +212,33 @@ One sizing note: the masked area wants to be roughly **a quarter of the
 silhouette or more**. At 43 px on screen at rest, faction identity carried by a
 collar and cuffs alone will not survive.
 
+## 8.2 What ships now, beyond the three tiers
+
+The set grew past infantry-and-vehicles, and the renderer reads all of it from
+the same manifest:
+
+| Art | Who has it | Selected by |
+|---|---|---|
+| `infantry` — `std`, `std_str`, `vet`, `vet_str`, `bombard` | all 8 factions | veterancy + strength chips |
+| `vehicle_t1` — `std`, `vet` | 4 majors | Navigator (+1 Movement) |
+| `vehicle_t2` | 4 majors | Troop Carrier (+2 Movement) |
+| `landship` | 4 majors | the Landship chip |
+| `tollbooth` | 4 majors | a finished blockade on the hex |
+
+**Bombard and Landship override rather than accumulate.** Each is `slots: 2`
+against a two-bay unit, so neither can ever share a unit with another upgrade.
+That is what lets the renderer treat them as a straight swap instead of folding
+them into the movement and strength totals. Bombard also beats promotion: there
+is no veteran cut of the siege piece, and the silhouette is the readable thing.
+
+**Minor factions ship infantry only.** A chipped minor unit therefore has to
+fall all the way back to the foot model rather than to nothing, or it would
+vanish from the board the moment it was upgraded.
+
+**The tollbooth is not a unit.** It lives in `art/units/` because that is where
+the pipeline reads from, but no chip combination can select it — the renderer
+reaches it through `structureFor`, keyed by hex, never by a unit's chips.
+
 ## 8.1 Output location and naming
 
 Drop files at `art/units/<faction>/`, alongside the tile masters in

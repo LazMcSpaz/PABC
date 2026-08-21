@@ -36,11 +36,15 @@ const MANIFEST = path.join(ROOT, "src", "prototype", "unitSprites.json");
 const FACTION_DIR_ALIAS = {
   laker: "lakers",
   plainer: "plainers",
+  dambaran: "dambarans",
+  steel_traders: "steeltraders",
 };
 
 // Recognised variant suffixes, longest first so `std_str` is not read as `std`.
 // A file with none of these is the unit's only arrangement and is keyed `base`.
-const VARIANTS = ["std_str", "vet_str", "std", "vet"];
+// `bombard` is a variant rather than a unit of its own: the chip that selects it
+// fills both bays, so it never combines with anything else.
+const VARIANTS = ["std_str", "vet_str", "std", "vet", "bombard"];
 const BASE_VARIANT = "base";
 
 // Geometry every variant of one unit must agree on.

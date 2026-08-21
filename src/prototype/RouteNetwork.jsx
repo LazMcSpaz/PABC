@@ -18,6 +18,8 @@
 import { routeSegments, trimToEllipse } from "./hexProjection.js";
 import { LOD_FLAT, useBoardLod } from "./boardLod.js";
 import BlockadeMark from "./BlockadeMark.jsx";
+import { blockadeStance } from "./blockadeStance.js";
+import { structureFor } from "./unitSprites.js";
 import { HEX_W } from "./hexProjection.js";
 
 // How far short of a Location's centre a route stops. Sized to clear the
@@ -167,7 +169,18 @@ export default function RouteNetwork({ rows, hexes, centers, width, height }) {
   // Blockades sit ON the road network, so they are drawn with it rather than in
   // the tile layer — which also means they survive the zoom-out unchanged
   // instead of needing a second implementation at the flat level of detail.
-  const blockades = Object.values(hexes).filter((h) => h.blockade && centers[h.id]);
+  // A blockade closes a road, so it stands ON that road out near the tile edge
+  // rather than at the hex centre — see blockadeStance.js. A finished blockade
+  // with art is drawn by BlockadeSprites instead; what stays here is the
+  // construction site, whose whole job is to show progress, and any faction
+  // without blockade art.
+  const blockades = Object.values(hexes)
+    .filter((h) => h.blockade && centers[h.id])
+    .filter((h) => !(h.blockade.done && structureFor(h.blockade.owner, "tollbooth")))
+    .map((h) => ({
+      hex: h,
+      at: blockadeStance(h.id, rows, hexes, centers) || centers[h.id],
+    }));
   if (!roads.length && !rails.length && !blockades.length) return null;
 
   // TWO svg layers at full detail, and the split is load-bearing rather than
@@ -202,13 +215,8 @@ export default function RouteNetwork({ rows, hexes, centers, width, height }) {
             </g>
           );
         })}
-        {blockades.map((h) => (
-          <BlockadeMark
-            key={`blockade-${h.id}`}
-            x={centers[h.id].x}
-            y={centers[h.id].y}
-            blockade={h.blockade}
-          />
+        {blockades.map(({ hex, at }) => (
+          <BlockadeMark key={`blockade-${hex.id}`} x={at.x} y={at.y} blockade={hex.blockade} />
         ))}
       </svg>
     );
@@ -259,12 +267,12 @@ export default function RouteNetwork({ rows, hexes, centers, width, height }) {
           a unit standing at a blockade reads in front of it. */}
       {blockades.length > 0 && (
         <svg width={width} height={height} style={layer({ zIndex: 8010 })}>
-          {blockades.map((h) => (
+          {blockades.map(({ hex, at }) => (
             <BlockadeMark
-              key={`blockade-${h.id}`}
-              x={centers[h.id].x}
-              y={centers[h.id].y}
-              blockade={h.blockade}
+              key={`blockade-${hex.id}`}
+              x={at.x}
+              y={at.y}
+              blockade={hex.blockade}
             />
           ))}
         </svg>

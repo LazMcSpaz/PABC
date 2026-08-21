@@ -1,15 +1,17 @@
 // Which sheet does a given unit draw? Exhaustive test of the sprite matrix.
 //
-// The matrix is sparse and the fallbacks are the part that can quietly go wrong:
-// infantry ships all four arrangements, the tier-1 vehicle has no strength
-// variant, the tier-2 vehicle has no variants at all, and two chips (Bombard at
-// +3 Strength, Landship at +3 Movement) have no model of their own. Every
-// combination is enumerated here against every faction, so a missing sheet or a
-// bad fallback shows up as a failing row rather than a blank unit on the board.
+// The matrix is sparse and the fallbacks are the part that can quietly go wrong.
+// Infantry ships five cuts, the tier-1 vehicle has no strength variant, the
+// tier-2 vehicle and the landship have none at all, and the minor factions ship
+// infantry only — so a chipped minor unit has to fall all the way back to the
+// foot model rather than to nothing. Two chips (Bombard, Landship) fill both
+// bays and override rather than accumulate. Every combination is enumerated
+// here against every faction, so a missing sheet or a bad fallback shows up as
+// a failing row rather than a blank unit on the board.
 //
 //   node scripts/check-unit-variants.mjs
 
-import { spriteFor, variantFor, unitKeyFor, hasSprite, spriteScale, hitBoxStyle, drawnBox } from "../src/prototype/unitSprites.js";
+import { spriteFor, variantFor, unitKeyFor, hasSprite, spriteScale, hitBoxStyle, drawnBox, structureFor } from "../src/prototype/unitSprites.js";
 import { UNIT_UPGRADES, FACTIONS } from "../src/prototype/data.js";
 import { engineChipIdToUi } from "../src/prototype/engineAdapter.js";
 
@@ -19,8 +21,10 @@ function check(name, pass, detail) {
   console.log(`  ${pass ? "PASS" : "FAIL"}  ${name}${detail ? ` — ${detail}` : ""}`);
 }
 
-// The four playable factions, i.e. the ones that need art.
+// The four playable factions, i.e. the ones with the full model range.
 const MAJOR = ["versari", "lakers", "goldgrass", "plainers"];
+// Minors fight too, and now ship infantry of their own.
+const MINOR = ["tempest", "croppers", "steeltraders", "dambarans"];
 const unit = (chips, veteran = false) => ({ uid: "u1", owner: "versari", veteran, chips });
 
 console.log("--- every faction has art, under its game faction id ---");
@@ -38,10 +42,10 @@ const MOV_CASES = [
   { chips: ["drilledTroops"], want: "infantry", why: "strength only" },
   { chips: ["navigator"], want: "vehicle_t1", why: "+1 movement" },
   { chips: ["troopCarrier"], want: "vehicle_t2", why: "+2 movement" },
-  { chips: ["landship"], want: "vehicle_t2", why: "+3, no model — clamps to t2" },
+  { chips: ["landship"], want: "landship", why: "its own hull" },
   { chips: ["navigator", "drilledTroops"], want: "vehicle_t1", why: "+1 mov, +1 str" },
   { chips: ["navigator", "navigator"], want: "vehicle_t2", why: "+1 and +1 stack to 2" },
-  { chips: ["troopCarrier", "landship"], want: "vehicle_t2", why: "+5 clamps" },
+  { chips: ["bombard"], want: "infantry", why: "a siege piece, still on foot" },
 ];
 for (const c of MOV_CASES) {
   const got = unitKeyFor("versari", unit(c.chips));
@@ -55,9 +59,11 @@ const VAR_CASES = [
   { chips: [], vet: true, infantry: "vet", t1: "vet", t2: "base" },
   { chips: ["drilledTroops"], vet: false, infantry: "std_str", t1: "std", t2: "base" },
   { chips: ["sharpenedBlades"], vet: false, infantry: "std_str", t1: "std", t2: "base" },
-  { chips: ["bombard"], vet: false, infantry: "std_str", t1: "std", t2: "base" },
+  { chips: ["bombard"], vet: false, infantry: "bombard", t1: "std", t2: "base" },
   { chips: ["drilledTroops"], vet: true, infantry: "vet_str", t1: "vet", t2: "base" },
-  { chips: ["bombard"], vet: true, infantry: "vet_str", t1: "vet", t2: "base" },
+  // Bombard beats promotion: the siege silhouette is the readable thing, and
+  // there is no veteran cut of it. The vehicles have no bombard cut at all.
+  { chips: ["bombard"], vet: true, infantry: "bombard", t1: "vet", t2: "base" },
 ];
 for (const f of MAJOR) {
   for (const c of VAR_CASES) {
@@ -131,6 +137,51 @@ for (const [engineId, wantStr, wantMov] of [
   const u = { uid: "e2e", owner: "versari", veteran: false, chips: [engineChipIdToUi("navigator")] };
   check("engine 'navigator' promotes to vehicle_t1", unitKeyFor("versari", u) === "vehicle_t1",
     `${unitKeyFor("versari", u)} / ${variantFor(u, spriteFor("versari", u))}`);
+}
+
+console.log("\n--- minor factions ---");
+for (const f of MINOR) {
+  check(`${f} has infantry`, !!spriteFor(f, "infantry"), hasSprite(f) ? "yes" : "NO ART");
+  // They ship no vehicles, so every chip has to land back on the foot model
+  // rather than on nothing — or a chipped minor unit would vanish.
+  const worst = { uid: "m", owner: f, veteran: true, chips: ["landship"] };
+  check(`${f}: a landship chip still resolves`, !!spriteFor(f, worst),
+    `${unitKeyFor(f, worst)} / ${variantFor(worst, spriteFor(f, worst))}`);
+  check(`${f} has the bombard cut`, !!spriteFor(f, "infantry")?.variants?.bombard);
+}
+
+console.log("\n--- the two-slot chips override rather than accumulate ---");
+// Bombard and Landship each fill both bays, so they can never combine with
+// another upgrade. That is what lets them be read as a plain override.
+for (const f of MAJOR) {
+  for (const vet of [false, true]) {
+    const bomb = { uid: "b", owner: f, veteran: vet, chips: ["bombard"] };
+    check(`${f}: bombard${vet ? " + veteran" : ""} -> infantry/bombard`,
+      unitKeyFor(f, bomb) === "infantry" && variantFor(bomb, spriteFor(f, bomb)) === "bombard",
+      `${unitKeyFor(f, bomb)}/${variantFor(bomb, spriteFor(f, bomb))}`);
+    const ship = { uid: "l", owner: f, veteran: vet, chips: ["landship"] };
+    check(`${f}: landship${vet ? " + veteran" : ""} -> landship`,
+      unitKeyFor(f, ship) === "landship", unitKeyFor(f, ship));
+  }
+}
+
+console.log("\n--- tollbooths are blockade art, never a unit ---");
+for (const f of MAJOR) {
+  check(`${f} has a tollbooth`, !!structureFor(f, "tollbooth"));
+  check(`${f}: tollbooth is not reachable as a unit model`,
+    !["infantry", "vehicle_t1", "vehicle_t2", "landship"].includes("tollbooth")
+    && !structureFor(f, "infantry"),
+    "structureFor rejects unit keys");
+}
+// No chip combination may ever select it.
+{
+  const chipIds = Object.keys(UNIT_UPGRADES);
+  let hit = null;
+  for (const a of chipIds) for (const b of chipIds) {
+    const u = { uid: "x", owner: "versari", veteran: false, chips: [a, b] };
+    if (unitKeyFor("versari", u) === "tollbooth") hit = `${a}+${b}`;
+  }
+  check("no chip pair selects a tollbooth", hit === null, hit || `${chipIds.length ** 2} pairs checked`);
 }
 
 console.log("\n--- chip table sanity ---");
