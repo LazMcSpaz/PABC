@@ -727,13 +727,23 @@ swing across the eight facings.
 
 ### 11.14 Known gaps, not fixed
 
-- `oldHands` — **the renderer and the rules disagree about who is a veteran.** The
-  rules honour it: `old-hands` carries `veteranEquiv: true` and `effectiveVeteran()`
-  is used in `contest.js` and `actions.js`. But `variantFor` reads the raw
-  `unit.veteran`, so a unit that fights as a veteran draws as a non-veteran.
+- ~~`oldHands` — the renderer and the rules disagree about who is a veteran.~~
+  **Fixed.** The cause was a second definition of the rule: the adapter published
+  `veteran: !!u.veteran` while every engine read went through `effectiveVeteran()`.
+  It now publishes the effective flag, so the sprite variant, the UnitPanel tag
+  and the rules all read one definition. It turned out to be two bugs, not one —
+  `reinforcePreview` had the same raw read and was quoting an Old Hands unit's
+  repair against the non-veteran cap, under-reporting the deficit by 4 Strength
+  (8 scrap) against what Reinforce actually charges. Regression:
+  `scripts/check-veteran-art.mjs`, which drives the real engine, grants the chip,
+  and also disables it again — a chip that is not paid up rents nothing.
 - `laker_landship_sheet.webp` has see-through **0.415** against a shipped t2
   vehicle band of 0.124–0.348. Needs re-export at a higher Mix Shader Fac.
 - `plainer_vehicle_t1` still clips at the bottom edge — §11.2.
+- ~~`croppers_infantry` is off its rotation axis on all five cuts.~~ **Fixed** by
+  rigid per-row translation, the §11.15 fallback — §11.16. It is still worth
+  fixing in the blend if `CRP_group` is ever reconciled (§11.3), because a
+  re-render from a corrected rig needs no correction applied to it afterwards.
 - `GG_veh_t2` and `CRP_group` have drifted from their shipped sheets — §11.3.
 
 ### 11.15 Anchor registration — the ground footprint must sit on the pivot
@@ -767,11 +777,8 @@ pixel lost, sheet and mask shifted identically, everything else untouched. It is
 worse fix than a re-render and it is the right one when the model cannot be
 reproduced.
 
-**Measure registration on the footprint ellipse, not the whole silhouette.** The
-rule names the ground footprint, so restrict to pixels within
-`footprintMetres/2 · sin(34.18°) · px_per_m` of the anchor row. `check-unit-art.py`
-currently takes the bounding-box midpoint of the entire silhouette, which is a
-different quantity — on `goldgrass_vehicle_t1` the two disagreed by 6 px.
+**Measure registration on the footprint ellipse, not the whole silhouette** — this
+was the standing recommendation, and it was **tried and rejected**. See §11.16.
 
 #### Two things I got wrong here, and what caught them
 
@@ -796,3 +803,93 @@ and looking: the dense core sat visibly left of the anchor. **The composite deci
 it, not the estimator** — the same conclusion as the bombard that passed every
 numeric check while reading as a scaffold. When a metric and a picture disagree at
 this size, the picture is the evidence.
+
+
+### 11.16 Croppers is off its axis too — and the metric that found it
+
+Once §11.15's four were cleared, `croppers_infantry` was the only asset still
+failing registration, and it fails on **all five cuts**: row 0 sits −6.0 to −7.0 px
+off the anchor and the art travels 11.6–13.0 px across the eight rows. The per-row
+offsets are the textbook signature — `s −7.0, se −1.0, e +0.2, ne +6.0, n +6.0,
+nw +0.1, w −1.0, sw −7.0` — one clean cycle, zero at east and west, extreme at
+north and south. That is a group rigged about **0.36 m off the turntable axis**,
+the same mechanism as the tollbooth, and it wants the same fix: move the group's
+ground-footprint centre onto the pivot and re-render.
+
+Croppers had been skipped as cosmetic because 7 px is only ~2 px at board scale.
+That was the wrong reason to skip it: 2 px of *slide every time a unit turns* is a
+different thing from 2 px of static offset, and it is the only asset on the board
+that does it.
+
+**Fixed by rigid per-row translation** — the §11.15 fallback, and it applies here
+for the documented reason: `CRP_group` matches the shipped sheet at IoU 0.920
+(§11.3), so the model cannot be re-rendered as shipped. `scripts/recentre-unit-sheet.py`
+measures each row's displacement, refuses any shift that would push art off the
+cell edge (the margins here were 33–51 px against shifts of ≤7 px), and moves
+sheet and mask by the same whole-pixel amount. Verified lossless the strict way:
+for every row of every cut, the multiset of *visible* pixels — colour and alpha
+together — is identical before and after. Only fully-transparent padding columns
+differ, which is what a translation should change and all it changed. Result:
+row 0 within 0.5 px and drift ≤0.9 px on all five cuts, the tightest registration
+of any asset on the board, with `part%` and livery share unmoved to two decimals.
+
+The strict check earned its keep: the *first* form of it compared all four
+channels and reported False on all five sheets. The cause was padding — a fully
+transparent pixel still carries RGB, and shifting drops columns of `(r,g,b,0)`
+and adds columns of `(0,0,0,0)`. Comparing what is actually drawn is the question
+worth asking; comparing raw buffers answers a different one.
+
+**The proof is the picture, and it is one picture.** Overlay row `s` against row
+`n` with the anchor pinned:
+
+| sheet | row `s` x-extent | row `n` x-extent | width | midpoint |
+|---|---|---|---|---|
+| `croppers_infantry_std` | 33–145 | 46–158 | **112 both** | **13 px apart** |
+| `goldgrass_infantry_std` | 37–154 | 37–154 | 117 both | identical |
+
+Same shape, same width, moved. There is no viewing-angle explanation for that,
+which is exactly what the whole confound in §11.15 was about.
+
+#### Why the footprint restriction was rejected
+
+The reasoning behind it is right — raised geometry does enter the silhouette's
+bounding box at different rows and move its midpoint without the unit shifting.
+But **a metric that cannot pass known-good art is not evidence about unknown
+art**, and neither restriction passes. Measured inside the footprint band,
+`goldgrass_infantry_std` reads **−8.5 px off its anchor, drifting 13.5 px**; the
+ellipse gives −7.0 / 11.3. Pinning the anchor and stacking all eight rows shows
+that sheet is symmetric about the anchor to the pixel, and the table above shows
+its two extreme rows land on each other exactly. The restriction fails on squads
+because the band's bounding box is set by the outermost figures' feet, and *which*
+figures are outermost changes as the group turns — the same confound, relocated
+rather than removed.
+
+Two other estimators were built and thrown out for the same reason before settling:
+
+- **Mass centroid inside the band or ellipse.** Puts `goldgrass_landship` at
+  +5.3 px and `versari_landship` at 13.9–16.2 px of drift. Both are believed good.
+- **Least-squares fit of a single-cycle sinusoid to the eight offsets**, scored by
+  amplitude. This is the right *model* — it is what predicted the tollbooth to
+  within 0.6 px on every row — but as a *detector* it ranks `goldgrass_vehicle_t2`
+  (amplitude 9.58, residual 0.66) above every Croppers cut. A long asymmetric hull
+  rotating about its true contact centre traces a sinusoid in bounding-box
+  midpoint all by itself, so amplitude alone cannot separate cause from geometry.
+
+The whole-silhouette midpoint stays, because it passes every asset believed good
+and catches the one believed bad — on row 0, on all five cuts, which is what
+matters here. `check-unit-art.py` now also prints **`wvar`**, how much the
+silhouette's own width varies across the rows, and annotates any asset whose
+midpoint travels further than its width varies as a *rigid slide*. That is the
+table above reduced to one number, and it fires on four of the five Croppers cuts
+(the fifth, `vet`, carries a banner that swings its extent 19 px and hides the
+signature — the row-0 check still catches it). It is a **note, not a test**: the
+comparison is a good explanation and a bad discriminator, and it is labelled as
+one.
+
+**Vertical registration was checked too, and there is nothing to report.** A unit
+that sank as it turned would be as visible as one that slid, so the lowest drawn
+pixel per row was measured against the anchor across every sheet. The swing runs
+16–41 px, led by the landships — and known-good `lakers_vehicle_t1` swings 20 px
+by itself, because a long hull's near ground edge genuinely projects further down
+seen broadside than end-on. Same confound, same verdict: no check was added,
+because none of the candidates could pass art that is already correct.

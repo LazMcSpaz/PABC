@@ -20,6 +20,7 @@ import {
 import { recruitCapBonus } from "../game/actions.js";
 import { blockadeAt, blockadesOn, supplyStatus, blockadeSlotsUsed, blockadeIncome } from "../game/blockades.js";
 import { supplyCutter } from "../game/movement.js";
+import { effectiveVeteran } from "../game/stats.js";
 import { postAt } from "../game/posts.js";
 import { isUnitVisibleTo } from "../game/visibility.js";
 import { factionDef } from "../game/content.js";
@@ -312,7 +313,12 @@ export function adaptState(state) {
       effectiveMovement: u.movement,
       moveRemaining: u.moveRemaining ?? u.movement,
       fortified: !!u.fortified,
-      veteran: !!u.veteran,
+      // Every veteran read in the rules goes through effectiveVeteran, so this
+      // one does too. Old Hands rents the status (`veteranEquiv`), and a unit
+      // that FIGHTS as a veteran must also be shown and DRAWN as one — the
+      // sprite variant is picked from this field, so reading the raw flag put
+      // a unit with the chip in its non-veteran arrangement.
+      veteran: effectiveVeteran(state, u),
       chips: adaptChips(state, u.chips),
       chipUids: [...u.chips],
       immobilized: isImmobilized(state, u),
@@ -1455,7 +1461,10 @@ export function postAction(state, unitUid) {
 export function reinforcePreview(state, unitUid) {
   const unit = state.units[unitUid];
   if (!unit) return null;
-  const cap = unit.veteran ? CONFIG.unit.veteranStrengthCap : CONFIG.unit.baseStrengthCap;
+  // Same cap the Reinforce action itself charges against (actions.js
+  // unitStrengthCap), or the preview under-reports an Old Hands unit's deficit
+  // by the two Strength the chip's cap is worth.
+  const cap = effectiveVeteran(state, unit) ? CONFIG.unit.veteranStrengthCap : CONFIG.unit.baseStrengthCap;
   const deficit = cap - unit.baseStrength;
   const loc = state.locations[unit.node];
   const onFriendlyLoc = !!(loc && loc.controller === unit.owner);

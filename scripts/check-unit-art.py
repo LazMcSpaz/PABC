@@ -20,7 +20,10 @@ What it checks, and why each one matters:
   registration    every row's art must sit on the anchor. All eight rows are
                   drawn now — units turn to face the middle of their hex — so a
                   row that wanders off the anchor visibly slides sideways as a
-                  unit takes up a different stance
+                  unit takes up a different stance. Measured as the midpoint of
+                  the WHOLE silhouette; `wvar` reports how much the silhouette's
+                  own width changes across the rows, which is what tells a real
+                  displacement apart from a viewing-angle artifact — see below
   footprint       the drawn art should sit inside the footprint it declares,
                   since the slot chooser and hit target are sized from it
   livery share    masked fraction of the silhouette, against §8's 25% floor
@@ -42,6 +45,28 @@ LIVERY_FLOOR = 25.0        # §8: masked area wants to be a quarter of the silho
 ROW0_TOLERANCE = 4.0       # px; the front-facing row must sit on the anchor
 DRIFT_TOLERANCE = 12.0     # px; how far any other row may wander from it
 
+# Restricting registration to the ground footprint was tried and REJECTED.
+#
+# The reasoning for it is sound — the rule names the ground footprint, and raised
+# geometry (a whip, a banner, a gun barrel) enters the silhouette's bounding box
+# at different rows and moves its midpoint without the unit having shifted. But a
+# metric that cannot pass known-good art is not evidence about unknown art, and
+# neither restriction passes: measured inside the footprint band, goldgrass
+# infantry reads -8.5 px off its anchor and drifting 13.5 px, and the ellipse is
+# no better. Pinning the anchor and overlaying all eight rows shows that sheet is
+# symmetric about the anchor to the pixel. The restriction fails on squads because
+# the band's bounding box is set by the outermost figures' feet, and WHICH figures
+# are outermost changes as the group turns.
+#
+# The whole-silhouette midpoint passes every asset believed good and catches the
+# one believed bad (croppers, on row 0, on all five variants), so it stays.
+#
+# What actually settles a disputed case is the picture, not a better estimator:
+# overlay row `s` against row `n` with the anchor pinned. Croppers' two rows are
+# the same shape and the same width, 13 px apart — a rigid slide, which is an
+# off-axis rig and nothing else. Goldgrass's two rows land on each other exactly.
+# `wvar` below is that comparison reduced to one number.
+
 problems = []
 warnings = []
 
@@ -53,7 +78,7 @@ def main():
         return 1
     manifest = json.load(open(MANIFEST))["units"]
 
-    print(f"{'asset':34s} {'part%':>6s} {'liv%':>5s} {'row0':>6s} {'drift':>6s} {'clip':>4s}  notes")
+    print(f"{'asset':34s} {'part%':>6s} {'liv%':>5s} {'row0':>6s} {'drift':>6s} {'wvar':>6s} {'clip':>4s}  notes")
     for faction, units in sorted(manifest.items()):
         for unit, spec in sorted(units.items()):
             for variant, files in sorted(spec["variants"].items()):
@@ -107,8 +132,10 @@ def check_one(name, spec, files):
     clipped = 0
     row_off = []
     reach_x = reach_below = 0
+    row_width = []
     for r in range(len(rows)):
         mids = []
+        widths = []
         for c in range(nf):
             cell = A[r * ch:(r + 1) * ch, c * cw:(c + 1) * cw]
             ys, xs = np.nonzero(cell)
@@ -117,14 +144,23 @@ def check_one(name, spec, files):
             if xs.min() == 0 or ys.min() == 0 or xs.max() == cw - 1 or ys.max() == ch - 1:
                 clipped += 1
             mids.append((xs.min() + xs.max()) / 2.0 - ax)
+            widths.append(xs.max() - xs.min())
             if r == 0:
                 reach_x = max(reach_x, ax - xs.min(), xs.max() - ax)
                 reach_below = max(reach_below, ys.max() - ay)
         row_off.append(float(np.mean(mids)) if mids else 0.0)
+        row_width.append(float(np.mean(widths)) if widths else 0.0)
 
     row0 = row_off[0]
     drift = max(abs(o - row0) for o in row_off)
     worst = rows[max(range(len(row_off)), key=lambda i: abs(row_off[i] - row0))]
+    # How much the silhouette's own width moves across the rows. A midpoint that
+    # travels further than the shape's width varies is the shape MOVING; one that
+    # travels less is the shape changing extent under the camera.
+    wvar = max(row_width) - min(row_width)
+    if drift > 6.0 and drift > wvar:
+        notes.append(f"shape holds its width (±{wvar:.0f}px) while its midpoint travels "
+                     f"{drift:.0f}px — a rigid slide, i.e. the model sits off its rotation axis")
 
     if abs(row0) > ROW0_TOLERANCE:
         problems.append(f"{name}: row 0 art sits {row0:+.1f}px off the anchor, so the unit will not line "
@@ -144,7 +180,8 @@ def check_one(name, spec, files):
         warnings.append(f"{name}: row 0 art reaches {reach_below:.0f}px below the anchor, past the "
                         f"{half_w * SIN_ELEVATION:.0f}px its footprint projects")
 
-    print(f"{name:34s} {partial:6.2f} {livery:5.1f} {row0:+6.1f} {drift:6.1f} {clipped:4d}  {'; '.join(notes)}")
+    print(f"{name:34s} {partial:6.2f} {livery:5.1f} {row0:+6.1f} {drift:6.1f} {wvar:6.1f} {clipped:4d}  "
+          f"{'; '.join(notes)}")
 
 
 if __name__ == "__main__":

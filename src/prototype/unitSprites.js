@@ -115,7 +115,9 @@ export function hasSprite(faction) {
 
 // Which arrangement of that model to use.
 //
-// `veteran` is a boolean on the unit. The strength arrangement applies when the
+// `veteran` is the unit's EFFECTIVE veteran flag — the adapter resolves Old
+// Hands (which rents the status) before it gets here, so a unit that fights as a
+// veteran is drawn as one. The strength arrangement applies when the
 // unit carries a chip that adds Strength — deliberately keyed off installed
 // chips rather than effective Strength, because Strength also moves via
 // transient effects (Korad's Forge, MODIFY_STAT with duration "this_turn") and
