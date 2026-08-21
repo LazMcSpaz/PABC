@@ -14,6 +14,23 @@
 // arrive as a parameter instead. Hence the `isCut` predicate threaded through
 // the supply helpers rather than a `passesFreely` import.
 //
+// A hex carries ONE BLOCKADE PER ROAD leaving it, not one blockade. A tile the
+// road runs straight through has two roads and so takes two; a T-junction has
+// three and takes three; a dead-end takes one. That is the whole capacity rule
+// — you are closing a road, so the roads are what you have to close, and a hex
+// cannot hold more barricades than it has things to barricade.
+//
+// Records are therefore keyed `hex|edge`, where `edge` is the neighbouring hex
+// the road runs toward. `blockadeAt(state, hex)` still answers with one of them
+// so the many callers that only ask "is this tile held" keep working; anything
+// that needs the whole set asks `blockadesOn`.
+//
+// Blocking itself stays per HEX, not per edge: §3 makes a blockade a garrison
+// holding a tile rather than a gate on one border, and movement.js halts a
+// mover entering the hex. Two blockades on a junction therefore make it harder
+// to clear rather than differently shaped — each is separately contestable,
+// separately upgraded and separately paid for.
+//
 // A blockade lives in one of two phases in a single record:
 //
 //   done: false   under construction. Holds `progress` against `cost`, and the
@@ -27,9 +44,50 @@ import { CONFIG } from "./config.js";
 import { CHIPS } from "./content.js";
 import { emit } from "./events.js";
 
-// The blockade on `hex`, or null. A hex carries at most one (§3.1).
-export function blockadeAt(state, hex) {
-  return state.world?.blockades?.[hex] || null;
+// The composite key a blockade is stored under.
+export function blockadeKey(hex, edge) {
+  return `${hex}|${edge}`;
+}
+
+// Which roads leave `hex` — the neighbouring hexes a road actually runs to.
+// Both ends have to carry road, exactly as the renderer decides where to draw
+// one, or a blockade could be built on a road that is not there.
+export function roadEdgesOf(state, hex) {
+  if (!state.board.hexes[hex]?.road) return [];
+  return (state.board.adjacency[hex] || [])
+    .filter((n) => state.board.hexes[n]?.road)
+    .sort();
+}
+
+// How many blockades this hex could ever hold: one per road.
+export function blockadeCapacity(state, hex) {
+  return roadEdgesOf(state, hex).length;
+}
+
+// Every blockade on `hex`, in a stable order.
+export function blockadesOn(state, hex) {
+  const all = state.world?.blockades || {};
+  return Object.keys(all)
+    .filter((k) => all[k].hex === hex)
+    .sort()
+    .map((k) => all[k]);
+}
+
+// The blockade on `hex`, or the one on a particular road if `edge` is given.
+//
+// Without an edge this answers with the first — which is what most callers
+// want, because they are asking "is this tile held", a question that does not
+// depend on which road. Callers that care about a specific barricade pass the
+// edge; callers that need all of them use `blockadesOn`.
+export function blockadeAt(state, hex, edge = null) {
+  if (edge != null) return state.world?.blockades?.[blockadeKey(hex, edge)] || null;
+  return blockadesOn(state, hex)[0] || null;
+}
+
+// The roads on `hex` with no blockade on them yet.
+export function freeRoadEdges(state, hex) {
+  const taken = new Set(blockadesOn(state, hex).map((b) => b.edge));
+  return roadEdgesOf(state, hex).filter((e) => !taken.has(e));
 }
 
 // The blockade on `hex` only if it is finished AND paid — the phase that
@@ -38,9 +96,12 @@ export function blockadeAt(state, hex) {
 // blockade is DORMANT, still standing and still repairable, but the road is
 // open through it and it contributes no sight. Routing every consumer through
 // this one reader is what makes dormancy total rather than partial.
+export function activeBlockadesOn(state, hex) {
+  return blockadesOn(state, hex).filter((b) => b.done && b.paid !== false);
+}
+
 export function activeBlockadeAt(state, hex) {
-  const b = blockadeAt(state, hex);
-  return b && b.done && b.paid !== false ? b : null;
+  return activeBlockadesOn(state, hex)[0] || null;
 }
 
 export function ownedBlockades(state, pid) {
@@ -181,19 +242,23 @@ export function supplyStatus(state, pid, hex, isCut) {
 // --- lifecycle -----------------------------------------------------------
 // §3.1 — begin construction. The caller (actions.js) validates the road hex,
 // the supply line, the builder and the cost; this creates the state.
-export function startBlockade(state, owner, hex, builderUid) {
+export function startBlockade(state, owner, hex, builderUid, edge = null) {
   state.world.blockades = state.world.blockades || {};
+  // Callers that do not name a road get the first free one, so every existing
+  // call site keeps working and a hex with one road needs no extra argument.
+  const road = edge ?? freeRoadEdges(state, hex)[0] ?? null;
   const b = {
     owner,
     hex,
+    edge: road,
     done: false,
     progress: 0,
     cost: CONFIG.blockades.cost,
     builder: builderUid,
     chips: [],
   };
-  state.world.blockades[hex] = b;
-  emit(state, "blockade_started", { owner, hex, unit: builderUid, cost: b.cost });
+  state.world.blockades[blockadeKey(hex, road)] = b;
+  emit(state, "blockade_started", { owner, hex, edge: road, unit: builderUid, cost: b.cost });
   return b;
 }
 
@@ -224,8 +289,8 @@ export function resolveBlockadeSites(state, pid, isCut) {
     if (!b.done) {
       const builder = state.units[b.builder];
       if (!builder || builder.node !== b.hex || builder.owner !== pid) {
-        delete state.world.blockades[b.hex];
-        emit(state, "blockade_failed", { owner: pid, hex: b.hex, reason: "builder left" });
+        delete state.world.blockades[blockadeKey(b.hex, b.edge)];
+        emit(state, "blockade_failed", { owner: pid, hex: b.hex, edge: b.edge, reason: "builder left" });
         continue;
       }
     }
@@ -314,15 +379,20 @@ function creditUpgrade(state, b, amount) {
 // §3.3 — destroy-only. Unlike a Location a blockade has no VP or economic
 // identity worth inheriting, so a lost contest removes it rather than flipping
 // its controller.
-export function destroyBlockade(state, hex, by) {
-  const b = state.world?.blockades?.[hex];
+export function destroyBlockade(state, hex, by, edge = null) {
+  // Without an edge this takes the first blockade on the tile, matching
+  // blockadeAt: a contest fought on the hex brings down one barricade, not
+  // every barricade standing there.
+  const b = edge != null
+    ? state.world?.blockades?.[blockadeKey(hex, edge)]
+    : blockadesOn(state, hex)[0];
   if (!b) return null;
-  delete state.world.blockades[hex];
+  delete state.world.blockades[blockadeKey(b.hex, b.edge)];
   // Its chips go with it — a destroyed structure leaves no salvage, matching
   // the demolished-in-place rule for Location chips.
   for (const c of b.chips || []) state.removed.push(c);
   emit(state, "blockade_destroyed", {
-    owner: b.owner, hex, by: by || null, wasComplete: !!b.done,
+    owner: b.owner, hex, edge: b.edge, by: by || null, wasComplete: !!b.done,
   });
   return b;
 }

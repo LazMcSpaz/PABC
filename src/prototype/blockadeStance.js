@@ -8,9 +8,8 @@
 // Out near the edge for two reasons. It is where a checkpoint belongs — you
 // meet it entering the tile, not after crossing it — and it leaves the middle
 // clear, so a hex crossed by two roads has room for a blockade on each. The
-// engine keeps one blockade per hex today (`state.world.blockades[hexId]`), so
-// the second stance is unused; the geometry is per-segment anyway, and picking
-// a segment is the only thing that has to change if that limit lifts.
+// engine keeps one blockade per road now, so that is exactly what happens: a
+// through-road tile can hold two, a T-junction three.
 //
 // JSX-free so it stays testable headless, like boardSlots.js and hexProjection.
 import { HEX_H, HEX_W, neighborMap } from "./hexProjection.js";
@@ -60,10 +59,13 @@ export function pickSegment(hexId, rows, hexes, centers) {
 // should draw. Returns null when the hex has no road to sit on — the caller
 // falls back to the hex centre rather than dropping the blockade, because an
 // invisible thing that stops you reads as a bug.
-export function blockadeStance(hexId, rows, hexes, centers) {
+export function blockadeStance(hexId, rows, hexes, centers, edge = null) {
   const here = centers[hexId];
   if (!here) return null;
-  const neighbour = pickSegment(hexId, rows, hexes, centers);
+  // A blockade knows which road it closes. Without one — an older record, or a
+  // caller that does not track it — fall back to picking a road, so a blockade
+  // is never left undrawn.
+  const neighbour = (edge && centers[edge]) ? edge : pickSegment(hexId, rows, hexes, centers);
   if (!neighbour) return null;
   const there = centers[neighbour];
 

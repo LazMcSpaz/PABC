@@ -174,13 +174,19 @@ export default function RouteNetwork({ rows, hexes, centers, width, height }) {
   // with art is drawn by BlockadeSprites instead; what stays here is the
   // construction site, whose whole job is to show progress, and any faction
   // without blockade art.
-  const blockades = Object.values(hexes)
-    .filter((h) => h.blockade && centers[h.id])
-    .filter((h) => !(h.blockade.done && structureFor(h.blockade.owner, "tollbooth")))
-    .map((h) => ({
-      hex: h,
-      at: blockadeStance(h.id, rows, hexes, centers) || centers[h.id],
-    }));
+  const blockades = [];
+  for (const h of Object.values(hexes)) {
+    if (!centers[h.id]) continue;
+    for (const b of h.blockades || []) {
+      // A finished blockade with art is drawn by BlockadeSprites instead.
+      if (b.done && structureFor(b.owner, "tollbooth")) continue;
+      blockades.push({
+        hex: h,
+        blockade: b,
+        at: blockadeStance(h.id, rows, hexes, centers, b.edge) || centers[h.id],
+      });
+    }
+  }
   if (!roads.length && !rails.length && !blockades.length) return null;
 
   // TWO svg layers at full detail, and the split is load-bearing rather than
@@ -215,8 +221,9 @@ export default function RouteNetwork({ rows, hexes, centers, width, height }) {
             </g>
           );
         })}
-        {blockades.map(({ hex, at }) => (
-          <BlockadeMark key={`blockade-${hex.id}`} x={at.x} y={at.y} blockade={hex.blockade} />
+        {blockades.map(({ hex, blockade, at }) => (
+          <BlockadeMark key={`blockade-${hex.id}-${blockade.edge || "0"}`}
+            x={at.x} y={at.y} blockade={blockade} />
         ))}
       </svg>
     );
@@ -267,12 +274,12 @@ export default function RouteNetwork({ rows, hexes, centers, width, height }) {
           a unit standing at a blockade reads in front of it. */}
       {blockades.length > 0 && (
         <svg width={width} height={height} style={layer({ zIndex: 8010 })}>
-          {blockades.map(({ hex, at }) => (
+          {blockades.map(({ hex, blockade, at }) => (
             <BlockadeMark
-              key={`blockade-${hex.id}`}
+              key={`blockade-${hex.id}-${blockade.edge || "0"}`}
               x={at.x}
               y={at.y}
-              blockade={hex.blockade}
+              blockade={blockade}
             />
           ))}
         </svg>

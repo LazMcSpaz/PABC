@@ -19,6 +19,7 @@ import { hasTechNode } from "./tech.js";
 import { postAt, buildPost, revealPost } from "./posts.js";
 import {
   blockadeAt, startBlockade, supplyStatus, blockadeSlotsUsed,
+  blockadesOn, freeRoadEdges, roadEdgesOf, blockadeCapacity,
 } from "./blockades.js";
 import {
   meetsTech, meetsLoyalty, slotCapacity, slotsUsed, stationedUnitWithBay,
@@ -591,7 +592,20 @@ function validateBuildBlockade(state, { pid, player, params }) {
   if (!cell) return fail("no such hex");
   if (!cell.road) return fail("a blockade can only be built on a road hex");
   if (state.locations[hex]) return fail("cannot build a blockade on a Location hex");
-  if (blockadeAt(state, hex)) return fail("a blockade already occupies that hex");
+  // One blockade per ROAD, so the cap is however many roads leave this hex: two
+  // where a road runs through, three at a T. `params.edge` names which road;
+  // omitted, it takes the first free one.
+  const roads = roadEdgesOf(state, hex);
+  const free = freeRoadEdges(state, hex);
+  if (params.edge != null && !roads.includes(params.edge))
+    return fail("no road runs that way from this hex");
+  if (params.edge != null && !free.includes(params.edge))
+    return fail("a blockade already closes that road");
+  if (!free.length) {
+    return fail(blockadeCapacity(state, hex) === 1
+      ? "a blockade already occupies that hex"
+      : `every road out of this hex is already blockaded (${blockadesOn(state, hex).length})`);
+  }
   if (postAt(state, hex)) return fail("a listening post already occupies that hex");
   const crew = Object.values(state.units).filter((u) => u.owner === pid && u.node === hex);
   if (!crew.length) return fail("needs a friendly unit on the target hex");
@@ -610,8 +624,8 @@ function runBuildBlockade(state, { pid, player, params }) {
   // The pinned builder is the unit that paid the Action, so the player's own
   // choice of crew is honoured rather than re-picked here.
   const crew = Object.values(state.units).find((u) => u.owner === pid && u.node === params.hex);
-  const b = startBlockade(state, pid, params.hex, crew.uid);
-  return { hex: b.hex, unit: crew.uid, cost: b.cost };
+  const b = startBlockade(state, pid, params.hex, crew.uid, params.edge ?? null);
+  return { hex: b.hex, edge: b.edge, unit: crew.uid, cost: b.cost };
 }
 
 // --- Upgrade Blockade (rail doc §3.2) --------------------------------
@@ -620,7 +634,9 @@ function runBuildBlockade(state, { pid, player, params }) {
 // following Upkeeps (§3.4), not from banked scrap up front. No unit has to be
 // present — the builder was released when the structure landed.
 function validateUpgradeBlockade(state, { pid, player, params }) {
-  const b = blockadeAt(state, params.hex);
+  // `params.edge` names one of several barricades on a junction; without it
+  // this takes the first, which is the whole answer on a hex that holds one.
+  const b = blockadeAt(state, params.hex, params.edge ?? null);
   if (!b) return fail("no blockade on that hex");
   if (b.owner !== pid) return fail("not your blockade");
   if (!b.done) return fail("that blockade is still under construction");
@@ -641,7 +657,7 @@ function validateUpgradeBlockade(state, { pid, player, params }) {
 }
 
 function runUpgradeBlockade(state, { pid, params }) {
-  const b = blockadeAt(state, params.hex);
+  const b = blockadeAt(state, params.hex, params.edge ?? null);
   const def = CHIPS[params.chipId];
   b.build = { chipId: def.id, cost: effectiveBuildCost(state, pid, def), progress: 0 };
   emit(state, "build_started", { hex: b.hex, chipId: def.id, cost: b.build.cost });

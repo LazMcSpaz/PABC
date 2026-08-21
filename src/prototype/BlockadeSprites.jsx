@@ -16,17 +16,20 @@ import { structureFor, spriteStyle, ensureIdleKeyframes } from "./unitSprites.js
 export default function BlockadeSprites({ rows, hexes, centers }) {
   const drawn = [];
   for (const h of Object.values(hexes)) {
-    const b = h.blockade;
-    if (!b || !b.done || !centers[h.id]) continue;
-    const spec = structureFor(b.owner, "tollbooth");
-    if (!spec) continue; // minor factions ship no blockade art
-    const stance = blockadeStance(h.id, rows, hexes, centers) || {
-      // No road on this hex to stand on. Should not happen — a blockade is
-      // built on a road — but drawing it at the centre beats not drawing the
-      // thing that is stopping you.
-      ...centers[h.id], facing: "s",
-    };
-    drawn.push({ hex: h, blockade: b, spec, stance });
+    if (!centers[h.id]) continue;
+    // One per road out of the hex, each on its own road.
+    for (const b of h.blockades || []) {
+      if (!b.done) continue;
+      const spec = structureFor(b.owner, "tollbooth");
+      if (!spec) continue; // minor factions ship no blockade art
+      const stance = blockadeStance(h.id, rows, hexes, centers, b.edge) || {
+        // No road on this hex to stand on. Should not happen — a blockade is
+        // built on a road — but drawing it at the centre beats not drawing the
+        // thing that is stopping you.
+        ...centers[h.id], facing: "s",
+      };
+      drawn.push({ hex: h, blockade: b, spec, stance });
+    }
   }
   if (!drawn.length) return null;
 
@@ -38,7 +41,7 @@ export default function BlockadeSprites({ rows, hexes, centers }) {
         const style = spriteStyle(spec, "base", { uid: hex.id, facing: stance.facing });
         return (
           <div
-            key={`blockade-sprite-${hex.id}`}
+            key={`blockade-sprite-${hex.id}-${blockade.edge || "0"}`}
             data-blockade-sprite={hex.id}
             title={`Blockade — ${faction?.name || blockade.owner}`}
             style={{
