@@ -1,10 +1,15 @@
 /**
  * AudioWidget.jsx — the always-there audio control.
  *
- * A small holo speaker button pinned bottom-left on every screen. Click it to
- * open a panel with mute, separate music and effects levels, what's playing,
- * and a skip. It is also the one place that tells the player when the
- * browser's autoplay policy has muzzled us, and offers the click that fixes it.
+ * A small holo speaker button pinned bottom-left on every screen, opening a
+ * panel with the two level sliders and nothing else. The same sliders appear
+ * in the in-game Settings window; this is the copy that is reachable from the
+ * title screen, where there is no Settings to open.
+ *
+ * The one thing it says beyond the levels is when the browser's autoplay
+ * policy has muzzled us — that is a state the player cannot otherwise explain,
+ * so it earns its line. Nothing else does: a now-playing readout is a detail
+ * nobody came here for.
  *
  * Styling follows the HUD language in HudChrome.jsx (C palette, Oswald,
  * holo cyan) so it does not read as browser chrome bolted onto the game.
@@ -13,6 +18,7 @@
 import { useEffect, useRef, useState } from "react";
 import { C } from "../prototype/HudChrome.jsx";
 import { useAudio } from "./AudioProvider.jsx";
+import VolumeSliders from "./VolumeSliders.jsx";
 
 const HOLO = "#56d3c6";
 
@@ -62,6 +68,9 @@ export default function AudioWidget() {
   return (
     <div
       ref={rootRef}
+      // Opts this whole corner out of the global click cue — a volume control
+      // that blips every time you touch it is unusable for setting a level.
+      data-sfx="none"
       style={{
         position: "fixed",
         left: 12,
@@ -127,29 +136,11 @@ export default function AudioWidget() {
 // ---------------------------------------------------------------------------
 
 function AudioPanel({ audio }) {
-  const { music, sfx } = audio;
-  const [gapLeft, setGapLeft] = useState(() => music.getGapRemainingMs());
-
-  // Only tick while the panel is open — the player never emits position
-  // updates, precisely so the rest of the app does not re-render at 4Hz.
-  useEffect(() => {
-    if (music.state !== "gap") { setGapLeft(0); return; }
-    setGapLeft(music.getGapRemainingMs());
-    const t = setInterval(() => setGapLeft(music.getGapRemainingMs()), 250);
-    return () => clearInterval(t);
-  }, [music.state, music]);
-
-  let line;
-  if (music.blocked) line = "Click anywhere to start the music";
-  else if (music.state === "gap") line = gapLeft > 0 ? `Next cut in ${Math.ceil(gapLeft / 1000)}s` : "Next cut…";
-  else if (music.state === "playing") line = music.trackTitle || "Playing";
-  else line = "Standby";
-
   return (
     <div
       style={{
         minWidth: 214,
-        padding: "12px 13px 13px",
+        padding: "12px 13px 14px",
         borderRadius: 9,
         background: "linear-gradient(158deg, rgba(16,28,29,0.95), rgba(7,13,14,0.97))",
         border: `1px solid rgba(86,211,198,0.55)`,
@@ -165,93 +156,27 @@ function AudioPanel({ audio }) {
           color: C.holoHi,
           opacity: 0.72,
           fontWeight: 600,
-          marginBottom: 8,
+          marginBottom: 11,
         }}
       >
         ▸ Sound
       </div>
 
-      <div
-        style={{
-          fontSize: 11.5,
-          letterSpacing: 0.7,
-          color: music.blocked ? C.gold : "rgba(236,227,210,0.86)",
-          minHeight: 15,
-          marginBottom: 10,
-          whiteSpace: "nowrap",
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-        }}
-      >
-        {line}
-      </div>
+      {audio.music.blocked && (
+        <div
+          style={{
+            fontSize: 10.5,
+            letterSpacing: 0.7,
+            lineHeight: 1.4,
+            color: C.gold,
+            marginBottom: 11,
+          }}
+        >
+          Click anywhere to start the music.
+        </div>
+      )}
 
-      <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
-        <PanelBtn onClick={audio.toggleMuted} active={audio.muted} title={audio.muted ? "Unmute" : "Mute everything"}>
-          {audio.muted ? "Unmute" : "Mute"}
-        </PanelBtn>
-        <PanelBtn onClick={music.state === "gap" ? music.playNow : music.skip} title="Next track">
-          {music.state === "gap" ? "Play now" : "Skip"}
-        </PanelBtn>
-      </div>
-
-      <Slider label="Music" value={music.volume} onChange={music.setVolume} />
-      <Slider label="FX" value={sfx.volume} onChange={sfx.setVolume} />
+      <VolumeSliders compact />
     </div>
-  );
-}
-
-function Slider({ label, value, onChange }) {
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10 }}>
-      <span
-        style={{
-          fontSize: 8.5, letterSpacing: 1.5, textTransform: "uppercase",
-          color: C.textFaint, width: 30, flexShrink: 0,
-        }}
-      >
-        {label}
-      </span>
-      <input
-        type="range"
-        min={0}
-        max={100}
-        value={Math.round(value * 100)}
-        onChange={(e) => onChange(Number(e.target.value) / 100)}
-        aria-label={`${label} volume`}
-        style={{ flex: 1, accentColor: HOLO, cursor: "pointer", minWidth: 0 }}
-      />
-      <span style={{ fontSize: 10, color: C.textDim, width: 24, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
-        {Math.round(value * 100)}
-      </span>
-    </div>
-  );
-}
-
-function PanelBtn({ children, onClick, active, title }) {
-  return (
-    <button
-      type="button"
-      className="hud-int"
-      onClick={onClick}
-      title={title}
-      style={{
-        flex: 1,
-        fontFamily: C.font,
-        fontSize: 10,
-        fontWeight: 700,
-        letterSpacing: 1.4,
-        textTransform: "uppercase",
-        padding: "6px 8px",
-        borderRadius: 5,
-        cursor: "pointer",
-        color: active ? "#06110f" : C.holoHi,
-        background: active ? HOLO : "rgba(86,211,198,0.10)",
-        border: `1px solid rgba(86,211,198,${active ? 0.9 : 0.35})`,
-        transition: "background .14s ease, color .14s ease",
-      }}
-    >
-      {children}
-    </button>
   );
 }

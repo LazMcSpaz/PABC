@@ -134,7 +134,7 @@ await page.waitForTimeout(200);
 const liveGain = await page.evaluate(() => window.__ashlandAudio.music.gain?.gain.value ?? -1);
 check("unmute restores it", liveGain > 0.05, `gain=${liveGain.toFixed(3)}`);
 
-for (const cue of ["envoyArrival", "diplomacyAlert", "windowOpen", "radialAmbience", "contestRoll"]) {
+for (const cue of ["uiSelect", "windowOpen", "envoyArrival", "diplomacyAlert", "radialAmbience", "contestRoll"]) {
   const loaded = await page.evaluate(async (name) => {
     const p = window.__ashlandAudio.sfx;
     await p.load(name);
@@ -205,14 +205,58 @@ await page.keyboard.press("Escape"); // closes the radial with nothing picked
 await page.waitForTimeout(600);
 check("closing the radial stops it", !(await looping()));
 
-// Re-open and pick a sector: the bed must stop when the choice is made, not
-// only when the radial is dismissed.
+// Re-open and pick the Diplomacy sector. Three things have to happen: the bed
+// stops, the sector itself clicks, and the drawer it opened gets the window
+// cue. The drawer is the destination least like the others (not a
+// TitledWindow), so it is the one most likely to be missed.
 await page.locator("button[title='Menu']").first().click();
 await page.waitForTimeout(400);
 await clearFired();
-await page.locator("text=Diplomacy").first().click();
+await page.locator('[data-sfx="select"]').filter({ hasText: /Diplomacy/i }).first().click();
 await page.waitForTimeout(700);
 check("picking a sector stops the ambience", !(await looping()));
+check("a radial sector clicks", (await fired()).includes("uiSelect"), (await fired()).join(","));
+check("the diplomacy drawer gets the window cue", (await fired()).includes("windowOpen"), (await fired()).join(","));
+await page.keyboard.press("Escape");
+await page.waitForTimeout(400);
+
+// The click cue on an ordinary button, and the audio widget's opt-out.
+await clearFired();
+await page.locator("button[title='Menu']").first().click();
+await page.waitForTimeout(250);
+check("an ordinary button clicks", (await fired()).includes("uiSelect"), (await fired()).join(","));
+await page.keyboard.press("Escape");
+await page.waitForTimeout(300);
+
+await clearFired();
+await page.locator("button[aria-label='Sound controls']").click();
+await page.waitForTimeout(300);
+const sliderCount = await page.locator('[data-sfx="none"] input[type="range"]').count();
+check("the audio widget shows exactly the two sliders", sliderCount === 2, `${sliderCount} slider(s)`);
+check(
+  "no now-playing readout in the widget",
+  (await page.locator('[data-sfx="none"]').innerText()).toLowerCase().includes("main theme") === false,
+);
+await page.locator('[data-sfx="none"] input[type="range"]').first().click();
+await page.waitForTimeout(250);
+check("the audio widget's own controls stay silent", !(await fired()).includes("uiSelect"), (await fired()).join(","));
+await page.locator("button[aria-label='Sound controls']").click(); // close
+await page.waitForTimeout(300);
+
+// Volume controls in the in-game Settings window. Settings is not a radial
+// sector — it hangs off the top bar's gear.
+await page.locator("button[title='Settings']").first().click();
+await page.waitForTimeout(700);
+const settingsSliders = await page
+  .locator('input[type="range"][aria-label="Music volume"], input[type="range"][aria-label="Sound Effects volume"]')
+  .count();
+check("settings offers both volume sliders", settingsSliders >= 2, `${settingsSliders} found`);
+const volBefore = await page.evaluate(() => window.__ashlandAudio.music.volume);
+await page.locator('input[type="range"][aria-label="Music volume"]').last().fill("22");
+await page.waitForTimeout(300);
+const volAfter = await page.evaluate(() => window.__ashlandAudio.music.volume);
+check("the settings slider actually moves the level", Math.abs(volAfter - 0.22) < 0.02, `${volBefore} → ${volAfter}`);
+await page.evaluate(() => window.__ashlandAudio.music.setVolume(0.55));
 await page.keyboard.press("Escape");
 await page.waitForTimeout(400);
 
@@ -251,14 +295,20 @@ if (contestHex && (await clickHex(contestHex))) {
     await page.waitForTimeout(800);
     check("a conflict roll sounds the battle stinger", await held());
 
-    // The overlay is a ~6.3s dramatisation and the cue runs 7.4s. Closing it
-    // early must take the sound with it rather than leaving a battle playing
-    // over a quiet board.
-    await page.keyboard.press("Escape");
-    await page.locator("button").filter({ hasText: /^(Exit|Close|Done)$/i }).first()
-      .click({ timeout: 2000 }).catch(() => {});
-    await page.waitForTimeout(900);
-    check("closing the roll releases it", !(await held()));
+    // Closing the overlay must take the sound with it rather than leaving a
+    // battle playing over a quiet board. The overlay's Exit button is part of
+    // its timeline and only appears with the winner banner at ~6.3s, so wait
+    // for it rather than guessing — clicking early is how this check used to
+    // pass by accident.
+    const exitBtn = page.locator("button").filter({ hasText: /^Exit$/i }).first();
+    await exitBtn.waitFor({ state: "visible", timeout: 12000 }).catch(() => {});
+    await exitBtn.click({ timeout: 3000 }).catch(() => {});
+    await page.waitForTimeout(700);
+    // _heldWanted is cleared only by release(), never by a cue ending on its
+    // own — so it, not _sustained, is what proves the wiring let go.
+    const stillWanted = await page.evaluate(() =>
+      [...window.__ashlandAudio.sfx._heldWanted].includes("contestRoll"));
+    check("closing the roll releases it", !stillWanted && !(await held()));
   } else {
     check("a conflict roll sounds the battle stinger", false, "no Contest button on the staged location");
   }

@@ -27,9 +27,16 @@ export const SFX = {
    *  so it stays under the envoy's cue rather than matching it. */
   diplomacyAlert: { src: `${DIR}/diplomacy-alert.mp3`, gain: 0.7 },
 
-  /** A detail window sliding in — a selected unit, location, or blockade.
-   *  Fires on nearly every click on the board, so it sits well back. */
+  /** A detail window sliding in — a selected unit, location, or blockade, or
+   *  whatever the radial menu opens. Fires on nearly every click on the
+   *  board, so it sits well back. */
   windowOpen: { src: `${DIR}/window-open.mp3`, gain: 0.45 },
+
+  /** The click under every selection, toggle and button in the game. It fires
+   *  more often than everything else here combined, so it is mixed to be felt
+   *  rather than heard — loud enough to confirm the press, quiet enough to
+   *  disappear under whatever the press opened. */
+  uiSelect: { src: `${DIR}/ui-select.mp3`, gain: 0.32 },
 
   /** Held under the radial menu for as long as it is open with nothing
    *  picked. `loop: true` repeats it until released; it is mastered ~6 dB
@@ -48,4 +55,4 @@ export const SFX = {
 };
 
 /** Cues worth having in memory before the moment they're needed. */
-export const PRELOAD = ["envoyArrival", "diplomacyAlert", "windowOpen", "radialAmbience", "contestRoll"];
+export const PRELOAD = ["uiSelect", "windowOpen", "envoyArrival", "diplomacyAlert", "radialAmbience", "contestRoll"];

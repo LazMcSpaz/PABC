@@ -16,6 +16,7 @@ import {
 } from "./HudChrome.jsx";
 import { useIsPhone } from "./useViewport.js";
 import { useSfxHold, useSfxOn, useSfxOnChange } from "../audio/AudioProvider.jsx";
+import VolumeSliders from "../audio/VolumeSliders.jsx";
 import { createGame } from "../game/setup.js";
 import { startTurn, endTurn } from "../game/turn.js";
 import { performAction } from "../game/actions.js";
@@ -1019,6 +1020,18 @@ export default function Prototype({ config, onNewGame }) {
   })();
   useSfxOnChange(selectedUnitForPanel && `unit:${selectedUnitForPanel}`, "windowOpen");
   useSfxOnChange(selectedHexForWindow && `hex:${selectedHexForWindow}`, "windowOpen");
+
+  // Whatever the radial menu opened gets the same window cue — the diplomacy
+  // drawer, the tech wheel, and the Units / Economy / Settings panels. One key
+  // rather than four hooks: onMenuPick opens exactly one of these at a time,
+  // and a single key means switching straight from one to another still reads
+  // as a new window opening.
+  const radialDestination =
+    showDiplomacy ? "diplomacy"
+    : showTechWheel ? "tech"
+    : menuPanel ? `panel:${menuPanel}`
+    : null;
+  useSfxOnChange(radialDestination, "windowOpen");
   // Herald banners — the small, option-less callouts at the top of the screen
   // announcing what the powers just did to each other. Keyed on the newest
   // banner's id: they arrive in batches and the retrigger guard collapses a
@@ -1206,7 +1219,20 @@ export default function Prototype({ config, onNewGame }) {
 
       {menuPanel === "settings" && (
         <TitledWindow key="settings" title="Settings" onClose={() => setMenuPanel(null)}>
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 16 }}>
+            <span style={{ fontFamily: HUD.font, fontSize: 13, fontWeight: 700, letterSpacing: 0.6, color: HUD.text }}>
+              Volume
+            </span>
+            <p className="pc-prose" style={{ margin: "0 0 8px", fontSize: 12, lineHeight: 1.5, color: HUD.textDim }}>
+              The score and the interface run on separate levels — turn either
+              one down without losing the other. Both are remembered between
+              sessions.
+            </p>
+            {/* Same component the corner audio widget uses, so the two can
+                never disagree about what these are called or where they sit. */}
+            <VolumeSliders />
+          </div>
+          <div style={{ borderTop: `1px solid ${theme.border}`, paddingTop: 14, display: "flex", flexDirection: "column", gap: 6 }}>
             <span style={{ fontFamily: HUD.font, fontSize: 13, fontWeight: 700, letterSpacing: 0.6, color: HUD.text }}>
               AI turn speed
             </span>

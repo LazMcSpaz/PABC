@@ -30,6 +30,47 @@ export function AudioProvider({ children, widget = true }) {
   useEffect(() => sfx.subscribe(setSfxStatus), [sfx]);
   useEffect(() => { sfx.preloadAll(); }, [sfx]);
 
+  // Every selection, toggle and button press clicks — delegated from the
+  // document rather than wired into each of the ~70 interactive components,
+  // which would be that many chances to forget one. `.hud-int` is the
+  // project's own marker for "interactive HUD element", so it does most of
+  // the work; `data-sfx="select"` covers the handful of clickables that are
+  // neither buttons nor tagged (the radial menu's SVG sectors).
+  //
+  // Capture phase, so a component that stops propagation cannot silence it,
+  // and pointerdown rather than click so the sound lands with the press.
+  // Range inputs are excluded: dragging a slider is not a selection, and a
+  // blip per pixel of travel is intolerable.
+  useEffect(() => {
+    const SELECTOR = [
+      "button",
+      '[role="button"]',
+      'input[type="checkbox"]',
+      'input[type="radio"]',
+      "select",
+      "a[href]",
+      "label",
+      ".hud-int",
+      '[data-sfx="select"]',
+    ].join(",");
+
+    const onDown = (e) => {
+      const target = e.target;
+      if (!(target instanceof Element)) return;
+      const el = target.closest(SELECTOR);
+      if (!el) return;
+      if (el.disabled || el.getAttribute("aria-disabled") === "true") return;
+      if (el.matches('input[type="range"]')) return;
+      // A subtree can opt out — the audio widget does, so setting a level
+      // does not click at you while you do it.
+      if (target.closest('[data-sfx="none"]')) return;
+      sfx.play("uiSelect");
+    };
+
+    document.addEventListener("pointerdown", onDown, true);
+    return () => document.removeEventListener("pointerdown", onDown, true);
+  }, [sfx]);
+
   // Dev handle for scripts/check-audio.mjs and for poking at the soundtrack
   // from the console. Dev only — nothing in the app reads it.
   useEffect(() => {

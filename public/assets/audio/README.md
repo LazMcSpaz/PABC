@@ -26,6 +26,7 @@ release.
 |---|---|---|
 | `sfx/diplomacy-alert.mp3` | `freesound_community-sci-fi-door-14782` | Freesound |
 | `sfx/radial-ambience.mp3` | `freesound_community-mysterious-electricity-73307` | Freesound |
+| `sfx/ui-select.mp3` | `freesound_community-3rd-blip-95666` | Freesound |
 | `sfx/contest-roll.mp3` | `freesound_community-angry-mob-loop-6847` | Freesound |
 | `sfx/contest-roll.mp3` | `universfield-epic-war-combat-scream-352707` | UNIVERSFIELD |
 | `sfx/contest-roll.mp3` | `dragon-studio-sword-fight-2-393846` | Dragon Studio |
@@ -84,6 +85,15 @@ Cues are too short for an integrated loudness read, so they are matched on
 bed at −20. Relative mix (which cue is "louder" in play) is *not* baked in — it
 lives in the `gain` field of `src/audio/sfxLibrary.js`, so re-levelling a cue is
 a one-line edit rather than a re-encode.
+
+> **Cues shorter than 400 ms need padding to measure.** EBU R128's momentary
+> loudness uses a 400 ms window, so a clip shorter than that never completes
+> one and `ebur128` reports the −120.7 dB silence floor for the whole file —
+> which, fed to the gain formula below, asks for +106 dB. `ui-select.mp3` is
+> 0.1 s and hits this. Measure a padded copy (`apad=whole_dur=1.0`) and apply
+> the resulting gain to the *unpadded* audio. The padding dilutes the reading,
+> so a short click lands quieter than a sustained cue at the same nominal
+> target — which is about right for how a click is heard.
 
 ```sh
 TRIM="silenceremove=start_periods=1:start_threshold=-66dB:start_silence=0.01:detection=peak,\
@@ -164,4 +174,6 @@ real browser: the pinned title theme, the ten-second gaps, the four-cut
 rotation, every cue firing on the interaction it belongs to (including a staged
 envoy audience and a staged herald banner), the bed starting and stopping with
 the radial menu, a staged contest sounding and releasing the battle stinger,
-and the autoplay-blocked path.
+the click cue on buttons and radial sectors — and *not* on the audio widget's
+own controls — the volume sliders in both places that offer them, and the
+autoplay-blocked path.

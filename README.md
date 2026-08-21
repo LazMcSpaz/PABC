@@ -122,6 +122,16 @@ player parks in a `blocked` state and starts on the first click rather than
 going silently dead. Level runs through gain nodes rather than
 `audio.volume`, which iOS Safari ignores.
 
+Every button, toggle and selection clicks, driven by one delegated listener in
+`AudioProvider` rather than wiring ~70 components by hand. It recognises
+`button`, form controls, and the project's own `.hud-int` marker; `data-sfx="select"`
+tags the few clickables that are none of those (the radial menu's SVG sectors),
+and `data-sfx="none"` opts a subtree out — the audio widget uses it, so setting
+a level doesn't click at you while you do it.
+
+Levels live in `src/audio/VolumeSliders.jsx`, shared by the corner widget and
+the in-game Settings window so the two can't drift apart.
+
 Adding a cue: drop the file in `public/assets/audio/sfx/` (mastering recipe in
 that folder's README), add an entry to `src/audio/sfxLibrary.js`, and fire it
 with `useSfxOn` (once per game object), `useSfxOnChange` (every time a UI
