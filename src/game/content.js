@@ -48,6 +48,14 @@ export const FACTIONS = {
 // kin (warm) | rival (cold) | foil (wary) seeds default standing toward
 // the associated major. Not added to FACTIONS so the default 4-major
 // headless game (Object.keys(FACTIONS)) is unchanged.
+//
+// `homeLocation` is optional and names the Location a minor actually holds
+// in the fiction. A minor that declares one seats THERE whenever that
+// Location made the board and nobody already holds it; the others (and this
+// one, when its home is off a small board) fall back to the proximity rule
+// in setup.js. Only the Dambarans have one so far: they hold Dambar, and
+// seating them at whatever neutral happened to sit nearest the Versari put
+// them in a random city while their own stood empty.
 export const MINOR_FACTIONS = {
   tempest: {
     id: "tempest", name: "Clan Tempest", color: "#4a6fa5",
@@ -73,7 +81,7 @@ export const MINOR_FACTIONS = {
   dambarans: {
     id: "dambarans", name: "The Dambarans", color: "#5fa06e",
     tier: "minor", scope: "local", playable: false,
-    associatedMajor: "versari", relationship: "foil",
+    associatedMajor: "versari", relationship: "foil", homeLocation: "dambar",
     temperament: "honorable", aggression: 0.45, trust: 0.92, grudge: 0.5, sociability: 0.5,
     victoryLean: "conquest", expansion: 0.4,
   },
