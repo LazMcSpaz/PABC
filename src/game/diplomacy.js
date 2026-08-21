@@ -2349,6 +2349,13 @@ export function dominionMet(state, pid) {
 // away, or attack. It does not apply when nobody is left to break it — kill
 // everyone and you have won, there is nothing to hold against.
 export function checkDominion(state) {
+  // Alliances and vassals are worth SCORE now, and nothing else recomputes on
+  // a change to the alliance graph — territory changes call recomputeVp,
+  // handshakes never did. Without this a lord who had sworn the whole board
+  // still showed its opening total, and the closing table could rank a winner
+  // below its own vassal. This runs wherever the political situation moves,
+  // which is exactly where the score needs re-reading.
+  recomputeVp(state);
   if (state.winnerId) return;
   if (state.rules?.victory?.dominion === false) return;
   const held = state.diplomacy.dominionSince = state.diplomacy.dominionSince || {};

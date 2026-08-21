@@ -93,7 +93,7 @@ export default function HudShowcase({ onExit }) {
           <p className="pc-prose" style={{ margin: 0, fontSize: 13, lineHeight: 1.6, color: C.textDim }}>Your fielded units, their strength and movement, installed chips, and reinforcement options.</p>
         </TitledWindow>}
         {panel === "diplomacy" && <TitledWindow key="diplomacy" title="Diplomacy" icon={ICON.diplomacy} onClose={() => setPanel(null)}>
-          <p className="pc-prose" style={{ margin: 0, fontSize: 13, lineHeight: 1.6, color: C.textDim }}>Broker deals, pacts and coalitions with rival factions — manage reputation and pursue a Recognition victory.</p>
+          <p className="pc-prose" style={{ margin: 0, fontSize: 13, lineHeight: 1.6, color: C.textDim }}>Broker deals, pacts and coalitions with rival factions — manage reputation, and deal with every rival by treaty or by force.</p>
         </TitledWindow>}
         {panel === "encounter" && (
           <EncounterModal

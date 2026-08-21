@@ -290,7 +290,7 @@ export default function TitleScreen({
               color:         `rgba(143,246,234,0.50)`,
             }}
           >
-            Lead one faction · twelve VP claim the wasteland
+            Lead one faction · ally, subdue or bury the rest
           </motion.div>
 
           {/* ──────────────────────────────────────────────────────────────

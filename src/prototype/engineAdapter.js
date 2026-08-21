@@ -542,8 +542,8 @@ export function adaptState(state) {
     phase: state.phase,
     youId: state.humanFactionId,
     activeId: state.turnOrder[state.activeIndex],
-    // No longer a goal — VP is the end-of-game standing. Kept on the view
-    // model so the HUD dial can still show a scale until it is redesigned.
+    // Not a goal any more — VP is the closing standing. Kept only so the
+    // phone bar has a fallback before `dominion` arrives.
     vpGoal: CONFIG.vpThreshold,
     techThresholds: [...CONFIG.tech.researchThresholds],
     maxTechLevel: CONFIG.tech.maxLevel,
@@ -552,6 +552,12 @@ export function adaptState(state) {
     hexes,
     rows: buildRows(state),
     winnerId: state.winnerId,
+    // HOW they won — conquest, diplomacy, submission, or the mix. The end
+    // screen used to show only a VP table, which since VP stopped being the
+    // condition told a player nothing about what actually ended the game.
+    winnerBy: state.winnerId
+      ? ([...(state.log || [])].reverse().find((e) => e.name === "dominion_won")?.payload?.by || null)
+      : null,
     // v0.2 §16.5 — in-transit field reinforcements, for board overlay /
     // unit panel ETA display.
     reinforcements: (state.reinforcements || []).map((r) => ({ ...r })),

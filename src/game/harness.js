@@ -3625,6 +3625,27 @@ line("\n§18 DIPLOMACY CAPSTONE");
         })());
     }
 
+    // The closing table has to be right the moment the game ends. Nothing
+    // recomputed the score on a change to the ALLIANCE graph — territory
+    // changes always did, handshakes never did — so a lord who had sworn the
+    // whole board still showed its opening total, and the end screen could
+    // rank the winner below its own vassal.
+    {
+      const g = mk();
+      const before = g.players.versari.vp;
+      for (const f of others(g)) vassalize(g, "versari", f, "test");
+      checkDominion(g);
+      const expect = before + others(g).length * CONFIG.victory.score.vassal;
+      check("swearing the board moves the score without waiting for a turn",
+        g.players.versari.vp === expect);
+      // Only for a lord who has sworn EVERYONE. VP is not the condition, so in
+      // an organic game a diplomat can win it while a bigger land power
+      // out-scores them — measured at 2 games in 14. The end screen pins the
+      // winner to the top of the table rather than pretending otherwise.
+      check("…and a lord who has sworn the whole board tops the table",
+        others(g).every((f) => g.players.versari.vp > g.players[f].vp));
+    }
+
     // A faction serves ONE lord, so two rivals can never both count it.
     {
       const g = mk();

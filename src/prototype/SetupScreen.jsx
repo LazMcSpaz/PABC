@@ -9,9 +9,7 @@
 //   humanFactionId: string  — "versari"|"lakers"|"goldgrass"|"plainers"
 //   mapSize:       string   — "small"|"medium"|"large"|"huge"
 //   factionCount:  number   — integer 2..4
-//   victory: {
-//     dominion:  boolean  — every surviving faction allied, vassal or gone
-//   }
+//   (no victory key — there is one condition and it is always on)
 //   encounters: {
 //     field: number  — 0..1 frequency
 //     world: number  — 0..1 frequency
@@ -74,18 +72,6 @@ export function locationsFor(sizeId, densityIndex) {
   if (!tiers) return CONFIG.mapSizes[sizeId]?.locations ?? 0;
   return tiers[Math.max(0, Math.min(tiers.length - 1, densityIndex))];
 }
-
-// One condition, not three. Conquest / Recognition / Elimination turned out to
-// be three names for three faces of the same thing — every faction still
-// standing is dealt with — and only one of the three code paths honoured its
-// own switch anyway.
-const VICTORY_CONDITIONS = [
-  {
-    id: "dominion",
-    label: "Dominion",
-    desc: "Win when every surviving faction is your ally, your vassal, or gone — then hold it for 3 rounds. Off: the game never ends on its own.",
-  },
-];
 
 const FREQ_LABELS = ["None", "Low", "Normal", "High"];
 // Which of the four bands a 0..1 slider sits in. One definition, so the label
@@ -500,9 +486,6 @@ export default function SetupScreen({ onStart, onBack }) {
   const [sizeIndex, setSizeIndex] = useState(1);      // medium
   const [densityIndex, setDensityIndex] = useState(1); // medium
 
-  // victory conditions — all on by default; guard: ≥1 must stay enabled
-  const [victory, setVictory] = useState({ dominion: true });
-
   // advanced settings (collapsible)
   const [advOpen, setAdvOpen] = useState(false);
   const [fieldFreq, setFieldFreq] = useState(0.5);
@@ -510,14 +493,6 @@ export default function SetupScreen({ onStart, onBack }) {
   const [minorFactions, setMinorFactions] = useState(true);
   const [fogOfWar, setFogOfWar] = useState(true);
   const [seedText, setSeedText] = useState("");
-
-  // guard: prevent disabling the last active victory condition
-  function toggleVictory(id) {
-    const next = { ...victory, [id]: !victory[id] };
-    const anyOn = Object.values(next).some(Boolean);
-    if (!anyOn) return; // refuse — must keep at least one
-    setVictory(next);
-  }
 
   function start() {
     const seed = Number(seedText) || Math.floor(Math.random() * 1e9);
@@ -530,7 +505,6 @@ export default function SetupScreen({ onStart, onBack }) {
       // handed a number rather than a pair of UI concepts.
       locationBudget: settlementCount,
       factionCount,
-      victory: { ...victory },
       // Resolved to engine units here, like the settlement budget above, so
       // the engine is handed shares and counts rather than UI slider values.
       encounters: {
@@ -721,30 +695,6 @@ export default function SetupScreen({ onStart, onBack }) {
                 onChange={setFactionCount}
                 label="major factions"
               />
-            </div>
-
-            <Divider />
-
-            {/* Victory Conditions */}
-            <div>
-              <div style={{ ...sectionLabelStyle, marginBottom: 12 }}>▸ Victory Conditions</div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                {VICTORY_CONDITIONS.map((vc) => {
-                  const isOn = victory[vc.id];
-                  const enabledCount = Object.values(victory).filter(Boolean).length;
-                  const isLast = isOn && enabledCount === 1;
-                  return (
-                    <div key={vc.id} title={isLast ? "At least one victory condition must be enabled." : undefined}>
-                      <Toggle
-                        value={isOn}
-                        onChange={() => toggleVictory(vc.id)}
-                        label={vc.label}
-                        desc={vc.desc}
-                      />
-                    </div>
-                  );
-                })}
-              </div>
             </div>
 
             <Divider />

@@ -395,10 +395,30 @@ function formatEvent(ev, engineState) {
     case "menace_changed":
       if (p.player !== you) return null;
       return { color: p.delta > 0 ? theme.accent2 : theme.good, text: `Your Menace ${p.delta > 0 ? "▲" : "▼"} ${p.value}` };
-    case "recognition_changed":
-      return { color: theme.accent, text: `${who(p.player)} Recognition → ${p.value}` };
-    case "recognition_summit":
-      return { color: theme.accent, text: `${who(p.player)} was recognised — +${p.vp} VP` };
+    // The win condition. These are the three most consequential lines in the
+    // feed — someone is about to win, or just has — and every one of them
+    // printed its own raw event name until now, because the formatters this
+    // replaces were for a Recognition score and a summit dividend that no
+    // longer exist.
+    case "dominion_reached":
+      return {
+        color: theme.accent2,
+        text: `${who(p.player)} has every faction allied, sworn or gone — the clock is running`,
+      };
+    case "dominion_lost":
+      return {
+        color: theme.good,
+        text: `${who(p.player)} lost their hold — ${p.outstanding?.length || 0} still standing free`,
+      };
+    case "dominion_won": {
+      const how = {
+        conquest: "by conquest — nobody left standing",
+        diplomacy: "by treaty — every rival an ally",
+        submission: "by submission — every rival sworn",
+        mixed: "by war and treaty together",
+      }[p.by] || "";
+      return { color: theme.accent, text: `${who(p.player)} has taken the Ashlands ${how}` };
+    }
     case "faction_eliminated":
       return { color: theme.accent2, text: `${who(p.player)} has been eliminated` };
 

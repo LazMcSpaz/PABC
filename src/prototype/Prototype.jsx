@@ -1483,7 +1483,16 @@ function TurnBanner({ banner }) {
 function EndOverlay({ state, onNewGame }) {
   const winner = state.players[state.winnerId];
   const winnerFaction = UI_FACTIONS[state.winnerId];
-  const sorted = Object.values(state.players).sort((a, b) => b.vp - a.vp);
+  // Winner first, then by score. VP is the closing STANDING — ground held and
+  // friends kept — and it is not what decided the game, so a diplomat can win
+  // the condition while the biggest land power out-scores them. That is a
+  // coherent story, but a table with the winner sitting fifth reads like a
+  // bug, so the ★ goes on top and the real numbers stay honest.
+  const sorted = Object.values(state.players).sort((a, b) => {
+    if (a.id === state.winnerId) return -1;
+    if (b.id === state.winnerId) return 1;
+    return b.vp - a.vp;
+  });
   return (
     <div
       style={{
@@ -1531,6 +1540,28 @@ function EndOverlay({ state, onNewGame }) {
         >
           {winnerFaction?.name || winner?.id}
         </div>
+        {/* HOW it ended. The table below is the closing standing — VP is a
+            score now, not the condition — so without this line a player is
+            left to infer what actually won it. */}
+        {state.winnerBy && (
+          <div
+            style={{
+              fontFamily: theme.fontDisplay,
+              fontSize: 12.5,
+              letterSpacing: 1,
+              color: theme.textDim,
+              marginTop: 8,
+              maxWidth: 320,
+            }}
+          >
+            {{
+              conquest: "By conquest — nobody left standing.",
+              diplomacy: "By treaty — every rival an ally.",
+              submission: "By submission — every rival sworn.",
+              mixed: "By war and treaty together.",
+            }[state.winnerBy] || ""}
+          </div>
+        )}
         <div
           style={{
             marginTop: 18,
@@ -1539,6 +1570,10 @@ function EndOverlay({ state, onNewGame }) {
             gap: 5,
           }}
         >
+          <div style={{
+            fontFamily: theme.fontDisplay, fontSize: 10, letterSpacing: 2,
+            textTransform: "uppercase", color: theme.textFaint, textAlign: "left",
+          }}>Final standing · ground held and friends kept</div>
           {sorted.map((p) => {
             const f = UI_FACTIONS[p.id];
             return (
@@ -1559,7 +1594,7 @@ function EndOverlay({ state, onNewGame }) {
                   {p.id === state.winnerId ? " ★" : ""}
                 </span>
                 <span style={{ fontFamily: theme.fontDisplay, fontWeight: 700 }}>
-                  {p.vp} VP
+                  {p.vp}
                 </span>
               </div>
             );
