@@ -57,6 +57,12 @@ Added: YYYY-MM-DD
 
 ## Vessels
 
+## landship-turnaround-01.png
+URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/landship-turnaround-01.png
+Use for: the landship hull as geometry — eight views round the same form as `landship-base-01.jpg`, untextured, so bow taper, deck plan, flank slot and the open stern read without material getting in the way. This is the sheet to hand a Blender agent under §5.6, and the one to attach when a generation needs the hull from an angle the painted anchor does not show
+Do not use for: **FRAMING** — a near-black ground, further from §15's clean grey than any other anchor, so it will darken and contaminate anything it leads. Also no material, finish or colour information whatsoever: it is form only, and each view is small in a 2538×266 strip, so there is little detail to take
+Added: 2026-08-11
+
 ## landship-base-01.jpg
 URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/landship-base-01.jpg
 Use for: the bare landship hull before anything is built on it — §5.4's form rule made explicit, one continuous armored form with plating unbroken from the rounded bow to the stern and no seam anywhere along it. The lift emitter row recessed into the flank rather than hung off it, the chamfered skirt, the deck left flat and empty with only its mounting hardpoints showing, and the dust plume that sells ground clearance. Attach this first when generating any vessel, then describe only the superstructure
