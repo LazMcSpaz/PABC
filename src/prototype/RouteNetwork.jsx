@@ -1,30 +1,40 @@
 // Roads and rails drawn as a continuous network across the board, above the
 // tiles and below the unit tokens.
 //
-// Two problems shape how these are drawn:
+// Three problems shape how these are drawn:
 //
 // 1. The background is never the same colour twice. A route crosses hexes
 //    glowing in whatever colour their owner is, so no single stroke colour is
-//    reliably legible. Fix: a dark CASING under every route — the standard
-//    cartographic trick — so the bright core always sits against near-black
-//    regardless of the hologram underneath.
+//    reliably legible. Fix: a dark TROUGH under every route — the standard
+//    cartographic casing trick, softened — so the core always sits against
+//    near-black regardless of the hologram underneath.
 // 2. Two route types have to be told apart by more than hue. Roads are one
-//    solid line; rails carry cross-ties. That difference survives both a
+//    worn line; rails carry cross-ties. That difference survives both a
 //    faction recolour and colour-vision deficiency.
+// 3. A route must not compete with the units standing on it. The board's
+//    subject is the tokens; the network is ground under them, and every value
+//    here is set low enough that a sprite reads in front of it rather than
+//    against it.
+//
+// The SHAPE — where the lines actually run, how they join, and how a road and
+// a railway sharing ground are held apart — is routeGeometry.js. Two paths
+// come back, one per kind, and everything below is styling laid over them.
+//
+// One path per kind, rather than one element per segment, is load-bearing at
+// these opacities. An SVG stroke is a single paint: where a path crosses
+// itself, or three chains meet at a hex centre, the translucent stroke does NOT
+// stack. Separate elements do, and that is what used to make every junction
+// flare brighter than the roads feeding it.
 //
 // Purely derived from the board: roads are laid once at generation time
-// (src/game/board.js assignRoads) and never move, so this re-renders only when
-// the board itself changes.
-import { routeSegments, trimToEllipse } from "./hexProjection.js";
+// (src/game/board.js assignRoads) and never move, so the geometry is rebuilt
+// only when the network or the fog over it actually changes.
+import { useMemo } from "react";
+import { buildRouteNetwork } from "./routeGeometry.js";
 import { LOD_FLAT, useBoardLod } from "./boardLod.js";
 import BlockadeMark from "./BlockadeMark.jsx";
 import { blockadeStance } from "./blockadeStance.js";
 import { structureFor } from "./unitSprites.js";
-import { HEX_W } from "./hexProjection.js";
-
-// How far short of a Location's centre a route stops. Sized to clear the
-// settlement art and the floating radial's contact ellipse beneath it.
-const LOCATION_CLEARANCE = HEX_W * 0.23;
 
 // Each route is a STACK of strokes rather than a single line, widest first.
 // One flat stroke is what made these read as clip-art laid over the board: the
@@ -33,113 +43,115 @@ const LOCATION_CLEARANCE = HEX_W * 0.23;
 //
 // The stack has three jobs, and they pull against each other:
 //
-//   trough   two wide, soft, dark strokes. This is the legibility guarantee —
+//   trough   three wide, soft, dark strokes. This is the legibility guarantee —
 //            a route crosses hexes glowing in whatever colour their owner is,
 //            and without something dark underneath the core has no reliable
-//            contrast. Widened and softened from the old single hard casing so
-//            it reads as ground worn into the terrain rather than an outline
-//            drawn around a line.
-//   halo     a wide, faint, warm/cool wash in the route's own colour, painted
-//            with `screen` so it ADDS light like everything else on this board
+//            contrast. Wide and faint rather than narrow and hard, so it reads
+//            as ground worn down rather than as an outline drawn around a line.
+//   halo     a wide, faint wash in the route's own colour, painted with
+//            `screen` so it ADDS light like everything else on this board
 //            instead of covering what is beneath it.
-//   core     the thin bright line that actually says "there is a road here",
-//            also screened, and no longer at full opacity.
+//   core     the thin line that actually says "there is a road here", also
+//            screened, kept well under half opacity, and BROKEN: the dash
+//            pattern is long and irregular, so the road shows through as a
+//            worn track with the surface gone in places rather than as an
+//            unbroken drawn line. The gaps let the halo and the terrain under
+//            it come through, which is most of what stops it reading as an
+//            overlay.
 //
-// Roads stay one continuous line and rails keep their cross-ties: that
-// difference has to survive a faction recolour and colour-vision deficiency,
-// so it can never be carried by hue alone.
+// Roads stay one worn line and rails keep their cross-ties: that difference has
+// to survive a faction recolour and colour-vision deficiency, so it can never
+// be carried by hue alone.
 const STYLES = {
   road: {
     trough: [
-      { color: "rgba(6,10,14,0.14)", width: 14 },
-      { color: "rgba(6,10,14,0.28)", width: 10 },
-      { color: "rgba(6,10,14,0.58)", width: 6.5 },
+      { color: "rgba(6,10,14,0.10)", width: 12 },
+      { color: "rgba(6,10,14,0.21)", width: 8.5 },
+      { color: "rgba(6,10,14,0.42)", width: 5.5 },
     ],
-    halo: { color: "#f2c078", width: 5.5, opacity: 0.24 },
+    halo: { color: "#f2c078", width: 5, opacity: 0.15 },
     ties: null,
-    core: { color: "#f0c184", width: 2.1, opacity: 0.76 },
-    glow: "#f2c07866",
+    // Long dashes with uneven gaps: at a glance it is a line, up close the
+    // surface is patchy. The pattern is prime-ish so it never lines up with
+    // itself over the length of a chain.
+    core: { color: "#f0c184", width: 1.9, opacity: 0.5, dash: "37 4 19 3 26 6", cap: "round" },
+    glow: "#f2c07840",
+    // Zoomed out the whole stack collapses to these two. Brighter and wider
+    // than the full-detail core on purpose: at 0.6 zoom a 1.9px line at half
+    // opacity is a rumour, and what you are reading down there is where the
+    // network GOES, not what it is made of.
+    flat: {
+      casing: { color: "rgba(6,10,14,0.55)", width: 6 },
+      core: { color: "#f0c184", width: 2.4, opacity: 0.85 },
+    },
   },
   rail: {
     trough: [
-      { color: "rgba(6,10,14,0.14)", width: 15 },
-      { color: "rgba(6,10,14,0.30)", width: 11 },
-      { color: "rgba(6,10,14,0.62)", width: 7.5 },
+      { color: "rgba(6,10,14,0.10)", width: 12.5 },
+      { color: "rgba(6,10,14,0.21)", width: 9 },
+      { color: "rgba(6,10,14,0.45)", width: 6 },
     ],
-    halo: { color: "#cfe0f0", width: 6.0, opacity: 0.18 },
-    // sleepers: a thick, heavily-dashed stroke reading as cross-ties
-    ties: { color: "#9fb2c6", width: 6.6, dash: "1.8 6.5", opacity: 0.7 },
-    core: { color: "#dce7f2", width: 1.5, opacity: 0.7 },
-    glow: "#cfd8e355",
+    halo: { color: "#cfe0f0", width: 5.5, opacity: 0.12 },
+    // sleepers: a thick, heavily-dashed stroke reading as cross-ties. Butt
+    // caps, because a sleeper is a rectangle of timber and rounding its ends
+    // turns the ties into a row of beads.
+    ties: { color: "#9fb2c6", width: 6.2, dash: "1.7 6.5", opacity: 0.44, cap: "butt" },
+    core: { color: "#dce7f2", width: 1.4, opacity: 0.46 },
+    glow: "#cfd8e33a",
+    // The ties are too fine to survive the zoom-out, so the flat rail carries
+    // the difference as a dashed line instead. Roads and rails still have to
+    // be told apart without reading colour at every zoom, not just close up.
+    flat: {
+      casing: { color: "rgba(6,10,14,0.58)", width: 6.5 },
+      core: { color: "#dce7f2", width: 2.1, opacity: 0.8, dash: "7 4.5", cap: "butt" },
+    },
   },
 };
 
-// Segment identity, direction-independent, so the road pass and the rail pass
-// agree on which stretch of ground they are both crossing.
-const segKey = (a, b) => (a < b ? `${a}~${b}` : `${b}~${a}`);
-
-// How far each route slides off the centre line where a road and a railway run
-// between the SAME two hexes. Half the separation each, so the pair straddles
-// the line the single route would have taken and neither looks displaced.
-//
-// Sized to clear both troughs: the widest strokes are 14 (road) and 15 (rail),
-// so ~7.5 each way puts a visible gap of ground between them at every zoom.
-const PARALLEL_OFFSET = 7.5;
-
-// `shared` is the set of segment keys carried by BOTH kinds; `side` is which
-// way this kind steps off the line there (-1 / +1).
-//
-// Without this the two draw on top of each other and only the one painted last
-// survives — a settlement served by road AND rail looked rail-only, which is a
-// lie about how you can reach it.
-function buildPaths(rows, hexes, centers, carries, shared, side = 0) {
-  const out = [];
-  for (const [a, b] of routeSegments(rows, hexes, carries)) {
-    const ca = centers[a];
-    const cb = centers[b];
-    if (!ca || !cb) continue;
-    // Trim whichever end lands on a Location so the line stops outside it.
-    let pa = hexes[a]?.type === "location" ? trimToEllipse(cb, ca, LOCATION_CLEARANCE) : ca;
-    let pb = hexes[b]?.type === "location" ? trimToEllipse(ca, cb, LOCATION_CLEARANCE) : cb;
-    if (!pa || !pb) continue;
-
-    let dx = 0, dy = 0;
-    if (side && shared?.has(segKey(a, b))) {
-      // Perpendicular to the segment, measured in a FIXED direction (low hex id
-      // to high) so both kinds resolve the same normal and reliably step to
-      // opposite sides rather than landing on each other.
-      const [from, to] = a < b ? [ca, cb] : [cb, ca];
-      const vx = to.x - from.x;
-      const vy = to.y - from.y;
-      const len = Math.hypot(vx, vy) || 1;
-      dx = (-vy / len) * PARALLEL_OFFSET * side;
-      dy = (vx / len) * PARALLEL_OFFSET * side;
-    }
-    out.push({
-      key: `${a}~${b}`,
-      x1: pa.x + dx, y1: pa.y + dy,
-      x2: pb.x + dx, y2: pb.y + dy,
-    });
-  }
-  return out;
-}
-
-function Strokes({ paths, spec, dash }) {
-  if (!spec) return null;
-  return paths.map((p) => (
-    <line
-      key={p.key}
-      x1={p.x1} y1={p.y1} x2={p.x2} y2={p.y2}
+function Route({ d, spec }) {
+  if (!d || !spec) return null;
+  return (
+    <path
+      d={d}
+      fill="none"
       stroke={spec.color}
       strokeWidth={spec.width}
       strokeOpacity={spec.opacity ?? undefined}
-      strokeDasharray={dash || undefined}
-      strokeLinecap={dash ? "butt" : "round"}
+      strokeDasharray={spec.dash || undefined}
+      strokeLinecap={spec.cap || "round"}
+      strokeLinejoin="round"
     />
-  ));
+  );
 }
 
-export default function RouteNetwork({ rows, hexes, centers, width, height }) {
+// The route network, memoised on what it actually depends on.
+//
+// Exported because the blockade sprites need the same road nodes to stand on,
+// and building the network twice a render would put the chain walk and the
+// curve fitting back on the hot path. HexBoard3D builds it once and hands it to
+// both layers.
+export function useRouteNetwork(rows, hexes, centers) {
+  // The board object is rebuilt on every tick, so `hexes` is a new reference
+  // several times a turn while the network under it changes perhaps twice a
+  // game. Hashing what this actually depends on — who carries a route, and
+  // which ground has been seen — keeps the work off the hot path.
+  const signature = useMemo(() => {
+    let s = "";
+    for (const id of Object.keys(hexes)) {
+      const h = hexes[id];
+      if (!h.road && !h.rail) continue;
+      s += `${id}${h.road ? "r" : ""}${h.rail ? "l" : ""}${h.fog === "unexplored" ? "?" : ""},`;
+    }
+    return s;
+  }, [hexes]);
+  return useMemo(
+    () => buildRouteNetwork(rows, hexes, centers),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [rows, centers, signature],
+  );
+}
+
+export default function RouteNetwork({ rows, hexes, centers, width, height, net: netIn }) {
   // Below the LOD threshold a hex is under ~130px across and a route is a few
   // pixels wide: the soft trough and the screened glow are invisible at that
   // size, and paying a full-screen compositing pass for something nobody can
@@ -147,47 +159,44 @@ export default function RouteNetwork({ rows, hexes, centers, width, height }) {
   // routes collapse to one casing + one core in a single normally-composited
   // layer — the same trade the tile layer makes.
   const flat = useBoardLod() === LOD_FLAT;
-  // A route is only drawn where the viewer has seen the ground. Fog hides the
-  // road network the same way it hides everything else.
-  const known = (h) => h && h.fog !== "unexplored";
-  // Which stretches carry both? Computed once from the unoffset segment lists,
-  // then fed back so each kind knows where to step aside.
-  const roadCarries = (h) => known(h) && h.road;
-  const railCarries = (h) => known(h) && h.rail;
-  const railKeys = new Set(
-    routeSegments(rows, hexes, railCarries).map(([a, b]) => segKey(a, b)),
-  );
-  const shared = new Set(
-    routeSegments(rows, hexes, roadCarries)
-      .map(([a, b]) => segKey(a, b))
-      .filter((k) => railKeys.has(k)),
-  );
-  const roads = buildPaths(rows, hexes, centers, roadCarries, shared, -1);
-  // Rail is generated as a capital-to-capital trunk line (board.js
-  // assignRails) and stamped per hex, so this draws whatever that laid down.
-  const rails = buildPaths(rows, hexes, centers, railCarries, shared, +1);
+
+  // The board object is rebuilt on every tick, so `hexes` is a new reference
+  // several times a turn while the network under it changes perhaps twice a
+  // game. Hashing what this actually depends on — who carries a route, and
+  // which ground has been seen — keeps the chain walk and the curve fitting off
+  // the hot path.
+  // Built here when nobody hands one down, so this component still stands
+  // alone; HexBoard3D passes one so the blockade layer shares it.
+  const built = useRouteNetwork(rows, hexes, centers);
+  const net = netIn || built;
+
   // Blockades sit ON the road network, so they are drawn with it rather than in
   // the tile layer — which also means they survive the zoom-out unchanged
   // instead of needing a second implementation at the flat level of detail.
-  // A blockade closes a road, so it stands ON that road out near the tile edge
-  // rather than at the hex centre — see blockadeStance.js. A finished blockade
-  // with art is drawn by BlockadeSprites instead; what stays here is the
-  // construction site, whose whole job is to show progress, and any faction
+  // A blockade sits ON the road, so it takes its place and its bearing from
+  // the road's own geometry rather than from the hex centre — which is no
+  // longer where the road runs.
+  //
+  // A hex holds one blockade per road leaving it, so each takes its stance from
+  // its OWN road rather than from the hex's node: two barricades on a junction
+  // would otherwise stack on the same point at the same angle. A finished
+  // blockade with art is drawn by BlockadeSprites instead; what stays here is
+  // the construction site, whose whole job is to show progress, and any faction
   // without blockade art.
   const blockades = [];
   for (const h of Object.values(hexes)) {
     if (!centers[h.id]) continue;
     for (const b of h.blockades || []) {
-      // A finished blockade with art is drawn by BlockadeSprites instead.
       if (b.done && structureFor(b.owner, "tollbooth")) continue;
       blockades.push({
         hex: h,
         blockade: b,
-        at: blockadeStance(h.id, rows, hexes, centers, b.edge) || centers[h.id],
+        at: blockadeStance(h.id, b.edge, net.road.nodes, centers),
       });
     }
   }
-  if (!roads.length && !rails.length && !blockades.length) return null;
+  const kinds = [["road", net.road.d], ["rail", net.rail.d]].filter(([, d]) => d);
+  if (!kinds.length && !blockades.length) return null;
 
   // TWO svg layers at full detail, and the split is load-bearing rather than
   // tidiness.
@@ -204,26 +213,29 @@ export default function RouteNetwork({ rows, hexes, centers, width, height }) {
     position: "absolute", inset: 0, pointerEvents: "none", ...extra,
   });
 
-  const kinds = [["road", roads], ["rail", rails]].filter(([, paths]) => paths.length);
-
   if (flat) {
     // One layer, two strokes per route, no blending. Still casing-then-core so
     // a route stays legible over any faction tint — that rule holds at every
     // zoom; it is only the softness that is dropped.
     return (
       <svg width={width} height={height} style={layer({ zIndex: 8000 })}>
-        {kinds.map(([kind, paths]) => {
+        {kinds.map(([kind, d]) => {
           const s = STYLES[kind];
           return (
-            <g key={kind} strokeLinejoin="round">
-              <Strokes paths={paths} spec={s.trough[s.trough.length - 1]} />
-              <Strokes paths={paths} spec={s.core} />
+            <g key={kind}>
+              <Route d={d} spec={s.flat.casing} />
+              <Route d={d} spec={s.flat.core} />
             </g>
           );
         })}
         {blockades.map(({ hex, blockade, at }) => (
-          <BlockadeMark key={`blockade-${hex.id}-${blockade.edge || "0"}`}
-            x={at.x} y={at.y} blockade={blockade} />
+          <BlockadeMark
+            key={`blockade-${hex.id}-${blockade.edge || "0"}`}
+            x={at.x}
+            y={at.y}
+            angle={at.angle}
+            blockade={blockade}
+          />
         ))}
       </svg>
     );
@@ -234,10 +246,10 @@ export default function RouteNetwork({ rows, hexes, centers, width, height }) {
       {/* 1 — the worn trough. Normal compositing: this is the dark that keeps
           the core legible over a hex glowing in any faction's colour. */}
       <svg width={width} height={height} style={layer({ zIndex: 7990 })}>
-        {kinds.map(([kind, paths]) => (
-          <g key={kind} strokeLinejoin="round">
+        {kinds.map(([kind, d]) => (
+          <g key={kind}>
             {STYLES[kind].trough.map((t, i) => (
-              <Strokes key={i} paths={paths} spec={t} />
+              <Route key={i} d={d} spec={t} />
             ))}
           </g>
         ))}
@@ -250,13 +262,13 @@ export default function RouteNetwork({ rows, hexes, centers, width, height }) {
         height={height}
         style={layer({ zIndex: 8000, mixBlendMode: "screen" })}
       >
-        {kinds.map(([kind, paths]) => {
+        {kinds.map(([kind, d]) => {
           const s = STYLES[kind];
           return (
-            <g key={kind} style={{ filter: `drop-shadow(0 0 5px ${s.glow})` }}>
-              <g strokeLinejoin="round"><Strokes paths={paths} spec={s.halo} /></g>
-              {s.ties && <g><Strokes paths={paths} spec={s.ties} dash={s.ties.dash} /></g>}
-              <g strokeLinejoin="round"><Strokes paths={paths} spec={s.core} /></g>
+            <g key={kind} style={{ filter: `drop-shadow(0 0 3.5px ${s.glow})` }}>
+              <Route d={d} spec={s.halo} />
+              {s.ties && <Route d={d} spec={s.ties} />}
+              <Route d={d} spec={s.core} />
             </g>
           );
         })}
@@ -279,6 +291,7 @@ export default function RouteNetwork({ rows, hexes, centers, width, height }) {
               key={`blockade-${hex.id}-${blockade.edge || "0"}`}
               x={at.x}
               y={at.y}
+              angle={at.angle}
               blockade={blockade}
             />
           ))}

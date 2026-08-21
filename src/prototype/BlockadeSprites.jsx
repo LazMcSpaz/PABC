@@ -13,7 +13,7 @@ import { FACTIONS } from "./data.js";
 import { blockadeStance } from "./blockadeStance.js";
 import { structureFor, spriteStyle, ensureIdleKeyframes } from "./unitSprites.js";
 
-export default function BlockadeSprites({ rows, hexes, centers }) {
+export default function BlockadeSprites({ hexes, centers, nodes }) {
   const drawn = [];
   for (const h of Object.values(hexes)) {
     if (!centers[h.id]) continue;
@@ -22,12 +22,8 @@ export default function BlockadeSprites({ rows, hexes, centers }) {
       if (!b.done) continue;
       const spec = structureFor(b.owner, "tollbooth");
       if (!spec) continue; // minor factions ship no blockade art
-      const stance = blockadeStance(h.id, rows, hexes, centers, b.edge) || {
-        // No road on this hex to stand on. Should not happen — a blockade is
-        // built on a road — but drawing it at the centre beats not drawing the
-        // thing that is stopping you.
-        ...centers[h.id], facing: "s",
-      };
+      const stance = blockadeStance(h.id, b.edge, nodes, centers);
+      if (!stance) continue;
       drawn.push({ hex: h, blockade: b, spec, stance });
     }
   }

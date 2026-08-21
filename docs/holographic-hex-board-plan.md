@@ -187,26 +187,35 @@ This is a genuine upgrade over the current black/50%-dim treatment.
 Roads connect **settlements**, not just capitals: every Location is road-linked
 to its nearest neighbour, and `high`/`veryHigh` ones also to their second
 nearest, with cluster-bridging links added afterwards so the network is always
-connected (`assignRoads`, `CONFIG.roads.linksByValue`). That takes the network
-from ~11 road hexes of 30 to ~17, and it is what gives the blockade design its
-teeth — "an uninterrupted road connection to the nearest owned settlement"
-(rail/blockade doc §3) only means something if such a connection exists.
+connected (`assignRoads`, `CONFIG.roads.linksByValue`). That is what gives the
+blockade design its teeth — "an uninterrupted road connection to the nearest
+owned settlement" (rail/blockade doc §3) only means something if such a
+connection exists.
 
-`hex.road` is a per-hex boolean, not an edge list, so `RouteNetwork.jsx`
+Corridors are laid one at a time and routed by COST, not hop count: ground that
+already carries road is cheap and rough ground is dear (`CONFIG.roads`). A
+later corridor therefore merges into an existing trunk instead of laying a
+parallel lane a hex away from it — which matters because `road` is a per-hex
+boolean, so two lanes side by side get welded into a ladder by adjacency alone
+and the network reads as a lattice. See §11.
+
+`hex.road` is a per-hex boolean, not an edge list, so `routeGeometry.js`
 recovers a drawable network by linking each road hex to its road neighbours —
 re-deriving adjacency with the engine's own rule rather than from screen
-distance, so it survives any projection change.
+distance, so it survives any projection change — and then walks that network
+into **chains** running junction to junction, which is the unit everything
+downstream works in (§10).
 
 Two things decide how they're drawn. The background is never the same colour
 twice (a route crosses hexes glowing in whatever colour their owner is), so
-every route gets a **dark casing** under a bright core — the standard
-cartographic trick — and is legible over any tint. And the two types are
-distinguished by more than hue: roads are one solid amber line, rails carry
+every route gets a **dark trough** under its core — the standard cartographic
+casing trick — and is legible over any tint. And the two types are
+distinguished by more than hue: roads are one worn amber line, rails carry
 cross-ties, which survives both a recolour and colour-vision deficiency.
 
-Routes stop short of a Location's centre, trimmed against an ellipse that
-matches the board's vertical squash so the clearance reads as circular on the
-projected ground.
+Routes stop short of a Location's centre, cut where each one crosses a keep-out
+ellipse that matches the board's vertical squash, so the clearance reads as
+circular on the projected ground.
 
 Layer order is tiles → routes → tokens → radials → hit layer. Getting tokens
 above the routes is why they moved out of `HexTile` into `BoardTokens.jsx`: a
@@ -547,14 +556,15 @@ detected up front, and each steps half the separation off the line so the pair
 straddles the route a single line would have taken — neither looks displaced,
 and both read.
 
-The normal is measured in a fixed direction (low hex id to high) rather than
+The normal was measured in a fixed direction (low hex id to high) rather than
 from whichever end the enumeration happened to start at, so both kinds resolve
-the same perpendicular and reliably land on opposite sides instead of
-occasionally stacking.
+the same perpendicular and land on opposite sides instead of stacking. That
+much held; §10 replaces the id ordering, which flips at a bend, and extends the
+separation through junctions and settlements where the pair used to converge.
 
-`check-board-layers.mjs` asserts no two route strokes of the same width ever
-share endpoints, which is exactly what collapsing back onto one line looks
-like.
+`check-board-layers.mjs` walks both cores as drawn and asserts the two never
+run alongside each other in contact — a level crossing may touch, a shared run
+may not.
 
 ### Paint order, and where a blockade sprite goes
 
@@ -579,6 +589,192 @@ future blockade sprite *inside the screened light layer* and made it glow like
 a road instead of sitting on one. A blockade is a solid object, not more
 light. When real sprite art arrives it drops into that layer with the ordering
 already correct.
+
+## 10. Routes as ground, not lines (2026-08-21)
+
+§9 made the routes part of the hologram; they were still *lines*. Three
+complaints, all of them the same root cause — drawing SEGMENTS instead of
+ROUTES:
+
+1. **The joints were wrong.** Every stroke was its own `<line>` element, so
+   where three roads met at a hex centre, three translucent round caps stacked
+   and the junction bloomed brighter than the roads feeding it. The line was
+   see-through; the knot was not.
+2. **A road and a railway sharing ground stepped apart only over the segments
+   they SHARED.** Where a shared stretch ended, the road jumped back to the hex
+   centre inside one segment — a visible kink at exactly the point the eye is
+   drawn to, plus a gap on the outside of the turn.
+3. **Nothing varied.** Straight, uniform, dead-centre through every hex. That
+   is what reads as "line drawn on top of the board" rather than "track worn
+   into it", whatever you do to the colours.
+
+`routeGeometry.js` is now the whole shape of the network — pure geometry, no
+React, no styling — and `RouteNetwork.jsx` is styling laid over the two paths
+it returns.
+
+### Chains, not segments
+
+The network is walked into chains that run from one junction (or dead end, or
+Location) to the next. A chain becomes exactly one subpath, fitted with
+Catmull-Rom through every point, so a route crossing six hexes is one
+continuous stroke rather than six with five joints in it. Tension is 0.82
+rather than 1: a 60° turn — the tightest this grid can produce — overshoots at
+full Catmull-Rom and the road bulges outside the hex it is turning in.
+
+**One path per kind, not one element per segment, is load-bearing at these
+opacities.** An SVG stroke is a single paint operation: where a path crosses
+itself or three chains meet, its translucent stroke does not stack. Separate
+elements do. That one change is what fixed the bright knots, and it takes the
+route layers from hundreds of `<line>`s to ten `<path>`s.
+
+### Wander
+
+Each hex edge carries hashed sample points, and each crossing point is drifted
+off the hex centre by a hashed amount. Roads wander freely (a track worn by
+use); railways barely at all (surveyed, and the small drift they get is only
+what keeps them from looking ruled). The core is also drawn with a long,
+irregular dash so the surface reads as patchy rather than painted.
+
+Everything is hashed off hex ids — never rng'd, never time-based — so a road
+lies in exactly the same place on every frame, reload and machine. A route that
+reshuffled between renders would be worse than a straight one.
+
+### Keeping road and rail apart
+
+Separation is 17px centre to centre, which clears the widest stroke of the two
+put together with daylight to spare. Three things had to be got right, and the
+first two were wrong before:
+
+- **A consistent side.** An edge's normal is pinned to a fixed half-plane so it
+  comes out the same from either end — but on a shared run that closes a loop,
+  the returning edges point the other way round the loop and the road crosses
+  to the rail's side mid-run. So each shared run is now WALKED, and every edge
+  on it oriented relative to travel: left stays left, all the way round.
+- **Mitre, not average.** Averaging two normals at a bend and stepping half the
+  separation along it leaves the step perpendicular to neither arm, and the
+  visible gap closes to `sep × cos(half the turn)` — as little as 45% of it on
+  this grid, which is the two lines touching. Lengthening the step by the same
+  cosine restores true perpendicular separation, exactly as mitring a stroked
+  polyline does.
+- **Settlements.** A Location's own crossing point is never drawn, so the route
+  aims at a point chosen per ARM rather than per hex, and each route is cut
+  where IT meets the keep-out ellipse. Cutting both at a fixed radius from the
+  centre throws away the offset they arrived with and pinches them together at
+  the town gate.
+
+Where the two genuinely cross — both kinds on one hex, sharing no edge — they
+are stepped apart at the crossing point too, so they cross at an angle instead
+of knotting together with every other branch meeting there.
+
+`scripts/check-route-geometry.mjs` (`npm run check:routes`) tests all of this
+headless against 30 real generated boards: that a route crosses every hex
+carrying it and joins every adjacent pair without a gap, that road and rail
+keep ≥12.5px across every shared edge, that where they do touch they cross and
+part rather than braid, and that the whole thing is byte-identical on a rebuild.
+
+### Blockades ride the road
+
+A blockade takes its position and its bearing from the road's own geometry
+rather than from the hex centre, which is no longer where the road runs — and
+is laid ACROSS it. Drawn flat regardless, as it was, a barricade on a
+north-south road lies along the road and reads as scenery beside the route
+instead of the thing standing in it.
+
+### Cost
+
+The geometry is a pure function of the network and the fog over it, hashed to a
+signature so it is rebuilt only when one of those actually changes — not on
+every hover, selection or tick. A full rebuild on the largest board is ~2ms.
+The layer stack, the blend split and the LOD collapse are all unchanged from
+§9; zoomed out the routes now get their own brighter, wider spec, because at
+0.6 zoom a 1.9px line at half opacity is a rumour, and what you read down there
+is where the network goes.
+
+## 11. Road generation: a network, not a lattice (2026-08-21)
+
+Roads came out as a mesh — parallel lanes cross-linked rung after rung, a shape
+no real road system takes. Two separate causes, both in generation rather than
+in the drawing:
+
+**`road` is a per-hex boolean.** `assignRoads` returns its A→B links and
+`setup.js` throws them away, so connectivity — for the renderer AND for the
+supply walk in `blockades.js` — is recovered as "adjacent hexes that both carry
+road". Two corridors passing through neighbouring hexes are welded into a
+ladder. The rungs are not a drawing artefact: the renderer's adjacency was
+checked hex-for-hex against `state.board.adjacency`, and the engine's own
+supply BFS will happily take them.
+
+**Each corridor was routed independently**, by unweighted shortest path, with
+no knowledge of the roads already laid. Nothing pulled a second route onto an
+existing one, so it would run a field over instead.
+
+The fix is to lay corridors one at a time over the state left by the ones
+before, routed by cost (`roadPath`, a deterministic Dijkstra) rather than by
+hop count:
+
+- **existing road is cheap** (`CONFIG.roads.reuseCost`, 0.3) — a later corridor
+  detours to merge with a trunk and share it;
+- **rough ground is dear** (`CONFIG.roads.terrainCost`, forest 2 / mountain 4)
+  — roads run round a ridge the way a surveyor would.
+
+The second is a movement fix as much as a looks fix. A road eases a mountain's
+halt and a forest's toll (`expandMovement`), so every rough hex a corridor
+crosses is a rough hex that plays softer than it looks. (At the time this was
+written a road *negated* both outright; §12 changes it to halve them. Routing
+around the rough ground and easing rather than deleting it are the same fix
+from two ends.)
+
+Measured over 30 generated boards (10 seeds × 3 sizes):
+
+| | before | after |
+|---|---|---|
+| road hexes | 25.8 (36% of board) | 24.0 (33%) |
+| of which open country (not a settlement) | 13.5 | 11.7 |
+| drawn links | 33.0 | 26.2 |
+| triangles (the rungs) | 7.70 | 2.90 |
+| rough hexes carrying road | 3.6 | 1.0 |
+| boards with a disconnected road network | 0 | 0 |
+
+Per size, triangles go 6.1 → 2.8 (test map), 6.3 → 1.3 (medium), 12.3 → 4.6
+(huge). What survives is the occasional genuine junction, which is what a real
+network has.
+
+Note what this does NOT change: roads are still a per-hex boolean, so the
+remaining adjacencies are still real connections that supply and blockades
+honour. Storing the actual links (as rail already does, `state.board.rails`)
+would let both the renderer and the supply walk follow roads rather than infer
+them — a bigger change, and a rules change, so it is not made here.
+
+## 12. A road eases terrain; it does not delete it (2026-08-21)
+
+A road used to make rough ground cost the same as open grass: 1 MP to enter and
+never halting, through forest and mountain alike. With roads reaching about a
+third of the board, that meant about a third of the board's terrain stopped
+being terrain.
+
+Roads now HALVE the toll instead of waiving it (`CONFIG.movement`):
+
+| ground | no road | road |
+|---|---|---|
+| open | 1 | 1 |
+| forest | 2 | **1** |
+| mountain | 1, and the move HALTS there | **2**, no halt |
+
+A mountain's real cost was never its 1 MP — it was the halt, which spends
+whatever you had left. Two is half of that for a unit on a road march (base 2,
++1 for starting on the highway): a winding mountain road gets you over the pass
+and no further, where before it cost the same as crossing a field.
+
+`ignoresTerrain` (Landship, Pathfinders) is defined in the engine as "treats
+every hex as road-grade", so it inherits the new numbers — forest 1, mountain 2
+without halting. Both chips' rules text only ever promised that mountains don't
+halt, which is still true; their descriptions now state the costs outright.
+
+This pairs with §11 rather than duplicating it. §11 routes corridors AROUND
+rough ground so a road rarely crosses it (measured: high ground on about one
+board in thirty, forest about once a board); §12 makes the crossings that do
+happen still cost something. Route around it, and ease rather than delete what
+you cannot route around — the same fix from two ends.
 
 ## 8. What this does not change
 

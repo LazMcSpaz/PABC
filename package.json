@@ -16,6 +16,7 @@
     "motion": "node scripts/motion.mjs",
     "check:pooling": "node scripts/check-pooling-ui.mjs",
     "check:layers": "node scripts/check-board-layers.mjs",
+    "check:routes": "node scripts/check-route-geometry.mjs",
     "check:settlement": "node scripts/check-settlement-ui.mjs",
     "check:blockade": "node scripts/check-blockade-ui.mjs",
     "check:upkeep": "node scripts/check-upkeep-ui.mjs",

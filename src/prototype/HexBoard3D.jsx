@@ -29,7 +29,7 @@ import { LOCATIONS, fullController } from "./data.js";
 import HexTile from "./HexTile.jsx";
 import FlatTileLayer from "./FlatTileLayer.jsx";
 import FloatingControlMeter from "./FloatingControlMeter.jsx";
-import RouteNetwork from "./RouteNetwork.jsx";
+import RouteNetwork, { useRouteNetwork } from "./RouteNetwork.jsx";
 import BlockadeSprites from "./BlockadeSprites.jsx";
 import BoardTokens from "./BoardTokens.jsx";
 import { LOD_FLAT, useBoardLod } from "./boardLod.js";
@@ -64,6 +64,11 @@ export default function HexBoard3D({
       coast: eastRimHexes(state.rows),
     };
   }, [state.rows]);
+
+  // One route network for the whole board. The road layer draws from it and the
+  // blockades stand on its nodes, so building it twice would put the chain walk
+  // and the curve fitting back on the hot path for nothing.
+  const routeNet = useRouteNetwork(state.rows, state.hexes, geom.centers);
 
   return (
     <div
@@ -100,6 +105,7 @@ export default function HexBoard3D({
       )}
 
       <RouteNetwork
+        net={routeNet}
         rows={state.rows}
         hexes={state.hexes}
         centers={geom.centers}
@@ -110,9 +116,9 @@ export default function HexBoard3D({
       {/* Blockades stand on their road, between the route lines and the units,
           so a unit posted at one reads as being in front of it. */}
       <BlockadeSprites
-        rows={state.rows}
         hexes={state.hexes}
         centers={geom.centers}
+        nodes={routeNet.road.nodes}
       />
 
       <BoardTokens

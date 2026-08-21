@@ -143,6 +143,10 @@ export function paintOrder(centers) {
 // re-derived here with the SAME rule the engine uses (src/game/board.js: same
 // row and one column apart, or neighbouring rows half a hex apart) rather than
 // from screen distance, which would be fragile under any projection change.
+//
+// This is the only piece of the route network that belongs to the projection.
+// Everything built on top of it — subgraphs, chains, offsets, the curves
+// themselves — lives in routeGeometry.js.
 export function neighborMap(rows) {
   const index = rows.map((row) => {
     const m = new Map();
@@ -170,34 +174,6 @@ export function neighborMap(rows) {
     });
   });
   return nb;
-}
-
-// Every unordered pair of adjacent hexes that both carry the route.
-export function routeSegments(rows, hexes, carries) {
-  const nb = neighborMap(rows);
-  const segs = [];
-  for (const id of Object.keys(nb)) {
-    if (!carries(hexes[id])) continue;
-    for (const other of nb[id]) {
-      if (id < other && carries(hexes[other])) segs.push([id, other]);
-    }
-  }
-  return segs;
-}
-
-// Pull the `to` end of a segment back to the edge of an ellipse centred on it,
-// so a route arriving at a Location stops just outside the settlement instead
-// of running through its middle. The ellipse matches the board's vertical
-// squash, so the clearance looks circular on the projected ground plane.
-export function trimToEllipse(from, to, rx) {
-  const ry = rx * (HEX_H / HEX_W);
-  const k = rx / ry;
-  const dx = from.x - to.x;
-  const dy = (from.y - to.y) * k;
-  const len = Math.hypot(dx, dy);
-  if (len <= rx) return null; // wholly inside the keep-out — draw nothing
-  const t = rx / len;
-  return { x: to.x + dx * t, y: to.y + (dy * t) / k };
 }
 
 // --- which tile art goes on which hex ------------------------------------

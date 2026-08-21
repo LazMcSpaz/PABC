@@ -177,3 +177,9 @@ the radial menu, a staged contest sounding and releasing the battle stinger,
 the click cue on buttons and radial sectors — and *not* on the audio widget's
 own controls — the volume sliders in both places that offer them, and the
 autoplay-blocked path.
+
+Two of those checks exist because state can look perfect while the game is
+silent, so they tap an `AnalyserNode` onto each bus and assert real signal at
+two different levels. A third asserts the menu fetches its theme once: a
+duplicate request for a 1.6 MB file, one of the pair left to be cancelled, is
+what a stray warm-up looks like from the outside.

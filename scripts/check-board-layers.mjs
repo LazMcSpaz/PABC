@@ -71,7 +71,7 @@ const stack = await page.evaluate(() => {
   const svgs = [...document.querySelectorAll("svg")].map((el) => ({
     z: zOf(el),
     blend: getComputedStyle(el).mixBlendMode,
-    lines: el.querySelectorAll("line").length,
+    paths: el.querySelectorAll("path").length,
     rects: el.querySelectorAll("rect").length,
   })).filter((s) => s.z != null && s.z >= 7000 && s.z < 9000);
   const token = document.querySelector("[data-unit-sprite]");
@@ -81,8 +81,8 @@ const stack = await page.evaluate(() => {
   return { svgs, tokenZ, sprites: document.querySelectorAll("[data-unit-sprite]").length };
 });
 
-const troughs = stack.svgs.filter((s) => s.blend === "normal" && s.lines > 0);
-const lights = stack.svgs.filter((s) => s.blend === "screen" && s.lines > 0);
+const troughs = stack.svgs.filter((s) => s.blend === "normal" && s.paths > 0);
+const lights = stack.svgs.filter((s) => s.blend === "screen" && s.paths > 0);
 
 check("route strokes are on the board", troughs.length + lights.length > 0,
   `${stack.svgs.length} route-range svg layer(s)`);
@@ -111,56 +111,49 @@ const parallel = await page.evaluate(() => {
       if (n?.road && n?.rail) both.push([id, nb]);
     }
   }
-  if (!both.length) return { shared: 0 };
-
-  // Every route stroke on screen, keyed by its endpoints rounded to the pixel.
-  const lines = [];
-  for (const svg of document.querySelectorAll("svg")) {
-    const z = getComputedStyle(svg).zIndex;
-    if (z === "auto" || Number(z) < 7000 || Number(z) >= 9000) continue;
-    const blend = getComputedStyle(svg).mixBlendMode;
-    for (const l of svg.querySelectorAll("line")) {
-      lines.push({
-        blend,
-        x1: +l.getAttribute("x1"), y1: +l.getAttribute("y1"),
-        x2: +l.getAttribute("x2"), y2: +l.getAttribute("y2"),
-      });
-    }
-  }
-  // The rail carries cross-ties (a dashed stroke), the road never does — so
-  // the two kinds are separable on screen without reading colour.
-  return { shared: both.length, lines: lines.length };
+  return { shared: both.length };
 });
 check("the board has ground carrying both a road and a rail",
   parallel.shared > 0, `${parallel.shared} shared segment(s)`);
 
-// The real assertion: no two route strokes may sit exactly on top of each
-// other. If the offset is lost, the road and rail collapse onto one line and a
-// settlement served by both looks rail-only.
-const overlap = await page.evaluate(() => {
-  const seen = new Map();
-  let collisions = 0;
-  for (const svg of document.querySelectorAll("svg")) {
-    const z = getComputedStyle(svg).zIndex;
-    if (z === "auto" || Number(z) < 7000 || Number(z) >= 9000) continue;
-    for (const l of svg.querySelectorAll("line")) {
-      const k = [l.getAttribute("x1"), l.getAttribute("y1"),
-                 l.getAttribute("x2"), l.getAttribute("y2")].map(Number)
-        .map((n) => Math.round(n)).join(",");
-      const w = Math.round(Number(l.getAttribute("stroke-width")) * 10);
-      const key = `${k}`;
-      const widths = seen.get(key) || new Set();
-      // Strokes of the SAME width at the same place are the road and rail
-      // collapsed; different widths are the trough/halo/core of one route.
-      if (widths.has(w)) collisions += 1;
-      widths.add(w);
-      seen.set(key, widths);
+// The real assertion, measured on the geometry the browser actually drew: a
+// road and a railway may CROSS — a level crossing is a real thing and touches
+// by definition — but they may never run ALONGSIDE each other in contact. So
+// walk both cores, find every stretch where the two are within a stroke's
+// width of each other, and fail if any of those stretches runs on rather than
+// crossing and ending. (scripts/check-route-geometry.mjs tests the same
+// promise against the raw geometry over many more boards; this one is here to
+// catch a styling or layer change that quietly breaks it on screen.)
+const braid = await page.evaluate(() => {
+  const core = (stroke) => [...document.querySelectorAll("svg path")]
+    .find((p) => p.getAttribute("stroke") === stroke);
+  const road = core("#f0c184");
+  const rail = core("#dce7f2");
+  if (!road || !rail) return { missing: true };
+  const walk = (p) => {
+    const L = p.getTotalLength();
+    const out = [];
+    for (let l = 0; l <= L; l += 4) out.push(p.getPointAtLength(l));
+    return out;
+  };
+  const A = walk(road);
+  const B = walk(rail);
+  let run = 0;
+  let worst = 0;
+  for (const a of A) {
+    let close = false;
+    for (const b of B) {
+      if (Math.abs(a.x - b.x) > 12 || Math.abs(a.y - b.y) > 12) continue;
+      if (Math.hypot(a.x - b.x, a.y - b.y) <= 12) { close = true; break; }
     }
+    run = close ? run + 4 : 0;
+    if (run > worst) worst = run;
   }
-  return collisions;
+  return { worst, samples: A.length + B.length };
 });
-check("road and rail never collapse onto the same line",
-  overlap === 0, `${overlap} colliding stroke pair(s)`);
+check("road and rail never run alongside each other in contact",
+  !braid.missing && braid.worst <= 95,
+  braid.missing ? "no road/rail core paths found" : `longest contact ${braid.worst}px`);
 
 // --- 2. blockades: above the road, below the units -----------------------
 const blockade = await page.evaluate(() => {
@@ -221,12 +214,17 @@ for (let i = 0; i < 6; i++) {
 await page.waitForTimeout(600);
 const zoomed = await page.evaluate(() => {
   const zOf = (el) => { const z = getComputedStyle(el).zIndex; return z === "auto" ? null : Number(z); };
-  let lines = 0;
+  // Routes are fitted curves now, not segment lists, so they are <path>
+  // elements. Count both: the rail ties and the blockade uprights are still
+  // lines, and either kind means the network drew something.
+  let strokes = 0;
   for (const el of document.querySelectorAll("svg")) {
     const z = zOf(el);
-    if (z != null && z >= 7000 && z < 9000) lines += el.querySelectorAll("line").length;
+    if (z != null && z >= 7000 && z < 9000) {
+      strokes += el.querySelectorAll("path, line").length;
+    }
   }
-  return lines;
+  return strokes;
 });
 check("routes still render at the flat level of detail", zoomed > 0, `${zoomed} strokes`);
 await page.screenshot({ path: `${OUT}/board-layers-zoomed.png` });

@@ -315,10 +315,15 @@ play; there is no salvage.
 ## Why this started
 
 Road today (`src/game/board.js`) is free-for-anyone terrain infrastructure —
-it costs 1 to enter and never halts, even through mountain or forest, and
-there's no ownership check on it: any faction's units benefit, not just
-whoever's territory it's in. A rail line with the same effect would just be
-road reskinned.
+it eases rough ground for anyone crossing it, and there's no ownership check:
+any faction's units benefit, not just whoever's territory it's in. A rail line
+with the same effect would just be road reskinned.
+
+(At the time this was written a road *negated* terrain outright — 1 MP to
+enter, never halting, through mountain and forest alike. It now HALVES the
+toll instead: forest 1 rather than 2, mountain 2 and no halt rather than a
+dead stop. A road that made a mountain cost the same as open grass had
+removed the mountain from the game, and roads reach a third of the board.)
 
 **Rail is NOT player-built.** An earlier pass in this doc differentiated rail
 by making it something a faction constructs and owns; that is overruled. Rail
@@ -331,7 +336,7 @@ So the differentiation has to come from what rail *does*, and it still does:
 | | Road | Rail |
 |---|---|---|
 | Shape | continuous terrain, most of the map | sparse links between specific settlement pairs |
-| Movement | 1 MP per hex, never halts | **1 MP for the whole hop**, however far apart the endpoints |
+| Movement | 1 MP over open ground; halves rough ground rather than deleting it | **1 MP for the whole hop**, however far apart the endpoints |
 | Economy | none | **production pooling** between the two settlements it joins |
 | Access | anyone | gated on controlling the endpoints (§2.3) |
 

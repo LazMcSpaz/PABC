@@ -106,6 +106,8 @@ export class MusicPlayer {
     this._pausedByHidden = false;
     this._gestureBound = false;
     this._playGen = 0;        // invalidates start attempts that lost their race
+    this._preloadedId = null; // what the warm-up element already holds
+    this._preloadingId = null; // what it is fetching right now, if anything
     this._env = 0;            // fade envelope, 0..1 — multiplied by volume
     this._destroyed = false;
 
@@ -117,10 +119,23 @@ export class MusicPlayer {
     this.audio.addEventListener("ended", this._onEnded);
     this.audio.addEventListener("error", this._onError);
 
-    // Warms the HTTP cache for the next cut during the gap. Never routed
-    // through the graph and never played.
+    // Warms the HTTP cache for the next cut. Never routed through the graph
+    // and never played.
     this._preloader = new window.Audio();
     this._preloader.preload = "auto";
+    // Assigning src to a media element aborts whatever it was already
+    // fetching, so a warm-up must be allowed to finish before another starts
+    // — see _preloadNext. These events are how we learn it has.
+    const settle = (ok) => () => {
+      if (ok && this._preloadingId) this._preloadedId = this._preloadingId;
+      this._preloadingId = null;
+    };
+    // `suspend` counts as done: it is the browser saying it has stopped
+    // fetching of its own accord, which is the end of the warm-up either way.
+    this._preloader.addEventListener("canplaythrough", settle(true));
+    this._preloader.addEventListener("suspend", settle(true));
+    this._preloader.addEventListener("error", settle(false));
+    this._preloader.addEventListener("abort", settle(false));
 
     this._onVisibility = this._onVisibility.bind(this);
     document.addEventListener("visibilitychange", this._onVisibility);
@@ -239,16 +254,20 @@ export class MusicPlayer {
       this.audio.pause();
       this.audio.removeAttribute("src");
     }
+    if (this._preloader) {
+      this._preloader.removeAttribute("src");
+      this._preloadedId = null;
+      this._preloadingId = null;
+    }
   }
 
   // ---- playlist -----------------------------------------------------------
 
-  _buildQueue(scene) {
+  _buildQueue(scene, avoid = this.currentId || this.lastPlayedId) {
     if (scene !== "game") return [TITLE_TRACK_ID];
     const order = shuffled(MUSIC_TRACKS.map((t) => t.id));
     // Never open a rotation with whatever just finished — otherwise leaving
     // the title screen can play the theme twice back to back.
-    const avoid = this.currentId || this.lastPlayedId;
     if (order.length > 1 && order[0] === avoid) {
       [order[0], order[1]] = [order[1], order[0]];
     }
@@ -269,6 +288,12 @@ export class MusicPlayer {
       this.queue.unshift(id);
       id = next;
     }
+    // Commit the next rotation now rather than when it is needed, so what
+    // comes after this cut is a decided fact. _preloadNext can only warm the
+    // right file if there is a real answer to "what is next" — guessing with
+    // a throwaway shuffle warms a track we probably will not play, and then
+    // fetches the real one anyway.
+    if (!this.queue.length) this.queue = this._buildQueue(this.scene, id);
     return id;
   }
 
@@ -292,10 +317,32 @@ export class MusicPlayer {
     this._tryStart();
   }
 
+  /**
+   * Warm the next cut's HTTP cache during the gap.
+   *
+   * Never the cut already playing: the menu pins a single theme, so there
+   * "next" *is* "current", and starting a second fetch for the file the
+   * element is already streaming doubles a 1.6 MB download and leaves one of
+   * the two to be aborted by the browser.
+   *
+   * Tracked by id rather than by comparing `_preloader.src` — that property
+   * reads back as an absolute URL while the manifest holds a root-relative
+   * one, so the comparison never matched and every call reassigned it.
+   */
   _preloadNext() {
-    const id = this.queue[0] ?? this._buildQueue(this.scene)[0];
+    const id = this.queue[0];
+    if (!id || id === this.currentId) return;
+    if (id === this._preloadedId || id === this._preloadingId) return;
+    // One warm-up at a time. Reassigning src would abort the download already
+    // in flight, throwing away the bandwidth spent on it and logging a
+    // cancelled request — which is what a player skipping quickly through
+    // tracks used to produce. Warming is an optimisation: skipping one costs
+    // nothing, and the next advance warms whatever is next by then.
+    if (this._preloadingId) return;
     const t = trackById(id);
-    if (t && this._preloader && this._preloader.src !== t.src) this._preloader.src = t.src;
+    if (!t || !this._preloader) return;
+    this._preloadingId = id;
+    this._preloader.src = t.src;
   }
 
   // ---- gaps ---------------------------------------------------------------

@@ -1,13 +1,16 @@
-// Where blockades stand — on the road, near the edge, facing along it.
+// Where blockades stand — on their own road, out toward the edge, laid across it.
 //
-// The engine keeps one blockade per hex, so the board can never show the
-// two-per-tile case today. These tests build it anyway: the geometry is
-// per-segment, and the point of moving off the hex centre was to leave room.
+// A hex holds one blockade per road leaving it, and each takes its stance from
+// that road. Positions come from the route network's nodes rather than from hex
+// centres, because a road no longer runs through the centre: the network drifts
+// each crossing off it so the board does not read as a lattice. Measuring
+// against centres would put a barricade beside the road it is meant to close.
 //
 //   node scripts/check-blockade-stance.mjs
 
 import { blockadeStance, pickSegment, roadNeighbours } from "../src/prototype/blockadeStance.js";
-import { buildHexGeometry, HEX_W, HEX_H, topFacePoints } from "../src/prototype/hexProjection.js";
+import { buildHexGeometry, topFacePoints } from "../src/prototype/hexProjection.js";
+import { buildRouteNetwork } from "../src/prototype/routeGeometry.js";
 
 let failures = 0;
 function check(name, pass, detail) {
@@ -15,109 +18,139 @@ function check(name, pass, detail) {
   console.log(`  ${pass ? "PASS" : "FAIL"}  ${name}${detail ? ` — ${detail}` : ""}`);
 }
 
-// A real board: `rows` is the adapter's shape, [[hexId, ...], ...], and
-// buildHexGeometry gives the same centres the renderer uses.
 const rows = Array.from({ length: 7 }, (_, r) =>
   Array.from({ length: 7 }, (_, c) => `h${r}-${c}`));
-const geom = buildHexGeometry(rows);
-const centers = geom.centers;
+const { centers } = buildHexGeometry(rows);
 const ids = Object.keys(centers);
-// Put a road on every hex so every neighbour pair is a segment.
 const hexes = Object.fromEntries(ids.map((id) => [id, { id, road: true, fog: "visible" }]));
+const nodes = buildRouteNetwork(rows, hexes, centers).road.nodes;
 
-console.log("--- a blockade stands on one of its hex's roads ---");
-let placed = 0, offRoad = 0, atCentre = 0;
-for (const id of ids) {
-  const st = blockadeStance(id, rows, hexes, centers);
-  if (!st) continue;
-  placed++;
-  const c = centers[id];
-  const n = centers[st.neighbour];
-  if (Math.hypot(st.x - c.x, st.y - c.y) < 1) atCentre++;
-  // The stance must lie ON the segment from centre to neighbour.
-  const t = Math.hypot(st.x - c.x, st.y - c.y) / Math.hypot(n.x - c.x, n.y - c.y);
-  const px = c.x + (n.x - c.x) * t;
-  const py = c.y + (n.y - c.y) * t;
-  if (Math.hypot(st.x - px, st.y - py) > 0.001) offRoad++;
-}
-check("every hex with roads gets a stance", placed === ids.length, `${placed}/${ids.length}`);
-check("no stance is left at the hex centre", atCentre === 0, `${atCentre} at centre`);
-check("every stance lies on its road segment", offRoad === 0, `${offRoad} off the line`);
+const edgesOf = (id) => roadNeighbours(id, rows, hexes).filter((n) => nodes[n]);
+const stanceOf = (id, edge) => blockadeStance(id, edge, nodes, centers);
 
-console.log("\n--- out near the edge, but still on its own tile ---");
-const poly = topFacePoints(0, 0);
-function inside(px, py) {
-  let hit = false;
-  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
-    const [xi, yi] = poly[i]; const [xj, yj] = poly[j];
-    if ((yi > py) !== (yj > py) && px < ((xj - xi) * (py - yi)) / (yj - yi) + xi) hit = !hit;
-  }
-  return hit;
-}
-let off = 0, tooCentral = 0;
-const fracs = [];
-for (const id of ids) {
-  const st = blockadeStance(id, rows, hexes, centers);
-  if (!st) continue;
-  const c = centers[id];
-  const lx = st.x - c.x, ly = st.y - c.y;
-  if (!inside(lx, ly)) off++;
-  // "Near the edge" means well past the middle of its own half.
-  const n = centers[st.neighbour];
-  const f = Math.hypot(lx, ly) / Math.hypot(n.x - c.x, n.y - c.y);
-  fracs.push(f);
-  if (f < 0.25) tooCentral++;
-}
-check("stays on its own top face", off === 0, `${off} off-tile`);
-check("sits out toward the edge", tooCentral === 0,
-  `${(Math.min(...fracs) * 100).toFixed(0)}–${(Math.max(...fracs) * 100).toFixed(0)}% of the way to the neighbour`);
-
-console.log("\n--- room for a second blockade on the same tile ---");
-// The engine allows one today. This asserts the geometry would not overlap if
-// a hex ever carried two, which is the whole reason for leaving the centre.
-const BOOTH = HEX_W * 0.20; // tollbooth footprint on screen, 7.4m at rest
-let crowded = 0, pairs = 0;
-for (const id of ids) {
-  const nbs = roadNeighbours(id, rows, hexes);
-  if (nbs.length < 2) continue;
-  const c = centers[id];
-  const stances = nbs.map((n) => {
-    const t = centers[n];
-    return { x: (t.x - c.x) * 0.36, y: (t.y - c.y) * 0.36 };
-  });
-  for (let i = 0; i < stances.length; i++) {
-    for (let j = i + 1; j < stances.length; j++) {
-      pairs++;
-      if (Math.hypot(stances[i].x - stances[j].x, stances[i].y - stances[j].y) < BOOTH) crowded++;
+console.log("--- a stance sits on its own road ---");
+{
+  let placed = 0, offRoad = 0, atNode = 0;
+  for (const id of ids) {
+    for (const e of edgesOf(id)) {
+      const st = stanceOf(id, e);
+      if (!st) continue;
+      placed++;
+      const a = nodes[id]; const b = nodes[e];
+      if (Math.hypot(st.x - a.x, st.y - a.y) < 1) atNode++;
+      // It must lie on the segment between the two road crossings.
+      const t = Math.hypot(st.x - a.x, st.y - a.y) / Math.hypot(b.x - a.x, b.y - a.y);
+      if (Math.hypot(st.x - (a.x + (b.x - a.x) * t), st.y - (a.y + (b.y - a.y) * t)) > 0.001) offRoad++;
     }
   }
+  check("every road gets a stance", placed > 0, `${placed} across ${ids.length} hexes`);
+  check("none is left on the hex's own crossing", atNode === 0, `${atNode} un-moved`);
+  check("every stance lies on its road", offRoad === 0, `${offRoad} off the line`);
 }
-check("two roads give two clear stances", crowded === 0,
-  `${pairs} road pairs, none closer than ${BOOTH.toFixed(0)}px`);
 
-console.log("\n--- the choice is stable ---");
-let unstable = 0;
-for (const id of ids) {
-  const a = pickSegment(id, rows, hexes, centers);
-  for (let k = 0; k < 5; k++) if (pickSegment(id, rows, hexes, centers) !== a) unstable++;
+console.log("\n--- out toward the edge, still on its own tile ---");
+{
+  const poly = topFacePoints(0);
+  const inside = (px, py) => {
+    let hit = false;
+    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+      const [xi, yi] = poly[i]; const [xj, yj] = poly[j];
+      if ((yi > py) !== (yj > py) && px < ((xj - xi) * (py - yi)) / (yj - yi) + xi) hit = !hit;
+    }
+    return hit;
+  };
+  let off = 0, central = 0, n = 0;
+  for (const id of ids) {
+    for (const e of edgesOf(id)) {
+      const st = stanceOf(id, e); if (!st) continue;
+      n++;
+      const c = centers[id];
+      if (!inside(st.x - c.x, st.y - c.y)) off++;
+      const a = nodes[id]; const b = nodes[e];
+      if (Math.hypot(st.x - a.x, st.y - a.y) / Math.hypot(b.x - a.x, b.y - a.y) < 0.25) central++;
+    }
+  }
+  check("stays on its own top face", off === 0, `${off} of ${n} off-tile`);
+  check("sits out toward the edge", central === 0, "past a quarter of the way to the neighbour");
 }
-check("the same road is chosen every time", unstable === 0,
-  "no hopping between roads on re-render");
 
-console.log("\n--- hexes with no road ---");
-const bare = Object.fromEntries(ids.map((id) => [id, { id, road: false, fog: "visible" }]));
-check("no road, no stance", ids.every((id) => blockadeStance(id, rows, bare, centers) === null),
-  "caller falls back to the hex centre");
-
-console.log("\n--- facing runs along the road ---");
-// Opposite roads must give opposite aspects, or the booth is not square to the
-// road it closes.
-const seen = new Set();
-for (const id of ids) {
-  const st = blockadeStance(id, rows, hexes, centers);
-  if (st) seen.add(st.facing);
+console.log("\n--- two roads, two clear stances ---");
+// The reason for leaving the middle clear: a junction can be closed twice.
+{
+  const BOOTH = 43; // tollbooth footprint on screen at rest, 7.4m
+  let crowded = 0, pairs = 0, junctions = 0;
+  for (const id of ids) {
+    const es = edgesOf(id);
+    if (es.length < 2) continue;
+    junctions++;
+    const st = es.map((e) => stanceOf(id, e)).filter(Boolean);
+    for (let i = 0; i < st.length; i++) {
+      for (let j = i + 1; j < st.length; j++) {
+        pairs++;
+        if (Math.hypot(st[i].x - st[j].x, st[i].y - st[j].y) < BOOTH) crowded++;
+      }
+    }
+  }
+  check("blockades on one hex do not overlap", crowded === 0,
+    `${junctions} junctions, ${pairs} pairs, none closer than ${BOOTH}px`);
 }
-check("more than one aspect is used", seen.size > 1, [...seen].sort().join(","));
+
+console.log("\n--- each lies across its OWN road ---");
+// The bearing has to be that of the road this barricade closes, not the hex's
+// dominant through-road: on a junction the second one would otherwise lie
+// across the wrong road.
+//
+// Note two barricades on a hex may legitimately SHARE a bearing — a road
+// running straight through gets one at each end, parallel to each other. They
+// are still distinct positions, which the overlap check above covers.
+{
+  let wrong = 0, checked = 0, differing = 0;
+  for (const id of ids) {
+    const es = edgesOf(id);
+    for (const e of es) {
+      const st = stanceOf(id, e); if (!st) continue;
+      checked++;
+      const want = (Math.atan2(nodes[e].y - nodes[id].y, nodes[e].x - nodes[id].x) * 180) / Math.PI;
+      const d = Math.abs(((st.angle - want) % 360 + 360) % 360);
+      if (Math.min(d, 360 - d) > 0.001) wrong++;
+    }
+    if (es.length < 2) continue;
+    const angles = es.map((e) => stanceOf(id, e)?.angle).filter((a) => a != null);
+    const mod180 = angles.map((a) => ((a % 180) + 180) % 180);
+    if (new Set(mod180.map((a) => a.toFixed(1))).size > 1) differing++;
+  }
+  check("each stance carries its own road's bearing", wrong === 0,
+    `${checked} stances, ${wrong} wrong`);
+  check("a junction of differently-angled roads gets different bearings", differing > 0,
+    `${differing} hexes where the roads genuinely diverge`);
+}
+
+console.log("\n--- facings ---");
+{
+  const seen = new Set();
+  for (const id of ids) for (const e of edgesOf(id)) {
+    const st = stanceOf(id, e); if (st) seen.add(st.facing);
+  }
+  check("more than one sprite row is used", seen.size > 1, [...seen].sort().join(","));
+  check("every stance names a real row",
+    [...seen].every((f) => ["s", "se", "e", "ne", "n", "nw", "w", "sw"].includes(f)));
+}
+
+console.log("\n--- degenerate input ---");
+check("no nodes and no centres: no stance", blockadeStance("h0-0", null, {}, {}) === null);
+{
+  // A record with no edge still draws, on its hex's own road crossing.
+  const st = blockadeStance(ids[0], null, nodes, centers);
+  check("a record with no road still gets a stance", !!st,
+    st ? `at its own crossing, angle ${st.angle.toFixed(0)}` : "nothing");
+}
+check("pickSegment is stable", (() => {
+  for (const id of ids.slice(0, 20)) {
+    const a = pickSegment(id, rows, hexes, centers);
+    for (let k = 0; k < 3; k++) if (pickSegment(id, rows, hexes, centers) !== a) return false;
+  }
+  return true;
+})(), "no hopping between roads on re-render");
 
 console.log(`\n${failures ? `${failures} FAILED` : "all blockade-stance tests passed"}`);
 process.exit(failures ? 1 : 0);
