@@ -454,6 +454,39 @@
         }
       }
     },
+    "neutral": {
+      "weather_machine": {
+        "frameWidth": 320,
+        "frameHeight": 256,
+        "frames": 10,
+        "fps": 3,
+        "loop": true,
+        "sheetWidth": 3200,
+        "sheetHeight": 2048,
+        "pixelsPerMetre": 18.3,
+        "footprintMetres": 14.4,
+        "anchor": [
+          160,
+          176
+        ],
+        "rows": [
+          "s",
+          "se",
+          "e",
+          "ne",
+          "n",
+          "nw",
+          "w",
+          "sw"
+        ],
+        "variants": {
+          "base": {
+            "sheet": "neutral/neutral_weather_machine_sheet.webp",
+            "mask": "neutral/neutral_weather_machine_mask.webp"
+          }
+        }
+      }
+    },
     "plainers": {
       "infantry": {
         "frameWidth": 192,
