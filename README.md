@@ -2,9 +2,18 @@
 
 > Explore. Contest. Conquer.
 
-A post-apocalyptic strategy game for 2–4 players, set in the Ashlands — a
-retro-futuristic world wrecked by a simultaneous plague and solar
-catastrophe. Rival factions fight for control of a contested wasteland map.
+A strategy game for 2–4 players, set on the Remnant Continent — what is
+left of western North America roughly two hundred years after a pole shift
+broke the old world. This is a rebuilding era, not a scavenging one: the
+factions have institutions, standardized manufacturing, trade networks, and
+pride. Pre-collapse technology survives but cannot be reproduced, so it is
+recovered, mounted, and revered. Rival factions contest a hex-tile map for
+control of it.
+
+Setting canon lives in
+[`concept/style/remnant-continent-art-direction.md`](concept/style/remnant-continent-art-direction.md)
+and the in-game wiki
+([`src/game/content/wiki-repo.js`](src/game/content/wiki-repo.js)).
 
 > **Status — playable, content phase.** The spatial hex-board redesign's
 > engine is built and wired to the UI: every system in the mechanical spec
@@ -19,7 +28,7 @@ catastrophe. Rival factions fight for control of a contested wasteland map.
 ## The game
 
 Four factions — **Versari Korad**, the **Grand Lakers**, the **Goldgrass
-Coalition** and the **Free Plainers** — contest a hex map of the Ashlands.
+Coalition** and the **Free Plainers** — contest a hex map of the Remnant Continent.
 Each begins holding one faction Capital and races to the victory-point goal.
 
 Core ideas:
