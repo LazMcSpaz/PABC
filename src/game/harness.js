@@ -62,6 +62,11 @@ import { evalCond, evalStrength } from "./dsl.js";
 import { registerQuest } from "./quests.js";
 import { CONFIG } from "./config.js";
 import { takeAITurn, maybeAssignTech, warPeaceTerms } from "./ai.js";
+import {
+  STAGE, PHASE, DEVICE, chooseSiteHex, rainmakerState, progressFor,
+  joinRainmaker, advanceStage, grantDevice, looseDevice, destroyDevice,
+  onHolderEliminated, looseDeviceAt, deviceCarrier, isHaulingDevice, publicStanding,
+} from "./rainmaker.js";
 import { enforceLoyaltySlotCap, chargeChipUpkeep, slotCapacity, effectiveBuildCost, buildableChips, applyOutputAndBuilds, locationOutput, unitUpkeepFor, chargeUnitUpkeep } from "./economy.js";
 
 const seed = Number(process.argv[2]) || 42;
@@ -6791,6 +6796,225 @@ line("\n  [Phase 11] text-token resolver");
     applyDeal(g, deal, "ai-war-cession");
     check("…and it changes hands with no human in the room",
       loc.controller === "lakers" && atWar(g, "goldgrass", "lakers") === false);
+  }
+}
+
+
+// =====================================================================
+// Phase 31 — The Rainmaker, part 1: contested state and the device as a
+// map object (docs/rainmaker-questline-design.md §2, implementation
+// notes §1, §4, §5, §6, §7). The rules tested here are the ones the
+// notes flag as "a reasonable implementation produces a wrong result".
+// =====================================================================
+line("\n  [Phase 31] the Rainmaker — contested state and the device");
+{
+  const g = createGame({ seed, mapSize: "large" });
+  const rm = rainmakerState(g);
+
+  // --- the site is seated, once, at world creation ---------------------
+  check("a game seats a Rainmaker site", !!rm && !!rm.siteHex && !!g.board.hexes[rm.siteHex]);
+  check("the line opens in the parallel phase with nobody engaged",
+    rm.phase === PHASE.PARALLEL && Object.keys(rm.progress).length === 0);
+  check("the device starts buried at the site, owned by nobody",
+    rm.device.status === DEVICE.BURIED && rm.device.hex === rm.siteHex && rm.device.owner === null);
+
+  // Notes §6 — the distance floor is measured from EVERY capital, not the
+  // nearest. Checking only the closest is the mistake, so this asserts the
+  // whole set rather than the minimum.
+  {
+    const caps = Object.values(g.locations)
+      .filter((l) => (l.chips || []).some((c) => g.chips[c]?.chipId === "capital"))
+      .map((l) => l.hexId);
+    const dists = caps.map((c) => bfsDistances(g.board.adjacency, c)[rm.siteHex]);
+    check("the site clears the distance floor from every capital, not just the nearest",
+      caps.length >= 2 && dists.every((d) => d >= rm.siteDistance)
+      && Math.min(...dists) === rm.siteDistance);
+    check("…and on a board with room, that floor is the configured target",
+      rm.siteDistance === CONFIG.rainmaker.site.minCapitalDistance);
+  }
+
+  // A board too small to hold the target says so out loud rather than
+  // quietly seating the site two hexes from somebody's front door.
+  {
+    const small = createGame({ seed, mapSize: "small" });
+    const srm = rainmakerState(small);
+    const cramped = small.log.filter((e) => e.name === "rainmaker_site_cramped");
+    check("a board too small for the distance floor reports the shortfall loudly",
+      srm.siteDistance < CONFIG.rainmaker.site.minCapitalDistance
+        ? cramped.length === 1 && cramped[0].payload.distance === srm.siteDistance
+        : cramped.length === 0);
+  }
+
+  // Same seed, same site — the search is deterministic from the first turn
+  // because the answer was decided before anybody looked (notes §6).
+  check("the site is deterministic for a given seed",
+    rainmakerState(createGame({ seed, mapSize: "large" })).siteHex === rm.siteHex);
+
+  // --- per-faction progress on a shared object -------------------------
+  const [a, b, c] = g.turnOrder;
+  joinRainmaker(g, a);
+  joinRainmaker(g, b);
+  advanceStage(g, a, STAGE.RESEARCH);
+  advanceStage(g, a, STAGE.REGION);
+  check("two factions hold two different stages of the same line at once",
+    progressFor(g, a).stage === STAGE.REGION && progressFor(g, b).stage === STAGE.MYTH);
+  check("a faction that never engaged has no record at all", progressFor(g, c) === null);
+  check("joining twice does not reset progress",
+    joinRainmaker(g, a).stage === STAGE.REGION);
+
+  // --- the exclusive phase ---------------------------------------------
+  advanceStage(g, a, STAGE.SEARCH);
+  check("reaching the search stage does NOT open the exclusive phase",
+    rainmakerState(g).phase === PHASE.PARALLEL && progressFor(g, b).hunting === false);
+  advanceStage(g, a, STAGE.SITE);
+  check("reaching the site opens the exclusive phase", rainmakerState(g).phase === PHASE.EXCLUSIVE);
+  check("…and converts everyone else from pursuing to hunting",
+    progressFor(g, b).hunting === true && progressFor(g, a).hunting === false);
+  check("…which is announced publicly, naming who got there",
+    g.log.some((e) => e.name === "rainmaker_exclusive" && e.payload.holder === a));
+  // Design §2 / notes §10 — a latecomer in the exclusive phase joins as a
+  // hunter. There is no lockout, but there is nothing left to pursue.
+  joinRainmaker(g, c);
+  check("a faction engaging after the announcement joins as a hunter",
+    progressFor(g, c).hunting === true);
+
+  // --- capture grants the object and NOTHING else (notes §1) -----------
+  {
+    const h = createGame({ seed, mapSize: "large" });
+    const [x, y] = h.turnOrder;
+    joinRainmaker(h, x);
+    for (const st of [STAGE.RESEARCH, STAGE.REGION, STAGE.SEARCH, STAGE.SITE]) advanceStage(h, x, st);
+    // Stages 5 and up are only reachable by HOLDING the device, so the victim
+    // of a seizure is the previous holder by construction.
+    grantDevice(h, x, { hex: "h2-2", carrierUid: "u-haul", reason: "extracted" });
+    advanceStage(h, x, STAGE.INSTALL);
+    advanceStage(h, x, STAGE.SPECIALIST);
+    const xp = progressFor(h, x);
+    xp.retained.lab = true;
+    xp.installTurns = 3;
+    xp.specialist = "primary";
+    grantDevice(h, y, { hex: "h2-2", carrierUid: "u-test" });
+    check("seizing the device puts the captor at transport, not at the victim's stage",
+      progressFor(h, y).stage === STAGE.TRANSPORT);
+    check("…with no lab credit and no installation progress inherited",
+      progressFor(h, y).retained.lab === false
+      && progressFor(h, y).installTurns === 0
+      && progressFor(h, y).specialist === null);
+    check("…and the victim loses every scrap of Rainmaker progress",
+      progressFor(h, x).stage === STAGE.MYTH && progressFor(h, x).installTurns === 0
+      && progressFor(h, x).specialist === null);
+    check("…but keeps the buildings it paid for — a lab is a lab whoever is winning",
+      progressFor(h, x).retained.lab === true);
+    check("an owned device is never 'loose' — loose means nobody has it",
+      rainmakerState(h).device.status === DEVICE.CARRIED
+      && grantDevice(h, y, { hex: "h2-2" }) && rainmakerState(h).device.status === DEVICE.CARRIED
+      && rainmakerState(h).device.owner === y);
+    grantDevice(h, y, { hex: "h2-2", carrierUid: "u-test" });
+    check("the device knows where it is and who has it",
+      rainmakerState(h).device.owner === y && rainmakerState(h).device.hex === "h2-2"
+      && rainmakerState(h).device.carrierUid === "u-test");
+
+    // The hold clock resets on capture and does not partially carry.
+    rainmakerState(h).activatedBy = y;
+    rainmakerState(h).activatedRound = h.round;
+    grantDevice(h, x, { hex: "h2-2", carrierUid: "u-other" });
+    check("a hold clock does not survive the device changing hands",
+      rainmakerState(h).activatedBy === null && rainmakerState(h).activatedRound === null);
+  }
+
+  // --- the device is not a unit (notes §4, §5) -------------------------
+  {
+    const h = createGame({ seed, mapSize: "large" });
+    const [x, y] = h.turnOrder;
+    joinRainmaker(h, x);
+    grantDevice(h, x, { hex: "h3-3", carrierUid: "u-escort" });
+    check("a hauled device reports its carrier by uid, not by hex",
+      deviceCarrier(h) === "u-escort"
+      && isHaulingDevice(h, { uid: "u-escort" }) === true
+      && isHaulingDevice(h, { uid: "u-bystander" }) === false);
+
+    // The escort dies and the attacker cannot occupy the hex. The device
+    // must still exist, on its hex, belonging to nobody.
+    looseDevice(h, { reason: "escort lost" });
+    check("wiping out the escort leaves the device standing, not destroyed",
+      rainmakerState(h).device.status === DEVICE.LOOSE);
+    check("…on the hex it was crossing, owned by nobody",
+      rainmakerState(h).device.hex === "h3-3" && rainmakerState(h).device.owner === null
+      && deviceCarrier(h) === null);
+    check("…and the first unit to arrive is what finds it there",
+      looseDeviceAt(h, "h3-3") !== null && looseDeviceAt(h, "h4-4") === null);
+    // Notes §5 — first to land on the hex, which is not necessarily whoever
+    // did the killing.
+    grantDevice(h, y, { hex: "h3-3", carrierUid: "u-vulture", reason: "recovered" });
+    check("recovering a loose device starts the finder at transport with nothing else",
+      rainmakerState(h).device.owner === y && progressFor(h, y).stage === STAGE.TRANSPORT
+      && progressFor(h, y).retained.lab === false);
+  }
+
+  // Eliminating the holder is the same ending, and it is decided by where the
+  // device is rather than by who landed the kill.
+  {
+    const h = createGame({ seed, mapSize: "large" });
+    const [x, y] = h.turnOrder;
+    joinRainmaker(h, x);
+    grantDevice(h, x, { hex: "h5-1", carrierUid: "u-convoy" });
+    onHolderEliminated(h, x);
+    check("eliminating the holder mid-haul leaves the device unowned on its hex",
+      rainmakerState(h).device.status === DEVICE.LOOSE
+      && rainmakerState(h).device.owner === null && rainmakerState(h).device.hex === "h5-1");
+    check("…and does NOT hand it to whoever did the eliminating",
+      progressFor(h, y) === null);
+  }
+
+  // --- destruction is global and permanent (notes §7) ------------------
+  {
+    const h = createGame({ seed, mapSize: "large" });
+    const [x, y, z] = h.turnOrder;
+    for (const f of [x, y, z]) joinRainmaker(h, f);
+    advanceStage(h, y, STAGE.RESEARCH);
+    progressFor(h, z).search = 5;
+    grantDevice(h, x, { hex: "h2-1", carrierUid: "u-c" });
+    destroyDevice(h, y, { reason: "denied" });
+    check("destroying the device ends the line for every faction, not just its holder",
+      Object.values(rainmakerState(h).progress).every((p) => p.stage === STAGE.MYTH));
+    check("…and stops every background search counter dead",
+      Object.values(rainmakerState(h).progress).every((p) => p.search === 0));
+    check("…and closes the line permanently — no respawn, no second device",
+      rainmakerState(h).phase === PHASE.ENDED
+      && rainmakerState(h).device.status === DEVICE.DESTROYED);
+    check("…so nothing can rejoin or advance afterwards",
+      joinRainmaker(h, x) === null && advanceStage(h, y, STAGE.RESEARCH) === false);
+    check("…and everyone is told, including who did it",
+      h.log.some((e) => e.name === "rainmaker_destroyed" && e.payload.player === y));
+  }
+
+  // --- what everyone may know (design §7) ------------------------------
+  {
+    const h = createGame({ seed, mapSize: "large" });
+    const [x] = h.turnOrder;
+    joinRainmaker(h, x);
+    check("before anyone finds it, the site's position is not public",
+      publicStanding(h).siteHex === null && publicStanding(h).device === null);
+    rainmakerState(h).foundBy = x;
+    check("once found, the site is public to everybody at once",
+      publicStanding(h).siteHex === rainmakerState(h).siteHex);
+    advanceStage(h, x, STAGE.SITE);
+    const pub = publicStanding(h);
+    check("public progress is coarse — a stage per faction and nothing else",
+      pub.holders.length === 1 && pub.holders[0].stage === STAGE.SITE
+      && Object.keys(pub.holders[0]).sort().join() === "fid,hunting,stage");
+  }
+
+  // A board with no capitals at all cannot seat a site; that is an error
+  // rather than a silent skip, so a broken map never quietly ships without
+  // a third victory condition.
+  {
+    let threw = false;
+    try {
+      chooseSiteHex({ hexes: { a: {}, b: {} }, adjacency: { a: [], b: [] } }, ["a", "b"],
+        { pick: (arr) => arr[0] }, 1);
+    } catch { threw = true; }
+    check("a site that cannot reach every capital is an error, not a shrug", threw);
   }
 }
 

@@ -365,6 +365,57 @@ export const CONFIG = {
   // Blockade structures (docs/rail-road-blockade-design.md §3). Numbers are
   // the doc's placeholders pending a balance pass — the mechanics are settled,
   // these are not.
+  // The Rainmaker — the third way to win. See docs/rainmaker-questline-design.md
+  // for what each number is defending; the design's own [tune] markers are the
+  // ones that live here.
+  rainmaker: {
+    site: {
+      // Minimum hexes from EVERY capital, not the nearest. Below this a lucky
+      // spawn collapses the whole exclusive phase into a short walk home.
+      minCapitalDistance: 4,
+    },
+    // Stage 0 fires somewhere in this window, or earlier on contact with a
+    // relevant ruin. Kept as authored: this line is the long game, the one that
+    // resolves the stalemates the other two conditions leave standing.
+    myth: { earliestRound: 8, latestRound: 12 },
+    search: {
+      // Turns from Stage 3 opening before the highest accumulated progress
+      // finds it automatically, player included. The quest can never stall the
+      // game, and a player who searched hardest must be able to win the ceiling.
+      ceilingTurns: 6,
+      // Per-turn background accrual for an AI, scaled by its disposition. Below
+      // the rate a player achieves by walking, deliberately.
+      aiRatePerTurn: 0.1,
+    },
+    stages: {
+      researchTurns: 3,   // Stage 1, building the lab
+      siteTurns: 3,       // Stage 4, holding the hex
+      installTurns: 4,    // Stage 6, fitting it in the capital
+      // What the fast partial extraction at Stage 4 costs you later.
+      damagedInstallPenalty: 2,
+    },
+    transport: {
+      // Hexes per turn hauling the device. A HARD override, not a modifier:
+      // nothing adds to this, including modifiers nobody has written yet.
+      hexesPerTurn: 1,
+      // How long the first faction to engage a convoy holds the field alone.
+      claimWindowRounds: 2,
+    },
+    // Three rounds holding the switched-on device, matching how a dominion
+    // victory resolves. Same number on purpose: two win conditions that ask you
+    // to hold a position should ask for the same length of nerve.
+    holdRounds: 3,
+    // Retained benefits, sized against the design's "slightly less than the
+    // same turns spent on an ordinary build" rule (§3).
+    retained: {
+      sightBonus: 1,
+      moveBonus: 1,
+      // Found benefits are scarce and deplete — the third faction to search
+      // finds nothing worth hauling home.
+      vehicleFinders: 2,
+    },
+  },
+
   blockades: {
     buildCost: 8,  // §3.1 — 1 Action + scrap to break ground
     cost: 4,       // §3.1 — total construction progress needed

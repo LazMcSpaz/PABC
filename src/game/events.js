@@ -52,6 +52,13 @@ export const EVENT_NAMES = new Set([
   "blockade_started", "blockade_progressed", "blockade_stalled",
   "blockade_completed", "blockade_failed", "blockade_destroyed",
   "blockade_paid", "blockade_dormant",
+  // The Rainmaker — the third way to win (docs/rainmaker-questline-design.md).
+  "rainmaker_joined", "rainmaker_advanced", "rainmaker_exclusive",
+  "rainmaker_found", "rainmaker_taken", "rainmaker_loose", "rainmaker_destroyed",
+  "rainmaker_claimed", "rainmaker_claim_released",
+  "rainmaker_activated", "rainmaker_hold_broken", "rainmaker_won",
+  "rainmaker_specialist_secured", "rainmaker_specialist_lost",
+  "splinter_rose", "rainmaker_site_cramped",
   // Standing armies eat — 1 scrap per unit each Upkeep, 2 fully chipped.
   "unit_unsupplied", "unit_supplied",
   "build_priority_changed", "advance_checked",

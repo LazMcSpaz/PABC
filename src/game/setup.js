@@ -1,6 +1,7 @@
 // Game setup — builds the initial GameState (mechanical-spec §13.3):
 // the board, players, locations, units, and the tiered Market.
 import { CONFIG } from "./config.js";
+import { seedRainmaker } from "./rainmaker.js";
 import { FACTIONS, MINOR_FACTIONS, LOCATIONS, CAPITAL, ABILITIES, REACTIVES, factionDef } from "./content.js";
 import { FIELD_ENCOUNTERS } from "./content/index.js";
 import { makeRng } from "./rng.js";
@@ -447,5 +448,17 @@ export function createGame({
   // its starting homeland is worth, rather than at zero. Quietly: nobody has
   // "gained" anything yet.
   recomputeVp(state, { emitEvents: false });
+  // The Rainmaker's site is fixed now, at world creation, and stays secret
+  // until somebody walks onto it — that is what makes the player side of the
+  // search deterministic rather than a roll (rainmaker notes §6). Uses an
+  // ISOLATED rng derived from the seed, like the terrain features above, so
+  // adding the site does not shift a single existing seed-dependent result.
+  const capitalHexes = Object.values(state.locations)
+    .filter((l) => (l.chips || []).some((c) => state.chips[c]?.chipId === CAPITAL.id))
+    .map((l) => l.hexId)
+    .sort();
+  if (capitalHexes.length) {
+    seedRainmaker(state, capitalHexes, makeRng((seed ^ 0x5261696e) >>> 0));
+  }
   return state;
 }
