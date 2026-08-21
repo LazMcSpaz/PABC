@@ -185,6 +185,12 @@ Use for: **NOT CANON, SUPERSEDED** — the stepping stone that produced `plainer
 Do not use for: anything final, and never as the sole anchor on an approved shot. It carries no faction fabrication logic — the sporting-rifle stock and trigger guard in particular belong to no one in §4 — so it will drag output toward a generic modern crossbow, which is the exact §5.2 trap of naming an object type with a famous instance
 Added: 2026-08-11
 
+## oldworld-weather-machine-01.jpg
+URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/oldworld-weather-machine-01.jpg
+Use for: pre-collapse manufacture at large scale, and §3's rule that advanced tech reads as PRECISION and never as light — a seamless swept hull with no fastener, no panel line and no visible method of assembly anywhere, a single machined slot, plain circular apertures, and a surface that gives away nothing about how it was made. The scale figure is the point: it fixes this at roughly ten times a person, which is what makes it read as inherited rather than built. Two views, including the open end showing the hull is a shell
+Do not use for: any faction's fabrication logic — it is deliberately outside all four, so it will erase Versari faceting and Laker casting alike if allowed to lead; also not for weathering, since the only aging here is the rust bleed at the band joints
+Added: 2026-08-11
+
 ## goldgrass-quilted-cuirass-03.jpg
 URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/goldgrass-quilted-cuirass-03.jpg
 Use for: the core Goldgrass statement in §4 — thickness built in layers of quilted cloth rather than plate, soft bulky outline, no hard edge anywhere; the concealed-plate rule read exactly right, a salvaged panel sandwiched inside the quilting and betrayed only by its stitched outline and two rows of rivet heads; madder-and-gold woven geometric banding at collar, armscye and hem; the warm ochre-to-cream palette that makes Goldgrass the only faction with color; front and side pairing
