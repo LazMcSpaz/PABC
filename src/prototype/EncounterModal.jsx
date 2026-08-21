@@ -1,9 +1,20 @@
-// Modal that pops when a Move would draw a field-encounter card. By the
-// time the player sees this, the move is already committed (the pre-move
-// confirm overlay handles their last-chance to back out); the modal is
-// just choose-your-resolution. Layout: title top-left; left half is a
-// holographic display frame (placeholder until per-encounter art lands);
-// right half holds the narrative + choices.
+// Modal that pops when a Move would draw a field-encounter card, and the
+// same window quest beats are delivered through (quests.js dispatches each
+// beat as an encounter). By the time the player sees this, the move is
+// already committed (the pre-move confirm overlay handles their last-chance
+// to back out); the modal is just choose-your-resolution.
+//
+// Art is optional and always will be: only some encounters and beats carry
+// an `imagePath`. So there are two first-class layouts, not one layout with
+// a hole in it —
+//
+//   with art     720px, display frame beside the narrative + choices
+//   without art  520px, single column, prose on a holo rail
+//
+// The narrow width matters: 13px prose across the full 720px runs to ~110
+// characters a line, which is a punishing measure to read. Dropping to 520
+// puts it back near 70.
+import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { C, CornerBrackets, useEscClose } from "./HudChrome.jsx";
 import { RichText } from "./RichText.jsx";
@@ -12,8 +23,9 @@ import { useIsPhone } from "./useViewport.js";
 // The image goes in here at a 2:3 ratio. The outer chrome is a slightly
 // raised holo bezel; the inner display is recessed (inset shadows + dark
 // fill) so the whole thing reads as a screen mounted in a device, with
-// real depth, rather than a flat rectangle.
-function ImageFrame({ imageUrl }) {
+// real depth, rather than a flat rectangle. Only rendered when there is
+// actually art to put in it.
+function ImageFrame({ imageUrl, onError }) {
   return (
     <div style={{
       position: "relative",
@@ -48,41 +60,15 @@ function ImageFrame({ imageUrl }) {
         `,
         overflow: "hidden",
       }}>
-        {imageUrl ? (
-          <img src={imageUrl} alt="" style={{
+        <img
+          src={imageUrl}
+          alt=""
+          onError={onError}
+          style={{
             position: "absolute", inset: 0, width: "100%", height: "100%",
             objectFit: "cover", filter: "brightness(0.95)",
-          }} />
-        ) : (
-          <>
-            {/* faint reference grid */}
-            <div style={{
-              position: "absolute", inset: 0,
-              backgroundImage: `linear-gradient(rgba(86,211,198,0.06) 1px, transparent 1px), linear-gradient(90deg, rgba(86,211,198,0.06) 1px, transparent 1px)`,
-              backgroundSize: "22px 22px", pointerEvents: "none",
-            }} />
-            <div className="hud-scanlines" style={{ position: "absolute", inset: 0 }} />
-            <div style={{
-              position: "absolute", inset: 0, display: "flex", flexDirection: "column",
-              alignItems: "center", justifyContent: "center", gap: 10, pointerEvents: "none",
-            }}>
-              <motion.svg
-                width="56" height="56" viewBox="0 0 24 24" fill="none"
-                stroke={C.holoHi} strokeWidth="1"
-                animate={{ opacity: [0.4, 0.7, 0.4] }}
-                transition={{ duration: 2.4, repeat: Infinity, ease: "easeInOut" }}
-              >
-                <circle cx="12" cy="12" r="10" />
-                <circle cx="12" cy="12" r="4.5" />
-                <path d="M2 12h4M18 12h4M12 2v4M12 18v4" strokeLinecap="round" />
-              </motion.svg>
-              <span style={{
-                fontFamily: C.font, fontSize: 9.5, letterSpacing: 2.8,
-                textTransform: "uppercase", color: "rgba(143,246,234,0.42)",
-              }}>No Signal</span>
-            </div>
-          </>
-        )}
+          }}
+        />
         {/* Always-on top/bottom HUD strips on the inner display */}
         <div style={{
           position: "absolute", top: 0, left: 0, right: 0, height: 16,
@@ -127,6 +113,16 @@ export default function EncounterModal({ encounter, choices, eligibleIds, redraw
   const isPhone = useIsPhone();
   const title = encounter.title || displayName(encounter.id);
 
+  // A path that 404s falls back to the text-only layout rather than
+  // leaving a broken-image box in the frame: authored art gets added over
+  // time and a typo'd path shouldn't be the thing the player sees. Keyed
+  // on `src` so Recon's discard-and-redraw, which swaps the card in place
+  // without remounting, re-tries the next encounter's art.
+  const src = encounter.imagePath || encounter.imageUrl || null;
+  const [artBroken, setArtBroken] = useState(false);
+  useEffect(() => setArtBroken(false), [src]);
+  const hasArt = Boolean(src) && !artBroken;
+
   return (
     <motion.div
       initial={{ opacity: 0 }}
@@ -145,7 +141,7 @@ export default function EncounterModal({ encounter, choices, eligibleIds, redraw
         transition={{ type: "spring", stiffness: 280, damping: 24 }}
         className="hud-scratch"
         style={{
-          position: "relative", width: 720, maxWidth: "94vw", maxHeight: "92vh",
+          position: "relative", width: hasArt ? 720 : 520, maxWidth: "94vw", maxHeight: "92vh",
           background: "linear-gradient(158deg, rgba(18,31,32,0.97), rgba(9,17,18,0.98) 58%, rgba(6,11,12,0.99))",
           border: `1px solid ${C.holo}`, borderRadius: 8,
           boxShadow: `inset 0 0 34px rgba(86,211,198,0.07), 0 0 0 1px rgba(86,211,198,0.12), 0 0 36px rgba(86,211,198,0.24), 0 26px 70px rgba(0,0,0,0.72)`,
@@ -170,19 +166,23 @@ export default function EncounterModal({ encounter, choices, eligibleIds, redraw
           }}>{title}</div>
         </div>
 
-        {/* Body — image beside the text on desktop/iPad; stacked (image on
-            top, shrunk down) on phone, where a 220px-wide image plus its
-            gap left only ~80px for text and squeezed every line of prose
-            and every choice button down to one word per line. */}
-        <div style={{ display: "flex", flexDirection: isPhone ? "column" : "row", gap: isPhone ? 12 : 18, padding: isPhone ? "14px 16px 16px" : "18px 24px 18px", flex: 1, minHeight: 0, overflowY: isPhone ? "auto" : "visible" }}>
-          <motion.div
-            initial={{ opacity: 0, scale: 0.96 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ delay: 0.1, duration: 0.32, ease: "easeOut" }}
-            style={isPhone ? { width: "38%", maxWidth: 150, alignSelf: "center", flexShrink: 0 } : { width: 220, flexShrink: 0 }}
-          >
-            <ImageFrame imageUrl={encounter.imagePath || encounter.imageUrl} />
-          </motion.div>
+        {/* Body — art beside the text on desktop/iPad; stacked (art on top,
+            shrunk down) on phone, where a 220px-wide image plus its gap left
+            only ~80px for text and squeezed every line of prose and every
+            choice button down to one word per line. With no art the column
+            is gone entirely rather than reserved, and the window narrows to
+            match so the text isn't left rattling around in a 720px shell. */}
+        <div style={{ display: "flex", flexDirection: isPhone ? "column" : "row", gap: hasArt ? (isPhone ? 12 : 18) : 0, padding: isPhone ? "14px 16px 16px" : "18px 24px 18px", flex: 1, minHeight: 0, overflowY: isPhone ? "auto" : "visible" }}>
+          {hasArt && (
+            <motion.div
+              initial={{ opacity: 0, scale: 0.96 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ delay: 0.1, duration: 0.32, ease: "easeOut" }}
+              style={isPhone ? { width: "38%", maxWidth: 150, alignSelf: "center", flexShrink: 0 } : { width: 220, flexShrink: 0 }}
+            >
+              <ImageFrame imageUrl={src} onError={() => setArtBroken(true)} />
+            </motion.div>
+          )}
 
           <div className="pc-scroll" style={{
             flex: 1, display: "flex", flexDirection: "column", gap: 14,
@@ -194,7 +194,18 @@ export default function EncounterModal({ encounter, choices, eligibleIds, redraw
                 initial={{ opacity: 0, y: 4 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.14, duration: 0.28 }}
-                style={{ fontSize: 13, color: "#d0d7dd", lineHeight: 1.6, whiteSpace: "pre-wrap" }}
+                style={{
+                  fontSize: 13, color: "#d0d7dd", lineHeight: 1.6, whiteSpace: "pre-wrap",
+                  // With no art the prose is the only thing above the
+                  // choices, so it takes the display frame's job of holding
+                  // the left edge: a lit rail reads as a readout the same
+                  // way the frame's bezel did.
+                  ...(hasArt ? null : {
+                    borderLeft: `2px solid ${C.holo}55`,
+                    paddingLeft: 14,
+                    boxShadow: `-6px 0 14px -8px ${C.holo}66`,
+                  }),
+                }}
               >
                 <RichText>{encounter.text}</RichText>
               </motion.div>
