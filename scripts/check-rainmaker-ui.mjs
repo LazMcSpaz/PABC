@@ -264,6 +264,46 @@ const torn = await page.evaluate(() => {
 check("tearing it loose early is a button, and the device pays for it",
   torn.status === "carried" && torn.damaged === true, JSON.stringify(torn));
 
+// Stage 6 in a capital with no room left — which is every capital by round 15.
+// The player must never be looking at "no lab in the capital" with nowhere to
+// put one.
+await page.evaluate(async () => {
+  const g = window.__ashland;
+  const R = await import("/PABC/src/game/rainmaker.js");
+  const E = await import("/PABC/src/game/economy.js");
+  const me = g.humanFactionId;
+  const rm = R.rainmakerState(g);
+  const home = R.capitalHexOf(g, me);
+  rm.device.status = "installed";
+  rm.device.hex = home;
+  rm.device.owner = me;
+  R.advanceStage(g, me, R.STAGE.INSTALL);
+  const loc = g.locations[home];
+  while (E.slotsUsed(g, loc.chips) < E.slotCapacity(loc, g)) {
+    const uid = `full-${loc.chips.length}`;
+    g.chips[uid] = { uid, chipId: "recyclers", disabled: false };
+    loc.chips.push(uid);
+  }
+  g.players[me].resource = 300;
+  window.__ashlandBump();
+});
+await openPanel();
+const stuck = await page.evaluate(() => document.body.innerText);
+check("a full capital says what is holding the fitting up",
+  /no lab in the capital/i.test(stuck));
+const raise = page.locator("button").filter({ hasText: /Raise the workshop/ }).first();
+check("…and offers the way out rather than leaving the player stuck",
+  await raise.count() === 1);
+await raise.click();
+await page.waitForTimeout(500);
+const started = await page.evaluate(async () => {
+  const g = window.__ashland;
+  const R = await import("/PABC/src/game/rainmaker.js");
+  const home = R.capitalHexOf(g, g.humanFactionId);
+  return g.locations[home].activeBuild?.chipId || null;
+});
+check("…and the button actually starts the workshop", started === "rainmaker-lab", String(started));
+
 // Stage 7 and 8: the engineer, and the switch.
 await page.evaluate(async () => {
   const g = window.__ashland;

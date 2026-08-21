@@ -153,6 +153,9 @@ export default function RainmakerPanel({ rm, you, onAct, standingOnDevice }) {
             {mine.installBlocker && (
               <Row label="Held up by" value={mine.installBlocker} tone={T.accent2} />
             )}
+            {mine.workshop?.building && (
+              <Row label="Workshop" value="going up" tone={T.accent} />
+            )}
           </>
         )}
         {mine && (
@@ -167,6 +170,14 @@ export default function RainmakerPanel({ rm, you, onAct, standingOnDevice }) {
 
       {/* The decisions. */}
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+        {/* The way out of a capital with no room left. Your capital IS full by
+            this point — every one on the board is, by round 15 — so this is
+            the ordinary path rather than the escape hatch it looks like. */}
+        {mine && stage === 6 && mine.workshop?.can && !mine.workshop.building && (
+          <Btn onClick={() => onAct("workshop")}>
+            Raise the workshop ({mine.workshop.cost})
+          </Btn>
+        )}
         {mine && stage === 4 && mine.siteTurns >= 1 && (
           <Btn onClick={() => onAct("extractEarly")}>
             Tear it loose now

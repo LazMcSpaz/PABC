@@ -380,6 +380,24 @@ export function mythIsOpen(state) {
   return !!rainmakerState(state)?.mythOpened;
 }
 
+// What counts as a lab for the installation. The Rainmaker's own workshop is
+// one, which is the whole reason it exists.
+export const LAB_CHIPS = new Set(["labs", "advanced-lab", "rainmaker-lab"]);
+
+// Why `fid` may not raise the Rainmaker's workshop at `hexId`, or null if they
+// may. It is the answer to "am I gated out of the lab" — so it must be null
+// exactly when the installation is what needs one.
+export function rainmakerLabBlocker(state, fid, hexId) {
+  const rm = rainmakerState(state);
+  if (!rm) return "there is no Rainmaker";
+  if (rm.device.owner !== fid) return "only whoever holds the Rainmaker builds one";
+  const home = capitalHexOf(state, fid);
+  if (!home || hexId !== home) return "it is raised around the machine, in your capital";
+  if (rm.device.hex !== home) return "the machine is not home yet";
+  if (labHexOf(state, fid, { capitalOnly: true })) return "there is already a lab here";
+  return null;
+}
+
 // A lab in any settlement this faction holds. Stage 1 builds one; Stage 6
 // demands one in the capital specifically, which is a different question asked
 // of the same building.
@@ -389,7 +407,7 @@ export function labHexOf(state, fid, { capitalOnly = false } = {}) {
     if (capitalOnly && !(loc.chips || []).some((c) => state.chips?.[c]?.chipId === "capital")) continue;
     const lab = (loc.chips || []).some((c) => {
       const id = state.chips?.[c]?.chipId;
-      return (id === "labs" || id === "advanced-lab") && !state.chips[c]?.disabled;
+      return LAB_CHIPS.has(id) && !state.chips[c]?.disabled;
     });
     if (lab) return loc.hexId;
   }

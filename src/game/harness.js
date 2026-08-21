@@ -72,11 +72,12 @@ import {
   candidateArea, searchRate, findSite, onUnitEnteredHex, tickSearch, tickStages,
   rainmakerSightBonus, tickSite, extractDevice, extractEarly,
   installBlocker, installTurnsNeeded, tickInstall, onSettlementCaptured,
+  rainmakerLabBlocker,
   hireSpecialist, seizeSpecialist, specialistStanding, tickSpecialist,
   activate, rainmakerOutput, rainmakerCountdown, checkRainmakerVictory,
   siegeIntent, raiseSplinter,
 } from "./rainmaker.js";
-import { enforceLoyaltySlotCap, chargeChipUpkeep, slotCapacity, effectiveBuildCost, buildableChips, applyOutputAndBuilds, locationOutput, unitUpkeepFor, chargeUnitUpkeep } from "./economy.js";
+import { enforceLoyaltySlotCap, chargeChipUpkeep, slotCapacity, slotsUsed, effectiveBuildCost, buildableChips, applyOutputAndBuilds, locationOutput, unitUpkeepFor, chargeUnitUpkeep } from "./economy.js";
 
 const seed = Number(process.argv[2]) || 42;
 const line = (s = "") => console.log(s);
@@ -7641,6 +7642,67 @@ line("\n  [Phase 35] the Rainmaker — the installation and the specialist");
       progressFor(g, fid).stage === STAGE.SPECIALIST);
   }
 
+  // --- the workshop: you can never be gated out of the lab --------------
+  // Measured: every capital on the board is full by round 15 and not one has a
+  // lab in it, so the requirement as written taxed 100% of holders identically
+  // — arrive home, demolish a building. The toll is still paid, in scrap and in
+  // four turns of standing still; it is no longer paid in a slot.
+  {
+    const { g, fid, home } = homeSetup();
+    const loc = g.locations[home];
+    while (slotsUsed(g, loc.chips) < slotCapacity(loc, g)) {
+      const uid = `filler-${loc.chips.length}`;
+      g.chips[uid] = { uid, chipId: "recyclers", disabled: false };
+      loc.chips.push(uid);
+    }
+    const before = loc.chips.length;
+    g.players[fid].resource = 200;
+    check("a capital with no room left still cannot start the fitting",
+      installBlocker(g, fid) === "no lab in the capital");
+    check("…but the workshop may be raised there anyway",
+      rainmakerLabBlocker(g, fid, home) === null);
+    check("…and the capital's own build menu offers it",
+      buildableChips(g, loc).some((o) => o.chipId === "rainmaker-lab"));
+    const built = performAction(g, "build", { at: home, chipId: "rainmaker-lab" });
+    check("…and the build is accepted in a capital that is completely full",
+      built.ok === true);
+    // Finish it the way the economy would.
+    loc.buildProgress = 999;
+    applyOutputAndBuilds(g, fid);
+    check("…taking no slot when it lands",
+      slotsUsed(g, loc.chips) <= slotCapacity(loc, g)
+      && loc.chips.length === before + 1);
+    check("…and nothing was knocked down to fit it in",
+      loc.chips.filter((c) => g.chips[c]?.chipId === "recyclers").length
+        === before - 1);
+    check("…and it counts as the lab the installation was waiting for",
+      installBlocker(g, fid) === null && !!labHexOf(g, fid, { capitalOnly: true }));
+  }
+
+  // It is not general-purpose infrastructure. Without these it would be a free
+  // Lab everybody rushes in every city.
+  {
+    const { g, fid, home } = homeSetup();
+    const rival = g.turnOrder[1];
+    g.players[fid].resource = 200;
+    g.players[rival].resource = 200;
+    check("a faction that is not holding the machine cannot raise one",
+      rainmakerLabBlocker(g, rival, capitalHexOf(g, rival)) !== null
+      && performAction(g, "build", { at: capitalHexOf(g, rival), chipId: "rainmaker-lab" }).ok === false);
+    const other = Object.values(g.locations).find((l) => l.controller === fid && l.hexId !== home);
+    if (other) {
+      check("…and the holder cannot raise one anywhere but around the machine",
+        rainmakerLabBlocker(g, fid, other.hexId) !== null);
+    } else check("…and the holder cannot raise one anywhere but around the machine", true);
+    // Ordinary labs still compete for a slot like everything else.
+    giveLab(g, home);
+    check("a capital that already has a lab has no use for a workshop",
+      rainmakerLabBlocker(g, fid, home) === "there is already a lab here");
+    check("…and it is never offered in a build menu that would refuse it",
+      !buildableChips(g, g.locations[capitalHexOf(g, rival)])
+        .some((o) => o.chipId === "rainmaker-lab"));
+  }
+
   // A lab somewhere else in the empire is not a lab in the capital.
   {
     const { g, fid, home } = homeSetup();
@@ -8012,12 +8074,15 @@ line("\n  [Phase 37] the Rainmaker — AI dispositions");
     rainmakerState(h).device.status = DEVICE.INSTALLED;
     rainmakerState(h).device.hex = home;
     advanceStage(h, fid, STAGE.INSTALL);
-    check("the capital really is full", installBlocker(h, fid) === "no lab in the capital");
+    check("the capital really is full", installBlocker(h, fid) === "no lab in the capital"
+      && slotsUsed(h, loc.chips) >= slotCapacity(loc, h));
     takeAITurn(h);
-    const started = loc.activeBuild?.chipId === "labs" || !!labHexOf(h, fid, { capitalOnly: true });
-    check("an AI one beat from winning knocks something down to fit the lab in", started);
-    check("…and never the Capital",
-      loc.chips.some((c) => h.chips[c]?.chipId === "capital"));
+    const started = loc.activeBuild?.chipId === "rainmaker-lab"
+      || !!labHexOf(h, fid, { capitalOnly: true });
+    check("an AI one beat from winning raises the workshop in a capital with no room left", started);
+    check("…without knocking anything down to do it",
+      loc.chips.some((c) => h.chips[c]?.chipId === "capital")
+      && loc.chips.filter((c) => h.chips[c]?.chipId === "recyclers").length >= 1);
   }
 
   // --- take it, or end it ----------------------------------------------

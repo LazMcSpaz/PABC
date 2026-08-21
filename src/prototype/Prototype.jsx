@@ -22,7 +22,7 @@ import { startTurn, endTurn } from "../game/turn.js";
 import { performAction } from "../game/actions.js";
 import {
   joinRainmaker, extractEarly, hireSpecialist, seizeSpecialist, activate,
-  grantDevice, destroyDevice, rainmakerState, DEVICE,
+  grantDevice, destroyDevice, rainmakerState, capitalHexOf, DEVICE,
 } from "../game/rainmaker.js";
 import RainmakerPanel from "./RainmakerPanel.jsx";
 import { applyOutputAndBuilds, chargeChipUpkeep, chargeUnitUpkeep } from "../game/economy.js";
@@ -971,6 +971,10 @@ export default function Prototype({ config, onNewGame }) {
     const me = state.youId;
     const rm = rainmakerState(g);
     if (kind === "join") joinRainmaker(g, me);
+    else if (kind === "workshop") {
+      const home = capitalHexOf(g, me);
+      if (home) performAction(g, "build", { at: home, chipId: "rainmaker-lab" });
+    }
     else if (kind === "extractEarly") extractEarly(g, me);
     else if (kind === "hire") hireSpecialist(g, me);
     else if (kind === "seize") {

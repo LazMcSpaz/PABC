@@ -134,7 +134,41 @@ instead, measured as the haul: from where the device is lying, how much further
 is your capital than the nearest rival's. Carrying a one-hex-per-turn convoy
 home past somebody closer than you are is not a plan.
 
-### 2.6 Rulings taken during the build
+### 2.6 The lab that cannot gate you: the Rainmaker Workshop
+
+**Spec** (design §5.6): a lab in the destination capital, at full cost and
+duration, whatever route you took — "the vulture toll. It does not forbid the
+strategy; it prices it."
+
+**Measured**, 12 games, capitals sampled at rounds 15, 25 and 35:
+
+> **Every capital still standing had zero free slots by round 15, and not one of
+> them had a lab in it.**
+
+So the requirement as written did not price the vulture strategy — it taxed
+*everybody* identically. 100% of holders arrive home to a full capital and have
+to demolish a working building at the worst possible moment. And the
+Stage-1-to-Stage-6 continuity the design imagines ("you built one already, so
+you skip this") essentially never fires, because Stage 1's lab gets built
+wherever there is room and capitals fill with economy and military chips.
+
+The fix is a distinct chip, the **Rainmaker Workshop**: a lab in every respect
+that matters — it satisfies the installation and it does research like one — but
+it takes **no chip slot**, and it can only be raised in the capital the device is
+sitting in, by the faction holding it. The toll is still paid, in scrap (dearer
+than an ordinary Lab) and in four turns of standing still while the whole board
+walks toward you. It is simply no longer paid in a slot the city needed for
+something else. A capital that already has a lab has no use for one, so the
+player who did plan ahead still skips the beat.
+
+This needed one contained engine change: `def.slots || 1` read a genuine 0 as
+"unset" and charged a slot anyway, so a zero-slot chip was not expressible.
+
+**After**, over 20 AI games: no game terminates at Stage 6 any more. Games that
+reach the installation now run through to Stage 8, and the median winning round
+across 30 games fell from 46 to 35.
+
+### 2.7 Rulings taken during the build
 
 Three questions the spec left open, answered by the designer:
 
@@ -172,7 +206,7 @@ nobody had it.
 - **Art.** `RainmakerMark.jsx` is a placeholder built so the dedicated sprite
   drops in by replacing the SVG body — position, states and the data attribute
   all stay.
-- **The unresolved-game rate is high** (21 of 30 at round 70). That is largely
+- **The unresolved-game rate is high** (20 of 30 at round 70). That is largely
   inherited: before the Rainmaker existed, 11 of 24 games ran past round 60. The
   Rainmaker resolves some of them without dominating, but it is not a fix for
   whatever else makes late games stall.

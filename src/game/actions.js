@@ -6,7 +6,7 @@ import { emit } from "./events.js";
 import { activePlayerId } from "./targeting.js";
 import { bfsDistances, reinforcementRoute } from "./board.js";
 import { unitReach, supplyCutter, unseenBlockers, hexIsFull } from "./movement.js";
-import { onCarrierMoved, onUnitEnteredHex } from "./rainmaker.js";
+import { onCarrierMoved, onUnitEnteredHex, rainmakerLabBlocker } from "./rainmaker.js";
 import { CONFIG } from "./config.js";
 import { FACTIONS, CHIPS, ABILITIES, chipDefOf, factionDef } from "./content.js";
 import { validateContest, runContest } from "./contest.js";
@@ -320,6 +320,13 @@ function validateBuild(state, { pid, player, params }) {
   if (!def) return fail("unknown chip");
   if (def.faction && def.faction !== pid) return fail("that chip is another faction's signature");
   if (def.reward) return fail("that chip cannot be built — it is found, not made");
+  // The Rainmaker's workshop is not general-purpose infrastructure. It takes no
+  // slot, so without this it would be a free Lab everybody rushes in every city;
+  // it exists to stop the installation being gated, and nothing else.
+  if (def.id === "rainmaker-lab") {
+    const why = rainmakerLabBlocker(state, pid, params.at);
+    if (why) return fail(why);
+  }
   if (!meetsTech(player, def)) return fail(`needs Tech Level ${techLevelReqFor(def.techLevel || 1)}`);
   if (!meetsLoyalty(loc, def)) return fail(`needs Loyalty ${def.loyaltyReq}`);
   if (def.kind === "unit") {
@@ -327,7 +334,10 @@ function validateBuild(state, { pid, player, params }) {
       return fail(def.statType
         ? `needs a stationed friendly unit with bay space and no ${def.statType} chip`
         : "needs a friendly unit stationed here with bay space");
-  } else if (slotsUsed(state, loc.chips) + (def.slots || 1) > slotCapacity(loc, state)) {
+  // `?? 1`, not `|| 1`: a chip that genuinely takes NO slot is a real thing now
+  // (the Rainmaker's workshop), and `||` reads its 0 as "unset" and charges it
+  // a slot anyway.
+  } else if (slotsUsed(state, loc.chips) + (def.slots ?? 1) > slotCapacity(loc, state)) {
     return fail("not enough chip slots");
   }
   return { ok: true };

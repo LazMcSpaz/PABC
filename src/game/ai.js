@@ -9,7 +9,7 @@ import { endTurn } from "./turn.js";
 import { activePlayerId } from "./targeting.js";
 import { bfsDistances } from "./board.js";
 import { unitReach } from "./movement.js";
-import { LOCATIONS, CHIPS } from "./content.js";
+import { LOCATIONS } from "./content.js";
 import { CONFIG } from "./config.js";
 import {
   manageRainmaker, rainmakerGoal, claimLooseDevice, dispositionOf,
@@ -86,18 +86,16 @@ const RAINMAKER_API = {
       if (loc.controller !== pid) continue;
       const isCapital = (loc.chips || []).some((c) => state.chips[c]?.chipId === "capital");
       if (needCapital && !isCapital) continue;
-      if (loc.activeBuild?.chipId === "labs") return false; // already on it
-      const r = performAction(state, "build", { at: loc.hexId, chipId: "labs" });
-      if (r.ok) return true;
-      // A capital that has been developed for twenty rounds is FULL, which is
-      // how this stalled in every measured game: the device came home to a city
-      // with three chips in three slots and the line stopped there for good.
-      // A faction one beat from winning knocks something down to make room —
-      // the cheapest thing it owns, never the Capital.
-      if (needCapital && /slot/i.test(r.reason || "") && makeRoomForLab(state, pid, loc)) {
-        const again = performAction(state, "build", { at: loc.hexId, chipId: "labs" });
-        if (again.ok) return true;
-      }
+      // At the installation it is the workshop, which takes no slot — because a
+      // capital developed over twenty rounds is full, in every measured game,
+      // and the line used to stop dead there.
+      const chipId = needCapital ? "rainmaker-lab" : "labs";
+      if (loc.activeBuild?.chipId === chipId) return false; // already on it
+      if (performAction(state, "build", { at: loc.hexId, chipId }).ok) return true;
+      // Stage 1's ordinary lab still competes for a slot like anything else, so
+      // fall back to any city with room rather than insisting on this one.
+      if (!needCapital) continue;
+      return false;
     }
     return false;
   },
@@ -110,24 +108,6 @@ const RAINMAKER_API = {
     return destroyDevice(state, pid, { reason: "denied to everyone" });
   },
 };
-
-// Demolish the least valuable thing in a full capital so a lab can go up. Only
-// ever called when the Rainmaker is sitting in that capital waiting for one, so
-// "least valuable" is measured against a game that is otherwise about to end.
-function makeRoomForLab(state, pid, loc) {
-  const worth = (id) => {
-    const def = CHIPS[id];
-    if (!def) return 99;
-    return (def.output || 0) * 3 + (def.research || 0) * 3 + (def.garrison || 0) + (def.strength || 0);
-  };
-  const candidates = (loc.chips || [])
-    .filter((c) => state.chips[c] && state.chips[c].chipId !== "capital")
-    .sort((a, b) => worth(state.chips[a].chipId) - worth(state.chips[b].chipId));
-  for (const c of candidates) {
-    if (performAction(state, "remove-chip", { at: loc.hexId, chip: c }).ok) return true;
-  }
-  return false;
-}
 
 // Exact win probability over both d6 rolls (defender wins ties, and skips
 // its die entirely for a garrison-only Location defence — the §16 house
@@ -882,7 +862,7 @@ function pickBuild(state, pid, loc) {
 
   // Location chips into a free slot first.
   const locFits = options
-    .filter((o) => o.def.kind === "location" && slotsUsed(state, loc.chips) + (o.def.slots || 1) <= slotCapacity(loc, state))
+    .filter((o) => o.def.kind === "location" && slotsUsed(state, loc.chips) + (o.def.slots ?? 1) <= slotCapacity(loc, state))
     .sort((a, b) => score(b.def) - score(a.def));
   if (locFits.length) {
     return performAction(state, "build", { at: loc.hexId, chipId: locFits[0].chipId }).ok;

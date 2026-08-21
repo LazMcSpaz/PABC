@@ -9,7 +9,7 @@ import {
   STAGE, PHASE, DEVICE, rainmakerState, progressFor, publicStanding,
   candidateArea, specialistStanding, rainmakerCountdown, siegeIntent,
   installBlocker, installTurnsNeeded, capitalHexOf, convoyHex, mythIsOpen,
-  destroyBlocker,
+  destroyBlocker, rainmakerLabBlocker,
 } from "../game/rainmaker.js";
 import { dispositionOf } from "../game/rainmakerAi.js";
 import { locationActionCapacity } from "../game/turn.js";
@@ -1195,6 +1195,19 @@ function rainmakerView(state, viewer) {
         installTurns: mine.installTurns || 0,
         installTurnsNeeded: installTurnsNeeded(state),
         installBlocker: installBlocker(state, viewer),
+        // The way out of a capital with no room left. Offered exactly when the
+        // installation is what needs a lab, so the player is never simply stuck
+        // looking at "no lab in the capital" with nowhere to put one.
+        workshop: (() => {
+          const home = capitalHexOf(state, viewer);
+          const why = home ? rainmakerLabBlocker(state, viewer, home) : "no capital";
+          return {
+            can: !why,
+            reason: why,
+            cost: ENGINE_CHIPS["rainmaker-lab"]?.buildCost ?? 0,
+            building: home && state.locations[home]?.activeBuild?.chipId === "rainmaker-lab",
+          };
+        })(),
         // The area you have narrowed it down to — only worth drawing while you
         // are still looking, and never a list of hexes it is NOT on.
         candidates: !rm.foundBy && mine.stage >= STAGE.SEARCH

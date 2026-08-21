@@ -218,6 +218,22 @@ export const CHIPS = {
   // --- location chips: research ---
   labs: { id: "labs", name: "Labs", kind: "location", slots: 1, techLevel: 1, cost: 3, research: 1, buildCost: 3, loyaltyReq: 0, upgradesTo: "advanced-lab", desc: "+1 Research while controlled" },
   "advanced-lab": { id: "advanced-lab", name: "Advanced Lab", kind: "location", slots: 1, techLevel: 2, cost: 6, research: 2, buildCost: 6, loyaltyReq: 3, upkeep: 1, desc: "+2 Research while controlled (upkeep 1)" },
+  // The Rainmaker's own workshop (docs/rainmaker-build-notes.md §2.7). A lab in
+  // every respect that matters — it satisfies the installation's requirement and
+  // it does research like one — but it takes NO chip slot, and it can only be
+  // raised in the capital the device is sitting in.
+  //
+  // Measured: every capital on the board is FULL by round 15, and not one of
+  // them has a lab in it. So the requirement as written did not price the
+  // vulture strategy, it taxed everybody identically — 100% of holders arriving
+  // home to demolish a building at the worst possible moment. The toll is still
+  // paid here, in scrap and in four turns of standing still while the whole
+  // board walks toward you; it is simply no longer paid in a slot the city
+  // needed for something else.
+  //
+  // Dearer than an ordinary Lab because it is built in a hurry, around a machine
+  // nobody understands, by people who are being shot at.
+  "rainmaker-lab": { id: "rainmaker-lab", name: "Rainmaker Workshop", kind: "location", slots: 0, techLevel: 1, cost: 8, research: 1, buildCost: 8, loyaltyReq: 0, desc: "+1 Research. Takes no chip slot; only in the capital holding the Rainmaker" },
   // --- location chips: defense ---
   "defense-turrets": { id: "defense-turrets", name: "Defense Turrets", kind: "location", slots: 1, techLevel: 1, cost: 4, garrison: 2, buildCost: 4, loyaltyReq: 0, upgradesTo: "stronghold", desc: "+2 garrison Strength" },
   stronghold: { id: "stronghold", name: "Stronghold", kind: "location", slots: 1, techLevel: 2, cost: 7, garrison: 4, buildCost: 7, loyaltyReq: 3, upkeep: 1, desc: "+4 garrison Strength (upkeep 1)" },
@@ -278,6 +294,7 @@ export const CHIP_SKINS = {
   factory: { versari: "Sunworks", goldgrass: "Gristmill", lakers: "Stamping Plant", plainers: "Tradehouse" },
   works: { versari: "Fabricator", goldgrass: "Barn Raising", lakers: "Assembly Line", plainers: "Roustabouts" },
   labs: { versari: "Lyceum", goldgrass: "Almanac Society", lakers: "Trade School", plainers: "Assay Office" },
+  "rainmaker-lab": { versari: "The Condensary", goldgrass: "Rain Shed", lakers: "The Wet Works", plainers: "Sky Barn" },
   "advanced-lab": { versari: "The Institute", goldgrass: "Seed Vault", lakers: "Proving Grounds", plainers: "Surveyors' Guild" },
   "defense-turrets": { versari: "Rampart", goldgrass: "Hedgerows", lakers: "Slag Wall", plainers: "Stockade" },
   stronghold: { versari: "Bastion", goldgrass: "Granary Keep", lakers: "Blast Wall", plainers: "Hillfort" },

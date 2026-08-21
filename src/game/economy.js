@@ -8,7 +8,7 @@
 // build action (actions.js), the Upkeep loop (turn.js), the capture path
 // (contest.js), and the HUD exposures (engineAdapter.js).
 import { CONFIG } from "./config.js";
-import { rainmakerOutput } from "./rainmaker.js";
+import { rainmakerOutput, rainmakerLabBlocker } from "./rainmaker.js";
 import { CHIPS, chipDefOf } from "./content.js";
 import { emit } from "./events.js";
 import { recomputeStats, recomputeResearch } from "./stats.js";
@@ -107,6 +107,10 @@ export function buildableChips(state, loc) {
     if (def.reward) continue;
     // Blockade chips install into a structure out on the road, not here.
     if (def.kind === "blockade") continue;
+    // The Rainmaker's workshop is not general infrastructure — it is raised
+    // around the machine, in the capital holding it, and nowhere else. Offering
+    // it in every city's menu would advertise a build that fails on click.
+    if (def.id === "rainmaker-lab" && rainmakerLabBlocker(state, loc.controller, loc.hexId)) continue;
     if (!meetsTech(player, def)) continue; // Tech-forbidden → not shown at all
     const locked = !meetsLoyalty(loc, def);
     out.push({
