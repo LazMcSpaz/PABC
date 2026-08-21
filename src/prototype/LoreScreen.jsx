@@ -1,5 +1,5 @@
 // LoreScreen.jsx — full-screen Lore / in-game wiki browser for Ashland Conquest.
-// Reads WIKI_ENTRIES from the auto-generated content file (currently empty {}).
+// Reads the merged WIKI_ENTRIES (repo-authored + editor-exported).
 // Renders a robust skeleton that degrades gracefully when empty and becomes a
 // fully functional two-column wiki browser as entries are authored in the
 // Encounter Builder.
@@ -12,7 +12,7 @@ import { useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { C, CornerBrackets } from "./HudChrome.jsx";
 import { WikiProvider, RichText } from "./RichText.jsx";
-import { WIKI_ENTRIES } from "../game/content/wiki.js";
+import { WIKI_ENTRIES } from "../game/content/wiki-repo.js";
 import "./prototype.css";
 
 // Amber accent used for entry title/term headings — matching the existing wiki
