@@ -44,8 +44,8 @@ export class SfxPlayer {
     this._buffers = new Map();   // name -> AudioBuffer
     this._pending = new Map();   // name -> Promise (dedupes concurrent loads)
     this._lastPlayed = new Map();
-    this._loops = new Map();     // name -> { src, gain } for sounds held open
-    this._loopWanted = new Set();// what *should* be looping, load or no
+    this._sustained = new Map(); // name -> { src, gain } for sounds held open
+    this._heldWanted = new Set();// what *should* be sounding, load or no
     this._listeners = new Set();
     this._gain = null;
   }
@@ -203,43 +203,49 @@ export class SfxPlayer {
     src.start(0);
   }
 
-  // ---- held loops ---------------------------------------------------------
+  // ---- sustained cues -----------------------------------------------------
 
   /**
-   * Hold a sound open until stopLoop(). Used for beds tied to a UI state —
-   * the radial menu's ambience — rather than to a moment.
+   * Sound something for as long as a piece of UI is on screen, then release()
+   * it. Two kinds live here: beds that repeat until let go (the radial menu's
+   * ambience, `loop: true`) and long one-shots that should be allowed to play
+   * out but cut gracefully if the moment ends early (the contest stinger,
+   * `loop: false`). Both are *held*: what starts them is a state, not an
+   * instant, so they need an owner and a way to be taken away.
    *
-   * Safe to call repeatedly: a loop already running (or already loading) is
-   * left alone rather than restarted, so a re-render cannot retrigger it.
-   * Nothing here checks `muted`: loops run through the same bus as one-shots,
-   * so mute silences them and unmute brings them straight back, with no
-   * bookkeeping about what was playing when the player hit the button.
+   * Safe to call repeatedly: a cue already sounding (or already loading) is
+   * left alone rather than restarted, so a re-render cannot retrigger it and
+   * two overlapping contests cannot stack into mud.
+   *
+   * Nothing here checks `muted`: held cues run through the same bus as
+   * one-shots, so mute silences them and unmute brings them straight back,
+   * with no bookkeeping about what was sounding when the player hit the button.
    */
-  startLoop(name, { fadeMs = 260 } = {}) {
+  hold(name, { fadeMs = 260 } = {}) {
     const cue = SFX[name];
     if (!cue) return;
-    this._loopWanted.add(name);
-    if (this._loops.has(name)) return;
-    if (!resumeAudioContext()) return; // no Web Audio: skip the bed entirely
+    this._heldWanted.add(name);
+    if (this._sustained.has(name)) return;
+    if (!resumeAudioContext()) return; // no Web Audio: skip it entirely
 
     const buffer = this._buffers.get(name);
     if (!buffer) {
       this.load(name).then((b) => {
         // The state may have moved on while we were fetching.
-        if (b && this._loopWanted.has(name) && !this._loops.has(name)) {
-          this._startLoop(name, b, fadeMs);
+        if (b && this._heldWanted.has(name) && !this._sustained.has(name)) {
+          this._startSustained(name, b, fadeMs);
         }
       });
       return;
     }
-    this._startLoop(name, buffer, fadeMs);
+    this._startSustained(name, buffer, fadeMs);
   }
 
-  stopLoop(name, { fadeMs = 320 } = {}) {
-    this._loopWanted.delete(name);
-    const node = this._loops.get(name);
+  release(name, { fadeMs = 320 } = {}) {
+    this._heldWanted.delete(name);
+    const node = this._sustained.get(name);
     if (!node) return;
-    this._loops.delete(name);
+    this._sustained.delete(name);
     const ctx = getAudioContext();
     if (!ctx) return;
     const t = ctx.currentTime;
@@ -247,36 +253,46 @@ export class SfxPlayer {
     node.gain.gain.cancelScheduledValues(t);
     node.gain.gain.setValueAtTime(node.gain.gain.value, t);
     node.gain.gain.linearRampToValueAtTime(0, end);
-    node.src.onended = () => {
-      try { node.src.disconnect(); node.gain.disconnect(); } catch { /* already gone */ }
-    };
     try { node.src.stop(end + 0.02); } catch { /* never started */ }
   }
 
-  _startLoop(name, buffer, fadeMs) {
+  _startSustained(name, buffer, fadeMs) {
     const ctx = getAudioContext();
     const bus = this._bus();
     if (!ctx || !bus) return;
+    const cue = SFX[name];
+    const repeats = cue.loop !== false;
+
     const src = ctx.createBufferSource();
     src.buffer = buffer;
-    src.loop = true;
-    // Keep the wrap point clear of MP3 encoder delay and padding. Browsers
-    // mostly strip those, but not all of them do, and a 25 ms hole punched
-    // into a bed every fifteen seconds is exactly the kind of artefact that
-    // sounds like a bug in the game rather than in the file.
-    const guard = Math.min(0.05, buffer.duration / 20);
-    src.loopStart = guard;
-    src.loopEnd = Math.max(guard + 0.1, buffer.duration - guard);
+    src.loop = repeats;
+    // Looping only: keep the wrap point clear of MP3 encoder delay and
+    // padding. Browsers mostly strip those, but not all of them do, and a
+    // 25 ms hole punched into a bed every fifteen seconds is exactly the kind
+    // of artefact that sounds like a bug in the game rather than in the file.
+    // A one-shot wants its real attack, so it starts at zero.
+    const guard = repeats ? Math.min(0.05, buffer.duration / 20) : 0;
+    if (repeats) {
+      src.loopStart = guard;
+      src.loopEnd = Math.max(guard + 0.1, buffer.duration - guard);
+    }
 
     const g = ctx.createGain();
-    const peak = SFX[name].gain ?? 1;
+    const peak = cue.gain ?? 1;
     const t = ctx.currentTime;
     g.gain.setValueAtTime(0, t);
     g.gain.linearRampToValueAtTime(peak, t + fadeMs / 1000);
     src.connect(g);
     g.connect(bus);
+    src.onended = () => {
+      // Covers both endings — released early, or a one-shot reaching its own
+      // end. Without the map cleanup a finished one-shot would still look
+      // "already sounding" and the next contest would be silent.
+      if (this._sustained.get(name)?.src === src) this._sustained.delete(name);
+      try { src.disconnect(); g.disconnect(); } catch { /* already gone */ }
+    };
     src.start(0, guard);
-    this._loops.set(name, { src, gain: g });
+    this._sustained.set(name, { src, gain: g });
   }
 
   _playFallback(url, gain) {

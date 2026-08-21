@@ -134,7 +134,7 @@ await page.waitForTimeout(200);
 const liveGain = await page.evaluate(() => window.__ashlandAudio.music.gain?.gain.value ?? -1);
 check("unmute restores it", liveGain > 0.05, `gain=${liveGain.toFixed(3)}`);
 
-for (const cue of ["diplomacyAlert", "diplomacyOpen", "windowOpen", "radialAmbience"]) {
+for (const cue of ["diplomacyAlert", "diplomacyOpen", "windowOpen", "radialAmbience", "contestRoll"]) {
   const loaded = await page.evaluate(async (name) => {
     const p = window.__ashlandAudio.sfx;
     await p.load(name);
@@ -193,7 +193,7 @@ if (hexId && (await clickHex(hexId))) {
 }
 
 // The radial menu's held ambience, and the diplomacy drawer behind it.
-const looping = () => page.evaluate(() => window.__ashlandAudio.sfx._loops.has("radialAmbience"));
+const looping = () => page.evaluate(() => window.__ashlandAudio.sfx._sustained.has("radialAmbience"));
 await clearFired();
 check("nothing looping before the radial opens", !(await looping()));
 
@@ -215,6 +215,58 @@ check("picking a sector stops the ambience", !(await looping()));
 check("opening the diplomacy drawer fires its cue", (await fired()).includes("diplomacyOpen"), (await fired()).join(","));
 await page.keyboard.press("Escape");
 await page.waitForTimeout(400);
+
+// A conflict roll. Stage one the player can actually declare: their unit
+// standing on a location somebody else holds, on their own turn.
+await clearFired();
+const held = () => page.evaluate(() => window.__ashlandAudio.sfx._sustained.has("contestRoll"));
+const contestHex = await page.evaluate(() => {
+  const g = window.__ashland;
+  const me = g.turnOrder[g.activeIndex];
+  const other = g.turnOrder.find((f) => f !== me);
+  // Take a location the player already holds and hand it to someone else,
+  // rather than picking one they don't hold: a location they never held is
+  // fogged, and a fogged hex opens no window at all.
+  const loc = Object.values(g.locations).find((l) => l.controller === me);
+  const u = Object.values(g.units).find((x) => x.owner === me);
+  if (!loc || !u) return null;
+  // The window derives "who holds this" from the influence sections, not
+  // from loc.controller, so both have to move.
+  loc.controller = other;
+  if (Array.isArray(loc.sections)) loc.sections = loc.sections.map(() => other);
+  u.node = loc.hexId;
+  g.players[me].actions.remaining = 9;
+  window.__ashlandBump?.();
+  return loc.hexId;
+});
+
+if (contestHex && (await clickHex(contestHex))) {
+  const contestBtn = page.locator("button").filter({ hasText: /^Contest$/ }).first();
+  if (await contestBtn.count()) {
+    check("nothing sounding before the roll", !(await held()));
+    await contestBtn.click();
+    // Attacking someone you are not at war with asks first.
+    await page.locator("button").filter({ hasText: /^ATTACK$/i }).first()
+      .click({ timeout: 2000 }).catch(() => {});
+    await page.waitForTimeout(800);
+    check("a conflict roll sounds the battle stinger", await held());
+
+    // The overlay is a ~6.3s dramatisation and the cue runs 7.4s. Closing it
+    // early must take the sound with it rather than leaving a battle playing
+    // over a quiet board.
+    await page.keyboard.press("Escape");
+    await page.locator("button").filter({ hasText: /^(Exit|Close|Done)$/i }).first()
+      .click({ timeout: 2000 }).catch(() => {});
+    await page.waitForTimeout(900);
+    check("closing the roll releases it", !(await held()));
+  } else {
+    check("a conflict roll sounds the battle stinger", false, "no Contest button on the staged location");
+  }
+} else {
+  check("a conflict roll sounds the battle stinger", false, "could not stage a contest");
+}
+await page.keyboard.press("Escape");
+await page.waitForTimeout(300);
 
 // The envoy audience.
 await clearFired();

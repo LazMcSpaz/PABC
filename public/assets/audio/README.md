@@ -26,9 +26,16 @@ release.
 |---|---|---|
 | `sfx/diplomacy-alert.mp3` | `freesound_community-sci-fi-door-14782` | Freesound |
 | `sfx/radial-ambience.mp3` | `freesound_community-mysterious-electricity-73307` | Freesound |
+| `sfx/contest-roll.mp3` | `freesound_community-angry-mob-loop-6847` | Freesound |
+| `sfx/contest-roll.mp3` | `universfield-epic-war-combat-scream-352707` | UNIVERSFIELD |
+| `sfx/contest-roll.mp3` | `dragon-studio-sword-fight-2-393846` | Dragon Studio |
+| `sfx/contest-roll.mp3` | `dragon-studio-sword-fight-393849` | Dragon Studio |
 | `sfx/window-open.mp3` | `suno-via-sci-fi-whoosh-289719` | Suno |
 | `sfx/diplomacy-open.mp3` | `47313572-sci-fi-launch-3351238` | — |
 | `music/*.mp3` | Replicate predictions (see below) | generated |
+
+`contest-roll.mp3` is a mix of four sources; all four need clearing, not just
+the Freesound one.
 
 ---
 
@@ -90,6 +97,40 @@ ffmpeg -i in.mp3 -af "$TRIM,volume=${GAIN}dB,alimiter=limit=0.891,aresample=4410
   -c:a libmp3lame -q:a 4 -ar 44100 -ac 2 out.mp3
 ```
 
+### The contest stinger
+
+`sfx/contest-roll.mp3` is four sources pre-mixed into one file rather than four
+sources scheduled together at runtime: mixed, the war cry can never drift off
+its one-second offset because a slow device stalled one `start()` call. It also
+means one decode, one node, one thing to release.
+
+Every stem is levelled to a common max-momentary **first**, so the blend
+weights below mean what they say instead of inheriting whatever each source
+happened to be mastered at:
+
+```sh
+# per stem: measure max-M, gain by (-14 - measured), force 44.1 kHz stereo
+ffmpeg -i stem.mp3 -af "volume=${G}dB,aresample=44100,aformat=channel_layouts=stereo" stem.wav
+```
+
+Then blend — the crowd is a bed and sits under the action, the sword stems are
+the impact, the war cry is the hero element and enters a second late:
+
+```sh
+ffmpeg -i mob.wav -i sword1.wav -i sword2.wav -i scream.wav -filter_complex "[0:a]volume=0.55[mob];[1:a]volume=0.90[s1];[2:a]volume=0.90[s2];[3:a]adelay=1000|1000,volume=1.0[scr];[mob][s1][s2][scr]amix=inputs=4:duration=longest:normalize=0[sum];[sum]afade=t=out:st=6.0:d=1.4,atrim=0:7.4,asetpts=N/SR/TB[out]" -map "[out]" raw.wav
+```
+
+`normalize=0` keeps the weights literal — `amix` otherwise divides by the input
+count and the weights stop meaning anything.
+
+The taper is not a stylistic trim. The crowd source is a **loop**: it runs 11.9 s
+and its raw end is a hard cut, not a decay, so leaving it whole would end the
+cue with an audible chop. Fading from 6.0 s also lands the stinger on the
+contest overlay's own arc (dice lock at 5 s, winner banner at 6.3 s). The sword
+and war-cry stems finish at 6.1 s and 3.2 s, so nothing but the bed is shortened.
+
+Finally normalise the sum to the −14 max-M cue target and limit, as above.
+
 ### The looping bed
 
 `sfx/radial-ambience.mp3` is held open for as long as the radial menu is, so
@@ -118,5 +159,6 @@ in the wrap on a browser that does not strip them.
 
 `npm run check:audio` (with `npm run dev` running) drives the real players in a
 real browser: the pinned title theme, the ten-second gaps, the four-cut
-rotation, every cue firing on the interaction it belongs to, the held loop
-starting and stopping with the radial menu, and the autoplay-blocked path.
+rotation, every cue firing on the interaction it belongs to, the bed starting
+and stopping with the radial menu, a staged contest sounding and releasing the
+battle stinger, and the autoplay-blocked path.

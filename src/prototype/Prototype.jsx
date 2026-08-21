@@ -15,7 +15,7 @@ import {
   TopBar, MenuOrb, RadialMenu, LocationWindow, BlockadeWindow, EconomyLedger, TitledWindow, ICON, C as HUD, COMPACT_HUD_H,
 } from "./HudChrome.jsx";
 import { useIsPhone } from "./useViewport.js";
-import { useSfxLoop, useSfxOnChange } from "../audio/AudioProvider.jsx";
+import { useSfxHold, useSfxOnChange } from "../audio/AudioProvider.jsx";
 import { createGame } from "../game/setup.js";
 import { startTurn, endTurn } from "../game/turn.js";
 import { performAction } from "../game/actions.js";
@@ -1027,7 +1027,18 @@ export default function Prototype({ config, onNewGame }) {
   // the moment a sector is picked — onMenuPick closes the radial before it
   // opens anything, and the extra clauses hold even if a panel is opened by
   // some other route while the radial is still up.
-  useSfxLoop(menuOpen && !menuPanel && !showTechWheel && !showDiplomacy, "radialAmbience");
+  useSfxHold(menuOpen && !menuPanel && !showTechWheel && !showDiplomacy, "radialAmbience");
+
+  // The battle under a conflict roll — both surfaces that show one. The
+  // player's own contest gets the dramatised overlay; an AI's gets a fast
+  // popup during the turn replay. Held rather than fired, so the stinger is
+  // released with the roll instead of running on over whatever comes next,
+  // and so two contests in quick succession cannot stack. `terse` overlays
+  // ("Unit lost") are aftermath, not a roll, so they are excluded.
+  const contestRollOnScreen =
+    !!contestViz ||
+    (replay.activeOverlays || []).some((o) => o.kind === "contest" && !o.terse);
+  useSfxHold(contestRollOnScreen, "contestRoll");
 
   return (
     <WikiProvider entries={WIKI_ENTRIES} openEntry={openWikiEntry}>

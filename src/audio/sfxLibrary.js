@@ -30,12 +30,20 @@ export const SFX = {
   windowOpen: { src: `${DIR}/window-open.mp3`, gain: 0.45 },
 
   /** Held under the radial menu for as long as it is open with nothing
-   *  picked. `loop: true` marks it for startLoop()/stopLoop() rather than
-   *  play(); it is mastered ~6 dB below the one-shots because a bed that
-   *  sits at cue level stops being a bed. The file is already crossfaded
-   *  end-to-head so the wrap has no seam — see the audio README. */
+   *  picked. `loop: true` repeats it until released; it is mastered ~6 dB
+   *  below the one-shots because a bed that sits at cue level stops being a
+   *  bed. The file is crossfaded end-to-head so the wrap has no seam — see
+   *  the audio README. */
   radialAmbience: { src: `${DIR}/radial-ambience.mp3`, gain: 0.85, loop: true },
+
+  /** The battle under a conflict roll: crowd, two sword stems, and a war cry
+   *  a second behind them — pre-mixed into one file, so the four can never
+   *  drift apart on a slow device the way four scheduled sources would.
+   *  Held rather than fired: it runs 7.4 s, longer than a fast AI contest
+   *  beat, so it is released with the roll it belongs to instead of trailing
+   *  over the next one. `loop: false` — it plays out once, no repeat. */
+  contestRoll: { src: `${DIR}/contest-roll.mp3`, gain: 0.9, loop: false },
 };
 
 /** Cues worth having in memory before the moment they're needed. */
-export const PRELOAD = ["diplomacyAlert", "diplomacyOpen", "windowOpen", "radialAmbience"];
+export const PRELOAD = ["diplomacyAlert", "diplomacyOpen", "windowOpen", "radialAmbience", "contestRoll"];

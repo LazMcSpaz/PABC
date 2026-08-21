@@ -125,7 +125,9 @@ going silently dead. Level runs through gain nodes rather than
 Adding a cue: drop the file in `public/assets/audio/sfx/` (mastering recipe in
 that folder's README), add an entry to `src/audio/sfxLibrary.js`, and fire it
 with `useSfxOn` (once per game object), `useSfxOnChange` (every time a UI
-element opens) or `useSfxLoop` (held while a state is true).
+element opens) or `useSfxHold` (sounded while a state is true, and faded out
+when it ends — for beds that repeat and for long stingers that should be cut
+short gracefully rather than trail over what comes next).
 
 `npm run check:audio` drives all of it in a real browser — run `npm run dev`
 first.

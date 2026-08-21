@@ -55,8 +55,8 @@ export function AudioProvider({ children, widget = true }) {
         player: sfx,
         setVolume: (v) => sfx.setVolume(v),
         play: (name, opts) => sfx.play(name, opts),
-        startLoop: (name, opts) => sfx.startLoop(name, opts),
-        stopLoop: (name, opts) => sfx.stopLoop(name, opts),
+        hold: (name, opts) => sfx.hold(name, opts),
+        release: (name, opts) => sfx.release(name, opts),
       },
       muted: musicStatus.muted,
       setMuted,
@@ -130,17 +130,22 @@ export function useSfxOn(key, name, opts) {
 }
 
 /**
- * Hold a looping sound open for as long as `active` is true.
+ * Sound a cue for as long as `active` is true, then fade it out.
+ *
+ * For the two kinds of sound that belong to a state rather than a moment: a
+ * bed that repeats while some UI is up, and a long stinger that should be
+ * allowed to play out but cut gracefully when the moment ends early. Which
+ * one you get is the cue's `loop` flag, not the caller's business.
  *
  * Tied to the player singleton rather than to the context value, so a volume
- * drag (which changes the context object) cannot restart the loop mid-note.
+ * drag (which changes the context object) cannot restart the sound mid-note.
  */
-export function useSfxLoop(active, name) {
+export function useSfxHold(active, name) {
   const { player } = useSfx();
   useEffect(() => {
     if (!active) return undefined;
-    player.startLoop(name);
-    return () => player.stopLoop(name);
+    player.hold(name);
+    return () => player.release(name);
   }, [active, name, player]);
 }
 
