@@ -71,9 +71,10 @@ const EFFECTS = {
       emit(state, e.amount >= 0 ? "resource_gained" : "resource_spent", {
         player: pid, resource: e.resource, amount: e.amount,
       });
-      if (e.resource === "VP" && p.vp >= CONFIG.vpThreshold && !state.winnerId) {
-        state.winnerId = pid;
-      }
+      // VP no longer wins anything — it is the end-of-game standing. This was
+      // the third copy of the old threshold check, and like the one in
+      // contest.js it honoured neither the setup toggle nor the major/minor
+      // rule the copy in victory.js applied.
     }
   },
 

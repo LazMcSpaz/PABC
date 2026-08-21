@@ -13,8 +13,8 @@ import { recomputeInfluence } from "./influence.js";
 import { recomputeVisibility, recomputeVisibilityFor, isUnitVisibleTo } from "./visibility.js";
 import { onLocationCaptured, onRaidWon } from "./standing.js";
 import { hexIsFull } from "./movement.js";
-import { onAttack } from "./diplomacy.js";
-import { makeUnit } from "./setup.js";
+import { onAttack, checkDominion } from "./diplomacy.js";
+import { makeUnit, nextMusterIndex } from "./setup.js";
 import { TECH_NODES, hasTechNode } from "./tech.js";
 import { destroyPost } from "./posts.js";
 import { blockadeAt, blockadeDefense, destroyBlockade } from "./blockades.js";
@@ -408,7 +408,7 @@ function strandReinforcementsFrom(state, capturedHex) {
     const target = state.units[r.targetUnit];
     const node = target ? target.node : capturedHex;
     const u = state.nextId("unit");
-    state.units[u] = makeUnit(u, r.owner, node, factionDef(r.owner)?.name || r.owner);
+    state.units[u] = makeUnit(u, r.owner, node, factionDef(r.owner)?.name || r.owner, nextMusterIndex(state, r.owner));
     state.units[u].baseStrength = Math.min(CONFIG.unit.baseStrengthCap, r.amount);
     recomputeStats(state);
     emit(state, "reinforcement_arrived", { player: r.owner, unit: u, stranded: true });
@@ -637,16 +637,15 @@ function offerRetreat(state, unit, ctx, preferred) {
 }
 
 // A player wins immediately at the VP threshold (§3 / §14.1). Checked
-// after every contest so an Obstacle outcome or capture reward that
-// crosses 12 ends the game at once.
+// after every contest, because taking a city can be the move that leaves every
+// surviving rival your ally, your vassal, or dead.
+//
+// This used to be a VP-threshold check of its own — one of THREE copies of the
+// win condition, each with different rules: this one ignored the setup toggle
+// that was supposed to switch it off, and ignored the major/minor filter the
+// copy in victory.js applied. There is one condition now, in one place.
 function checkVictory(state) {
-  if (state.winnerId) return;
-  for (const p of Object.values(state.players)) {
-    if (p.vp >= CONFIG.vpThreshold) {
-      state.winnerId = p.id;
-      break;
-    }
-  }
+  checkDominion(state);
 }
 
 // --- action handlers (plugged into performAction's dispatcher) -------
@@ -955,7 +954,11 @@ export function runContest(state, { pid, params, ctx = {} }) {
   // §18.5/§18.7 — feed the political layer: the attacker takes a Menace
   // swing vs the target's temperament, breaks any pact/promise with them,
   // and establishes the war-state. (The combat math above is untouched.)
-  if (ambushDefOwner) onAttack(state, pid, ambushDefOwner);
+  // The hex it happened on: Menace is scored by who could SEE it (§18.5), so
+  // the political layer needs to know where, not just who.
+  if (ambushDefOwner) {
+    onAttack(state, pid, ambushDefOwner, t.kind === "raid" ? t.unit.node : (t.loc?.hexId ?? unit.node));
+  }
 
   // §16.6 veterancy — credit survivors and the winning unit, then promote.
   tickVeterancy(state, [attackerUnit, defenderUnit], winnerUnit?.uid ?? null);

@@ -14,19 +14,30 @@ import { evaluateConditionalBeats } from "./quests.js";
 import {
   applyOutputAndBuilds, chargeChipUpkeep, chargeUnitUpkeep, enforceLoyaltySlotCap,
 } from "./economy.js";
-import { runDiplomacyRound, vassalsOf, arePacted, adjustMenace, sweepTrespass } from "./diplomacy.js";
+import {
+  runDiplomacyRound, vassalsOf, arePacted, adjustMenace, sweepTrespass,
+  checkDominion, dominionStanding,
+} from "./diplomacy.js";
 import { holdsLocation } from "./control.js";
 import { adjustStanding } from "./standing.js";
 import { pressureSource } from "./influence.js";
 import { hasTechNode } from "./tech.js";
 import { chargePostUpkeep } from "./posts.js";
 import { chargeBlockadeUpkeep } from "./blockades.js";
-import { bankVp, recomputeVp } from "./victory.js";
+import { bankVp, recomputeVp, registerAllyReader } from "./victory.js";
 import { CHIPS, LOCATIONS, ABILITIES, factionDef } from "./content.js";
 
 // Sum a numeric chip field across a Location's installed, non-dormant
 // chips — the shared reader for the per-Location behavior chips
 // (loyaltyRise, healBonus, actionBonus, …).
+// How many actions a Location refreshes to at Upkeep — one, plus whatever a
+// Logistics Hub adds. Exported because the HUD has to draw the same number:
+// the action readout used to assume one per city, so a hub city could put the
+// dial at "8/7" and its pip row a pip short of what it actually holds.
+export function locationActionCapacity(state, loc) {
+  return 1 + locChipSum(state, loc, "actionBonus");
+}
+
 function locChipSum(state, loc, field) {
   let n = 0;
   for (const c of loc.chips) {
@@ -171,29 +182,19 @@ function awardVp(state, pid, amount, source) {
   bankVp(state, pid, amount, source);
 }
 
-function tickVictoryFaucets(state, pid) {
-  // The trickle is the MAJORS' race — seeded minors hold ground but never
-  // collect it.
-  if (factionDef(pid)?.tier !== "major") return;
-  // Alliance trickle — you must be pacted with a MAJORITY of the other
-  // surviving MAJORS to draw anything (seeded minors don't move the
-  // denominator), and past that bar every allied major pays. Unlike territory
-  // this one still ACCUMULATES: an alliance you held and lost was still held.
-  // Worth watching now that conquest VP is volatile and this is not.
-  const others = state.turnOrder.filter(
-    (f) => f !== pid && !state.players[f]?.eliminated && factionDef(f)?.tier === "major",
-  );
-  if (others.length > 0) {
-    const pacts = others.filter((f) => arePacted(state, pid, f)).length;
-    if (pacts > others.length / 2) {
-      awardVp(state, pid, pacts * CONFIG.victory.allianceTrickle, "alliance");
-    }
-  }
-}
+// The alliance trickle used to live here: +1 VP per allied major every round,
+// forever, once you were pacted with a majority of them. It was 77% of all
+// banked VP across 20 games and enough on its own to win while holding no
+// ground at all. Alliances and vassals are worth a HELD score now (victory.js
+// `diplomacyVp`), which every recompute picks up.
+function tickVictoryFaucets() {}
 
 // Elimination (docs/vp-and-actions-design.md §1): a faction with no
-// Locations and no units is out — flagged, skipped by the turn loop, and
-// excluded from the trickle majority. Last faction standing wins outright.
+// Locations and no units is out — flagged and skipped by the turn loop.
+//
+// Being last standing is no longer its own win condition: it is the pure-
+// conquest face of the one condition (checkDominion), which every surviving
+// faction being dead satisfies vacuously.
 function sweepEliminations(state) {
   for (const pid of state.turnOrder) {
     const p = state.players[pid];
@@ -206,12 +207,7 @@ function sweepEliminations(state) {
       emit(state, "faction_eliminated", { player: pid });
     }
   }
-  const survivors = state.turnOrder.filter((f) => !state.players[f]?.eliminated);
-  // Last-faction-standing is a win condition like any other, and switchable.
-  // Eliminations still happen either way; with it off, outliving everyone
-  // simply does not end the game by itself.
-  if (state.rules?.victory?.elimination === false) return;
-  if (survivors.length === 1 && !state.winnerId) state.winnerId = survivors[0];
+  checkDominion(state);
 }
 
 // v0.2 §16.2 — refresh each owned unit's move budget from its effective
@@ -222,12 +218,10 @@ function refreshMoveBudget(state, pid) {
   for (const u of Object.values(state.units)) {
     if (u.owner !== pid) continue;
     u.moveRemaining = u.movement;
-    // §16.2 road march — starting the turn on the highway network is
-    // worth +1 Movement this turn (roads as fast lanes, not only
-    // terrain-negators).
-    if (state.board.hexes[u.node]?.road) {
-      u.moveRemaining += CONFIG.movement.roadStartBonus || 0;
-    }
+    // No road start-bonus any more: the network pays out per hex travelled
+    // (CONFIG.movement.pavedCost), not as a lump for happening to be parked on
+    // it at Upkeep. See config.js.
+
     u.fortified = !u.movedSinceUpkeep;
     u.movedSinceUpkeep = false;
     // Where this unit's turn began, and whether an unseen blocker has since
@@ -303,7 +297,7 @@ export function startTurn(state) {
   }
   for (const loc of Object.values(state.locations)) {
     if (loc.controller !== pid) continue;
-    loc.actionsRemaining = 1 + locChipSum(state, loc, "actionBonus");
+    loc.actionsRemaining = locationActionCapacity(state, loc);
   }
   state.pendingActionGrants = state.pendingActionGrants.filter((g) => {
     if (g.player === pid) {
@@ -477,3 +471,12 @@ function decayWorldCounters(state) {
     w.ignoreCounts[k] = Math.floor(w.ignoreCounts[k] * 0.9);
   }
 }
+
+
+// victory.js scores alliances and vassals but must not import diplomacy.js —
+// diplomacy already imports victory, and the cycle would bite at load. turn.js
+// sits above both, so it is the natural place to hand the reader across.
+registerAllyReader((state, fid) => {
+  const st = dominionStanding(state, fid);
+  return { allied: st.allied, vassals: st.vassals };
+});

@@ -114,16 +114,6 @@
   transform: translateY(1px);
 }
 
-/* Corner brackets framing the board. */
-.pc-bracket {
-  position: absolute;
-  width: 28px;
-  height: 28px;
-  border: 2px solid #e8a93f;
-  opacity: 0.5;
-  pointer-events: none;
-}
-
 /* Floating windows pop in when they open. The end state matches the
  * window's own inline transform (a centring translate). */
 @keyframes pc-pop-in {

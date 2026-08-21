@@ -29,7 +29,7 @@ export { slotPos, chooseSlots } from "./boardSlots.js";
 // ground point, and both children hang off that origin. The sprite is offset by
 // its anchor rather than its bottom edge, which is the whole reason it lines up
 // with the contact ellipse.
-function SpriteToken({ unit, spec, faction, selected, pos, onClick, dim }) {
+function SpriteToken({ unit, spec, faction, selected, pos, onClick, dim, ready }) {
   ensureIdleKeyframes(spec);
   const s = spriteScale(spec);
   const style = spriteStyle(spec, variantFor(unit, spec), { uid: unit.uid, facing: pos.facing });
@@ -64,6 +64,32 @@ function SpriteToken({ unit, spec, faction, selected, pos, onClick, dim }) {
             : `radial-gradient(ellipse, ${faction.color}55, transparent 70%)`,
         }}
       />
+      {/* §4 of vp-and-actions-design — this unit still has its action.
+          Same filled dot the HUD's READY strip uses, so the symbol is learned
+          once; pinned at the unit's feet rather than over its head because
+          sprite heights differ and a marker that floats has to be hunted for.
+          Marking what is READY (not what is spent) means the board quietly
+          empties as the turn does. */}
+      {ready && (
+        <div
+          data-ready-dot=""
+          style={{
+            position: "absolute",
+            // Centred just under the contact ellipse: a status light at the
+            // unit's feet. Off to one side it sat half-outside the sprite's
+            // footprint and read as board noise.
+            left: 0,
+            top: shadowW * 0.34,
+            width: 9,
+            height: 9,
+            transform: "translate(-50%, -50%)",
+            borderRadius: "50%",
+            background: theme.ready,
+            border: "1.5px solid rgba(4,10,10,0.85)",
+            boxShadow: `0 0 7px ${theme.ready}, 0 1px 2px rgba(0,0,0,0.7)`,
+          }}
+        />
+      )}
       <div
         data-unit-sprite=""
         style={{
@@ -103,7 +129,7 @@ function SpriteToken({ unit, spec, faction, selected, pos, onClick, dim }) {
   );
 }
 
-export function UnitToken({ unit, selected, slot = 0, count = 1, pos: posIn, onClick, dim = false }) {
+export function UnitToken({ unit, selected, slot = 0, count = 1, pos: posIn, onClick, dim = false, ready = false }) {
   const faction = FACTIONS[unit.owner] || { name: unit.owner || "Unknown", color: "#888" };
   const pos = posIn || slotPos(slot, count);
   // The unit itself picks the model: movement chips promote it from infantry to
@@ -119,6 +145,7 @@ export function UnitToken({ unit, selected, slot = 0, count = 1, pos: posIn, onC
         pos={pos}
         onClick={onClick}
         dim={dim}
+        ready={ready}
       />
     );
   }
@@ -301,6 +328,7 @@ export default function BoardTokens({ order, hexes, units, centers, selectedUnit
                 pos={unitSlots[i]}
                 selected={u.uid === selectedUnitId}
                 dim={u.uid === dimmedUnitUid}
+                ready={!!u.canAct}
                 onClick={onUnitClick}
               />
             ))}

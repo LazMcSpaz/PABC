@@ -34,7 +34,7 @@ import { NEUTRAL } from "./data.js";
 import { getEncounter } from "../game/encounters.js";
 import { encounterRedrawBudget } from "../game/encounters.js";
 import { evalCond } from "../game/dsl.js";
-import { adaptState, reinforcePreview, engineChipIdToUi, previewLocationContest, previewAttackerStrength, blockadeView, blockadeBuildOffer, postAction, upkeepSummary, economyReport } from "./engineAdapter.js";
+import { adaptState, reinforcePreview, engineChipIdToUi, previewLocationContest, previewAttackerStrength, blockadeView, blockadeBuildOffer, postAction, upkeepSummary, economyReport, homeHexFor } from "./engineAdapter.js";
 import { resolveSalvage } from "../game/contest.js";
 import { assignTechNode } from "../game/stats.js";
 import { performDiplomacy } from "../game/diplomacy.js";
@@ -236,6 +236,13 @@ function buildLocView(state, hex, isYourTurn) {
     valueColor: val.color,
     vp: uiLoc.vp || 0,
     statusLabel: ctrl ? `Held — ${UI_FACTIONS[ctrl]?.name}` : claimed ? "Contested" : "Uncontrolled",
+    // What this place IS, as opposed to what it scores. Nine of the nineteen
+    // have no line written yet and render without one.
+    flavour: uiLoc.flavour || null,
+    basis: uiLoc.basis || null,
+    // Whether the city can still do something — the window is where you spend
+    // a city's action, so it is the one place that has to say so.
+    actionsReady: hex.actionsReady || 0,
     sections: control.sections,
     loyalty: control.loyalty,
     loyaltyMax: control.loyaltyMax,
@@ -323,17 +330,6 @@ function driveAIsThroughHumanTurn(game) {
   }
 }
 
-function Bracket({ corner }) {
-  const c = theme.accent;
-  const map = {
-    tl: { top: 0, left: 0, borderTop: `2px solid ${c}`, borderLeft: `2px solid ${c}` },
-    tr: { top: 0, right: 0, borderTop: `2px solid ${c}`, borderRight: `2px solid ${c}` },
-    bl: { bottom: 0, left: 0, borderBottom: `2px solid ${c}`, borderLeft: `2px solid ${c}` },
-    br: { bottom: 0, right: 0, borderBottom: `2px solid ${c}`, borderRight: `2px solid ${c}` },
-  };
-  return <div className="pc-bracket" style={map[corner]} />;
-}
-
 export default function Prototype({ config, onNewGame }) {
   // The engine mutates a single GameState in place; we hold a ref to it
   // and bump a tick to trigger a re-adapt + re-render after each mutation.
@@ -372,9 +368,23 @@ export default function Prototype({ config, onNewGame }) {
   );
   const replay = useAIReplay({ gameRef, geomRef, bumpTick });
 
+  // Where the camera opens the game: your Capital, in the same content-space
+  // coordinates the replay camera pans to. Computed once — BoardViewport only
+  // reads it on mount, and re-deriving it every render would recompute a
+  // constant on every tick.
+  const openingFocus = useMemo(
+    () => geomRef.current?.centers?.[homeHexFor(gameRef.current, state.youId)] || null,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
+
   const [selectedHexId, setSelectedHexId] = useState(null);
   const [selectedUnitId, setSelectedUnitId] = useState(null);
   const [toast, setToast] = useState(null); // { kind: "error"|"info", text }
+  // Things the player has waved off for now. An offer they said "consider it"
+  // to stays live in the drawer; it just stops knocking. Cleared by nothing —
+  // the ids are one-shot and the offer expires on its own.
+  const [deferredAudience, setDeferredAudience] = useState([]);
   const [encounterPrompt, setEncounterPrompt] = useState(null); // pending move + encounter pick
   const [pendingMove, setPendingMove] = useState(null);          // { unitUid, origin, dest } awaiting confirm
   const [skipMoveConfirm, setSkipMoveConfirm] = useState(readSkipMoveConfirm);
@@ -960,8 +970,24 @@ export default function Prototype({ config, onNewGame }) {
   // routes params + surfaces the accept/decline result.
   // Answer an envoy's audience (hear / placate / defy). The engine dequeues
   // the warning, so the modal closes to whatever is next in line.
-  function onEnvoyRespond(warning, answer) {
+  // Everything a faction says to you arrives through the same door. An
+  // offer or a demand is not "open the drawer and look" news — somebody has
+  // come to say it, so they get an audience and an answer.
+  function onEnvoyRespond(item, answer) {
     const game = gameRef.current;
+    if (item?.kind === "offer") {
+      if (answer === "later") { setDeferredAudience((d) => [...d, item.offer.id]); return; }
+      onDiplomacy("answer-offer", { offerId: item.offer.id, accept: answer === "accept" });
+      return;
+    }
+    if (item?.kind === "ultimatum") {
+      onDiplomacy("answer-ultimatum", {
+        ultimatumId: item.ultimatum.id, comply: answer === "comply",
+      });
+      if (answer === "defy") setDeferredAudience((d) => [...d, item.ultimatum.id]);
+      return;
+    }
+    const warning = item;
     const r = performDiplomacy(game, state.youId, "respond-warning", {
       warningId: warning.id,
       answer,
@@ -995,7 +1021,19 @@ export default function Prototype({ config, onNewGame }) {
       bumpTick();
       return;
     }
+    if (action === "answer-offer") {
+      msg = !r.ok ? (r.reason || "that offer is gone")
+        : r.accepted ? "Agreed. The terms stand."
+        : "You let it pass.";
+      setDiploResult({ ...r, msg });
+      bumpTick();
+      return;
+    }
     if (!r.ok) msg = r.reason || "no effect";
+    // A counter is not a refusal — it is their price, and it is waiting to be
+    // answered. Say where it went, because it lands in the inbox rather than
+    // in this result line.
+    else if (r.countered) msg = `${name} counter-offers — their terms are on the table.`;
     else if (r.accepted === false) msg = `${name} declines — ${r.reason || ""}`;
     else if (r.accepted === true) msg = `${name} agrees.`;
     else if (r.honored === true) msg = `${name} answers the call.`;
@@ -1004,6 +1042,19 @@ export default function Prototype({ config, onNewGame }) {
     setDiploResult({ ...r, msg });
     bumpTick();
   }
+
+  // Who is at the door, in order of how much it can hurt to ignore them. A
+  // demand with a deadline outranks an offer, which outranks a grumble.
+  const audience = useMemo(() => {
+    const d = state.diplomacy;
+    if (!d) return null;
+    const ult = (d.ultimatums || []).find((u) => !u.defied && !deferredAudience.includes(u.id));
+    if (ult) return { kind: "ultimatum", ultimatum: ult };
+    const offer = (d.offers || []).find((o) => !deferredAudience.includes(o.id));
+    if (offer) return { kind: "offer", offer };
+    return d.pendingWarnings?.[0] || null;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tick, deferredAudience]);
 
   // Bind the token resolver to live engine state. Re-fires on every
   // engine tick so a {faction:lowest-standing-with-active} read mid-game
@@ -1084,12 +1135,19 @@ export default function Prototype({ config, onNewGame }) {
           HUD chrome (resource wheel, faction readout, menu orb) floats
           over it as absolute overlays — see below. */}
       <div style={{ position: "relative", flex: 1, display: "flex", minHeight: 0 }}>
-        <BoardViewport cameraTarget={replay.cameraTarget} cameraPanMs={replay.cameraPanMs} controlsTop={hudOffset + 10}>
+        <BoardViewport cameraTarget={replay.cameraTarget} cameraPanMs={replay.cameraPanMs} controlsTop={hudOffset + 10} initialFocus={openingFocus}>
+          {/* No corner brackets here. They used to sit on this element —
+              the pan/zoom CONTENT layer — which put them at the corners of
+              the MAP, not of the screen: the top pair rendered underneath
+              the HUD bar and was never visible, and the moment you panned
+              or zoomed the bottom pair drifted across the board as two
+              stray gold Ls with nothing attached to them. Promoting them
+              to the viewport layer doesn't work either — the board's four
+              screen corners are already occupied by the zoom cluster, the
+              event feed and the menu orb, so a frame drawn there lands on
+              top of live controls. The board is the one surface in this UI
+              that is framed by its own HUD rather than by panel chrome. */}
           <div style={{ position: "relative", padding: 30 }}>
-            <Bracket corner="tl" />
-            <Bracket corner="tr" />
-            <Bracket corner="bl" />
-            <Bracket corner="br" />
             <Board
               state={boardState}
               selectedHexId={selectedHexId}
@@ -1182,6 +1240,7 @@ export default function Prototype({ config, onNewGame }) {
         color={UI_FACTIONS[state.youId]?.color}
         vp={you.vp}
         vpGoal={state.vpGoal}
+        dominion={state.diplomacy?.recognition || null}
         actions={you.actions}
         round={state.round}
         onEndTurn={onEndTurn}
@@ -1309,7 +1368,7 @@ export default function Prototype({ config, onNewGame }) {
           Shown one at a time; only on your own turn so it never interrupts
           an AI replay. */}
       {isYourTurn && !showDiplomacy && (
-        <EnvoyModal warning={state.diplomacy?.pendingWarnings?.[0]} onRespond={onEnvoyRespond} />
+        <EnvoyModal audience={audience} onRespond={onEnvoyRespond} />
       )}
 
       <HeraldLayer banners={heralds} onDismiss={dismissHerald} topOffset={hudOffset + 14} />
@@ -1512,7 +1571,16 @@ function TurnBanner({ banner }) {
 function EndOverlay({ state, onNewGame }) {
   const winner = state.players[state.winnerId];
   const winnerFaction = UI_FACTIONS[state.winnerId];
-  const sorted = Object.values(state.players).sort((a, b) => b.vp - a.vp);
+  // Winner first, then by score. VP is the closing STANDING — ground held and
+  // friends kept — and it is not what decided the game, so a diplomat can win
+  // the condition while the biggest land power out-scores them. That is a
+  // coherent story, but a table with the winner sitting fifth reads like a
+  // bug, so the ★ goes on top and the real numbers stay honest.
+  const sorted = Object.values(state.players).sort((a, b) => {
+    if (a.id === state.winnerId) return -1;
+    if (b.id === state.winnerId) return 1;
+    return b.vp - a.vp;
+  });
   return (
     <div
       style={{
@@ -1560,6 +1628,28 @@ function EndOverlay({ state, onNewGame }) {
         >
           {winnerFaction?.name || winner?.id}
         </div>
+        {/* HOW it ended. The table below is the closing standing — VP is a
+            score now, not the condition — so without this line a player is
+            left to infer what actually won it. */}
+        {state.winnerBy && (
+          <div
+            style={{
+              fontFamily: theme.fontDisplay,
+              fontSize: 12.5,
+              letterSpacing: 1,
+              color: theme.textDim,
+              marginTop: 8,
+              maxWidth: 320,
+            }}
+          >
+            {{
+              conquest: "By conquest — nobody left standing.",
+              diplomacy: "By treaty — every rival an ally.",
+              submission: "By submission — every rival sworn.",
+              mixed: "By war and treaty together.",
+            }[state.winnerBy] || ""}
+          </div>
+        )}
         <div
           style={{
             marginTop: 18,
@@ -1568,6 +1658,10 @@ function EndOverlay({ state, onNewGame }) {
             gap: 5,
           }}
         >
+          <div style={{
+            fontFamily: theme.fontDisplay, fontSize: 10, letterSpacing: 2,
+            textTransform: "uppercase", color: theme.textFaint, textAlign: "left",
+          }}>Final standing · ground held and friends kept</div>
           {sorted.map((p) => {
             const f = UI_FACTIONS[p.id];
             return (
@@ -1588,7 +1682,7 @@ function EndOverlay({ state, onNewGame }) {
                   {p.id === state.winnerId ? " ★" : ""}
                 </span>
                 <span style={{ fontFamily: theme.fontDisplay, fontWeight: 700 }}>
-                  {p.vp} VP
+                  {p.vp}
                 </span>
               </div>
             );

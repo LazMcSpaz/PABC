@@ -32,7 +32,7 @@ const LEADER_PORTRAIT = {
   plainers:  `${A}assets/portraits/factions/plainers/plainer_leader_1.webp`,
 };
 
-// Draw a dotted capital-to-capital line between two location ids by
+// Draw a dotted route line between two location ids by
 // querying the DOM for hex cells tagged data-loc=<id>. Re-measures on
 // resize/scroll so the line tracks pan/zoom.
 function TradingPactRouteLayer({ fromLocId, toLocId, status }) {
@@ -101,19 +101,20 @@ const TIER_COLOR = {
 // menu. Each carries label / description / destructive flag.
 const VERB_META = {
   "gift":                  { label: "Gift", body: "Send scrap. Raises their Standing toward you.", isPane: "gift" },
-  "propose-deal":          { label: "Custom Deal", body: "Build a give/get offer. Opens the deal builder.", isPane: "deal" },
+  "propose-deal":          { label: "Custom Deal", body: "Scrap, streams, alliances, borders, non-aggression — build it and see what they say.", isPane: "deal" },
   "demand-tribute":        { label: "Demand Tribute", body: "Take, don't ask. Stains Honor if refused.", isPane: "tribute", destructive: true },
   "sue-for-peace":         { label: "Sue for Peace", body: "Offer terms alongside the peace promise.", isPane: "peace" },
   "propose-pact":          { label: "Propose Pact", body: "Mutual defence + Standing bonus on both sides." },
-  "make-peace":            { label: "Make Peace", body: "End the war, no terms attached." },
+  "make-peace":            { label: "Ask for a Ceasefire", body: "Offer to end the war with nothing attached. They take it only if they want out." },
   "mediate":               { label: "Mediate", body: "Broker peace between two warring factions.", isPane: "mediate" },
   "pact-call":             { label: "Call to Pact", body: "Call your ally into one of your wars.", isPane: "pact-call" },
   "vassalize":             { label: "Vassalize", body: "Bind them under your banner.", destructive: true },
   "free-vassal":           { label: "Free Vassal", body: "Release them. Honor rises; tribute stops.", destructive: true },
-  "denounce":              { label: "Denounce", body: "Public condemnation. Standing falls on both sides.", destructive: true },
+  "denounce":              { label: "Denounce", body: "Name them publicly. Warranted, it pays; baseless, it costs — and the board can tell.", destructive: true },
+  "issue-ultimatum":       { label: "Issue Ultimatum", body: "Name a demand and a deadline. Defiance makes your war just — backing down costs Honor.", isPane: "ultimatum", destructive: true },
   "declare-war":           { label: "Declare War", body: "Open hostilities. Menace rises immediately.", destructive: true },
   // §6 trade + passive toggles
-  "trading-pact":          { label: "Open Trading Pact", body: "Route between capitals — per-round scrap each side + permanent Research floor." },
+  "trading-pact":          { label: "Open Trading Pact", body: "Any city of yours reaching any of theirs — per-round scrap each side + permanent Research floor." },
   "dissolve-trading-pact": { label: "Close Trading Pact", body: "Closes the trade route. Keeps the Research floor.", destructive: true },
   "set-open-borders":      { label: "Open Borders", body: "Let them transit your territory; they may grant the reverse." },
   "toggle-open-borders":   { label: "Toggle Open Borders", body: "Flip your half of the open-borders agreement on or off." },
@@ -121,8 +122,9 @@ const VERB_META = {
 };
 
 const DESTRUCTIVE_PROMPT = {
-  "declare-war":            "Declare war? You'll lose Standing and gain Menace immediately. Their allies may join in.",
-  "denounce":               "Denounce publicly? Standing falls on both sides and your Honor takes a hit.",
+  "declare-war":            "Declare war? Standing collapses, and unless you have a grievance on record the declaration alone raises your Menace. Their allies may join in.",
+  "issue-ultimatum":        "Put your name to a demand with a deadline? If they defy you and you then do nothing, the whole board sees you back down.",
+  "denounce":               "Denounce publicly? The board judges the accusation, not the accused: with grounds it earns you Honor and allies, without them it marks you as the liar.",
   "vassalize":              "Take them under your banner? The cornered submit; a friendly minor may welcome a protector.",
   "free-vassal":            "Release this vassal? Your Honor rises, their tribute stops.",
   "demand-tribute":         "Demand tribute? Refusal will damage your Honor and could trigger war.",
@@ -132,7 +134,7 @@ const DESTRUCTIVE_PROMPT = {
 // Loose match — used to skip a verb's `outcome` tooltip when it's a
 // near-paraphrase of the static body. Jaccard on long-enough word tokens;
 // ≥0.55 overlap is the empirical threshold that catches "Opens a route
-// between your capitals — …" vs. "Route between capitals — …" without
+// between you — …" vs. "Route between you — …" without
 // collapsing genuinely-different sentences like "Costs 5 scrap" vs.
 // "Will likely accept".
 function sameish(a, b) {
@@ -359,6 +361,155 @@ function btnHoloStyle() {
 // Landing view — §3.2
 // =======================================================================
 
+// Where your Menace and Honor came from. Both were floats with no history:
+// a player could watch the board turn on them with no way to learn which of
+// their own acts had done it.
+function Receipts({ receipts }) {
+  const [open, setOpen] = useState(false);
+  if (!receipts) return null;
+  const rows = [
+    ...receipts.menace.map((r) => ({ ...r, stat: "Menace", color: "#d2913c" })),
+    ...receipts.honor.map((r) => ({ ...r, stat: "Honor", color: "#5fc27a" })),
+  ].sort((a, b) => b.round - a.round);
+  if (!rows.length) return null;
+  return (
+    <Card>
+      <button
+        className="hud-int"
+        onClick={() => setOpen((v) => !v)}
+        style={{
+          width: "100%", textAlign: "left", background: "none", border: "none",
+          padding: 0, cursor: "pointer", color: C.holoHi,
+          fontFamily: C.font, fontSize: 10, fontWeight: 700,
+          letterSpacing: 1.6, textTransform: "uppercase",
+        }}
+      >{open ? "▾" : "▸"} How you got here · {rows.length}</button>
+      {open && (
+        <div style={{ marginTop: 7, display: "flex", flexDirection: "column", gap: 3 }}>
+          {rows.map((r, i) => (
+            <div key={i} className="pc-prose" style={{ fontSize: 11.5, lineHeight: 1.45 }}>
+              <span style={{
+                color: r.color, fontFamily: C.font, fontWeight: 700,
+                fontSize: 10, letterSpacing: 0.8, marginRight: 6,
+              }}>{r.stat}</span>
+              <span style={{ color: r.delta > 0 ? "#e8b467" : "rgba(207,214,220,0.8)" }}>{r.text}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+// A demand with a deadline. Complying costs you the thing; defying costs you
+// nothing yet, and hands them the right to take it.
+function UltimatumCard({ u, dip, onAction }) {
+  const f = dip.factions.find((x) => x.id === u.from);
+  return (
+    <Card accent="#d2453f">
+      <div className="pc-prose" style={{ fontSize: 12, lineHeight: 1.5, marginBottom: 7 }}>
+        <b style={{ color: f?.color || "#d2453f" }}>{u.fromName}</b> demands{" "}
+        <b style={{ color: C.holoHi }}>{u.demandText}</b>
+        {u.defied ? " — and you have refused." : "."}
+      </div>
+      {!u.defied && (
+        <div style={{ display: "flex", gap: 8 }}>
+          <button
+            className="hud-int"
+            disabled={!u.canComply}
+            onClick={() => onAction("answer-ultimatum", { ultimatumId: u.id, comply: true })}
+            style={{
+              flex: 1, fontFamily: C.font, fontSize: 10, fontWeight: 700,
+              letterSpacing: 1, textTransform: "uppercase", color: "#f4efe2",
+              padding: "6px 8px", borderRadius: 4, border: "1px solid rgba(86,211,198,0.35)",
+              background: "rgba(86,211,198,0.06)",
+              cursor: u.canComply ? "pointer" : "not-allowed", opacity: u.canComply ? 1 : 0.45,
+            }}
+          >{u.canComply ? "Give in" : (u.kind === "tribute" ? "Can't afford" : "Units still there")}</button>
+          <button
+            className="hud-int"
+            onClick={() => onAction("answer-ultimatum", { ultimatumId: u.id, comply: false })}
+            title={u.ifDefy}
+            style={{
+              flex: 1, fontFamily: C.font, fontSize: 10, fontWeight: 700,
+              letterSpacing: 1, textTransform: "uppercase", color: "#fff",
+              padding: "6px 8px", borderRadius: 4, border: "1px solid #6e1f12",
+              background: "linear-gradient(180deg, #d8553f, #a5331f)", cursor: "pointer",
+            }}
+          >Let it stand</button>
+        </div>
+      )}
+      <div style={{ fontFamily: C.font, fontSize: 9, letterSpacing: 0.5, color: "rgba(255,180,174,0.75)", marginTop: 6 }}>
+        {u.defied
+          ? "They may now take it by force, righteously."
+          : `${u.roundsLeft} round${u.roundsLeft === 1 ? "" : "s"} left. ${u.ifDefy}`}
+      </div>
+    </Card>
+  );
+}
+
+// One offer awaiting an answer. Deliberately plain: two term lists and two
+// buttons. The interesting part is that it EXISTS — before this, a proposal
+// resolved the instant it was made and there was no state in which anything
+// was pending.
+function OfferCard({ offer: o, dip, onAction }) {
+  const f = dip.factions.find((x) => x.id === o.from);
+  const accent = o.isCounter ? "#c9b24e" : (f?.color || C.holoHi);
+  const Terms = ({ label, items, empty }) => (
+    <div style={{ flex: 1, minWidth: 0 }}>
+      <SectionLabel>{label}</SectionLabel>
+      <div className="pc-prose" style={{ fontSize: 12, lineHeight: 1.5 }}>
+        {items.length ? items.join(" · ") : <span style={{ opacity: 0.55 }}>{empty}</span>}
+      </div>
+    </div>
+  );
+  return (
+    <Card accent={accent}>
+      {/* Phrased around the faction name rather than after it: half the
+          names are plural ("Free Plainers"), half singular ("Clan Tempest"),
+          and no verb agrees with both. */}
+      <div className="pc-prose" style={{ fontSize: 12, lineHeight: 1.5, marginBottom: 8 }}>
+        {o.isCounter ? "Counter-terms from " : "An offer from "}
+        <b style={{ color: f?.color || C.holoHi }}>{o.fromName}</b>.
+        {o.note && <span style={{ opacity: 0.75 }}> {o.note}</span>}
+      </div>
+      <div style={{ display: "flex", gap: 10, marginBottom: 8 }}>
+        <Terms label="You get" items={o.youGet} empty="nothing" />
+        <Terms label="You give" items={o.youGive} empty="nothing" />
+      </div>
+      <div style={{ display: "flex", gap: 8 }}>
+        <button
+          className="hud-int"
+          disabled={!o.affordable}
+          onClick={() => onAction("answer-offer", { offerId: o.id, accept: true })}
+          style={{
+            flex: 1, fontFamily: C.font, fontSize: 10, fontWeight: 700,
+            letterSpacing: 1, textTransform: "uppercase", color: "#08100f",
+            padding: "6px 8px", borderRadius: 4, border: "1px solid #5fc27a",
+            background: "linear-gradient(180deg, #7bd496, #4faf6e)",
+            cursor: o.affordable ? "pointer" : "not-allowed", opacity: o.affordable ? 1 : 0.45,
+          }}
+        >{o.affordable ? "Accept" : "Can't afford"}</button>
+        <button
+          className="hud-int"
+          onClick={() => onAction("answer-offer", { offerId: o.id, accept: false })}
+          style={{
+            flex: 1, fontFamily: C.font, fontSize: 10, fontWeight: 700,
+            letterSpacing: 1, textTransform: "uppercase", color: "#f4efe2",
+            padding: "6px 8px", borderRadius: 4, border: "1px solid rgba(86,211,198,0.35)",
+            background: "rgba(86,211,198,0.06)", cursor: "pointer",
+          }}
+        >Decline</button>
+      </div>
+      <div style={{ fontFamily: C.font, fontSize: 8.5, letterSpacing: 0.4, color: "rgba(143,246,234,0.5)", marginTop: 6 }}>
+        {o.roundsLeft > 0
+          ? `Lapses in ${o.roundsLeft} round${o.roundsLeft === 1 ? "" : "s"} — letting it lapse costs nothing.`
+          : "Lapses at the end of this round."}
+      </div>
+    </Card>
+  );
+}
+
 function LandingView({ dip, onSelectFaction, onAction, onClose }) {
   const rec = dip.recognition;
   const inbox = dip.pendingCalls || [];
@@ -410,13 +561,17 @@ function LandingView({ dip, onSelectFaction, onAction, onClose }) {
             <RepStat label="Honor" value={dip.honor.toFixed(1)} color="#5fc27a" sub="kept your word" />
             <RepStat label="Threat" value={dip.threat.toFixed(1)} color={dip.threat > 6 ? "#d2453f" : C.holoHi} sub="coalition risk" />
             <RepStat
-              label="Recognition"
+              label="Dominion"
               value={`${rec.score}/${rec.threshold}`}
               color={rec.met ? "#5fc27a" : "#c9b24e"}
-              sub={rec.met ? "Victory!" : `${rec.contributors?.length || 0} backing`}
+              sub={rec.roundsLeft != null
+                ? `${rec.roundsLeft} to victory`
+                : `${rec.outstanding?.length || 0} still to deal with`}
             />
           </div>
         </Card>
+
+        <Receipts receipts={dip.receipts} />
 
         {/* Path to Recognition — the per-faction backing checklist. Coarse
             status is common knowledge; exact numbers ride with the Spy Ring. */}
@@ -430,6 +585,47 @@ function LandingView({ dip, onSelectFaction, onAction, onClose }) {
               {dip.coalitionAgainstYou.join(", ")} have aligned against your rise. Their walls are higher; your reach is shorter.
             </div>
           </Card>
+        )}
+
+        {/* §6.10 — offers on the table. Either a faction opened a
+            conversation with you, or one came back with terms of its own
+            after refusing yours. Sits above Calls to Arms because an offer
+            expires quietly and a call does not. */}
+        {(dip.offers || []).length > 0 && (
+          <>
+            <SectionLabel color={C.holoHi}>On the Table</SectionLabel>
+            {dip.offers.map((o) => (
+              <OfferCard key={o.id} offer={o} dip={dip} onAction={onAction} />
+            ))}
+          </>
+        )}
+
+        {/* §6.11 — threats standing over you, and your own clock running. */}
+        {(dip.ultimatums || []).length > 0 && (
+          <>
+            <SectionLabel color="#d2453f">Or Else</SectionLabel>
+            {dip.ultimatums.map((u) => (
+              <UltimatumCard key={u.id} u={u} dip={dip} onAction={onAction} />
+            ))}
+          </>
+        )}
+        {(dip.ultimatumsIssued || []).length > 0 && (
+          <>
+            <SectionLabel color="#c9b24e">Your Word</SectionLabel>
+            {dip.ultimatumsIssued.map((u) => (
+              <Card key={u.id} accent="#c9b24e">
+                <div className="pc-prose" style={{ fontSize: 12, lineHeight: 1.5 }}>
+                  You have demanded <b style={{ color: C.holoHi }}>{u.demandText}</b> of{" "}
+                  <b>{u.toName}</b>.
+                </div>
+                <div style={{ fontFamily: C.font, fontSize: 9, letterSpacing: 0.5, color: u.defied ? "#ffb4ae" : "rgba(143,246,234,0.6)", marginTop: 5 }}>
+                  {u.defied
+                    ? `THEY REFUSED. ${u.roundsLeft} round${u.roundsLeft === 1 ? "" : "s"} to make good on it, or the board watches you back down.`
+                    : `${u.roundsLeft} round${u.roundsLeft === 1 ? "" : "s"} to answer.`}
+                </div>
+              </Card>
+            ))}
+          </>
         )}
 
         {/* §1.8 — pact-call inbox: allies calling you into their wars. */}
@@ -491,8 +687,11 @@ const BACKING_COLOR = {
   backs: "#5fc27a", warming: "#c9b24e", cold: "rgba(143,246,234,0.45)",
   blocked: "#d2913c", coalition: "#d2453f",
 };
+// "BACKS YOU" was the language of a Recognition score somebody could lend you
+// weight toward. The question now is simply whether this faction is dealt
+// with — allied, sworn, or gone.
 const BACKING_LABEL = {
-  backs: "BACKS YOU", warming: "WARMING", cold: "COLD",
+  backs: "DEALT WITH", warming: "WARMING", cold: "OUTSTANDING",
   blocked: "DISTRUSTS", coalition: "COALITION",
 };
 function RecognitionCard({ rec }) {
@@ -501,12 +700,26 @@ function RecognitionCard({ rec }) {
   const hasSpy = backing.some((b) => b.detail);
   return (
     <Card>
-      <SectionLabel>Path to Recognition</SectionLabel>
+      <SectionLabel>The Road to Victory</SectionLabel>
       <div className="pc-prose" style={{ fontSize: 11, lineHeight: 1.5, color: "rgba(143,246,234,0.6)", marginBottom: 8 }}>
-        Reach <b style={{ color: C.holoHi }}>{rec.threshold}</b> backing to win outright.
-        A vassal counts double an ally. The first time each power backs you,
-        you bank <b style={{ color: "#e8c95a" }}>+{rec.summitVp} VP</b>.
+        You win when every faction still standing is your ally, your vassal, or
+        gone — by conquest, by diplomacy, or any mix of the two. Then hold it
+        for <b style={{ color: C.holoHi }}>{rec.holdRounds}</b> rounds.
+        {" "}<b style={{ color: rec.met ? "#5fc27a" : C.holoHi }}>{rec.score}</b> of{" "}
+        <b style={{ color: C.holoHi }}>{rec.threshold}</b> dealt with.
       </div>
+      {rec.roundsLeft != null && (
+        <div style={{
+          fontFamily: C.font, fontSize: 11, letterSpacing: 1, marginBottom: 8,
+          padding: "6px 8px", borderRadius: 5,
+          color: "#08100f", fontWeight: 700,
+          background: `linear-gradient(180deg, ${C.holoHi}, ${C.holo})`,
+        }}>
+          {rec.roundsLeft > 0
+            ? `Hold it — ${rec.roundsLeft} round${rec.roundsLeft === 1 ? "" : "s"} to victory`
+            : "The board is yours"}
+        </div>
+      )}
       <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
         {backing.map((b) => (
           <div key={b.id} style={{
@@ -518,13 +731,7 @@ function RecognitionCard({ rec }) {
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <span style={{ fontFamily: C.font, fontSize: 11.5, fontWeight: 700, flex: 1, color: "#f4efe2" }}>
                 {b.name}
-                {rec.summits?.includes(b.id) && (
-                  <span title="Summit VP banked" style={{ color: "#e8c95a", marginLeft: 6 }}>★</span>
-                )}
               </span>
-              {b.weight > 0 && (
-                <span style={{ fontFamily: C.font, fontSize: 10.5, fontWeight: 700, color: "#5fc27a" }}>+{b.weight}</span>
-              )}
               <span style={{
                 fontFamily: C.font, fontSize: 8.5, fontWeight: 700, letterSpacing: 1,
                 color: BACKING_COLOR[b.status],
@@ -1097,6 +1304,11 @@ function ActionGroup({ label, accent, defaultOpen, count, children }) {
 
 function FactionDetailView({ f, dip, onBack, onClose, onVerb, onOpenPane, onConfirmAndAct }) {
   const tierColor = TIER_COLOR[f.standingTier] || "#f4efe2";
+  // Anything THIS faction has put to you, shown here as well as in the
+  // landing inbox. A counter-offer is generated by proposing from this very
+  // screen, so telling the player to go and look somewhere else for the
+  // reply would be a strange way to hold a conversation.
+  const theirOffers = (dip.offers || []).filter((o) => o.from === f.id);
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
       <DetailHeader f={f} tierColor={tierColor} onBack={onBack} onClose={onClose} />
@@ -1105,6 +1317,14 @@ function FactionDetailView({ f, dip, onBack, onClose, onVerb, onOpenPane, onConf
         flex: 1, overflowY: "auto", padding: "12px 14px 14px",
         display: "flex", flexDirection: "column", gap: 11,
       }}>
+        {theirOffers.length > 0 && (
+          <>
+            <SectionRule index={0} label={theirOffers[0].isCounter ? "Their Terms" : "On the Table"} color={C.holoHi} />
+            {theirOffers.map((o) => (
+              <OfferCard key={o.id} offer={o} dip={dip} onAction={onVerb} />
+            ))}
+          </>
+        )}
         {/* Recorded transmission — leader portrait in a viewscreen with
             broadcast HUD strips. Top of the detail view; scrolls away. */}
         <LeaderTransmission f={f} tierColor={tierColor} />
@@ -1117,6 +1337,7 @@ function FactionDetailView({ f, dip, onBack, onClose, onVerb, onOpenPane, onConf
         <Card>
           <ObligationsList f={f} dip={dip} />
         </Card>
+        <GrievanceLedger f={f} />
 
         <SectionRule index={3} label="What They Want" color={C.holo} />
         <Card>
@@ -1157,6 +1378,47 @@ function FactionDetailView({ f, dip, onBack, onClose, onVerb, onOpenPane, onConf
         />
       </div>
     </div>
+  );
+}
+
+// What is actually between you — the books, both ways. The engine has always
+// kept this (it is what makes a war "justified") and never shown a line of
+// it, so a player could be denounced, invaded and coalitioned against with
+// no way to read why.
+function GrievanceLedger({ f }) {
+  const l = f.ledger;
+  if (!l || (!l.theyHold.length && !l.youHold.length)) return null;
+  const Side = ({ label, entries, weight, color }) => {
+    if (!entries.length) return null;
+    return (
+      <div style={{ marginTop: 6 }}>
+        <SectionLabel color={color}>{label} · weight {weight}</SectionLabel>
+        {entries.map((e, i) => (
+          <div key={i} className="pc-prose" style={{ fontSize: 11.5, lineHeight: 1.5, color: "rgba(207,214,220,0.85)" }}>
+            <span style={{ color, fontWeight: 700 }}>▪</span> {e.text}
+          </div>
+        ))}
+      </div>
+    );
+  };
+  return (
+    <Card accent="#d2913c">
+      <SectionLabel color="#e8b467">The books</SectionLabel>
+      <Side label="They hold against you" entries={l.theyHold} weight={l.theirWeight} color="#d2453f" />
+      <Side label="You hold against them" entries={l.youHold} weight={l.yourWeight} color="#c9b24e" />
+      {(l.theyHold.some((e) => e.kind === "occupation") || l.youHold.some((e) => e.kind === "occupation")) && (
+        <div className="pc-prose" style={{ fontSize: 11, lineHeight: 1.5, color: "#e8b467", marginTop: 6 }}>
+          Ground held is not a thing that happened — no settlement clears it.
+          It ends when the place changes hands.
+        </div>
+      )}
+      <div className="pc-prose" style={{ fontSize: 11, lineHeight: 1.5, color: "rgba(207,214,220,0.55)", marginTop: 7 }}>
+        A live grievance makes a war righteous for the side that holds it, and
+        gives them grounds to denounce — which is how something nobody
+        witnessed still reaches the board. Offer a settlement in a deal to
+        clear the slate: both ways at once, for a price that tracks the weight.
+      </div>
+    </Card>
   );
 }
 
@@ -1230,7 +1492,7 @@ function ObligationsList({ f, dip }) {
   if (f.tradingPact) {
     items.push(f.tradingPact.suspended
       ? `Trading pact — suspended (round ${f.tradingPact.suspendedRounds} of grace).`
-      : "Trading pact — open route between capitals.");
+      : "Trading pact — a clear route from your ground to theirs.");
   }
   if (f.openBordersFromYou && f.openBordersFromThem) items.push("Open borders both ways.");
   else if (f.openBordersFromYou) items.push("You allow their units through your territory.");
@@ -1299,25 +1561,75 @@ function TechReadout({ nodes }) {
 // Action panes — §3.4
 // =======================================================================
 
+// The term, in rounds, that a stream or a standing promise runs for.
+// Mirrors CONFIG.diplomacy.flow — kept here rather than imported so the pane
+// stays a pure view; the engine clamps anything out of range regardless.
+const TERM_DEFAULT = 5;
+const TERM_MAX = 20;
+
 function DealPane({ f, dip, kind = "custom", onBack, onSubmit }) {
   const [scrapGive, setScrapGive] = useState(0);
   const [scrapGet, setScrapGet] = useState(0);
+  const [flowGive, setFlowGive] = useState(0);
+  const [flowGet, setFlowGet] = useState(0);
   const [pactOffer, setPactOffer] = useState(false);
   const [openBorders, setOpenBorders] = useState(false);
+  const [nonAggression, setNonAggression] = useState(false);
+  // …and the same three the other way round. A treaty table where you can
+  // only ever OFFER is a donation form; asking for their borders is half of
+  // what anyone actually wants out of one.
+  const [wantPact, setWantPact] = useState(false);
+  const [wantBorders, setWantBorders] = useState(false);
+  const [settle, setSettle] = useState(false);
+  // §3.2 — cities on the table, by hexId. The map is what the war is about,
+  // and until now the only thing this pane could move was scrap.
+  const [cedeGive, setCedeGive] = useState(() => new Set());
+  const [cedeGet, setCedeGet] = useState(() => new Set());
+  const yoursToGive = dip.youCouldCede || [];
+  const theirsToAsk = f.theyCouldCede || [];
+  // Only worth offering when there is something a settlement can clear. An
+  // occupation is not in the past, so scrap does not touch it.
+  const owed = f.ledger?.settleable || 0;
+  const [term, setTerm] = useState(TERM_DEFAULT);
   const isPeace = kind === "peace";
   const isTribute = kind === "tribute";
   const isGift = kind === "gift";
+  // A term only means anything when something on the table actually runs for
+  // one; a lump sum and an alliance are both settled the moment it's struck.
+  const termMatters = flowGive > 0 || flowGet > 0 || nonAggression;
 
+  // Everything here speaks the engine's item schema
+  // ({resource} / {flow} / {promise:{kind}}). It used to emit its own
+  // shorthand — {pact:true}, {openBorders:true} — which valueOfItem does not
+  // read, so those terms were worth nothing to the other side and created
+  // nothing when the deal was struck. An offer of "an alliance for free" was
+  // accepted and produced no alliance.
   const deal = useMemo(() => {
     const give = [];
     const get = [];
     if (scrapGive > 0) give.push({ resource: { resource: "scrap", amount: scrapGive } });
     if (scrapGet > 0) get.push({ resource: { resource: "scrap", amount: scrapGet } });
-    if (pactOffer && !isTribute) give.push({ pact: true });
-    if (openBorders) give.push({ openBorders: true });
-    if (isPeace) give.push({ peace: true });
+    if (flowGive > 0) give.push({ flow: { resource: "scrap", amountPerTurn: flowGive, rounds: term } });
+    if (flowGet > 0) get.push({ flow: { resource: "scrap", amountPerTurn: flowGet, rounds: term } });
+    if (pactOffer && !isTribute) give.push({ promise: { kind: "pact" } });
+    if (openBorders) give.push({ promise: { kind: "openBorders" } });
+    if (nonAggression) {
+      // Non-aggression is mutual by nature — a one-sided one is just a
+      // promise not to hit somebody who may still hit you.
+      give.push({ promise: { kind: "nonAggression", rounds: term } });
+      get.push({ promise: { kind: "nonAggression", rounds: term } });
+    }
+    if (wantPact && !isTribute) get.push({ promise: { kind: "pact" } });
+    if (wantBorders) get.push({ promise: { kind: "openBorders" } });
+    // Asked for, not given: the party holding the grievances is the one being
+    // asked to give something up, and they price it accordingly.
+    if (settle) get.push({ settlement: true });
+    for (const hex of cedeGive) give.push({ location: { hexId: hex } });
+    for (const hex of cedeGet) get.push({ location: { hexId: hex } });
+    if (isPeace) give.push({ promise: { kind: "peace" } });
     return { proposer: dip.youId, recipient: f.id, give, get };
-  }, [scrapGive, scrapGet, pactOffer, openBorders, dip.youId, f.id, isPeace, isTribute]);
+  }, [scrapGive, scrapGet, flowGive, flowGet, pactOffer, openBorders, nonAggression,
+      wantPact, wantBorders, settle, cedeGive, cedeGet, term, dip.youId, f.id, isPeace, isTribute]);
 
   const title = isGift ? "Send a gift" : isPeace ? "Sue for peace" : isTribute ? "Demand tribute" : "Custom deal";
   const subtitle = isGift
@@ -1326,7 +1638,7 @@ function DealPane({ f, dip, kind = "custom", onBack, onSubmit }) {
     ? "The peace promise is fixed; everything else is yours to shape."
     : isTribute
     ? "Make them an offer they can refuse. Then live with the cost."
-    : "Build a give/get. They accept where the offer outweighs the ask.";
+    : "Build a give/get. If the ask outweighs the offer they will say so — and name the price they would take.";
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
@@ -1346,11 +1658,26 @@ function DealPane({ f, dip, kind = "custom", onBack, onSubmit }) {
             <Card style={{ flex: 1 }}>
               <SectionLabel>You give</SectionLabel>
               <NumberRow label="Scrap" value={scrapGive} onChange={setScrapGive} max={50} disabled={isTribute} />
+              {!isGift && (
+                <NumberRow label="Scrap / turn" value={flowGive} onChange={setFlowGive} max={12} />
+              )}
               {!isPeace && !isGift && (
                 <Toggle label="Offer pact" value={pactOffer} onChange={setPactOffer} />
               )}
               {!isGift && (
-                <Toggle label="Open borders" value={openBorders} onChange={setOpenBorders} />
+                <Toggle label="Open my borders" value={openBorders} onChange={setOpenBorders} />
+              )}
+              {!isGift && (
+                <Toggle label="Non-aggression" value={nonAggression} onChange={setNonAggression} />
+              )}
+              {!isGift && yoursToGive.length > 0 && (
+                <CityPicker
+                  label="Cede a city"
+                  cities={yoursToGive}
+                  chosen={cedeGive}
+                  onChange={setCedeGive}
+                  claimantOf={f.id}
+                />
               )}
               {isPeace && (
                 <div style={{
@@ -1366,9 +1693,41 @@ function DealPane({ f, dip, kind = "custom", onBack, onSubmit }) {
             <Card style={{ flex: 1 }}>
               <SectionLabel>You get</SectionLabel>
               <NumberRow label="Scrap" value={scrapGet} onChange={setScrapGet} max={50} />
+              <NumberRow label="Scrap / turn" value={flowGet} onChange={setFlowGet} max={12} />
+              {!isPeace && !isTribute && (
+                <Toggle label="Their alliance" value={wantPact} onChange={setWantPact} />
+              )}
+              <Toggle label="Their borders" value={wantBorders} onChange={setWantBorders} />
+              {owed > 0 && (
+                <Toggle label={`Call it settled (weight ${owed})`} value={settle} onChange={setSettle} />
+              )}
+              {theirsToAsk.length > 0 && (
+                <CityPicker
+                  label="Ask for a city"
+                  cities={theirsToAsk}
+                  chosen={cedeGet}
+                  onChange={setCedeGet}
+                  claimantOf={dip.youId}
+                />
+              )}
             </Card>
           )}
         </div>
+
+        {/* Term — only shown once something on the table actually runs for
+            one. A stream priced without a term is how the old builder let a
+            player buy four scrap a turn forever for twelve scrap. */}
+        {termMatters && (
+          <Card>
+            <SectionLabel>Term</SectionLabel>
+            <NumberRow label="Rounds" value={term} onChange={(v) => setTerm(Math.max(1, v))} max={TERM_MAX} />
+            <div className="pc-prose" style={{ fontSize: 11, lineHeight: 1.5, color: "rgba(207,214,220,0.6)", marginTop: 4 }}>
+              Streams and standing promises run for this long, then lapse —
+              honourably, on both sides. They price it accordingly: a longer
+              term is worth more, but not proportionally more.
+            </div>
+          </Card>
+        )}
 
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
           <button onClick={onBack} className="hud-int" style={btnGhostStyle()}>Back</button>
@@ -1378,6 +1737,54 @@ function DealPane({ f, dip, kind = "custom", onBack, onSubmit }) {
             className="hud-int"
             style={{ ...btnHoloStyle(), opacity: isGift && scrapGive <= 0 ? 0.5 : 1 }}
           >{isGift ? "Send gift" : isTribute ? "Demand" : isPeace ? "Sue for peace" : "Propose"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Naming a demand and a deadline. Two kinds, because these are the two the
+// engine can check without ambiguity: scrap paid, and units gone.
+function UltimatumPane({ f, dip, onBack, onSubmit }) {
+  const [kind, setKind] = useState("tribute");
+  const [amount, setAmount] = useState(8);
+  const intruders = f.unitsInYourTerritory ?? null;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
+      <PaneHeader title="Issue an ultimatum" f={f} onBack={onBack} />
+      <div className="pc-scroll" style={{
+        flex: 1, overflowY: "auto", padding: "12px 16px",
+        display: "flex", flexDirection: "column", gap: 12,
+      }}>
+        <div style={{ fontFamily: C.font, fontSize: 11, letterSpacing: 1, lineHeight: 1.5, color: "rgba(207,214,220,0.7)" }}>
+          Say it out loud, with a date on it. If they defy you, your war on
+          them is righteous — and if you then do nothing, everyone saw.
+        </div>
+        <Card>
+          <SectionLabel>The demand</SectionLabel>
+          <Toggle label="Pay us" value={kind === "tribute"} onChange={() => setKind("tribute")} />
+          {kind === "tribute" && (
+            <NumberRow label="Scrap" value={amount} onChange={setAmount} max={30} />
+          )}
+          <Toggle
+            label="Get your units out of our territory"
+            value={kind === "withdraw"}
+            onChange={() => setKind("withdraw")}
+          />
+          {kind === "withdraw" && intruders === 0 && (
+            <div className="pc-prose" style={{ fontSize: 11, color: "#ffb4ae", marginTop: 5 }}>
+              They have nothing inside your borders to withdraw.
+            </div>
+          )}
+        </Card>
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+          <button onClick={onBack} className="hud-int" style={btnGhostStyle()}>Back</button>
+          <button
+            className="hud-int"
+            disabled={kind === "tribute" && amount < 1}
+            onClick={() => onSubmit(kind === "tribute" ? { kind, amount } : { kind })}
+            style={btnHoloStyle()}
+          >Deliver it</button>
         </div>
       </div>
     </div>
@@ -1596,6 +2003,65 @@ function smallBtnStyle() {
     padding: 0,
   };
 }
+// §3.2 — the cities each side can put on the table. Multi-select, because
+// "both Omara and Kansit and we have peace" is a sentence somebody will want
+// to say, and each row carries the two facts that decide the price: what the
+// place is worth, and whose homeland it is. `claimantOf` is the party on the
+// OTHER side of this column — a city they call theirs is the one they will
+// pay far over the odds for, and the row says so rather than leaving the
+// player to discover it from a refusal.
+function CityPicker({ label, cities, chosen, onChange, claimantOf }) {
+  const toggle = (hex) => {
+    const next = new Set(chosen);
+    if (next.has(hex)) next.delete(hex); else next.add(hex);
+    onChange(next);
+  };
+  return (
+    <div style={{ marginTop: 10 }}>
+      <div style={{
+        fontFamily: C.font, fontSize: 9.5, letterSpacing: 1.4,
+        textTransform: "uppercase", color: "rgba(207,214,220,0.5)", marginBottom: 4,
+      }}>{label}</div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+        {cities.map((c) => {
+          const on = chosen.has(c.hexId);
+          const theirHomeland = c.affiliation && c.affiliation === claimantOf;
+          return (
+            <button
+              key={c.hexId}
+              onClick={() => toggle(c.hexId)}
+              className="hud-int"
+              style={{
+                display: "flex", alignItems: "baseline", gap: 6, width: "100%",
+                textAlign: "left", cursor: "pointer",
+                padding: "4px 6px", borderRadius: 3,
+                border: `1px solid ${on ? C.holo : "rgba(207,214,220,0.18)"}`,
+                background: on ? "rgba(86,211,198,0.14)" : "rgba(255,255,255,0.02)",
+                boxShadow: on ? `0 0 6px ${C.holo}55` : undefined,
+              }}
+            >
+              <span style={{
+                fontFamily: C.font, fontSize: 11.5, letterSpacing: 0.6,
+                color: on ? "#f4efe2" : "#cfd6dc", flex: 1,
+              }}>{c.name}</span>
+              {theirHomeland && (
+                <span
+                  title="Their homeland — they will pay well past its output to have it back"
+                  style={{ fontFamily: C.font, fontSize: 9, letterSpacing: 1, color: C.holoHi }}
+                >CLAIMED</span>
+              )}
+              <span style={{
+                fontFamily: C.font, fontSize: 10, letterSpacing: 0.6,
+                color: "rgba(207,214,220,0.55)",
+              }}>{c.vp} VP · {c.output}/turn</span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function Toggle({ label, value, onChange }) {
   return (
     <label style={{
@@ -1675,22 +2141,25 @@ export default function DiplomacyDrawer({
     setPane(null);
   }
 
-  // §5.3 — when the faction-detail view is showing a faction with an
-  // active trading pact, paint the capital-to-capital dotted route line
-  // on the map (green if clear, amber if suspended). Both endpoints come from
-  // live state via the adapter — a Capital moves when its Location is taken,
-  // so a static table cannot supply them.
+  // §5.3 — when the faction-detail view is showing a faction with an active
+  // trading pact, paint the dotted route line on the map (green if clear,
+  // amber if suspended). The endpoints are the two cities the ENGINE found the
+  // route between, not the two capitals: a pact is no longer a statement about
+  // anybody's seat, and drawing capital-to-capital would trace a line the
+  // trade is not travelling. Falls back to the capitals when the route is
+  // severed, so a suspended pact still shows what it was.
   const tradeFor = selectedFaction?.tradingPact || null;
-  const myCapital = dip.youCapital || null;
-  const theirCapital = selectedFaction?.capital || null;
-  const showRoute = tradeFor && myCapital && theirCapital && view === "detail";
+  const route = selectedFaction?.tradeRoute || null;
+  const fromLoc = route?.fromLocId || dip.youCapital || null;
+  const toLoc = route?.toLocId || selectedFaction?.capital || null;
+  const showRoute = tradeFor && fromLoc && toLoc && view === "detail";
 
   return (
     <>
       {showRoute && (
         <TradingPactRouteLayer
-          fromLocId={myCapital}
-          toLocId={theirCapital}
+          fromLocId={fromLoc}
+          toLocId={toLoc}
           status={tradeFor.suspended ? "suspended" : "clear"}
         />
       )}
@@ -1836,7 +2305,10 @@ export default function DiplomacyDrawer({
                   onBack={() => setPane(null)}
                   onSubmit={(deal) => runFromPane("demand-tribute", {
                     faction: selectedFaction.id,
-                    give: [], get: deal.get,
+                    // `terms` is what the verb reads. It used to be sent as
+                    // `get`, which the verb ignored, so every demand made
+                    // from here asked for nothing and "succeeded".
+                    terms: deal.get,
                   })}
                 />
               )}
@@ -1849,6 +2321,16 @@ export default function DiplomacyDrawer({
                   onSubmit={(deal) => runFromPane("sue-for-peace", {
                     faction: selectedFaction.id,
                     give: deal.give, get: deal.get,
+                  })}
+                />
+              )}
+              {pane === "ultimatum" && (
+                <UltimatumPane
+                  f={selectedFaction}
+                  dip={dip}
+                  onBack={() => setPane(null)}
+                  onSubmit={(demand) => runFromPane("issue-ultimatum", {
+                    faction: selectedFaction.id, demand,
                   })}
                 />
               )}

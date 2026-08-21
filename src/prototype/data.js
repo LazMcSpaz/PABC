@@ -15,6 +15,11 @@ export const theme = {
   textDim: "#a89d87",
   textFaint: "#776c5b",
   accent: "#e8a93f", // amber lamplight
+  // "This can still act." Deliberately NOT `accent`: amber is already the
+  // selection glow, and a unit that is selected is not the same as a unit
+  // that has an action left. Holo teal is the interface's own voice — it
+  // reads as a readout rather than as a faction or a highlight.
+  ready: "#56d3c6",
   accent2: "#c75d30", // rust
   good: "#86ad52",
   boardBg:
@@ -142,6 +147,21 @@ export const ALL_UPGRADES = { ...UNIT_UPGRADES, ...LOCATION_UPGRADES };
 export function ownerColor(ownerId) {
   if (!ownerId || ownerId === "neutral") return NEUTRAL;
   return FACTIONS[ownerId]?.color || NEUTRAL;
+}
+
+// The engine is deliberately theme-free, so every resource event carries the
+// generic key ("Resource", "Research", "VP") rather than the Ashlands name for
+// it. That key is an engine identifier, not player-facing copy — printing it
+// raw is how the turn feed ended up saying "+5 resource (output)" for what the
+// rest of the UI, down to the icon beside it, calls scrap. Translate here, at
+// the one seam that is allowed to know the theme.
+const RESOURCE_LABEL = {
+  Resource: "scrap",
+  Research: "research",
+  VP: "VP",
+};
+export function resourceLabel(key) {
+  return RESOURCE_LABEL[key] || String(key || "").toLowerCase();
 }
 
 // Board hologram tints. A separate palette from the UI colours above, and it

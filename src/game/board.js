@@ -112,10 +112,23 @@ export function isCover(hex) {
 // EASES terrain cost: a road through a forest costs 1 instead of 2, and a road
 // over a mountain costs 2 and does not halt, instead of halting outright. It
 // does not make rough ground free — see CONFIG.movement for why that matters.
+// On EASY ground it is quicker still: half a hex (`isPaved` below).
 // Roads do NOT affect cover/visibility — a road through a forest still
 // conceals and a mountain still blocks sight.
 export function isRoad(hex) {
   return !!(hex && hex.road);
+}
+
+// Graded ground: a road hex or a rail hex. Both are surfaces somebody levelled
+// before the collapse, so both are quick to march down and neither halts you —
+// a cutting through a mountain is a cutting whether it carries sleepers or
+// tarmac. Entering one costs `CONFIG.movement.pavedCost` rather than 1.
+//
+// This is about the HEXES a line occupies, and is a different thing from the
+// station-to-station rail hop (`CONFIG.rail.hopCost`), which is a property of
+// the LINK and skips the ground between entirely.
+export function isPaved(hex) {
+  return !!(hex && (hex.road || hex.rail));
 }
 
 // §16.2 terrain movement — the hexes a unit can reach this turn from `start`
@@ -181,20 +194,28 @@ function expandMovement(state, start, budget, blocked, ignoreTerrain, extraCost,
     const rem = best[cur];
     if (rem <= 0) continue; // out of movement — also how halting hexes (rem 0) stop
     for (const nb of adj[cur] || []) {
-      // Eased ground: a road under the mover, or a mover that carries its own
-      // road-grade with it.
-      const eased = isRoad(hexes[nb]) || ignoreTerrain;
+      // A laid surface — road OR rail. Both are ground somebody levelled
+      // before the collapse, and a cutting through a mountain is a cutting
+      // whether it carries sleepers or tarmac.
+      const paved = isPaved(hexes[nb]);
+      // …or a mover that carries its own road-grade with it (Landship,
+      // Pathfinders). It gets the EASED terrain costs everywhere, but not the
+      // paved discount on open ground: it is not a road-layer.
+      const graded = paved || ignoreTerrain;
       const high = isElevation(hexes[nb]);
-      // A mountain halts unless it is eased — the road switchbacks over it.
-      const mountain = mv.mountainHalts && high && !eased;
+      // A mountain halts unless it is graded — the road switchbacks over it.
+      const mountain = mv.mountainHalts && high && !graded;
       // Toll Gate (MOVE_TAX): a per-hex surcharge layered on top of the
-      // terrain cost — roads don't waive a toll.
+      // terrain cost — a lane doesn't waive a toll.
       const toll = extraCost ? extraCost.get(nb) || 0 : 0;
       // A halting mountain's own cost is nominal: the halt is what it costs
-      // you. Everything else pays its terrain, eased or not.
-      let base = 1;
-      if (high) base = eased ? easedMountain : 1;
-      else if (isCover(hexes[nb])) base = eased ? easedForest : forestCost;
+      // you. Rough ground pays its terrain, eased or not — a road over a pass
+      // is still a pass. The half-hex is for EASY ground, which is where a
+      // lane is actually a lane.
+      let base;
+      if (high) base = graded ? easedMountain : 1;
+      else if (isCover(hexes[nb])) base = graded ? easedForest : forestCost;
+      else base = paved ? mv.pavedCost : 1;
       const cost = base + toll;
       if (rem < cost) continue; // not enough movement to enter
       // A mountain (no road) or a blockaded hex halts you on entry: enter, stop.
@@ -431,18 +452,19 @@ function roadPath(adjacency, hexes, a, b) {
 // Rail — docs/rail-road-blockade-design.md §2. NOT player-built: it is
 // pre-collapse trunk line, laid once here and never changed.
 //
-// Rail is deliberately sparse where road is dense. Roads now reach every
+// Rail is deliberately sparse where road is dense. Roads reach every
 // settlement, so a rail network of comparable size would add nothing; instead
-// rail is a spanning tree over the CAPITALS only — the fewest lines that still
-// tie every faction's home into one system. Capitals are fixed content
-// (`FACTIONS[fid].capital`), so the trunk line is stable across a game.
+// rail is a spanning tree over the MAJOR settlements — the fewest lines that
+// tie the big places into one system. Which settlements qualify is
+// `CONFIG.rail.hubTiers` (see setup.js); every capital is in that band, so the
+// trunk still ties every faction's home into the network.
 //
 // A line occupies a real sequence of hexes, so it can be cut per-hex like a
 // road (§2.1), and `hex.rail` gives the board renderer something to draw. But
 // the 1-MP hop is a property of the LINK, not of its hexes, so the endpoints
 // and the path are returned as records for `state.board.rails`.
-export function assignRails(adjacency, hexes, capitalHexes) {
-  const hubs = [...new Set(capitalHexes)].filter((h) => hexes[h]);
+export function assignRails(adjacency, hexes, hubHexes) {
+  const hubs = [...new Set(hubHexes)].filter((h) => hexes[h]);
   if (hubs.length < 2) return [];
   const distCache = {};
   const distFrom = (h) => (distCache[h] ||= bfsDistances(adjacency, h));

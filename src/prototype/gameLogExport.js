@@ -23,7 +23,7 @@
 // follow unit_moved's pattern if you add one. Static lookups (location
 // names, chip names, tech descriptions) are fine to resolve here since
 // they never change mid-game.
-import { FACTIONS as UI_FACTIONS } from "./data.js";
+import { FACTIONS as UI_FACTIONS, resourceLabel } from "./data.js";
 import { FACTIONS as ENGINE_FACTIONS, CHIPS as ENGINE_CHIPS, LOCATIONS as ENGINE_LOCATIONS } from "../game/content.js";
 import { TECH_NODES, TECH_PATHS } from "../game/tech.js";
 import { CONFIG } from "../game/config.js";
@@ -150,8 +150,8 @@ function formatLine(ev, state) {
     case "tech_node_assigned": return `${factionName(p.player)} assigned tech node "${p.node}" — ${techNodeDesc(p.node)}`;
     case "tech_node_lost": return `${factionName(p.player)} LOST tech node "${p.node}" (Tech Level dropped) — was: ${techNodeDesc(p.node)}`;
 
-    case "resource_gained": return `${factionName(p.player)} +${p.amount} ${p.resource}${p.source ? ` (${p.source})` : ""}`;
-    case "resource_spent": return `${factionName(p.player)} −${Math.abs(p.amount)} ${p.resource}${p.source ? ` (${p.source})` : ""}`;
+    case "resource_gained": return `${factionName(p.player)} +${p.amount} ${resourceLabel(p.resource)}${p.source ? ` (${p.source})` : ""}`;
+    case "resource_spent": return `${factionName(p.player)} −${Math.abs(p.amount)} ${resourceLabel(p.resource)}${p.source ? ` (${p.source})` : ""}`;
     case "action_spent": return `${factionName(p.player)} spent an Action on ${p.action} (cost ${p.cost ?? 0})`;
     case "stat_modified": return `Stat modifier: ${p.target} ${p.stat} ${p.amount >= 0 ? "+" : ""}${p.amount}`;
 
@@ -159,7 +159,9 @@ function formatLine(ev, state) {
     case "track_changed": return `${factionName(p.player)} ${p.track} → ${p.value}`;
     case "menace_changed": return `${factionName(p.player)} Menace → ${p.value} (Δ${p.delta}, cause: ${p.cause || "?"})`;
     case "honor_changed": return `${factionName(p.player)} Honor → ${p.value} (Δ${p.delta}, cause: ${p.cause || "?"})`;
-    case "recognition_changed": return `${factionName(p.player)} Recognition score → ${p.value}`;
+    case "dominion_reached": return `${factionName(p.player)} has every faction allied, sworn or gone — the clock is running`;
+    case "dominion_lost": return `${factionName(p.player)} lost their hold — ${p.outstanding?.length || 0} still standing free`;
+    case "dominion_won": return `${factionName(p.player)} has taken the Ashlands (${p.by})`;
     case "surprise_attack_honor_lost": return `${factionName(p.attacker)} lost ${p.amount} Honor for a surprise attack on ${factionName(p.target)} (no declared war)`;
     case "territory_trespassed": return `${factionName(p.mover)} trespassed into ${factionName(p.owner)}'s territory at ${p.hex} (Standing −${p.standingHit}, Menace +${p.repHit})`;
 
@@ -261,7 +263,8 @@ export function buildGameLogText(state) {
     "=== ASHLAND CONQUEST — PLAYTEST LOG ===",
     `Exported: ${new Date().toISOString()}`,
     `Round reached: ${state.round}`,
-    `Victory threshold: ${CONFIG.vpThreshold} VP`,
+    "Victory: every surviving faction allied, vassal or gone — held for "
+      + `${CONFIG.victory.holdRounds} rounds. VP is the closing standing, not a target.`,
     `Winner: ${state.winnerId ? factionName(state.winnerId) : "none — session ended mid-game"}`,
     "",
     "--- Factions ---",

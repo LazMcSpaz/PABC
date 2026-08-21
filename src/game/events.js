@@ -19,6 +19,10 @@ export const EVENT_NAMES = new Set([
   "contest_declared", "contest_won", "contest_lost",
   "obstacle_claimed", "encounter_resolved",
   "location_spawned", "section_flipped", "location_captured", "location_decayed",
+  // §3.2 — a city changing hands by treaty rather than by force. Its own
+  // name, because "Omara falls" and "Omara is signed away" are not the
+  // same thing to read in a feed, and only one of them is a conquest.
+  "location_ceded",
   // §18.2 Loyalty
   "loyalty_changed", "loyalty_failing", "control_peeled",
   // §18.3 Influence & Zone of Control
@@ -78,6 +82,19 @@ export const EVENT_NAMES = new Set([
   "diplomatic_warning",
   // Truces — peace is binding for a window; breaking it is treachery.
   "truce_broken",
+  // Deal flows run for a term and then lapse, honorably.
+  "agreement_expired",
+  // §6.10 the round trip — offers on the table, counters, and pestering.
+  "offer_tabled", "offer_accepted", "offer_declined", "offer_lapsed", "offer_pestered",
+  // The grievance ledger — what was done to you, and what it takes to settle.
+  "grievance_recorded", "grievances_settled",
+  // The win condition: every surviving faction eliminated, allied or vassal.
+  // `reached` starts the hold clock, `lost` stops it, `won` ends the game.
+  "dominion_reached", "dominion_lost", "dominion_won",
+  // Reputation is what the board saw. Some things it doesn't.
+  "attack_unwitnessed",
+  // §6.11 ultimatums — the verb between asking and attacking.
+  "ultimatum_issued", "ultimatum_complied", "ultimatum_defied", "ultimatum_bluffed",
 ]);
 
 // Resolve a chip / card instance uid to its content def. Covers Market

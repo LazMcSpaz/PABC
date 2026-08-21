@@ -796,3 +796,106 @@ and looking: the dense core sat visibly left of the anchor. **The composite deci
 it, not the estimator** — the same conclusion as the bombard that passed every
 numeric check while reading as a scaffold. When a metric and a picture disagree at
 this size, the picture is the evidence.
+
+### 11.16 Oldworld weather machine — the first ownerless asset (2026-08)
+
+A unique quest item carried across the map on carts. Neutral livery, no faction and no
+std/vet/str variants, one sheet on the t2 grid. Built at 13.7 m by ruling — about 15%
+longer than a landship broadside — from a measured reference at 4.49:1 length:height with
+a flat underside and a peak 29% along from the blunt rear. What follows is what it taught,
+not what it is.
+
+**⚠ Extra geometry laid on a surface adds emission, so it brightens whatever it sits on.**
+The four strap bands were first built as a thin shell standing 0.055 m proud of the hull.
+They came out *lighter* than the hull and read as loud tan stripes. The cause was not the
+rim lamp and not their own colour: in the house shader a second emissive layer stacks with
+the one behind it, so any detail laid over a surface gains brightness no matter how dark it
+is authored. The fix was to delete the geometry and make the bands a material zone on the
+hull faces themselves. Anyone adding surface detail — plating, patches, decals, straps —
+will hit this, and will reach for the light rig first, which is the wrong lever.
+
+**The lever is value, not hue — but only if the feature is built on the value axis.**
+§11.11 established value over hue for the tollbooth tints. This sharpens it. The bands
+carried a 60% rust tint against a cool hull, so their contrast lived in *hue*, and a value
+multiplier could not reach it: at ×0.78, ×1.00 and ×1.28 the game-size gradient energy was
+0.0239 / 0.0209 / 0.0248 and all three still read as loud stripes — at ×1.00, with no value
+difference at all. Pulling the tint from 60% rust to 25% is what quieted them. Before
+tuning a feature's contrast, check which axis it is actually carrying it on; the rule in
+§11.11 is about which lever to *reach for*, not a guarantee that the lever is connected.
+
+**⚠ The naive stroke-width calculation under-predicts by about 29%.** `metres × 18.3 /
+3.137` said a 0.40 m rope would draw 2.33 px at game size; it measured **3.0 px**. Soft rim
+and antialiasing widen a thin stroke past its geometric width. Measure instead: render the
+element alone, area-resample the cell to 102×82, threshold alpha at 0.30, and take, for
+each element pixel, the **minimum of its horizontal and vertical run length** — horizontal
+runs alone over-measure any stroke that is not vertical. Median of that is the true
+perpendicular width. A 0.30 m rope measures 2.0–3.0 px across facings, which is the floor.
+
+**⚠ A tie-down only reads if it terminates outside the object's widest silhouette point.**
+The first rope pass wrapped the hull and tied to a cart at y = ±1.34 m. It read as
+decoration and the note back was "these don't read as being tied to the carts". The ropes
+*did* reach the cart. The hull's maximum half-beam is 2.05 m and — because the underside is
+flat — its widest point is at the *bottom*, so the final descent ran inboard and was
+occluded by the hull's own overhang. The failure presented as "the rope stops short" and
+was nothing of the kind. Widening the cradle so the tie posts stand at y = ±2.45 m, outboard
+of the hull, put a 30.9 px (9.85 px at game size) free run in clear space against the
+background, and it reads as lashed. The general form: if a connecting element has to pass
+under a silhouette that is widest at its base, it will vanish at a 34° elevation. Put the
+termination outside the widest point or it cannot be seen at any size.
+
+**⚠ Lightening a feature to separate it from a dark background can merge it worse.** The
+rope crossed the recessed slot, and rope base luminance 0.039 against slot 0.044 meant it
+disappeared exactly there. The obvious fix — lighten the rope so it reads over the dark
+region — moved it into the hull's mid-tones and made it worse everywhere else. Measured as
+per-scanline contrast against a two-pixel surrounding ring:
+
+| rope | median | p10 | min | reads as |
+|---|---|---|---|---|
+| **dark (shipped)** | **0.146** | **0.058** | **0.026** | rope |
+| lighter body | 0.048 | 0.008 | 0.001 | merges into the hull |
+| dark + strong rim | 0.038 | 0.004 | 0.000 | **wire, not rope** |
+
+Two results worth keeping. Separation is against the *whole* range a feature crosses, not
+against the one place it is worst — a value chosen to fix the dark crossing lost the pale
+one. And raising the rim on a thin tube changed what the material read as entirely: a
+cylinder is nearly all grazing angle, so the fresnel term covers most of its width and it
+stops being rope and becomes cable. The slot crossing then solved itself once the rope's
+main run moved outside the hull, where there is nothing to merge with.
+
+**A faction-less asset does not fit the pipeline, and the mask is a build failure rather
+than a lint one.** `build-units.mjs` requires a mask file to exist and short-circuits before
+writing the manifest if one is missing, and it runs on `predev`/`prebuild` — so an absent
+mask breaks `npm run dev` for everyone, not just the validator. Shipped with an all-black
+mask as an honest declaration of zero owner region, which makes `check-unit-art.py` report
+`livery is 0.0%` instead of raising. Filed under a new `neutral` art directory; nothing
+enumerates `manifest.units`, so this is inert and `check-unit-variants.mjs` passes
+unchanged. Both are placements, not designs — the four asks are in
+`docs/weather-machine-pipeline-asks.md` rather than duplicated here.
+
+#### Two things I got wrong here, and what caught them
+
+Both were caught by looking, and neither by a metric — the same pattern as the bombard in
+§11.13 and the Goldgrass cart in §11.15.
+
+**I overshot the rope and every number said it was fine.** At 0.40 m the rope cleared the
+2 px floor, and stdL went from 0.0686 — 31% under the shipped floor — to 0.1112, inside the
+0.0999–0.1284 band. It also read as **bandaging**: four wraps at 3 px buried the pale hull
+and the token looked like a mummy rather than a lashed machine. Trimming to 0.30 m, four
+lashings instead of five, and halving the skew fixed it, at a cost of 0.005 stdL. The
+contrast metric could not see the difference because "enough contrast" and "the right
+amount of contrast" are not the same quantity.
+
+**I proposed lightening the rope and the measurement contradicted me.** The reasoning was
+sound — a dark rope on a dark recess merges, so lighten it — and it was wrong, for the
+reason in the table above. It cost one render to find out. Worth stating plainly because
+the note that prompted it was a good note and the fix that followed from it was still the
+wrong fix; a plausible mechanism is not evidence, and testing it was cheaper than arguing
+about it.
+
+**One thing the numbers did decide.** Internal machinery — five bulkheads, a spine and ribs
+— was added to break the see-through cliff, and it worked exactly as intended. A uniform
+thin shell is two surfaces deep almost everywhere, so alpha snaps rather than grades: Fac
+0.84 gave see-through 0.53 and 0.856 gave **0.000**, with no value in between that put all
+eight rows in band. With varied internal depth the same sweep grades smoothly and 0.80
+lands every row at 0.157–0.303. If a hollow asset will not sit in the see-through band,
+the answer is geometry inside it, not a shader number.
