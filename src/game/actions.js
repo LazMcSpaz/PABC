@@ -22,7 +22,7 @@ import {
 } from "./blockades.js";
 import {
   meetsTech, meetsLoyalty, slotCapacity, slotsUsed, stationedUnitWithBay,
-  techLevelReqFor, upgradeOption, completeBuildIfDone, effectiveBuildCost,
+  techLevelReqFor, upgradeOption, completeBuildIfDone, bankBuildSurplus, effectiveBuildCost,
 } from "./economy.js";
 
 const fail = (reason) => ({ ok: false, reason });
@@ -45,6 +45,9 @@ function validateMove(state, { pid, params }) {
   if (unit.owner !== pid) return fail("not your unit");
   if (unit.immobilizedUntil != null && turnOrdinal(state) <= unit.immobilizedUntil)
     return fail("unit is immobilized");
+  // Arrears strand a unit where it stands. Its budget was already zeroed at
+  // Upkeep, but say so plainly rather than reporting "out of range".
+  if (unit.unsupplied) return fail("unit is unsupplied — pay its upkeep first");
   if (!state.board.hexes[params.to]) return fail("no such hex");
   if (params.to === unit.node) return fail("unit is already on that hex");
   // v0.2 §16.2 — Move spends the per-turn move budget (not Actions), consumed
@@ -326,7 +329,9 @@ function runBuild(state, { params }) {
     targetSlot: loc.chips.length, targetUnit,
   };
   emit(state, "build_started", { hex: loc.hexId, chipId: def.id, kind: "build", cost: loc.activeBuild.cost });
-  completeBuildIfDone(state, loc); // carried-over progress may finish it at once
+  // Carried-over progress may finish it at once; anything past the cost is
+  // scrap rather than a pile sitting on the Location.
+  bankBuildSurplus(state, loc.controller, completeBuildIfDone(state, loc));
   return { hex: loc.hexId, chipId: def.id };
 }
 
@@ -356,7 +361,7 @@ function runUpgrade(state, { pid, params }) {
     targetUnit: holder.kind === "unit" ? holder.uid : null,
   };
   emit(state, "build_started", { hex: loc.hexId, chipId: opt.chipId, kind: "upgrade", cost: loc.activeBuild.cost });
-  completeBuildIfDone(state, loc);
+  bankBuildSurplus(state, loc.controller, completeBuildIfDone(state, loc));
   return { hex: loc.hexId, chipId: opt.chipId };
 }
 
@@ -397,7 +402,8 @@ function runRush(state, { pid, player, params }) {
   player.resource -= spend;
   emit(state, "resource_spent", { player: pid, resource: "Resource", amount: -spend, source: "rush" });
   loc.buildProgress = (loc.buildProgress || 0) + points;
-  completeBuildIfDone(state, loc);
+  // Rushing past the cost refunds the overshoot as scrap.
+  bankBuildSurplus(state, loc.controller, completeBuildIfDone(state, loc));
   return { hex: loc.hexId, points, spent: spend };
 }
 
@@ -791,6 +797,11 @@ export function performAction(state, type, params = {}, ctx = {}) {
   if (payer) {
     const units = (payer.units || []).map((u) => state.units[u]).filter(Boolean);
     const locs = (payer.locations || []).map((h) => state.locations[h]).filter(Boolean);
+    // An unsupplied unit is stranded outright — its own action was zeroed at
+    // Upkeep, and it may not reach for a player wildcard either. Without this
+    // the wildcard pool would quietly buy back exactly what arrears took away.
+    const starving = units.find((u) => u.unsupplied);
+    if (starving) return fail("that unit is unsupplied — pay its upkeep first");
     let shortfall = 0;
     for (const u of units) if ((u.actionsRemaining ?? 0) < 1) shortfall += 1;
     for (const l of locs) if ((l.actionsRemaining ?? 0) < 1) shortfall += 1;

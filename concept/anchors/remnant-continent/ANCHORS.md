@@ -57,6 +57,12 @@ Added: YYYY-MM-DD
 
 ## Vessels
 
+## landship-base-01.jpg
+URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/landship-base-01.jpg
+Use for: the bare landship hull before anything is built on it — §5.4's form rule made explicit, one continuous armored form with plating unbroken from the rounded bow to the stern and no seam anywhere along it. The lift emitter row recessed into the flank rather than hung off it, the chamfered skirt, the deck left flat and empty with only its mounting hardpoints showing, and the dust plume that sells ground clearance. Attach this first when generating any vessel, then describe only the superstructure
+Do not use for: **FRAMING** — this sits on painted ground under a hazy sky rather than §15's plain grey, so it carries an environment and its light into anything it anchors; pair it with a clean sheet. Also carries no faction: it is deliberately unmarked primer, so it will not supply Versari, Laker, Goldgrass or Plainer identity
+Added: 2026-08-11
+
 ## versari-land-vessel-01.jpg
 URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/versari-land-vessel-01.jpg
 Use for: the one continuous armored hull form §5.4 asks for — faceted plating carried unbroken bow to stern with no seam at the raised bow; the hover skirt and its dust plume; deck furniture recessed rather than hung; the human silhouette as a scale key

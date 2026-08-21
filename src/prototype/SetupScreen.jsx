@@ -60,6 +60,23 @@ const MAP_SIZES = ["small", "medium", "large", "huge"].map((id) => ({
   locations: CONFIG.mapSizes[id]?.locations ?? 0,
 }));
 
+// Settlement density. The number each tier resolves to depends on the board —
+// CONFIG.mapSizes[size].locationTiers — because a "high" density means
+// something different on 30 hexes than on 127.
+const DENSITY = [
+  { id: "low", label: "Low" },
+  { id: "medium", label: "Medium" },
+  { id: "high", label: "High" },
+  { id: "veryHigh", label: "Very High" },
+];
+
+// How many Locations a (size, density) pair actually seats.
+export function locationsFor(sizeId, densityIndex) {
+  const tiers = CONFIG.mapSizes[sizeId]?.locationTiers;
+  if (!tiers) return CONFIG.mapSizes[sizeId]?.locations ?? 0;
+  return tiers[Math.max(0, Math.min(tiers.length - 1, densityIndex))];
+}
+
 const VICTORY_CONDITIONS = [
   {
     id: "conquest",
@@ -79,6 +96,19 @@ const VICTORY_CONDITIONS = [
 ];
 
 const FREQ_LABELS = ["None", "Low", "Normal", "High"];
+// Which of the four bands a 0..1 slider sits in. One definition, so the label
+// a player reads and the number the engine is handed can never disagree.
+function freqTier(v) {
+  if (v <= 0.05) return 0;
+  if (v <= 0.35) return 1;
+  if (v <= 0.69) return 2;
+  return 3;
+}
+// Engine units per band. Field is the SHARE of spare hexes that become
+// encounter sites (the engine's own default is 0.65, which is "Normal"),
+// world is how many world triggers fire each round.
+const FIELD_SHARE = [0, 0.35, 0.65, 0.9];
+const WORLD_PER_ROUND = [0, 1, 2, 4];
 function freqLabel(v) {
   if (v <= 0.05) return "None";
   if (v <= 0.35) return "Low";
@@ -341,6 +371,59 @@ function Toggle({ value, onChange, label, desc }) {
   );
 }
 
+// A slider over NAMED steps rather than a continuous 0–1 range: map size and
+// settlement density are both "pick one of four", but they read as a
+// magnitude, so a slider says more than four buttons do — you can see at a
+// glance that you are near one end.
+function StepSlider({ options, index, onChange, label, note }) {
+  const last = Math.max(0, options.length - 1);
+  const pct = last === 0 ? 0 : Math.round((index / last) * 100);
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 5 }}>
+        <div style={{ ...sectionLabelStyle, opacity: 0.7, fontSize: 9.5 }}>{label}</div>
+        <div style={{ fontFamily: C.font, fontSize: 11, fontWeight: 700, color: C.holoHi, letterSpacing: 1 }}>
+          {options[index]?.label}
+          {note && <span style={{ color: "rgba(143,246,234,0.40)", fontWeight: 400 }}> ({note})</span>}
+        </div>
+      </div>
+      <div style={{ position: "relative", height: 18, display: "flex", alignItems: "center" }}>
+        <div style={{
+          position: "absolute", left: 0, right: 0, height: 3, borderRadius: 2,
+          background: "rgba(86,211,198,0.14)", border: "1px solid rgba(86,211,198,0.22)",
+        }} />
+        <div style={{
+          position: "absolute", left: 0, width: `${pct}%`, height: 3, borderRadius: 2,
+          background: `linear-gradient(90deg, rgba(86,211,198,0.50), ${C.holoHi})`,
+          boxShadow: `0 0 6px ${C.holo}66`, pointerEvents: "none",
+        }} />
+        {/* Notches, so the discrete steps are visible before you drag. */}
+        {options.map((o, i) => (
+          <div key={o.id ?? i} style={{
+            position: "absolute", left: `${last === 0 ? 0 : (i / last) * 100}%`,
+            width: 2, height: 8, marginLeft: -1, borderRadius: 1,
+            background: i <= index ? C.holoHi : "rgba(86,211,198,0.30)",
+            pointerEvents: "none",
+          }} />
+        ))}
+        <input
+          type="range"
+          min={0} max={last} step={1}
+          value={index}
+          onChange={(e) => onChange(parseInt(e.target.value, 10))}
+          className="hud-int"
+          aria-label={label}
+          style={{
+            position: "relative", width: "100%", appearance: "none",
+            WebkitAppearance: "none", background: "transparent", outline: "none",
+            cursor: "pointer", margin: 0, padding: 0, height: 18,
+          }}
+        />
+      </div>
+    </div>
+  );
+}
+
 // Horizontal range slider with label
 function Slider({ value, onChange, label }) {
   const pct = Math.round(value * 100);
@@ -415,8 +498,9 @@ export default function SetupScreen({ onStart, onBack }) {
   const [picked, setPicked] = useState("versari");
 
   // map & player config
-  const [mapSize, setMapSize] = useState("small");
   const [factionCount, setFactionCount] = useState(4);
+  const [sizeIndex, setSizeIndex] = useState(1);      // medium
+  const [densityIndex, setDensityIndex] = useState(1); // medium
 
   // victory conditions — all on by default; guard: ≥1 must stay enabled
   const [victory, setVictory] = useState({ conquest: true, recognition: true, elimination: true });
@@ -444,15 +528,27 @@ export default function SetupScreen({ onStart, onBack }) {
       seed,
       humanFactionId: picked,
       mapSize,
+      // What the board should actually seat, resolved here so the engine is
+      // handed a number rather than a pair of UI concepts.
+      locationBudget: settlementCount,
       factionCount,
       victory: { ...victory },
-      encounters: { field: fieldFreq, world: worldFreq },
+      // Resolved to engine units here, like the settlement budget above, so
+      // the engine is handed shares and counts rather than UI slider values.
+      encounters: {
+        field: FIELD_SHARE[freqTier(fieldFreq)],
+        world: WORLD_PER_ROUND[freqTier(worldFreq)],
+      },
       minorFactions,
       fogOfWar,
     });
   }
 
-  const selectedMap = MAP_SIZES.find((m) => m.id === mapSize);
+  // Derived from the two sliders rather than stored, so the pair can never
+  // disagree with what the board actually builds.
+  const mapSize = MAP_SIZES[sizeIndex]?.id ?? "medium";
+  const selectedMap = MAP_SIZES[sizeIndex];
+  const settlementCount = locationsFor(mapSize, densityIndex);
 
   return (
     <div
@@ -591,23 +687,28 @@ export default function SetupScreen({ onStart, onBack }) {
           {/* ── RIGHT: settings column ───────────────────────────── */}
           <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
 
-            {/* Map Size */}
+            {/* Board — size and settlement density, deliberately independent.
+                Tying the two made "small" mean "few cities" whether or not
+                that was what anyone wanted; a cramped small board and a sparse
+                huge one are both games worth playing. */}
             <div>
-              <div style={{ ...sectionLabelStyle, marginBottom: 10 }}>▸ Map Size</div>
-              <Segmented
-                options={MAP_SIZES}
-                value={mapSize}
-                onChange={setMapSize}
-              />
-              {selectedMap && (
-                <div style={{
-                  fontFamily: C.font, fontSize: 9.5, letterSpacing: 1.2,
-                  color: "rgba(143,246,234,0.42)", marginTop: 5,
-                  textAlign: "center",
-                }}>
-                  ~{selectedMap.hexes} hexes
-                </div>
-              )}
+              <div style={{ ...sectionLabelStyle, marginBottom: 10 }}>▸ The Board</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                <StepSlider
+                  options={MAP_SIZES}
+                  index={sizeIndex}
+                  onChange={setSizeIndex}
+                  label="map size"
+                  note={selectedMap ? `~${selectedMap.hexes} hexes` : null}
+                />
+                <StepSlider
+                  options={DENSITY}
+                  index={densityIndex}
+                  onChange={setDensityIndex}
+                  label="settlements"
+                  note={`${settlementCount} on this map`}
+                />
+              </div>
             </div>
 
             <Divider />
@@ -787,7 +888,7 @@ export default function SetupScreen({ onStart, onBack }) {
             textAlign: isPhone ? "center" : "left",
             color: "rgba(143,246,234,0.38)",
           }}>
-            {`${UI_FACTIONS[picked]?.name} · ${MAP_SIZES.find((m) => m.id === mapSize)?.label} Map · ${factionCount} Factions`}
+            {`${UI_FACTIONS[picked]?.name} · ${selectedMap?.label} Map · ${settlementCount} Settlements · ${factionCount} Factions`}
           </div>
           <motion.button
             onClick={start}

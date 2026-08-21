@@ -10,9 +10,9 @@ import { CHIPS, ABILITIES, chipBlocksRail } from "./content.js";
 // `passesFreely` and `supplyCutter` are pure diplomacy questions — who may
 // pass whom, and what severs a line — so they live in diplomacy.js and are
 // re-exported here, where every mover already looks for them.
-export { passesFreely, supplyCutter } from "./diplomacy.js";
-import { passesFreely } from "./diplomacy.js";
-import { ensureVisibility, isHexVisible, isUnitVisibleTo } from "./visibility.js";
+export { passesFreely, supplyCutter, hasRailAccess } from "./diplomacy.js";
+import { passesFreely, hasRailAccess } from "./diplomacy.js";
+import { isHexExplored, isHexVisible, isUnitVisibleTo, canSeeUnitAt } from "./visibility.js";
 
 const BIG_BUDGET = 999; // budget-agnostic routing for display
 
@@ -29,7 +29,7 @@ const BIG_BUDGET = 999; // budget-agnostic routing for display
 // ambush (board.js `surprise`). Note it is a strict subset: a hex holding both
 // a visible and a hidden blocker is NOT a surprise — you could see a reason to
 // stop there, so stopping costs you the advance as usual.
-function blockerScan(state, ownerId, { ignoreUnits } = {}) {
+function blockerScan(state, ownerId, { ignoreUnits, mover } = {}) {
   const blocked = new Set();
   const hidden = new Set();
   const visible = new Set();
@@ -55,7 +55,7 @@ function blockerScan(state, ownerId, { ignoreUnits } = {}) {
     if (loc.controller && loc.controller !== ownerId && !passesFreely(state, ownerId, loc.controller)) {
       // A city is remembered once explored — you do not forget where it is or
       // roughly whose it is — so an explored Location never ambushes anyone.
-      note(loc.hexId, ensureVisibility(state, ownerId).explored.has(loc.hexId));
+      note(loc.hexId, isHexExplored(state, ownerId, loc.hexId));
     }
   }
   // Rail doc §3 — a COMPLETED enemy blockade halts a mover the same way a unit
@@ -67,8 +67,22 @@ function blockerScan(state, ownerId, { ignoreUnits } = {}) {
   // blockade still stops it — the same reasoning that keeps enemy Locations
   // blocking above.
   for (const b of Object.values(state.world?.blockades || {})) {
-    if (!b.done || b.owner === ownerId) continue;
+    // `paid === false` is a dormant position — standing, but unmanned, so the
+    // road is open through it until its owner clears the arrears.
+    if (!b.done || b.paid === false || b.owner === ownerId) continue;
     if (!passesFreely(state, ownerId, b.owner)) {
+      // Rail doc Part 1 — a blockade is a GARRISON, not a wall. It only halts
+      // a mover its owner can actually SEE arriving, asked at the blockade's
+      // own hex (the position being entered, not wherever the mover is
+      // standing while the field is computed). A stealthed unit therefore
+      // walks straight through unless the owner has Detection covering that
+      // hex — Signal Mast is what buys it.
+      //
+      // With no `mover` this stays ground truth: `movementBlockers(state, fid)`
+      // is a "what would stop this faction" query with no particular unit in
+      // hand, and answering it with a guess would be worse than answering it
+      // with the map.
+      if (mover && !canSeeUnitAt(state, b.owner, mover, b.hex)) continue;
       // Unlike a city, a blockade can go up (or come down) behind your back, so
       // it takes LIVE sight rather than memory to count as seen.
       note(b.hex, isHexVisible(state, ownerId, b.hex));
@@ -141,7 +155,15 @@ export function unitRailEdges(state, unit) {
   );
   if (barred) return null;
 
-  const controls = (hexId) => state.locations[hexId]?.controller === unit.owner;
+  // Rail doc §2.3 — you may work a station you hold, or one whose holder has
+  // granted you running rights (a pact grants them implicitly). Unheld track
+  // is nobody's to close. This is what turns rail from a purely territorial
+  // asset into something diplomacy can open.
+  const controls = (hexId) => {
+    const holder = state.locations[hexId]?.controller;
+    if (!holder) return true;
+    return holder === unit.owner || hasRailAccess(state, unit.owner, holder);
+  };
   // A hex is cut for this mover if a unit it cannot pass freely stands there.
   const hostile = new Set();
   for (const u of Object.values(state.units)) {
@@ -181,7 +203,7 @@ function restrictToFallback(state, unit, field) {
 export function unitReach(state, unit) {
   if (!unit) return {};
   const budget = unit.moveRemaining ?? unit.movement ?? 0;
-  const opts = { ignoreUnits: unitPassesThroughUnits(state, unit) };
+  const opts = { ignoreUnits: unitPassesThroughUnits(state, unit), mover: unit };
   const scan = blockerScan(state, unit.owner, opts);
   const field = movementField(state, unit.node, budget, {
     blockedThrough: scan.blocked,
@@ -200,7 +222,9 @@ export function unitMovePath(state, unit, dest) {
   if (!unit) return null;
   const budget = unit.moveRemaining ?? unit.movement ?? 0;
   return movementRoute(state, unit.node, budget, dest, {
-    blockedThrough: movementBlockers(state, unit.owner, { ignoreUnits: unitPassesThroughUnits(state, unit) }),
+    blockedThrough: movementBlockers(state, unit.owner, {
+      ignoreUnits: unitPassesThroughUnits(state, unit), mover: unit,
+    }),
     ignoreTerrain: unitIgnoresTerrain(state, unit),
     extraCost: tollTaxedHexes(state, unit.owner),
     railEdges: unitRailEdges(state, unit),

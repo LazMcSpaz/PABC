@@ -12,24 +12,29 @@ import BoardViewport from "./BoardViewport.jsx";
 import UnitCard from "./UnitCard.jsx";
 import ControlMeter from "./ControlMeter.jsx";
 import {
-  TopBar, MenuOrb, RadialMenu, LocationWindow, TitledWindow, ICON, C as HUD, COMPACT_HUD_H,
+  TopBar, MenuOrb, RadialMenu, LocationWindow, BlockadeWindow, EconomyLedger, TitledWindow, ICON, C as HUD, COMPACT_HUD_H,
 } from "./HudChrome.jsx";
 import { useIsPhone } from "./useViewport.js";
+import { useSfxHold, useSfxOn, useSfxOnChange } from "../audio/AudioProvider.jsx";
+import VolumeSliders from "../audio/VolumeSliders.jsx";
 import { createGame } from "../game/setup.js";
 import { startTurn, endTurn } from "../game/turn.js";
 import { performAction } from "../game/actions.js";
+import { applyOutputAndBuilds, chargeChipUpkeep, chargeUnitUpkeep } from "../game/economy.js";
+import { chargePostUpkeep } from "../game/posts.js";
+import { chargeBlockadeUpkeep } from "../game/blockades.js";
 import { takeAITurn } from "../game/ai.js";
 import { activePlayerId } from "../game/targeting.js";
 import { bfsDistances } from "../game/board.js";
 import { unitReach, unitMovePath } from "../game/movement.js";
-import { CHIPS as ENGINE_CHIPS, LOCATIONS as ENGINE_LOCATIONS, ABILITIES as ENGINE_ABILITIES, chipDisplayName } from "../game/content.js";
+import { CHIPS as ENGINE_CHIPS, LOCATIONS as ENGINE_LOCATIONS, ABILITIES as ENGINE_ABILITIES, FACTIONS as ENGINE_FACTIONS, chipDisplayName } from "../game/content.js";
 import { CONFIG } from "../game/config.js";
 import { downloadGameLog } from "./gameLogExport.js";
 import { NEUTRAL } from "./data.js";
 import { getEncounter } from "../game/encounters.js";
 import { encounterRedrawBudget } from "../game/encounters.js";
 import { evalCond } from "../game/dsl.js";
-import { adaptState, reinforcePreview, engineChipIdToUi, previewLocationContest, previewAttackerStrength } from "./engineAdapter.js";
+import { adaptState, reinforcePreview, engineChipIdToUi, previewLocationContest, previewAttackerStrength, blockadeView, blockadeBuildOffer, postAction, upkeepSummary, economyReport } from "./engineAdapter.js";
 import { resolveSalvage } from "../game/contest.js";
 import { assignTechNode } from "../game/stats.js";
 import { performDiplomacy } from "../game/diplomacy.js";
@@ -41,6 +46,18 @@ import { WikiProvider, TokenProvider } from "./RichText.jsx";
 import WikiModal from "./WikiModal.jsx";
 import { WIKI_ENTRIES } from "../game/content/index.js";
 import { resolveTokens } from "../game/textTokens.js";
+
+// The ECONOMY half of a player's Upkeep, in the order turn.js charges it.
+// Exposed as a dev handle so the upkeep-UI check can compare what the HUD
+// promises against what the engine actually takes, rather than reimplementing
+// the sum inside the test and proving only that two copies of a bug agree.
+function runUpkeepFor(game, pid) {
+  applyOutputAndBuilds(game, pid);
+  chargeChipUpkeep(game, pid);
+  chargePostUpkeep(game, pid);
+  chargeBlockadeUpkeep(game, pid);
+  chargeUnitUpkeep(game, pid);
+}
 
 // Local-storage key for the "Don't ask again" preference on move confirm.
 const SKIP_MOVE_CONFIRM_KEY = "pabc.skipMoveConfirm";
@@ -135,7 +152,7 @@ function contestMods(r) {
 const MENU_ITEMS = [
   { key: "research", icon: ICON.research, label: "Research" },
   { key: "units", icon: ICON.units, label: "Units" },
-  { key: "locations", icon: ICON.shield, label: "Locations" },
+  { key: "economy", icon: ICON.scrap, label: "Economy" },
   { key: "diplomacy", icon: ICON.diplomacy, label: "Diplomacy" },
 ];
 
@@ -186,6 +203,7 @@ function buildLocView(state, hex, isYourTurn) {
         chipId: engineId,
         name: chipDisplayName(engineId, ctrl),
         disabled: !!state.engineState.chips[uid]?.disabled,
+        upkeep: ENGINE_CHIPS[engineId]?.upkeep || 0,
         upgrade: e.upgrades[uid] || null,
       };
     });
@@ -200,6 +218,14 @@ function buildLocView(state, hex, isYourTurn) {
       chips: chipDefs,
       canManage: isYourTurn,
       scrap: you.scrap,
+      // Rail doc §2.2 pooling + §3.4 funding priority.
+      garrison: e.garrison,
+      poolTarget: e.poolTarget,
+      poolTargetName: e.poolTargetName,
+      poolTargets: e.poolTargets,
+      poolBlocked: e.poolBlocked,
+      buildPriority: e.buildPriority,
+      fundsBlockade: e.fundsBlockade,
     };
   }
 
@@ -242,9 +268,47 @@ function buildLocView(state, hex, isYourTurn) {
 // §18.4.1 — field a VARIABLE subset of minors per game so no two casts (and
 // therefore no two political webs) recur. Two distinct minors chosen by seed.
 const MINOR_POOL = ["tempest", "croppers", "steeltraders", "dambarans"];
-function bootGame(seed, humanFactionId, mapSize) {
-  const minors = [MINOR_POOL[seed % 4], MINOR_POOL[(seed + 2) % 4]];
-  const game = createGame({ seed, humanFactionId, minors, mapSize });
+
+// Which majors are in play. The human is always seated; the rest fill up to
+// `count` in registry order, so a 2-faction game is you and one rival rather
+// than a random pair that might exclude you.
+function majorsFor(humanFactionId, count) {
+  const all = Object.keys(ENGINE_FACTIONS);
+  const n = Math.max(2, Math.min(all.length, count || all.length));
+  if (n >= all.length) return undefined; // undefined = "all of them", createGame's default
+  const picked = [humanFactionId].filter((f) => all.includes(f));
+  for (const f of all) {
+    if (picked.length >= n) break;
+    if (!picked.includes(f)) picked.push(f);
+  }
+  // Keep registry order, so turn order does not depend on who the human picked.
+  return all.filter((f) => picked.includes(f));
+}
+
+function bootGame(config) {
+  const seed = config?.seed ?? 42;
+  const humanFactionId = config?.humanFactionId ?? "versari";
+  // §18.4.1 — a VARIABLE subset of minors per game so no two political webs
+  // recur. The setup screen can switch them off entirely.
+  const minors = config?.minorFactions === false
+    ? []
+    : [MINOR_POOL[seed % 4], MINOR_POOL[(seed + 2) % 4]];
+  const game = createGame({
+    seed,
+    humanFactionId,
+    minors,
+    mapSize: config?.mapSize,
+    factionIds: majorsFor(humanFactionId, config?.factionCount),
+    locationBudget: config?.locationBudget ?? null,
+    // Victory conditions, encounter cadence and fog all come straight from
+    // the setup screen. Anything the screen omits falls back to the engine's
+    // own defaults inside createGame.
+    rules: {
+      victory: config?.victory,
+      fogOfWar: config?.fogOfWar,
+      encounters: config?.encounters,
+    },
+  });
   startTurn(game);
   driveAIsThroughHumanTurn(game);
   return game;
@@ -275,9 +339,13 @@ export default function Prototype({ config, onNewGame }) {
   // and bump a tick to trigger a re-adapt + re-render after each mutation.
   const gameRef = useRef(null);
   if (!gameRef.current) {
-    gameRef.current = bootGame(config?.seed ?? 42, config?.humanFactionId ?? "versari", config?.mapSize);
+    gameRef.current = bootGame(config);
     // Dev handle — lets the screenshot harness / console stage scenarios.
     if (typeof window !== "undefined") window.__ashland = gameRef.current;
+    // Dev handle: run the engine's own Upkeep for one player. Exists so the
+    // upkeep-UI check can compare what the HUD promises against what the
+    // engine actually charges, rather than reimplementing the sum in the test.
+    if (typeof window !== "undefined") window.__ashlandUpkeep = runUpkeepFor;
   }
   const [tick, setTick] = useState(0);
   const bumpTick = useCallback(() => setTick((t) => t + 1), []);
@@ -343,16 +411,13 @@ export default function Prototype({ config, onNewGame }) {
   // its detail view is open. `null` means no highlight.
   const [highlightedFactionId, setHighlightedFactionId] = useState(null);
   const [menuOpen, setMenuOpen] = useState(false); // radial menu visible
-  const [menuPanel, setMenuPanel] = useState(null); // "units"|"market"|"locations"|"settings"
+  const [menuPanel, setMenuPanel] = useState(null); // "units"|"market"|"economy"|"settings"
   const [aiSpeed, setAiSpeed] = useState(getAiTurnSpeed()); // §AI replay speed (persisted)
   const you = state.players[state.youId];
   // During an AI replay the engine has already advanced (often to the human),
   // but the player must not act until the cinematics finish — gate on it too.
   const isYourTurn = state.activeId === state.youId && !state.winnerId && !replay.isReplaying;
   const yourUnits = Object.values(state.units).filter((u) => u.owner === state.youId);
-  const yourLocationHexes = Object.values(state.hexes).filter(
-    (h) => h.type === "location" && h.control?.sections?.some((s) => s === state.youId),
-  );
   const techLabel = (() => {
     const research = you.research || 0;
     const thresholds = state.techThresholds || [];
@@ -505,8 +570,12 @@ export default function Prototype({ config, onNewGame }) {
   // encounter hex has nothing to say either until you actually move onto it and
   // draw the card — the board's own `?` mark already tells you it is there, so
   // a panel that repeats it is a click you have to dismiss for nothing.
+  // What opens a window on click. A Location always has, and a blockade now
+  // does too: it is a structure that outlives the unit that raised it, so it
+  // gets selected like a place rather than reached through a passing soldier.
   function isInspectableHex(hexId) {
-    return state.hexes[hexId]?.type === "location";
+    const h = state.hexes[hexId];
+    return h?.type === "location" || (!!h?.blockade && h.fog === "visible");
   }
   function inspectHex(hexId) {
     if (!isInspectableHex(hexId)) {
@@ -772,8 +841,24 @@ export default function Prototype({ config, onNewGame }) {
   }
   // §20.4–20.7 — economy directives (all free of Actions). Construction
   // advances at Upkeep off the city's Output via its guns/butter slider.
-  function onBuild(hexId, chipId) {
-    return runAction("build", { at: hexId, chipId }, null, "Build queued.");
+  // `into` names which stationed unit a UNIT chip is destined for, so a city
+  // with two units in it does not silently arm whichever the engine happens to
+  // scan first. Omitted for city chips, where it means nothing.
+  function onBuild(hexId, chipId, into) {
+    return runAction("build", { at: hexId, chipId, ...(into ? { into } : {}) },
+      null, "Build queued.");
+  }
+  // Rail doc §3 — raise a blockade on the hex this unit stands on, and fit
+  // chips to one already standing there.
+  function onBuildBlockade(hexId) {
+    return runAction("build-blockade", { hex: hexId }, null, "Blockade started.");
+  }
+  function onUpgradeBlockade(hexId, chipId) {
+    return runAction("upgrade-blockade", { hex: hexId, chipId }, null, "Blockade upgrade queued.");
+  }
+  // §17.7 — dig a listening post in where this unit stands.
+  function onBuildPost(unitUid, hexId) {
+    return runAction("build-post", { unit: unitUid, hex: hexId }, null, "Listening post built.");
   }
   function onUpgrade(hexId, chipUid) {
     return runAction("upgrade", { at: hexId, chip: chipUid }, null, "Upgrade queued.");
@@ -801,6 +886,16 @@ export default function Prototype({ config, onNewGame }) {
   }
   function onSetSlider(hexId, value) {
     return runAction("set-slider", { at: hexId, value });
+  }
+  // Rail doc §2.2 / §3.4 — both are free (no action cost), so they run
+  // straight through without a confirm.
+  function onSetPoolTarget(hexId, to) {
+    return runAction("set-pool-target", { at: hexId, to },
+      null, to ? "Rail shipment set." : "Rail shipment stopped.");
+  }
+  function onSetBuildPriority(hexId, value) {
+    return runAction("set-build-priority", { at: hexId, value },
+      null, value === "chips" ? "Chips funded first." : "Blockade funded first.");
   }
 
   function onEndTurn() {
@@ -910,6 +1005,57 @@ export default function Prototype({ config, onNewGame }) {
     [tick, encounterPrompt?.encounter?.recipient],
   );
 
+  // Detail windows announce themselves with a whoosh. Two keys rather than
+  // one, because a unit panel and a location window can be open at the same
+  // time and a single key would let the second one slide in silently. The
+  // conditions mirror the render below exactly — the cue has to fire when a
+  // window actually appears, not merely when something is selected (an
+  // ordinary terrain hex opens nothing). Simultaneous fires collapse in the
+  // sfx player's retrigger guard, so this never doubles up.
+  const selectedUnitForPanel = selectedUnitId && state.units[selectedUnitId] ? selectedUnitId : null;
+  const selectedHexForWindow = (() => {
+    const h = selectedHexId ? state.hexes[selectedHexId] : null;
+    if (!h || h.fog !== "visible") return null;
+    return h.type === "location" || h.blockade ? selectedHexId : null;
+  })();
+  useSfxOnChange(selectedUnitForPanel && `unit:${selectedUnitForPanel}`, "windowOpen");
+  useSfxOnChange(selectedHexForWindow && `hex:${selectedHexForWindow}`, "windowOpen");
+
+  // Whatever the radial menu opened gets the same window cue — the diplomacy
+  // drawer, the tech wheel, and the Units / Economy / Settings panels. One key
+  // rather than four hooks: onMenuPick opens exactly one of these at a time,
+  // and a single key means switching straight from one to another still reads
+  // as a new window opening.
+  const radialDestination =
+    showDiplomacy ? "diplomacy"
+    : showTechWheel ? "tech"
+    : menuPanel ? `panel:${menuPanel}`
+    : null;
+  useSfxOnChange(radialDestination, "windowOpen");
+  // Herald banners — the small, option-less callouts at the top of the screen
+  // announcing what the powers just did to each other. Keyed on the newest
+  // banner's id: they arrive in batches and the retrigger guard collapses a
+  // batch into one hit, which is what a batch should sound like.
+  // (The envoy audience gets its own, heavier cue, fired from EnvoyModal.)
+  useSfxOn(heralds.length ? heralds[heralds.length - 1].id : null, "diplomacyAlert");
+
+  // The radial menu hums while it is open and waiting on a choice. It stops
+  // the moment a sector is picked — onMenuPick closes the radial before it
+  // opens anything, and the extra clauses hold even if a panel is opened by
+  // some other route while the radial is still up.
+  useSfxHold(menuOpen && !menuPanel && !showTechWheel && !showDiplomacy, "radialAmbience");
+
+  // The battle under a conflict roll — both surfaces that show one. The
+  // player's own contest gets the dramatised overlay; an AI's gets a fast
+  // popup during the turn replay. Held rather than fired, so the stinger is
+  // released with the roll instead of running on over whatever comes next,
+  // and so two contests in quick succession cannot stack. `terse` overlays
+  // ("Unit lost") are aftermath, not a roll, so they are excluded.
+  const contestRollOnScreen =
+    !!contestViz ||
+    (replay.activeOverlays || []).some((o) => o.kind === "contest" && !o.terse);
+  useSfxHold(contestRollOnScreen, "contestRoll");
+
   return (
     <WikiProvider entries={WIKI_ENTRIES} openEntry={openWikiEntry}>
     <TokenProvider resolve={resolveText}>
@@ -966,8 +1112,12 @@ export default function Prototype({ config, onNewGame }) {
             reinforce={reinforcePreview(gameRef.current, selectedUnitId)}
             scrap={you.scrap}
             raidTargets={raidTargets}
+            blockade={blockadeBuildOffer(gameRef.current, selectedUnitId)}
+            post={postAction(gameRef.current, selectedUnitId)}
             onReinforce={onReinforce}
             onContest={onContest}
+            onBuildBlockade={() => onBuildBlockade(state.units[selectedUnitId].node)}
+            onBuildPost={() => onBuildPost(selectedUnitId, state.units[selectedUnitId].node)}
             onClose={() => setSelectedUnitId(null)}
           />
         )}
@@ -990,10 +1140,23 @@ export default function Prototype({ config, onNewGame }) {
             onUpgrade={onUpgrade}
             onRush={onRush}
             onSetSlider={onSetSlider}
+            onSetPoolTarget={onSetPoolTarget}
+            onSetBuildPriority={onSetBuildPriority}
             onContest={(p) => {
               onContest(p);
               setSelectedHexId(null);
             }}
+          />
+        )}
+        {selectedHexId && state.hexes[selectedHexId]?.type !== "location" &&
+          state.hexes[selectedHexId]?.blockade &&
+          state.hexes[selectedHexId]?.fog === "visible" && (
+          <BlockadeWindow
+            key="blockade-window"
+            view={blockadeView(gameRef.current, selectedHexId, state.youId)}
+            canAct={isYourTurn}
+            onClose={() => setSelectedHexId(null)}
+            onFit={(chipId) => onUpgradeBlockade(selectedHexId, chipId)}
           />
         )}
       </AnimatePresence>
@@ -1002,6 +1165,7 @@ export default function Prototype({ config, onNewGame }) {
           top bar and bottom dock. */}
       <TopBar
         scrap={you.scrap}
+        upkeep={upkeepSummary(gameRef.current, state.youId)}
         units={{ n: yourUnits.length, cap: you.unitCap }}
         tech={{ level: you.techLevel, label: techLabel }}
         name={UI_FACTIONS[state.youId]?.name}
@@ -1043,42 +1207,32 @@ export default function Prototype({ config, onNewGame }) {
         </TitledWindow>
       )}
 
-      {menuPanel === "locations" && (
-        <TitledWindow key="locations" title="Locations" icon={ICON.shield} onClose={() => setMenuPanel(null)}>
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {yourLocationHexes.length === 0 && (
-              <span style={{ color: HUD.textDim, fontSize: 13 }}>
-                You hold no sections yet. Move a unit onto a location and contest it.
-              </span>
-            )}
-            {yourLocationHexes.map((h) => {
-              const ctrl = fullController(h.control.sections);
-              return (
-                <button
-                  key={h.id}
-                  className="hud-int"
-                  onClick={() => { setMenuPanel(null); setSelectedHexId(h.id); }}
-                  style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 10px", borderRadius: 8, border: "1px solid rgba(86,211,198,0.3)", background: "rgba(0,0,0,0.25)", color: HUD.text, cursor: "pointer", textAlign: "left" }}
-                >
-                  <ControlMeter sections={h.control.sections} loyalty={h.control.loyalty} danger={h.control.loyaltyDanger} size={40} />
-                  <div style={{ display: "flex", flexDirection: "column" }}>
-                    <span style={{ fontFamily: HUD.font, fontSize: 16, fontWeight: 700 }}>
-                      {UI_LOCATIONS[h.locationId]?.name || h.locationId}
-                    </span>
-                    <span style={{ fontSize: 10, letterSpacing: 1, textTransform: "uppercase", color: HUD.textFaint }}>
-                      {ctrl === state.youId ? "Held" : ctrl ? `Held — ${UI_FACTIONS[ctrl]?.short}` : "Contested"}
-                    </span>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
+      {menuPanel === "economy" && (
+        <TitledWindow key="economy" title="Economy" icon={ICON.scrap} onClose={() => setMenuPanel(null)}>
+          <EconomyLedger
+            report={economyReport(gameRef.current, state.youId)}
+            onOpenHex={(h) => { setMenuPanel(null); setSelectedHexId(h); }}
+            onOpenUnit={(uid) => { setMenuPanel(null); setSelectedUnitId(uid); }}
+          />
         </TitledWindow>
       )}
 
       {menuPanel === "settings" && (
         <TitledWindow key="settings" title="Settings" onClose={() => setMenuPanel(null)}>
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 16 }}>
+            <span style={{ fontFamily: HUD.font, fontSize: 13, fontWeight: 700, letterSpacing: 0.6, color: HUD.text }}>
+              Volume
+            </span>
+            <p className="pc-prose" style={{ margin: "0 0 8px", fontSize: 12, lineHeight: 1.5, color: HUD.textDim }}>
+              The score and the interface run on separate levels — turn either
+              one down without losing the other. Both are remembered between
+              sessions.
+            </p>
+            {/* Same component the corner audio widget uses, so the two can
+                never disagree about what these are called or where they sit. */}
+            <VolumeSliders />
+          </div>
+          <div style={{ borderTop: `1px solid ${theme.border}`, paddingTop: 14, display: "flex", flexDirection: "column", gap: 6 }}>
             <span style={{ fontFamily: HUD.font, fontSize: 13, fontWeight: 700, letterSpacing: 0.6, color: HUD.text }}>
               AI turn speed
             </span>

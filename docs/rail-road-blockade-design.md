@@ -11,16 +11,24 @@ aren't.
 
 | Part | | Where |
 |---|---|---|
-| 1 — Blockade vision-gating | **deferred, decision pending** | `movementBlockers` is still ground truth (but see *Ambush halts* below) |
+| 1 — Blockade vision-gating | built (garrison model) | `movement.js blockerScan`, `visibility.js canSeeUnitAt` |
 | 2.1 Rail transport | built | `board.js assignRails`, `movement.js unitRailEdges` |
 | 2.2 Rail production pooling | built | `economy.js railPoolRecipient` |
 | Rail as a trade route | built | `diplomacy.js tradeRouteOpen` |
-| 2.3 Rail access | built (endpoints-only) | `movement.js unitRailEdges` |
+| 2.3 Rail access | built (held stations + granted) | `movement.js unitRailEdges` |
 | 2.4 Rail generation | built (capital spanning tree) | `board.js assignRails` |
+| — No terminus at sign-named towns | built | `content.js noRailTerminus`, `setup.js railHubs` |
 | 3.1 Blockade construction | built | `blockades.js`, `actions.js build-blockade` |
 | 3.2 Once complete | built, chips included | `blockades.js`, `contest.js`, `visibility.js` |
 | 3.3 Combat and destruction | built | `contest.js` |
 | 3.4 Blockade funding | built | `economy.js`, `blockades.js` |
+| 2.3 Rail access agreement | built | `diplomacy.js hasRailAccess`, verb `set-rail-access` |
+| Pooling / priority UI | built | `HudChrome.jsx EconomyPanel`, `scripts/check-pooling-ui.mjs` |
+| Blockade UI (own window) | built | `HudChrome.jsx BlockadeWindow`, `scripts/check-blockade-ui.mjs` |
+| Upkeep visibility | built | top bar, unit panel, settlement, blockade · `scripts/check-upkeep-ui.mjs` |
+| Economy ledger (radial) | built | `HudChrome.jsx EconomyLedger`, `engineAdapter.js economyReport` |
+| Blockade upkeep | built | `blockades.js chargeBlockadeUpkeep` |
+| Unit upkeep | built | `economy.js chargeUnitUpkeep` |
 
 Both halves of the "route output to a connected recipient" idea now share one
 allocator in `processLocationEconomy`: blockade funding (§3.4) takes what it is
@@ -44,13 +52,25 @@ its own build always claims its output first. Beyond that, four gates:
   exactly as it would with no arrangement at all, and `pool_interrupted` fires
   so the player can see why the shipment stopped.
 
-Neither `set-pool-target` nor `set-build-priority` has a control in the
-settlement window yet — both are engine-side only.
+Both `set-pool-target` and `set-build-priority` now have controls in the
+settlement window (`EconomyPanel`), each rendered only when it is usable: the
+pooling picker appears when the settlement has a rail-linked sibling you also
+hold, the priority toggle only while a blockade is actually being funded.
+`scripts/check-pooling-ui.mjs` drives a real browser and asserts a click
+changes engine state, not just the DOM.
+
+Worth knowing: **rail is a spanning tree over CAPITALS, and a faction starts
+holding exactly one**, so nobody has a legal pool pair at turn 1. Pooling only
+becomes reachable once you take a second capital. That is why the control was
+never missed — there was nothing to show. If pooling is meant to be an
+early-game tool it needs either non-capital rail termini or a rule change
+letting an ally's station receive (today §2.2 requires you hold both).
 
 "Cut" has one definition across all four systems that ask the question —
 rail's line-cut check, blockade construction supply, blockade funding, and
-trading-pact routes — in `diplomacy.js routeCutter`, and that is the single
-place Part 1 would change. It takes the *parties* to a line rather than one
+trading-pact routes — in `diplomacy.js routeCutter`. Part 1 deliberately did
+NOT touch it: a line is cut by the *existence* of a hostile position on it,
+which is a supply question rather than a perception one. It takes the *parties* to a line rather than one
 faction: a trading pact has two, and neither of them cuts its own route.
 `supplyCutter` is the one-party case. Both live in diplomacy.js (who may pass
 whom is a diplomacy question, not a movement one) and are re-exported from
@@ -80,6 +100,121 @@ signage, not stations, so **no rail link may end at them**. They carry
 A line between two legitimate hubs whose hex path happens to cross one of them
 is fine and deliberately left alone — track passes through a place, it just
 does not stop there. Harness-checked.
+
+### §2.3 as built — running rights
+
+Design call, 2026-08-16, closing the "not yet named, specified, or scoped"
+item in Open questions. Rail has no owner of its own — whoever holds a station
+decides what runs through it — so the agreement is over stations, not track.
+
+`set-rail-access` grants one faction running rights over the grantor's
+stations. Deliberately a **lower bar than open borders**: Neutral+ rather than
+Friendly+, and **one-directional**. Open borders is the right to march an army
+across a neighbour's fields; running rights are commerce — your freight moves
+through their yard. Granting is not receiving; each side decides separately.
+A pact carries running rights implicitly (allies ride each other's lines).
+
+Three things read `hasRailAccess`:
+
+- **Unit transport.** `unitRailEdges` used to require the mover to hold BOTH
+  endpoint settlements. Now a station counts if you hold it, nobody holds it,
+  or its holder has granted you rights. This is what turns rail from a purely
+  territorial asset into something diplomacy can open.
+- **Trading pacts.** `railRouteBetween` now takes the two parties and refuses a
+  link whose stations belong to a third party that has granted neither of them
+  rights. Previously a pact could route its trade through the yards of a
+  faction that wanted nothing to do with either side.
+- **Pooling is deliberately NOT included** — §2.2 still requires you hold both
+  stations. Sharing a rival's track is commerce; pooling your industrial output
+  into their city is not the same promise.
+
+### The blockade UI — a place, not a unit ability
+
+A blockade is selected on the map like a settlement and opens **its own
+window**: ownership, manned or dormant, defense, upkeep per turn, slots, its
+fitted upgrades and the menu to fit more. A dormant one says plainly that
+nobody is manning it, which is the difference between a road that is shut and
+one that only looks shut. A foreign blockade reports only what is visible from
+outside, and a blockade you cannot see is not selectable at all.
+
+That replaces an earlier pass that put the whole lifecycle in the UnitPanel.
+A blockade outlives the unit that raised it, so reaching it through whichever
+soldier happened to be parked on it made a structure feel like a unit ability
+and meant keeping a unit standing there just to manage one.
+
+**Breaking ground stays a unit action** in the UnitPanel — there is nothing to
+select until a blockade exists — and quotes the upkeep it commits you to.
+`build-post` (§17.7) stays there too: a listening post is concealed, so unlike
+a blockade there is nothing on the map to click.
+
+Adapter split accordingly: `blockadeView(state, hex, viewer)` for the
+structure, `blockadeBuildOffer(state, unit)` for the offer to raise one. Every
+refusal is mirrored from the validator, so a button explains itself rather than
+failing on click.
+
+`scripts/check-blockade-ui.mjs` drives a real browser through raise → finish →
+select-with-no-unit-present → fit → dormant → post.
+
+### Upkeep is visible wherever it is charged
+
+Units, blockades, listening posts and five chips all bill every Upkeep, and
+none of it appeared anywhere: a player recruited a fifth unit and found out
+when the army starved. Now:
+
+- the **top bar** carries the running net (`Scrap +3/turn`, red when negative),
+  with the breakdown on hover;
+- the **unit panel** states that unit's own bill — including both halves, so a
+  Bombard carrier reads −3 (2 for the full bay, 1 for the chip) — and says
+  UNSUPPLIED when it is unpaid;
+- the **garrison rows** in a settlement state each unit's;
+- **installed chips** carry `−N/t`, and the **build menus** quote the upkeep a
+  chip commits you to next to its one-off price;
+- the **blockade window** and the **build-post button** state theirs.
+
+The radial's **Locations** tab is now **Economy**: a full ledger rather than a
+roster. It names every holding with what it banks (and its Output, when the
+two differ because the settlement is building or pooling), then itemises the
+standing army, the structures and the chip upkeep, each row opening the thing
+it names. A roster answered the wrong question once everything started billing
+per turn; the one a player actually has is "where is my scrap going".
+
+All of it comes from ONE computation — `economyReport` in the adapter, of
+which `upkeepSummary` is just the totals — so the top bar's running net and
+the panel's itemisation cannot disagree. A HUD promising +3/turn over a list
+that visibly sums to −1 would be worse than showing neither.
+
+The risk in six separate readouts is that they drift from the engine, so
+`scripts/check-upkeep-ui.mjs` compares the top bar's promise against a real
+Upkeep tick rather than reimplementing the sum, and separately checks the
+ledger's section totals add up to that same net. Note income is what actually
+REACHES the treasury — a settlement mid-build banks only the butter half of
+its slider — not gross Output.
+
+### Upkeep — blockades and standing armies
+
+Design call, 2026-08-16.
+
+- **A blockade costs 1 scrap per Upkeep** once finished. Unpaid it goes
+  DORMANT: it halts nobody, sees nothing, collects no toll, and adds no
+  defense in a contest — the works stand but nobody mans them, so arrears make
+  a line cheap to knock down. Never destroyed by arrears; paying revives it.
+  One reader (`activeBlockadeAt`) gates all of it, so dormancy is total rather
+  than partial.
+- **Every unit costs 1 scrap per Upkeep**, 2 once BOTH bay slots are filled —
+  by two 1-slot chips or one 2-slot chip alike, so the heavy kit (Bombard,
+  Landship) carries a supply tail. Charged cheapest-first, so a broke player
+  keeps as many units in the field as possible and the heavy kit starves first.
+  An unpaid unit is UNSUPPLIED: it holds ground and still defends, but cannot
+  move or spend an action, and cannot reach for a player wildcard to buy back
+  what arrears took away. Never destroyed.
+
+Charged in this order at Upkeep: chips, posts, blockades, then units — so
+structures already paid for keep running and it is the army that goes hungry
+first.
+
+Measured over 24 AI-vs-AI games on medium, upkeep-on vs upkeep-off:
+convergence **16/24 → 21/24**, mean round 21.6 → 23.0, and starvation bites in
+7 of 12 games but only 3.8% of unit-turns. It is pressure, not a collapse.
 
 ### Ambush halts — a partial answer to Part 0's gap
 
@@ -205,6 +340,39 @@ everything below:
   a unit moves again. It has no vision effect and no blockade-strength
   effect today. The new Blockade structure below is a wholly new mechanic,
   not an extension of `fortified`.
+
+### Part 1 as built — the blockade is a garrison, not a wall
+
+Design call, 2026-08-18, settling the question this doc left open from the
+start. A blockade stops what it **detects**; it does not stop what it cannot
+see. Sneaking past one works, so long as it has no Detection covering its hex.
+
+`blockerScan` now takes the MOVER, and a blockade halts it only if
+`canSeeUnitAt(state, blockadeOwner, mover, blockadeHex)` — a new reader in
+visibility.js that asks the ordinary concealment question about a hex the unit
+has not reached yet. The position that matters is the one being ENTERED, not
+wherever the mover happens to be standing when the reachability field is
+computed: a unit hidden in a forest two hexes away is still walking into plain
+view when it steps onto the blockade's own road hex.
+
+What that means in play:
+
+- An ordinary unit is seen and halted, exactly as before. A blockade's own hex
+  is always inside its owner's Vision, so nothing leaks by accident.
+- A **stealthed** unit (Night March, Cold Camp) walks straight through.
+- **Signal Mast** is the answer, and gained `blockadeDetection: 1` in the same
+  pass to be one — a blockade is now a Detection source in its own right.
+  Without a mast a blockade cannot stop what sneaks past it; with one it can.
+  This was a hole, not a nerf: before the change no blockade chip granted
+  Detection at all, so the garrison model would have had no counter.
+- A **dormant** (unpaid) blockade detects nothing, mast or not. Nobody is up
+  there.
+- With no mover in hand — `movementBlockers(state, fid)` as a "what would stop
+  this faction" query — the answer stays ground truth. Guessing would be worse
+  than answering with the map.
+
+`routeCutter` is deliberately NOT gated: a line is cut by the *existence* of a
+hostile position on it, which is a supply question, not a perception one.
 
 ## Part 1 — Blockade vision-gating (closes the Part 0 gap)
 
@@ -391,17 +559,20 @@ already works rather than as a new parallel system.
 ## Open questions (explicitly unresolved, not defaults to silently assume)
 
 - ~~**Trespass penalty consistency**~~ — *resolved*: `onTrespass` is
-  vision-gated (Part 0 above). Part 1 proper, gating the movement HALT itself,
-  is still open.
-- **Exact numbers**: blockade scrap-equivalent cost, base defense score,
-  base vision range, rail per-hop movement cost (proposed: 1, matching
-  road, not yet confirmed), Toll Booth income rate. All placeholders.
+  vision-gated (Part 0 above), and Part 1 proper — gating the movement HALT
+  itself — shipped 2026-08-18 as the garrison model. See *Part 1 as built*.
+- ~~**Exact numbers**~~ — *set 2026-08-16*: blockade build cost **8** scrap,
+  defense **4**, vision range **1**, upkeep **1**/turn; Toll Booth costs **4**
+  and pays **+2**/turn; units cost **1**/turn, **2** with a full chip bay.
+  Still open: **rail per-hop movement cost** (proposed 1, matching road) — the
+  one number in this list nobody has ruled on, because rail today is a free
+  hop between stations rather than a per-hex cost.
 - **Which settlement pairs get rail** (2.4), and **whether controlling both
   endpoints is the right access rule** (2.3). Both opened up by rail becoming
   generated rather than built.
-- **The rail-access diplomatic agreement** (2.3): not yet named, specified,
-  or scoped as an actual `DiplomacyDrawer` verb — flagged as future work
-  once the core rail mechanic exists.
+- ~~**The rail-access diplomatic agreement** (2.3)~~ — *resolved*: shipped as
+  `set-rail-access` ("running rights"), Neutral+ and one-directional. See
+  *§2.3 as built* above.
 
 ## Engineering footprint (rough scoping only, not a task breakdown)
 

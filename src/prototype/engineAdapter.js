@@ -14,9 +14,13 @@ import {
   chipDisplayName,
 } from "../game/content.js";
 import {
-  buildableChips, upgradeOption, slotCapacity, slotsUsed, locationOutput,
+  buildableChips, upgradeOption, slotCapacity, slotsUsed, locationOutput, meetsTech,
+  unitUpkeepFor,
 } from "../game/economy.js";
 import { recruitCapBonus } from "../game/actions.js";
+import { blockadeAt, supplyStatus, blockadeSlotsUsed, blockadeIncome } from "../game/blockades.js";
+import { supplyCutter } from "../game/movement.js";
+import { postAt } from "../game/posts.js";
 import { isUnitVisibleTo } from "../game/visibility.js";
 import { factionDef } from "../game/content.js";
 import {
@@ -25,8 +29,11 @@ import {
   aiAcceptsPact, aiAcceptsVassalage, wouldAccept, passesRepGates,
   evaluatePactCall, canDemandTribute, hasOpenBorders, warJustification,
   openBordersStanding,
+  railAccessStanding,
+  hasRailAccess,
 } from "../game/diplomacy.js";
 import { hasTechNode } from "../game/tech.js";
+import { holderOf } from "../game/control.js";
 import {
   LOCATIONS as UI_LOCATIONS,
   UNIT_UPGRADES,
@@ -172,6 +179,21 @@ function buildRows(state) {
     .map((r) => byRow[r].sort((a, b) => a.col - b.col).map((h) => h.id));
 }
 
+// What a chip list costs its owner each Upkeep (§20.9). One reader, so every
+// place the UI quotes an upkeep quotes the same number the engine charges.
+function chipUpkeep(state, chipUids) {
+  let n = 0;
+  for (const c of chipUids || []) n += ENGINE_CHIPS[state.chips[c]?.chipId]?.upkeep || 0;
+  return n;
+}
+
+// A unit's FULL per-turn bill: its own keep (1, doubled once the bay is full)
+// plus whatever its chips charge on top. A Landship-carrying unit pays for
+// both the bay being full AND the chip, and the panel should say so.
+function unitTotalUpkeep(state, u) {
+  return unitUpkeepFor(state, u) + chipUpkeep(state, u.chips);
+}
+
 function adaptChips(state, chipUids) {
   return (chipUids || []).map((uid) => engineChipIdToUi(state.chips[uid]?.chipId));
 }
@@ -294,6 +316,11 @@ export function adaptState(state) {
       chips: adaptChips(state, u.chips),
       chipUids: [...u.chips],
       immobilized: isImmobilized(state, u),
+      // Standing armies eat — surfaced per unit so the bill is legible where
+      // the unit is, not only as a lump sum at Upkeep.
+      upkeep: unitTotalUpkeep(state, u),
+      baseUpkeep: unitUpkeepFor(state, u),
+      unsupplied: !!u.unsupplied,
       node: u.node,
     };
   }
@@ -497,7 +524,11 @@ function adaptEconomy(state, loc) {
       uiChipId: engineChipIdToUi(o.chipId),
       name: chipDisplayName(o.chipId, loc.controller),
       kind: o.def.kind,
+      // The one-chip-per-stat-family rule is a UNIT constraint, so the
+      // per-unit outfit menu needs the family to explain a refusal.
+      statType: o.def.statType || null,
       cost: o.def.buildCost ?? o.def.cost ?? 0,
+      upkeep: o.def.upkeep || 0,
       slots: o.def.slots || 1,
       desc: o.def.desc || "",
       locked: o.locked,
@@ -515,6 +546,7 @@ function adaptEconomy(state, loc) {
         uiChipId: engineChipIdToUi(opt.chipId),
         name: chipDisplayName(opt.chipId, loc.controller),
         cost: opt.def.buildCost ?? opt.def.cost ?? 0,
+        upkeep: opt.def.upkeep || 0,
         desc: opt.def.desc || "",
         locked: opt.locked,
         reason: opt.reason,
@@ -526,12 +558,79 @@ function adaptEconomy(state, loc) {
     if (u.owner === loc.controller && u.node === loc.hexId) for (const c of u.chips) collect(c);
   }
 
+  // The GARRISON's own bays, kept separate from the Location's chip slots.
+  //
+  // Unit chips never consumed a Location slot in the engine — but the build
+  // menu was only reachable by clicking an EMPTY Location slot, so once a city
+  // filled up its stationed units could no longer be outfitted at all, and a
+  // unit chip's upgrade never rendered anywhere. The two economies are
+  // genuinely separate and now read that way.
+  const garrison = [];
+  for (const u of Object.values(state.units)) {
+    if (u.owner !== loc.controller || u.node !== loc.hexId) continue;
+    const bayUsed = slotsUsed(state, u.chips);
+    garrison.push({
+      uid: u.uid,
+      name: u.name || "Unit",
+      bayUsed,
+      baySlots: CONFIG.unit.baySlots,
+      upkeep: unitTotalUpkeep(state, u),
+      unsupplied: !!u.unsupplied,
+      // Each stat family admits one chip — surfaced so the menu can say WHY a
+      // second Strength chip is refused rather than just greying out.
+      statTypes: u.chips
+        .map((c) => ENGINE_CHIPS[state.chips[c]?.chipId]?.statType)
+        .filter(Boolean),
+      chips: u.chips.map((c) => ({
+        uid: c,
+        chipId: state.chips[c]?.chipId,
+        uiChipId: engineChipIdToUi(state.chips[c]?.chipId),
+        name: chipDisplayName(state.chips[c]?.chipId, loc.controller),
+        disabled: !!state.chips[c]?.disabled,
+        upkeep: ENGINE_CHIPS[state.chips[c]?.chipId]?.upkeep || 0,
+        upgrade: upgrades[c] || null,
+      })),
+    });
+  }
+
+  // Rail doc §2.2 — the settlements this one may pool into. Mirrors
+  // validateSetPoolTarget exactly (direct link, both stations held by the same
+  // faction), so the menu can never offer a target the engine will refuse.
+  const poolTargets = [];
+  for (const link of state.board.rails || []) {
+    const far = link.a === loc.hexId ? link.b : link.b === loc.hexId ? link.a : null;
+    if (far == null) continue;
+    const dest = state.locations[far];
+    if (!dest || dest.controller !== loc.controller) continue;
+    poolTargets.push({
+      hexId: far,
+      name: ENGINE_LOCATIONS[dest.locationId]?.name || far,
+      building: !!dest.activeBuild,
+    });
+  }
+  // Rail doc §3.4 — does this settlement actually fund a blockade? The
+  // priority toggle is meaningless without one, so the UI can hide it.
+  const fundsBlockade = Object.values(state.world?.blockades || {}).some(
+    (b) => !b.done && b.owner === loc.controller,
+  );
+
   return {
     output: locationOutput(state, loc),
     slider: loc.buildSlider ?? 0,
     progress: loc.buildProgress || 0,
     slotCapacity: cap,
     slotsUsed: used,
+    // Pooling (§2.2) + funding priority (§3.4) — engine actions that had no
+    // control anywhere in the UI until now.
+    garrison,
+    poolTarget: loc.poolTarget ?? null,
+    poolTargetName: loc.poolTarget
+      ? (ENGINE_LOCATIONS[state.locations[loc.poolTarget]?.locationId]?.name || loc.poolTarget)
+      : null,
+    poolTargets,
+    poolBlocked: loc.activeBuild ? "this settlement is building something of its own" : null,
+    buildPriority: loc.buildPriority || "blockade",
+    fundsBlockade,
     activeBuild: ab
       ? {
           kind: ab.kind,
@@ -1019,6 +1118,24 @@ function availableVerbsAgainst(state, viewer, fid) {
       state: "enabled",
       outcome: "Toggle the current open-borders agreement on or off from your side.",
     });
+    // Rail doc §2.3 — running rights. A lower bar than open borders and only
+    // one direction: this is YOUR grant over YOUR stations, so the drawer can
+    // read the gate off the one side it actually knows.
+    const ra = railAccessStanding(state, viewer, fid);
+    const granted = hasRailAccess(state, fid, viewer);
+    out.push(ra.ok || granted
+      ? {
+        verb: "set-rail-access",
+        state: "enabled",
+        outcome: granted
+          ? "Revoke their running rights over your rail — their freight and troops stop using your stations."
+          : "Let their units and trade run over the rail lines your settlements hold.",
+      }
+      : {
+        verb: "set-rail-access",
+        state: "disabled",
+        reason: `${ra.reason.charAt(0).toUpperCase()}${ra.reason.slice(1)}.`,
+      });
   }
   if (pacted) {
     out.push({
@@ -1054,6 +1171,282 @@ function hasStationedUnitWithBay(state, loc, slots) {
 // v0.2 §16.5 — what a Reinforce action would cost/look like for `unitUid`
 // right now: the scrap to top it up, whether an instant top-up is legal
 // (unit on a fully-held Location), and the field-supply ETA in turns.
+// The full economic ledger for a faction: what each holding earns, what each
+// standing asset costs, and the net.
+//
+// ONE computation, because the top bar's running total and the Economy panel's
+// itemisation must never disagree — a HUD that says +3/turn over a list that
+// visibly adds to −1 is worse than showing neither. `upkeepSummary` below is
+// just this report's totals.
+//
+// Mirrors the order the engine charges in (turn.js): Output and tolls in, then
+// chips, posts, blockades and units out.
+export function economyReport(state, fid) {
+  const locations = [];
+  let income = 0;
+  let chipCost = 0;
+
+  for (const loc of Object.values(state.locations)) {
+    const full = loc.controller === fid;
+    if (!full && holderOf(loc) !== fid) continue;
+
+    // A besieged city (majority-held, not outright) still works, at reduced
+    // capacity — control.js.
+    let output = locationOutput(state, loc);
+    if (!full) output = Math.floor(output * CONFIG.economy.partialOutputScale);
+
+    // BANKED is what actually reaches the treasury. A settlement with
+    // something under construction keeps only the butter half of its slider;
+    // one with nothing to build banks all of it, because throughput is never
+    // wasted (economy.js processLocationEconomy).
+    const diverting = !!loc.activeBuild || !!loc.poolTarget;
+    const f = Math.max(0, Math.min(1, loc.buildSlider ?? CONFIG.economy.defaultSlider));
+    const banked = diverting ? Math.floor((1 - f) * output) : output;
+    income += banked;
+
+    const chips = [];
+    for (const c of loc.chips) {
+      const def = ENGINE_CHIPS[state.chips[c]?.chipId];
+      if (!def?.upkeep) continue;
+      chips.push({
+        uid: c,
+        name: chipDisplayName(state.chips[c]?.chipId, fid),
+        upkeep: def.upkeep,
+        dormant: !!state.chips[c]?.disabled,
+      });
+      chipCost += def.upkeep;
+    }
+
+    locations.push({
+      hexId: loc.hexId,
+      name: ENGINE_LOCATIONS[loc.locationId]?.name || loc.locationId,
+      besieged: !full,
+      output,
+      banked,
+      // Why banked is short of output, when it is — so a player reading a low
+      // number can see it is a choice they made, not a loss.
+      diverting: diverting ? (loc.activeBuild ? "building" : "pooling") : null,
+      chips,
+      chipUpkeep: chips.reduce((n, c) => n + c.upkeep, 0),
+    });
+  }
+  locations.sort((a, b) => b.banked - a.banked || a.name.localeCompare(b.name));
+
+  const tolls = blockadeIncome(state, fid);
+  income += tolls;
+
+  const units = [];
+  let army = 0;
+  for (const u of Object.values(state.units)) {
+    if (u.owner !== fid) continue;
+    const cost = unitTotalUpkeep(state, u);
+    army += cost;
+    units.push({
+      uid: u.uid,
+      name: u.name || "Unit",
+      hexId: u.node,
+      at: ENGINE_LOCATIONS[state.locations[u.node]?.locationId]?.name || u.node,
+      upkeep: cost,
+      unsupplied: !!u.unsupplied,
+    });
+  }
+  units.sort((a, b) => b.upkeep - a.upkeep || a.name.localeCompare(b.name));
+
+  const structures = [];
+  let structureCost = 0;
+  for (const b of Object.values(state.world?.blockades || {})) {
+    if (b.owner !== fid) continue;
+    // An unfinished site costs nothing yet — it is paid for out of a
+    // settlement's build output, not from the treasury.
+    const cost = (b.done ? CONFIG.blockades.upkeep : 0) + chipUpkeep(state, b.chips);
+    if (!b.done && cost === 0) continue;
+    structureCost += cost;
+    structures.push({
+      kind: "blockade", hexId: b.hex, name: "Blockade",
+      upkeep: cost, dormant: b.done && b.paid === false,
+    });
+  }
+  for (const post of Object.values(state.world?.listeningPosts || {})) {
+    if (post.owner !== fid) continue;
+    structureCost += CONFIG.posts.upkeep;
+    structures.push({
+      kind: "post", hexId: post.hex, name: "Listening post",
+      upkeep: CONFIG.posts.upkeep, dormant: post.paid === false,
+    });
+  }
+  structures.sort((a, b) => b.upkeep - a.upkeep || String(a.hexId).localeCompare(String(b.hexId)));
+
+  const upkeep = chipCost + army + structureCost;
+  return {
+    income, tolls, upkeep, net: income - upkeep,
+    chips: chipCost, army, structures: structureCost,
+    locations, units, structureList: structures,
+  };
+}
+
+// Just the totals, for the top bar. Derived from the same report the Economy
+// panel itemises, so the two can never drift.
+export function upkeepSummary(state, fid) {
+  const r = economyReport(state, fid);
+  return { income: r.income, upkeep: r.upkeep, net: r.net, chips: r.chips, army: r.army, structures: r.structures };
+}
+
+// Rail doc §3 — the whole state of the blockade on `hex`, for its own window.
+//
+// A blockade is selected like a settlement, not reached through whichever unit
+// happens to be standing on it: it is a structure that outlives the unit that
+// raised it, and asking a player to keep a unit parked there to manage it made
+// it feel like a unit ability rather than a place on the map.
+//
+// Returns null on a hex with no blockade. `viewer` is the faction looking:
+// everything actionable is gated on owning it, and a foreign blockade reports
+// only what is visible from outside.
+export function blockadeView(state, hex, viewer) {
+  const b = blockadeAt(state, hex);
+  if (!b) return null;
+  const mine = b.owner === viewer;
+  const player = state.players?.[viewer];
+  const cut = mine ? supplyCutter(state, viewer) : null;
+  const supply = mine ? supplyStatus(state, viewer, hex, cut) : null;
+
+  const view = {
+    hex,
+    owner: b.owner,
+    mine,
+    done: !!b.done,
+    paid: b.paid !== false,
+    progress: b.progress || 0,
+    cost: b.cost || 0,
+    upkeep: CONFIG.blockades.upkeep,
+    defense: CONFIG.blockades.defense,
+    vision: CONFIG.blockades.vision,
+    builder: b.builder || null,
+    installed: [],
+    chips: [],
+    slotsUsed: 0,
+    slotCap: CONFIG.blockades.chipSlots,
+    building: null,
+    supply: supply ? { path: !!supply.path, ok: !!supply.ok } : null,
+  };
+  if (!mine) return view;
+
+  for (const c of b.chips || []) {
+    view.installed.push({
+      uid: c,
+      chipId: state.chips[c]?.chipId,
+      name: chipDisplayName(state.chips[c]?.chipId, viewer),
+      desc: ENGINE_CHIPS[state.chips[c]?.chipId]?.desc || "",
+      disabled: !!state.chips[c]?.disabled,
+      upkeep: ENGINE_CHIPS[state.chips[c]?.chipId]?.upkeep || 0,
+    });
+  }
+  view.slotsUsed = blockadeSlotsUsed(state, b);
+  if (b.build) {
+    view.building = {
+      chipId: b.build.chipId,
+      name: chipDisplayName(b.build.chipId, viewer),
+      cost: b.build.cost,
+      progress: b.progress || 0,
+    };
+  }
+
+  // What may be fitted, mirroring validateUpgradeBlockade so the menu never
+  // offers something the engine will refuse.
+  if (b.done && player) {
+    for (const def of Object.values(ENGINE_CHIPS)) {
+      if (def.kind !== "blockade") continue;
+      if (!meetsTech(player, def)) continue; // Tech-forbidden → not shown at all
+      let reason = null;
+      if (b.build) reason = "already building something";
+      else if ((b.chips || []).some((c) => state.chips[c]?.chipId === def.id)) reason = "already installed";
+      else if (view.slotsUsed + (def.slots || 1) > view.slotCap) reason = "no free slot";
+      else if (!supply?.path) reason = "no road back to a settlement you hold";
+      else if (!supply?.ok) reason = "that road connection is cut";
+      view.chips.push({
+        chipId: def.id,
+        name: chipDisplayName(def.id, viewer),
+        desc: def.desc || "",
+        cost: def.buildCost ?? def.cost ?? 0,
+        slots: def.slots || 1,
+        upkeep: def.upkeep || 0,
+        buildable: !reason,
+        reason,
+      });
+    }
+  }
+  return view;
+}
+
+// Can this unit BREAK GROUND on a blockade where it stands? This half stays a
+// unit action and stays in the UnitPanel: there is no blockade to select until
+// one exists, so it has nowhere else to live.
+//
+// Every refusal mirrors validateBuildBlockade so the button explains itself
+// rather than failing on click.
+export function blockadeBuildOffer(state, unitUid) {
+  const unit = state.units?.[unitUid];
+  if (!unit) return null;
+  const pid = unit.owner;
+  const player = state.players?.[pid];
+  const hex = unit.node;
+  const cell = state.board.hexes[hex];
+  if (!player || !cell) return null;
+  // Nothing to offer on ground a blockade could never go on — most of the
+  // board — so the panel does not grow a permanently-dead section.
+  if (!cell.road || state.locations[hex]) return null;
+  if (blockadeAt(state, hex)) return null; // one stands here; its own window has it
+
+  const supply = supplyStatus(state, pid, hex, supplyCutter(state, pid));
+  let reason = null;
+  if (postAt(state, hex)) reason = "a listening post occupies this hex";
+  else if (!supply.path) reason = "no road back to a settlement you hold";
+  else if (!supply.ok) reason = "that road connection is cut";
+  else if (player.resource < CONFIG.blockades.buildCost) reason = "not enough scrap";
+
+  return {
+    can: !reason,
+    reason,
+    cost: CONFIG.blockades.buildCost,
+    turns: CONFIG.blockades.minTurns,
+    upkeep: CONFIG.blockades.upkeep,
+  };
+}
+
+// §17.7 — can this unit dig in a listening post where it stands? Same shape
+// and same home as the blockade controls above, and for the same reason: a
+// post goes on a plain hex, and a plain hex opens no window.
+export function postAction(state, unitUid) {
+  const unit = state.units?.[unitUid];
+  if (!unit) return null;
+  const pid = unit.owner;
+  const player = state.players?.[pid];
+  const hex = unit.node;
+  if (!player || !state.board.hexes[hex]) return null;
+
+  const here = postAt(state, hex);
+  // Relay Kit (chip `postsWithoutTech`): the artifact IS the know-how, so a
+  // carrier stands in for the Intelligence A2 assignment.
+  const kitted = unit.chips.some(
+    (c) => !state.chips[c]?.disabled && ENGINE_CHIPS[state.chips[c]?.chipId]?.postsWithoutTech,
+  );
+
+  let reason = null;
+  if (state.locations[hex]) reason = "not on a settlement";
+  else if (here) reason = here.owner === pid ? "you already have a post here" : "a post already occupies this hex";
+  else if (blockadeAt(state, hex)) reason = "a blockade occupies this hex";
+  else if (!hasTechNode(state, pid, "int-a2") && !kitted) reason = "needs Intelligence A2 (Listening Post)";
+  else if (player.resource < CONFIG.posts.buildCost) reason = "not enough scrap";
+
+  return {
+    can: !reason,
+    reason,
+    cost: CONFIG.posts.buildCost,
+    upkeep: CONFIG.posts.upkeep,
+    range: CONFIG.posts.range,
+    mine: !!here && here.owner === pid,
+  };
+}
+
 export function reinforcePreview(state, unitUid) {
   const unit = state.units[unitUid];
   if (!unit) return null;

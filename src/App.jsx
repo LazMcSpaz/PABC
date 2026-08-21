@@ -9,6 +9,7 @@
 // title options (Continue / Load Game / Settings) are simply handlers we
 // don't pass yet — TitleScreen disables any item whose handler is absent.
 import { useEffect, useState } from "react";
+import { useMusicScene } from "./audio/AudioProvider.jsx";
 import Prototype from "./prototype/Prototype.jsx";
 import SetupScreen from "./prototype/SetupScreen.jsx";
 import TitleScreen from "./prototype/TitleScreen.jsx";
@@ -18,6 +19,12 @@ import HudShowcase from "./prototype/HudShowcase.jsx";
 export default function App() {
   const [config, setConfig] = useState(null);
   const [screen, setScreen] = useState("title"); // "title" | "setup" | "lore"
+
+  // Soundtrack scene. Everything before a match — title, setup, lore, the HUD
+  // look-pass — is "menu", which pins the title theme; a live match switches
+  // to the shuffled four-cut rotation. Declared here rather than inside each
+  // screen so the theme plays *through* title → setup instead of restarting.
+  useMusicScene(config ? "game" : "menu");
 
   // Look-pass: visit /#hud to preview the radial HUD redesign.
   const [hash, setHash] = useState(() => window.location.hash);

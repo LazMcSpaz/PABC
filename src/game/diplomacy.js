@@ -854,6 +854,63 @@ export function openBordersStanding(state, a, b) {
   };
 }
 
+// --- rail doc §2.3 rail access --------------------------------------
+// Rail has no owner of its own: the track is pre-collapse, and whoever holds a
+// station controls what runs through it. This is the agreement the rail doc
+// flagged as "not yet named, specified, or scoped" — running rights over
+// somebody else's line.
+//
+// It is deliberately a LOWER bar than open borders. Open borders is the right
+// to march an army across a neighbour's fields; running rights are commerce —
+// your freight moves through their yard on their track. Neutral-or-better, one
+// direction at a time, and it grants nothing but the rail.
+//
+// Pacts include it implicitly: allies ride each other's lines without a
+// separate negotiation. MOVEMENT IMPORTS THIS (via the re-export in
+// movement.js) to widen unitRailEdges, and tradeRouteOpen uses it below.
+export function hasRailAccess(state, riderFid, ownerFid) {
+  if (riderFid === ownerFid) return true;
+  if (arePacted(state, riderFid, ownerFid)) return true;
+  for (const agr of state.diplomacy?.agreements || []) {
+    if (agr.type !== "rail-access") continue;
+    // Directional: `a` granted `b` running rights over a's stations.
+    if (agr.a === ownerFid && agr.b === riderFid) return true;
+  }
+  return false;
+}
+
+// The standing gate for granting running rights. One-directional, so unlike
+// open borders it only asks about the grantor's regard for the rider.
+export function railAccessStanding(state, owner, rider) {
+  const need = D().tiers.neutral;
+  const mine = getStanding(state, owner, rider);
+  if (mine >= need) return { ok: true, mine, need };
+  return {
+    ok: false, mine, need,
+    reason: `running rights need ${need >= 0 ? "+" : ""}${need} regard — yours for them is ${mine >= 0 ? "+" : ""}${mine}`,
+  };
+}
+
+// The standalone rail-access grant from `owner` to `rider`, or null.
+function standaloneRailAccess(state, owner, rider) {
+  return state.diplomacy.agreements.find(
+    (agr) => agr.type === "rail-access" && agr.a === owner && agr.b === rider,
+  ) || null;
+}
+
+// May `parties` run freight over this link? Every station on it has to be open
+// to at least one of them: unheld track is nobody's to close, your own is
+// yours, and anyone else's needs running rights.
+export function railLinkOpenTo(state, link, parties) {
+  for (const station of [link.a, link.b]) {
+    const holder = state.locations[station]?.controller;
+    if (!holder) continue;
+    if (parties.some((p) => p === holder || hasRailAccess(state, p, holder))) continue;
+    return false;
+  }
+  return true;
+}
+
 // --- §1.3 trading pact ----------------------------------------------
 // The Capital hex a faction controls (carries the `capital` chip), or null.
 function capitalHexOf(state, fid) {
@@ -879,7 +936,9 @@ function capitalHexOf(state, fid) {
 // railed trade worth attacking rather than a free pass.
 //
 // `isCut` is injected by the caller so this module stays clear of movement.js.
-function railRouteBetween(state, capA, capB, isCut) {
+// `parties` are the two factions the route is for: a link is only usable if
+// its stations are open to one of them (rail doc §2.3 running rights).
+function railRouteBetween(state, capA, capB, isCut, parties) {
   const links = state.board?.rails;
   if (!links || !links.length) return false;
   const seen = new Set([capA]);
@@ -891,6 +950,10 @@ function railRouteBetween(state, capA, capB, isCut) {
       const far = link.a === cur ? link.b : link.b === cur ? link.a : null;
       if (far === null || seen.has(far)) continue;
       if (link.path.some((h) => isCut(h))) continue; // this line is severed
+      // A third party's stations close the line unless they have granted one
+      // of the two running rights. Without this a pact could route its trade
+      // through the yards of a faction that wants nothing to do with either.
+      if (parties && !railLinkOpenTo(state, link, parties)) continue;
       seen.add(far);
       queue.push(far);
     }
@@ -904,7 +967,7 @@ function tradeRouteOpen(state, a, b) {
   const capB = capitalHexOf(state, b);
   if (!capA || !capB) return false;
   if (reinforcementRoute(state, a, capB)) return true;
-  return railRouteBetween(state, capA, capB, routeCutter(state, [a, b]));
+  return railRouteBetween(state, capA, capB, routeCutter(state, [a, b]), [a, b]);
 }
 
 function tradingPactBetween(state, a, b) {
@@ -1198,6 +1261,11 @@ export function recognitionMet(state, pid) {
 // module, so awardVp can't be imported here without a cycle.
 export function checkRecognitionVictory(state) {
   if (state.winnerId) return;
+  // Recognition can be switched off at setup. The score still moves and the
+  // Hall of Powers still shows the path — it just no longer ends the game,
+  // and the summit VP below keeps paying, since that is scoring rather than
+  // winning.
+  const recognitionWins = state.rules?.victory?.recognition !== false;
   const rc = D().recognition;
   for (const pid of factionIds(state)) {
     const sc = recognitionScore(state, pid);
@@ -1218,7 +1286,7 @@ export function checkRecognitionVictory(state) {
         if (state.winnerId) return;
       }
     }
-    if (sc.total >= rc.threshold) { state.winnerId = pid; return; }
+    if (recognitionWins && sc.total >= rc.threshold) { state.winnerId = pid; return; }
   }
 }
 
@@ -1576,6 +1644,34 @@ export function performDiplomacy(state, pid, action, params = {}) {
         (agr) => !(agr.type === "open-borders" && ((agr.a === pid && agr.b === f) || (agr.a === f && agr.b === pid))),
       );
       emit(state, "open_borders_toggled", { agreement: `ob-${pid}-${f}`, on: false });
+      return r({ on: false });
+    }
+
+    // Rail doc §2.3 — grant or revoke running rights over YOUR stations.
+    // One-directional by design: you decide who rides your line, and that is a
+    // different question from whether you may ride theirs. Revoking is free of
+    // Standing cost while there is no formal treaty behind it — the offence is
+    // in what they do next, not in closing your own yard.
+    case "set-rail-access": {
+      const on = params.on !== false;
+      if (on) {
+        if (atWar(state, pid, f)) return { ok: false, reason: "at war with them" };
+        const gate = railAccessStanding(state, pid, f);
+        if (!gate.ok) return { ok: false, reason: gate.reason };
+        if (!passesRepGates(state, pid, f)) return { ok: false, reason: "reputation gates fail" };
+        if (!standaloneRailAccess(state, pid, f)) {
+          state.diplomacy.agreements.push({
+            id: `ra-${pid}-${f}-${state.round}`, type: "rail-access",
+            a: pid, b: f, since: state.round,
+          });
+        }
+        emit(state, "rail_access_toggled", { grantor: pid, rider: f, on: true });
+        return r({ on: true });
+      }
+      state.diplomacy.agreements = state.diplomacy.agreements.filter(
+        (agr) => !(agr.type === "rail-access" && agr.a === pid && agr.b === f),
+      );
+      emit(state, "rail_access_toggled", { grantor: pid, rider: f, on: false });
       return r({ on: false });
     }
 
