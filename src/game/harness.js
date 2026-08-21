@@ -62,6 +62,7 @@ import { evalCond, evalStrength } from "./dsl.js";
 import { registerQuest } from "./quests.js";
 import { CONFIG } from "./config.js";
 import { takeAITurn, maybeAssignTech, warPeaceTerms } from "./ai.js";
+import { DISPOSITION, dispositionOf, rainmakerGoal, manageRainmaker } from "./rainmakerAi.js";
 import {
   STAGE, PHASE, DEVICE, chooseSiteHex, rainmakerState, progressFor,
   joinRainmaker, advanceStage, grantDevice, looseDevice, destroyDevice,
@@ -7874,6 +7875,150 @@ line("\n  [Phase 36] the Rainmaker — activation, the siege and the win");
     const first = raiseSplinter(g, fid);
     check("the floor is raised once and only once",
       !!first && raiseSplinter(g, fid) === null);
+  }
+}
+
+
+// =====================================================================
+// Phase 37 — The Rainmaker, part 7: how an AI plays it. Four legible
+// behaviours off faction temperament, re-rolled at the two moments the
+// situation actually changes — and the pursue disposition able to
+// complete every stage, because an AI can win this way (notes §10).
+// =====================================================================
+line("\n  [Phase 37] the Rainmaker — AI dispositions");
+{
+  const g = createGame({ seed, mapSize: "large" });
+  startTurn(g);
+  openMyth(g);
+
+  // --- four behaviours, read off the personality already in play -------
+  {
+    const kinds = g.turnOrder.map((f) => dispositionOf(g, f));
+    check("every faction has a posture toward the line",
+      kinds.every((k) => Object.values(DISPOSITION).includes(k)));
+    check("…and they are not all the same one", new Set(kinds).size > 1);
+    check("the warlord blocks whoever leads", dispositionOf(g, "lakers") === DISPOSITION.BLOCK);
+    check("the schemer goes for it", dispositionOf(g, "versari") === DISPOSITION.PURSUE);
+    check("the opportunist sells its position", dispositionOf(g, "plainers") === DISPOSITION.SELL);
+    check("the pacifist stays out of it", dispositionOf(g, "goldgrass") === DISPOSITION.IGNORE);
+    check("…and a posture holds still while nothing has changed",
+      dispositionOf(g, "lakers") === kinds[g.turnOrder.indexOf("lakers")]);
+  }
+
+  // Re-rolled at the two thresholds that matter, and nobody is neutral once
+  // somebody is one beat from winning.
+  {
+    const h = createGame({ seed, mapSize: "large" });
+    startTurn(h);
+    openMyth(h);
+    check("the pacifist ignores it right up to the switch",
+      dispositionOf(h, "goldgrass") === DISPOSITION.IGNORE);
+    const rm = rainmakerState(h);
+    rm.activatedBy = h.turnOrder[0];
+    rm.activatedRound = h.round;
+    check("…and stops ignoring it the moment the device is switched on",
+      dispositionOf(h, "goldgrass") === DISPOSITION.BLOCK);
+    check("…except the faction whose whole business is staying out of it",
+      dispositionOf(h, "plainers") === DISPOSITION.SELL);
+  }
+
+  // --- where an AI walks ------------------------------------------------
+  {
+    const h = createGame({ seed, mapSize: "large" });
+    startTurn(h);
+    openMyth(h);
+    const rm = rainmakerState(h);
+    const chaser = h.turnOrder.find((f) => dispositionOf(h, f) === DISPOSITION.PURSUE);
+    const blocker = h.turnOrder.find((f) => dispositionOf(h, f) === DISPOSITION.BLOCK);
+    const bystander = h.turnOrder.find((f) => dispositionOf(h, f) === DISPOSITION.IGNORE);
+
+    check("with the site still secret, nobody has anywhere to walk to",
+      rainmakerGoal(h, chaser) === null);
+    findSite(h, chaser, "test");
+    check("once the site is public the pursuer walks to it",
+      rainmakerGoal(h, chaser) === rm.siteHex);
+    check("…and the faction that wants no part of it still does not",
+      rainmakerGoal(h, bystander) === null);
+
+    // A convoy in the open is what a blocker is for.
+    joinRainmaker(h, chaser);
+    grantDevice(h, chaser, { hex: rm.siteHex, carrierUid: "u-x", reason: "test" });
+    check("a blocker walks at the convoy", rainmakerGoal(h, blocker) === convoyHex(h));
+    check("…and the holder walks home", rainmakerGoal(h, chaser) === capitalHexOf(h, chaser));
+
+    // A device lying unowned is worth a detour to ANYBODY — the one thing even
+    // the faction that wants no part of it gets out of its chair for.
+    looseDevice(h, { reason: "test" });
+    check("an unowned device is a goal for everyone, including the bystander",
+      [chaser, blocker, bystander].every((f) => rainmakerGoal(h, f) === rm.device.hex));
+  }
+
+  // Under siege orders everyone named marches on the capital.
+  {
+    const h = createGame({ seed, mapSize: "large" });
+    startTurn(h);
+    openMyth(h);
+    const holder = h.turnOrder[0];
+    const rm = rainmakerState(h);
+    joinRainmaker(h, holder);
+    const home = capitalHexOf(h, holder);
+    grantDevice(h, holder, { hex: home, carrierUid: null, reason: "test" });
+    rm.device.status = DEVICE.INSTALLED;
+    rm.device.hex = home;
+    advanceStage(h, holder, STAGE.INSTALL);
+    advanceStage(h, holder, STAGE.SPECIALIST);
+    advanceStage(h, holder, STAGE.ACTIVATION);
+    activate(h, holder);
+    const seller = h.turnOrder.find((f) => dispositionOf(h, f) === DISPOSITION.SELL);
+    const others = h.turnOrder.filter((f) => f !== holder && f !== seller);
+    check("the siege call sends every rival at the capital",
+      others.every((f) => rainmakerGoal(h, f) === home));
+    check("…except the one who sells its position rather than spends it",
+      rainmakerGoal(h, seller) !== home);
+  }
+
+  // --- the stage an AI has to actually DO ------------------------------
+  // The lab is the part that cannot be abstracted into a percentage, and this
+  // is where every measured game stalled: the device came home to a capital
+  // developed full over twenty rounds, and the line stopped there for good.
+  {
+    const h = createGame({ seed, mapSize: "large" });
+    startTurn(h);
+    openMyth(h);
+    const fid = activePlayerId(h);
+    h.players[fid].isAI = true;
+    h.players[fid].resource = 200;
+    h.players[fid].techLevel = 3;
+    joinRainmaker(h, fid);
+    const home = capitalHexOf(h, fid);
+    const loc = h.locations[home];
+    // Fill it, the way twenty rounds of ordinary development does.
+    while (loc.chips.length < loc.chipSlots + 1) {
+      const uid = `filler-${loc.chips.length}`;
+      h.chips[uid] = { uid, chipId: "recyclers", disabled: false };
+      loc.chips.push(uid);
+    }
+    grantDevice(h, fid, { hex: home, carrierUid: null, reason: "test" });
+    rainmakerState(h).device.status = DEVICE.INSTALLED;
+    rainmakerState(h).device.hex = home;
+    advanceStage(h, fid, STAGE.INSTALL);
+    check("the capital really is full", installBlocker(h, fid) === "no lab in the capital");
+    takeAITurn(h);
+    const started = loc.activeBuild?.chipId === "labs" || !!labHexOf(h, fid, { capitalOnly: true });
+    check("an AI one beat from winning knocks something down to fit the lab in", started);
+    check("…and never the Capital",
+      loc.chips.some((c) => h.chips[c]?.chipId === "capital"));
+  }
+
+  // The splinter has one job and it is not this one.
+  {
+    const h = createGame({ seed, mapSize: "large" });
+    startTurn(h);
+    openMyth(h);
+    const holder = h.turnOrder[0];
+    const id = raiseSplinter(h, holder);
+    check("the splinter does not pursue the line — it came for the holder",
+      manageRainmaker(h, id, { buildLab: () => true, take: () => true, destroy: () => true }) === false);
   }
 }
 

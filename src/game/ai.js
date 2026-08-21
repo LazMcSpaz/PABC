@@ -9,8 +9,12 @@ import { endTurn } from "./turn.js";
 import { activePlayerId } from "./targeting.js";
 import { bfsDistances } from "./board.js";
 import { unitReach } from "./movement.js";
-import { LOCATIONS } from "./content.js";
+import { LOCATIONS, CHIPS } from "./content.js";
 import { CONFIG } from "./config.js";
+import {
+  manageRainmaker, rainmakerGoal, claimLooseDevice, dispositionOf,
+} from "./rainmakerAi.js";
+import { grantDevice, destroyDevice, rainmakerState, DEVICE } from "./rainmaker.js";
 import { buildableChips, slotCapacity, slotsUsed, stationedUnitWithBay } from "./economy.js";
 import { isUnitVisibleTo } from "./visibility.js";
 import { previewAttackerStrength, previewLocationContest } from "./contest.js";
@@ -59,7 +63,70 @@ export function takeAITurn(state) {
   // §18.8 — the AI actively works the political layer (gifts, pacts,
   // vassalage). Without this the whole diplomacy layer is inert.
   if (!state.winnerId) manageDiplomacy(state, pid);
+  // The Rainmaker, worked once a turn like the economy and the politics. It has
+  // to run every turn regardless of the Action budget for the same reason they
+  // do: an AI that only pursued the line when it happened to have a spare
+  // Action would never finish it, and the design requires that it can.
+  if (!state.winnerId) manageRainmaker(state, pid, RAINMAKER_API);
   if (!state.winnerId) endTurn(state);
+}
+
+// What the Rainmaker policy is allowed to do to the world. Handed in rather
+// than imported so the policy stays a policy: it decides WHAT, this decides how,
+// and both go through the same performAction every other AI decision does.
+const RAINMAKER_API = {
+  // Stage 1 and Stage 6's hard requirement. Queued at the capital when the
+  // capital is what needs it, anywhere otherwise — and it displaces whatever
+  // that city was building, because at this point nothing that city could
+  // build matters more.
+  buildLab(state, pid) {
+    const rm = rainmakerState(state);
+    const needCapital = rm?.device?.owner === pid;
+    for (const loc of Object.values(state.locations)) {
+      if (loc.controller !== pid) continue;
+      const isCapital = (loc.chips || []).some((c) => state.chips[c]?.chipId === "capital");
+      if (needCapital && !isCapital) continue;
+      if (loc.activeBuild?.chipId === "labs") return false; // already on it
+      const r = performAction(state, "build", { at: loc.hexId, chipId: "labs" });
+      if (r.ok) return true;
+      // A capital that has been developed for twenty rounds is FULL, which is
+      // how this stalled in every measured game: the device came home to a city
+      // with three chips in three slots and the line stopped there for good.
+      // A faction one beat from winning knocks something down to make room —
+      // the cheapest thing it owns, never the Capital.
+      if (needCapital && /slot/i.test(r.reason || "") && makeRoomForLab(state, pid, loc)) {
+        const again = performAction(state, "build", { at: loc.hexId, chipId: "labs" });
+        if (again.ok) return true;
+      }
+    }
+    return false;
+  },
+  take(state, pid, unit) {
+    return grantDevice(state, pid, {
+      hex: unit.node, carrierUid: unit.uid, reason: "recovered",
+    });
+  },
+  destroy(state, pid) {
+    return destroyDevice(state, pid, { reason: "denied to everyone" });
+  },
+};
+
+// Demolish the least valuable thing in a full capital so a lab can go up. Only
+// ever called when the Rainmaker is sitting in that capital waiting for one, so
+// "least valuable" is measured against a game that is otherwise about to end.
+function makeRoomForLab(state, pid, loc) {
+  const worth = (id) => {
+    const def = CHIPS[id];
+    if (!def) return 99;
+    return (def.output || 0) * 3 + (def.research || 0) * 3 + (def.garrison || 0) + (def.strength || 0);
+  };
+  const candidates = (loc.chips || [])
+    .filter((c) => state.chips[c] && state.chips[c].chipId !== "capital")
+    .sort((a, b) => worth(state.chips[a].chipId) - worth(state.chips[b].chipId));
+  for (const c of candidates) {
+    if (performAction(state, "remove-chip", { at: loc.hexId, chip: c }).ok) return true;
+  }
+  return false;
 }
 
 // Exact win probability over both d6 rolls (defender wins ties, and skips
@@ -117,6 +184,11 @@ function wouldFight(state, pid, ownerFid) {
 // succeeded or not — failed actions don't decrement remaining, so the
 // loop must give up if no priority matches a runnable action).
 function tryOneAction(state, pid) {
+  // Standing on an unowned device is a decision, taken before anything else
+  // this unit might do with its turn.
+  if (rainmakerState(state)?.device?.status === DEVICE.LOOSE
+    && claimLooseDevice(state, pid, RAINMAKER_API)) return true;
+
   // 1. Contest where standing — but only when the odds are acceptable.
   for (const unit of ownUnits(state, pid)) {
     if (isImmobilized(state, unit)) continue;
@@ -720,6 +792,21 @@ function pickMoveTarget(state, pid, unit) {
   const reachable = Object.entries(dists)
     .filter(([hex, d]) => d > 0 && hex !== unit.node && hex in field);
   if (!reachable.length) return null;
+
+  // The Rainmaker outranks the ordinary shopping list when it is asking for
+  // something: a faction hauling the device home, storming a site, or answering
+  // a siege call has one job this turn, and marching on the nearest town
+  // instead is how an AI loses a game it was winning.
+  const rmGoal = rainmakerGoal(state, pid);
+  if (rmGoal && rmGoal !== unit.node) {
+    if (rmGoal in field) return rmGoal;
+    let step = null, bestD = Infinity;
+    for (const [hex] of reachable) {
+      const d = bfsDistances(state.board.adjacency, hex)[rmGoal];
+      if (d !== undefined && d < bestD) { bestD = d; step = hex; }
+    }
+    if (step) return step;
+  }
 
   const goals = knownGoalHexes(state, pid);
   const ghosts = ghostHexes(state, pid);
