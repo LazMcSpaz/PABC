@@ -75,7 +75,7 @@ const armyUpkeep = (g, pid) => Object.values(g.units)
   .reduce((n, u) => n + unitUpkeepFor(g, u), 0);
 
 const game = createGame({ seed });
-line(`\n=== Ashland Conquest — engine harness (seed ${seed}) ===`);
+line(`\n=== The Remnant Continent — engine harness (seed ${seed}) ===`);
 
 // --- board ---
 line("\nBOARD  (loc[CTRL]  ~encounter~  wasteland;  * = unit)");
@@ -3491,6 +3491,45 @@ line("\n§18 DIPLOMACY CAPSTONE");
     check("a minor carries scope:local + associatedMajor + relationship",
       MINOR_FACTIONS.tempest.scope === "local" && MINOR_FACTIONS.tempest.associatedMajor === "lakers"
       && MINOR_FACTIONS.tempest.relationship === "rival");
+    // §18.4.1 — a minor that declares a homeLocation opens THERE. The
+    // Dambarans hold Dambar; before this they took whatever neutral sat
+    // nearest the Versari, which put them in a random city on most seeds.
+    // Checked over a span of seeds because the seat used to be a layout
+    // accident and a single seed would not have caught it.
+    {
+      let atHome = 0, versariClean = 0;
+      const SEEDS = 40;
+      for (let s = 1; s <= SEEDS; s++) {
+        const gg = createGame({ seed: s, minors: ["dambarans", "croppers"], mapSize: "large" });
+        const L = Object.values(gg.locations);
+        const seat = L.find((l) => l.controller === "dambarans");
+        if (seat && seat.locationId === "dambar") atHome++;
+        // and the Versari open holding their capital and nothing else
+        const vers = L.filter((l) => l.controller === "versari").map((l) => l.locationId);
+        if (vers.length === 1 && vers[0] === "korad") versariClean++;
+      }
+      check("the Dambarans open at Dambar on every seed that seats them",
+        atHome === SEEDS, `${atHome}/${SEEDS}`);
+      check("the Versari open holding Korad alone (Dambar is not theirs to start)",
+        versariClean === SEEDS, `${versariClean}/${SEEDS}`);
+    }
+    // A minor with no homeLocation still seats by proximity, and a declared
+    // home that did not make the board falls through to the same rule.
+    {
+      const small = createGame({ seed, minors: ["dambarans"], mapSize: "small", locationBudget: 6 });
+      const L = Object.values(small.locations);
+      const seat = L.find((l) => l.controller === "dambarans");
+      const dambarOnBoard = L.some((l) => l.locationId === "dambar");
+      check("a minor whose home Location is off the board still gets a seat",
+        !dambarOnBoard && !!seat);
+    }
+    // Unseeded means unheld: Dambar is only Dambaran when they are in the game.
+    {
+      const without = createGame({ seed, minors: ["croppers"], mapSize: "large" });
+      const dambar = Object.values(without.locations).find((l) => l.locationId === "dambar");
+      check("Dambar stays neutral in a game without the Dambarans",
+        !!dambar && dambar.controller === null);
+    }
     // seeded faction↔faction standing is non-trivial (not all zero)
     const anyNonZero = factionIds(g).some((a) => factionIds(g).some((b) => a !== b && getStanding(g, a, b) !== 0));
     check("faction↔faction Standing is seeded (not all neutral)", anyNonZero);

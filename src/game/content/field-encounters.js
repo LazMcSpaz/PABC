@@ -838,7 +838,7 @@ export const FIELD_ENCOUNTERS = {
     ],
     "copies": 2,
     "id": "fe_rail_walker",
-    "text": "He walks the rails for a living. Says he's been doing it since before the Versari started running landships on them, and he'll be doing it after, whoever that turns out to be. He has news from three settlements east. He'll trade it for something — your choice what."
+    "text": "He walks the rails for a living. Says he's been doing it since before the Versari started running trolleys on them, and he'll be doing it after, whoever that turns out to be. He has news from three settlements east. He'll trade it for something — your choice what."
   },
   "fe_reader_at_well": {
     "art": "An older woman seated cross-legged beside a stone well in a small plains settlement. Her eyes are closed. A handful of villagers wait at a respectful distance.",

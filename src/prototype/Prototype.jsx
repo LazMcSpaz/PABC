@@ -44,7 +44,7 @@ import EncounterModal from "./EncounterModal.jsx";
 import MoveConfirmOverlay from "./MoveConfirmOverlay.jsx";
 import { WikiProvider, TokenProvider } from "./RichText.jsx";
 import WikiModal from "./WikiModal.jsx";
-import { WIKI_ENTRIES } from "../game/content/index.js";
+import { WIKI_ENTRIES } from "../game/content/wiki-repo.js";
 import { resolveTokens } from "../game/textTokens.js";
 
 // The ECONOMY half of a player's Upkeep, in the order turn.js charges it.
@@ -413,6 +413,16 @@ export default function Prototype({ config, onNewGame }) {
   const closeWiki = useCallback(() => {
     setWikiOpen(null);
     setWikiHistory([]);
+  }, []);
+  // Settings → Wiki: open the modal on the first entry (alphabetical by
+  // term) so the sidebar doubles as a browsable index.
+  const openWikiFromSettings = useCallback(() => {
+    const first = Object.values(WIKI_ENTRIES)
+      .sort((a, b) => String(a.term).localeCompare(String(b.term)))[0];
+    if (!first) return;
+    setMenuPanel(null);
+    setWikiHistory([]);
+    setWikiOpen(first.id);
   }, []);
   const [showTechWheel, setShowTechWheel] = useState(false); // §17 wheel overlay
   const [showDiplomacy, setShowDiplomacy] = useState(false); // §18 diplomacy screen
@@ -1320,6 +1330,18 @@ export default function Prototype({ config, onNewGame }) {
               enemy turns — the next round still replays. Choose <em>Skip — instant</em>
               above to turn the replay off for good.
             </p>
+          </div>
+          <div style={{ marginTop: 16, borderTop: `1px solid ${theme.border}`, paddingTop: 14 }}>
+            <span style={{ fontFamily: HUD.font, fontSize: 13, fontWeight: 700, letterSpacing: 0.6, color: HUD.text }}>
+              Wiki
+            </span>
+            <p className="pc-prose" style={{ margin: "4px 0 8px", fontSize: 12, lineHeight: 1.5, color: HUD.textDim }}>
+              The world&rsquo;s reference. Every underlined term in encounter
+              text links into it, and it can be browsed end to end from here.
+            </p>
+            <Btn onClick={openWikiFromSettings} disabled={!Object.keys(WIKI_ENTRIES).length}>
+              Open Wiki
+            </Btn>
           </div>
           <div style={{ marginTop: 16, borderTop: `1px solid ${theme.border}`, paddingTop: 14 }}>
             <span style={{ fontFamily: HUD.font, fontSize: 13, fontWeight: 700, letterSpacing: 0.6, color: HUD.text }}>

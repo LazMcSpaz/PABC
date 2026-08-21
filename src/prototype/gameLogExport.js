@@ -161,7 +161,7 @@ function formatLine(ev, state) {
     case "honor_changed": return `${factionName(p.player)} Honor → ${p.value} (Δ${p.delta}, cause: ${p.cause || "?"})`;
     case "dominion_reached": return `${factionName(p.player)} has every faction allied, sworn or gone — the clock is running`;
     case "dominion_lost": return `${factionName(p.player)} lost their hold — ${p.outstanding?.length || 0} still standing free`;
-    case "dominion_won": return `${factionName(p.player)} has taken the Ashlands (${p.by})`;
+    case "dominion_won": return `${factionName(p.player)} has taken the continent (${p.by})`;
     case "surprise_attack_honor_lost": return `${factionName(p.attacker)} lost ${p.amount} Honor for a surprise attack on ${factionName(p.target)} (no declared war)`;
     case "territory_trespassed": return `${factionName(p.mover)} trespassed into ${factionName(p.owner)}'s territory at ${p.hex} (Standing −${p.standingHit}, Menace +${p.repHit})`;
 

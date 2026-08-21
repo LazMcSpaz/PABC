@@ -24,9 +24,9 @@ export const TITLE_TRACK_ID = "main-theme";
 
 export const MUSIC_TRACKS = [
   { id: "main-theme", title: "Main Theme",   src: `${DIR}/main-theme.mp3`, durationSec: 117.2 },
-  { id: "track-02",   title: "Ashland II",   src: `${DIR}/track-02.mp3`,   durationSec: 116.1 },
-  { id: "track-03",   title: "Ashland III",  src: `${DIR}/track-03.mp3`,   durationSec: 118.8 },
-  { id: "track-04",   title: "Ashland IV",   src: `${DIR}/track-04.mp3`,   durationSec: 119.8 },
+  { id: "track-02",   title: "Remnant II",   src: `${DIR}/track-02.mp3`,   durationSec: 116.1 },
+  { id: "track-03",   title: "Remnant III",  src: `${DIR}/track-03.mp3`,   durationSec: 118.8 },
+  { id: "track-04",   title: "Remnant IV",   src: `${DIR}/track-04.mp3`,   durationSec: 119.8 },
 ];
 
 export const TRACKS_BY_ID = Object.fromEntries(MUSIC_TRACKS.map((t) => [t.id, t]));

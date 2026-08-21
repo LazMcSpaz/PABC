@@ -1,4 +1,4 @@
-# Ashland Conquest — Content Editor
+# The Remnant Continent — Content Editor
 
 Standalone web tool for authoring quests and encounters against the
 game's Supabase instance. Source of truth for data shapes is

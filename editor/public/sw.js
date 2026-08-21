@@ -1,4 +1,4 @@
-// Minimal cache-first service worker for the Ashland Editor.
+// Minimal cache-first service worker for the Remnant Editor.
 //
 // What it does:
 // - Caches the app shell (HTML + built JS/CSS/icons) on first visit so the

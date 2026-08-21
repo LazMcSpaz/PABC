@@ -417,7 +417,7 @@ function formatEvent(ev, engineState) {
         submission: "by submission — every rival sworn",
         mixed: "by war and treaty together",
       }[p.by] || "";
-      return { color: theme.accent, text: `${who(p.player)} has taken the Ashlands ${how}` };
+      return { color: theme.accent, text: `${who(p.player)} has taken the continent ${how}` };
     }
     case "faction_eliminated":
       return { color: theme.accent2, text: `${who(p.player)} has been eliminated` };

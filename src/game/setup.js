@@ -256,19 +256,31 @@ export function createGame({
     };
   }
 
-  // §18.4.1 — give each seeded minor a SEAT: it takes a free neutral
-  // Location nearest its associated major (so it sits as a regional power
-  // near its kin/rival/foil). Landless minors (no free seat) stay political-
-  // only actors. Done before units so the seat can host the minor's unit.
+  // §18.4.1 — give each seeded minor a SEAT. A minor that declares a
+  // `homeLocation` takes that Location: the Dambarans hold Dambar and there is
+  // no reading of the fiction where they open anywhere else, so the seat is
+  // content rather than a proximity accident. Everyone else takes the free
+  // neutral Location nearest its associated major, so it still sits as a
+  // regional power beside its kin/rival/foil — and a home-declaring minor
+  // falls back to that same rule when its home Location did not make the board
+  // (small budgets drop the home bands) or is already held.
+  //
+  // Home-declaring minors are seated FIRST so a proximity pick can never take
+  // the city out from under the faction the city is named for.
   const minorSeat = {}; // minor fid -> hexId
-  for (const fid of seededMinors) {
-    const major = MINOR_FACTIONS[fid].associatedMajor;
-    const majorStart = layout.factionStart[major];
+  const seatOrder = [...seededMinors].sort(
+    (a, b) => (MINOR_FACTIONS[b].homeLocation ? 1 : 0) - (MINOR_FACTIONS[a].homeLocation ? 1 : 0),
+  );
+  for (const fid of seatOrder) {
+    const def = MINOR_FACTIONS[fid];
+    const majorStart = layout.factionStart[def.associatedMajor];
     const free = Object.values(locations).filter((l) => !l.controller && !Object.values(minorSeat).includes(l.hexId));
     if (!free.length) continue;
-    const dist = majorStart ? bfsDistances(grid.adjacency, majorStart) : {};
-    free.sort((a, b) => (dist[a.hexId] ?? 99) - (dist[b.hexId] ?? 99));
-    const seat = free[0];
+    let seat = def.homeLocation ? free.find((l) => l.locationId === def.homeLocation) : null;
+    if (!seat) {
+      const dist = majorStart ? bfsDistances(grid.adjacency, majorStart) : {};
+      seat = [...free].sort((a, b) => (dist[a.hexId] ?? 99) - (dist[b.hexId] ?? 99))[0];
+    }
     seat.controller = fid;
     seat.loyaltyOwner = fid;
     seat.sections = [fid, fid, fid];
