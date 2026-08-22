@@ -43,6 +43,10 @@ import { isUnitVisibleTo } from "../game/visibility.js";
 import DiplomacyDrawer from "./DiplomacyDrawer.jsx";
 import EncounterModal from "./EncounterModal.jsx";
 import { summarizeResolution } from "./encounterOutcome.js";
+import ContentEditor from "./ContentEditor.jsx";
+import { readEditMode, writeEditMode, restorePatches, forgetPatches } from "./contentEditMode.js";
+import { downloadContentEdits } from "./contentEditExport.js";
+import { clearPatch } from "../game/contentPatch.js";
 import MoveConfirmOverlay from "./MoveConfirmOverlay.jsx";
 import { WikiProvider, TokenProvider } from "./RichText.jsx";
 import WikiModal from "./WikiModal.jsx";
@@ -332,6 +336,12 @@ function driveAIsThroughHumanTurn(game) {
   }
 }
 
+// Content Edit Mode's saved edits go back into the engine BEFORE any game is
+// built: offerQuests reads opener gates on the very first turn, so a gate
+// edited last session has to be in place by then or the session starts on the
+// shipped content and diverges from the file on disk.
+restorePatches();
+
 export default function Prototype({ config, onNewGame }) {
   // The engine mutates a single GameState in place; we hold a ref to it
   // and bump a tick to trigger a re-adapt + re-render after each mutation.
@@ -406,6 +416,12 @@ export default function Prototype({ config, onNewGame }) {
   // to "what happened to my unit", and a card that is instantly replaced by
   // the next one is the bug this exists to fix.
   const [encOutcome, setEncOutcome] = useState(null);
+  // Content Edit Mode — off by default, remembered between sessions. `target`
+  // is the entity the editor is open on; null means the content browser.
+  const [editMode, setEditMode] = useState(readEditMode);
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [editorTarget, setEditorTarget] = useState(null);
+  const [editTick, setEditTick] = useState(0); // re-render cards after an edit
 
   // Wiki — a clickable [[term]] anywhere in flavor text opens this modal.
   // We keep a small history so the in-modal cross-links have a back button.
@@ -547,6 +563,27 @@ export default function Prototype({ config, onNewGame }) {
         ...summary,
       },
     });
+  }
+
+  // Leaving the mode is what hands over the file — that is the whole point of
+  // the mode, and a designer who forgets to press a button loses a session of
+  // notes. Turning it ON never downloads anything.
+  function toggleEditMode(on) {
+    setEditMode(on);
+    writeEditMode(on);
+    if (!on) {
+      setEditorOpen(false);
+      const doc = downloadContentEdits(gameRef.current);
+      setToast(doc
+        ? { kind: "info", text: `Saved ${doc.counts.changes} change(s) across ${doc.counts.entities} card(s)` }
+        : { kind: "info", text: "Content Edit Mode off — nothing was changed" });
+    }
+  }
+
+  function openEditorOn(entityId) {
+    setEditorTarget(entityId);
+    setEditorOpen(true);
+    setMenuPanel(null);
   }
 
   function closeOutcome() {
@@ -1438,6 +1475,48 @@ export default function Prototype({ config, onNewGame }) {
           </div>
           <div style={{ marginTop: 16, borderTop: `1px solid ${theme.border}`, paddingTop: 14 }}>
             <span style={{ fontFamily: HUD.font, fontSize: 13, fontWeight: 700, letterSpacing: 0.6, color: HUD.text }}>
+              Content Edit Mode
+            </span>
+            <p className="pc-prose" style={{ margin: "4px 0 8px", fontSize: 12, lineHeight: 1.5, color: HUD.textDim }}>
+              Rewrite quests and encounters while you play them — what gates a
+              beat, its prose, its choices, and exactly what each choice grants
+              or costs. Every card also shows its grants under the options while
+              this is on. Edits apply to this session only; the shipped content
+              is never touched. Switching this off downloads the change file.
+            </p>
+            <label
+              className="hud-int"
+              style={{ display: "flex", alignItems: "center", gap: 9, padding: "7px 9px", borderRadius: 6, border: `1px solid ${editMode ? "rgba(232,169,63,0.5)" : "rgba(86,211,198,0.25)"}`, background: editMode ? "rgba(232,169,63,0.12)" : "rgba(0,0,0,0.2)", color: HUD.text, cursor: "pointer", fontSize: 13 }}
+            >
+              <input type="checkbox" checked={editMode} onChange={(e) => toggleEditMode(e.target.checked)} />
+              {editMode ? "On — editing" : "Off"}
+            </label>
+            {editMode && (
+              <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+                <Btn onClick={() => openEditorOn(null)}>Browse all content</Btn>
+                <Btn onClick={() => {
+                  const doc = downloadContentEdits(gameRef.current);
+                  setToast(doc
+                    ? { kind: "info", text: `Saved ${doc.counts.changes} change(s)` }
+                    : { kind: "info", text: "No changes yet" });
+                }}>Download changes</Btn>
+                <Btn onClick={() => setConfirmPrompt({
+                  title: "Discard every edit?",
+                  body: "Every change made in Content Edit Mode is dropped and the shipped content comes back. This cannot be undone, and anything not already downloaded is lost.",
+                  confirmLabel: "Discard",
+                  danger: true,
+                  onConfirm: () => {
+                    clearPatch(null);
+                    forgetPatches();
+                    setEditTick((n) => n + 1);
+                    setToast({ kind: "info", text: "Edits discarded" });
+                  },
+                })}>Discard edits</Btn>
+              </div>
+            )}
+          </div>
+          <div style={{ marginTop: 16, borderTop: `1px solid ${theme.border}`, paddingTop: 14 }}>
+            <span style={{ fontFamily: HUD.font, fontSize: 13, fontWeight: 700, letterSpacing: 0.6, color: HUD.text }}>
               Playtest log
             </span>
             <p className="pc-prose" style={{ margin: "4px 0 8px", fontSize: 12, lineHeight: 1.5, color: HUD.textDim }}>
@@ -1455,6 +1534,27 @@ export default function Prototype({ config, onNewGame }) {
           </div>
         </TitledWindow>
       )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {editorOpen && (
+          <TitledWindow
+            key="content-editor"
+            title={editorTarget ? "Edit content" : "All content"}
+            width={720}
+            onClose={() => setEditorOpen(false)}
+          >
+            <ContentEditor
+              entityId={editorTarget}
+              onPick={setEditorTarget}
+              onClose={() => setEditorOpen(false)}
+              // A card on screen is rendered from the live definition, so an
+              // edit has to re-render it — otherwise the prose you just
+              // rewrote is still the old prose behind the panel.
+              onChanged={() => setEditTick((n) => n + 1)}
+            />
+          </TitledWindow>
+        )}
       </AnimatePresence>
 
       {/* Envoy audience — an AI's warning, answered rather than just read.
@@ -1535,6 +1635,9 @@ export default function Prototype({ config, onNewGame }) {
         {!encOutcome && encounterPrompt && (
           <EncounterModal
             key="encounter"
+            editMode={editMode}
+            editRev={editTick}
+            onEdit={() => openEditorOn(encounterPrompt.encounter.id)}
             encounter={encounterPrompt.encounter}
             choices={encounterPrompt.choices}
             eligibleIds={encounterPrompt.eligibleIds}
@@ -1565,6 +1668,9 @@ export default function Prototype({ config, onNewGame }) {
         {!encOutcome && !encounterPrompt && pendingEnc && (
           <EncounterModal
             key={`pending-${pendingEnc.id}`}
+            editMode={editMode}
+            editRev={editTick}
+            onEdit={() => openEditorOn(pendingEnc.encounterId)}
             encounter={pendingEnc}
             choices={pendingEnc.choices}
             eligibleIds={pendingEnc.choices.map((c) => c.id)}

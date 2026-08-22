@@ -149,9 +149,9 @@ export default function HudShowcase({ onExit }) {
         {panel === "diplomacy" && <TitledWindow key="diplomacy" title="Diplomacy" icon={ICON.diplomacy} onClose={() => setPanel(null)}>
           <p className="pc-prose" style={{ margin: 0, fontSize: 13, lineHeight: 1.6, color: C.textDim }}>Broker deals, pacts and coalitions with rival factions — manage reputation, and deal with every rival by treaty or by force.</p>
         </TitledWindow>}
-        {(panel === "encounter" || panel === "encounterArt"
+        {(panel === "encounter" || panel === "encounterArt" || panel === "encounterEdit"
           || panel === "outcome" || panel === "outcomePlain") && (() => {
-          const enc = panel === "outcome" ? MOCK_BEAT
+          const enc = (panel === "outcome" || panel === "encounterEdit") ? MOCK_BEAT
             : panel === "encounterArt" ? MOCK_ENCOUNTER_ART : MOCK_ENCOUNTER;
           const outcome = panel === "outcome" ? MOCK_OUTCOME_CONTEST
             : panel === "outcomePlain" ? MOCK_OUTCOME_PLAIN : null;
@@ -166,6 +166,11 @@ export default function HudShowcase({ onExit }) {
               onPick={() => setPanel(null)}
               outcome={outcome}
               onClose={() => setPanel(null)}
+              // MOCK_BEAT carries the REAL beat id, so edit mode resolves the
+              // real authored effects for it — this look pass is showing the
+              // actual grants, not a fixture of them.
+              editMode={panel === "encounterEdit"}
+              onEdit={() => {}}
             />
           );
         })()}
@@ -177,6 +182,7 @@ export default function HudShowcase({ onExit }) {
           <button className="hud-int" onClick={() => setPanel("encounterArt")} style={{ fontFamily: C.font, fontSize: 10.5, letterSpacing: 1.6, textTransform: "uppercase", color: C.holoHi, background: "rgba(86,211,198,0.08)", border: `1px solid ${C.holo}66`, borderRadius: 5, padding: "5px 12px", cursor: "pointer" }}>Encounter · with art</button>
           <button className="hud-int" onClick={() => setPanel("outcome")} style={{ fontFamily: C.font, fontSize: 10.5, letterSpacing: 1.6, textTransform: "uppercase", color: C.holoHi, background: "rgba(86,211,198,0.08)", border: `1px solid ${C.holo}66`, borderRadius: 5, padding: "5px 12px", cursor: "pointer" }}>Outcome · contest</button>
           <button className="hud-int" onClick={() => setPanel("outcomePlain")} style={{ fontFamily: C.font, fontSize: 10.5, letterSpacing: 1.6, textTransform: "uppercase", color: C.holoHi, background: "rgba(86,211,198,0.08)", border: `1px solid ${C.holo}66`, borderRadius: 5, padding: "5px 12px", cursor: "pointer" }}>Outcome · no roll</button>
+          <button className="hud-int" onClick={() => setPanel("encounterEdit")} style={{ fontFamily: C.font, fontSize: 10.5, letterSpacing: 1.6, textTransform: "uppercase", color: C.holoHi, background: "rgba(86,211,198,0.08)", border: `1px solid ${C.holo}66`, borderRadius: 5, padding: "5px 12px", cursor: "pointer" }}>Card · edit mode</button>
         </div>
         {onExit && <button className="hud-int" onClick={onExit} style={{ fontFamily: C.font, fontSize: 11, letterSpacing: 1.5, textTransform: "uppercase", color: C.textDim, background: "transparent", border: `1px solid ${C.steelHi}`, borderRadius: 5, padding: "5px 14px", cursor: "pointer" }}>← Back to game</button>}
       </div>

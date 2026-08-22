@@ -16,6 +16,7 @@ import { bfsDistances } from "./board.js";
 import { emit } from "./events.js";
 import { hasTechNode } from "./tech.js";
 import { spendBeat, noteBeatHeld } from "./beatBudget.js";
+import { applyPatchTo, getPatch } from "./contentPatch.js";
 import { CHIPS } from "./content.js";
 
 // One-time normalisation — flatten {type, params} once instead of on
@@ -31,7 +32,20 @@ function normalizeAll(rawMap) {
 }
 
 export function getEncounter(id) {
+  const base = WORLD[id] || FIELD[id] || null;
+  // Content Edit Mode's live rewrites (contentPatch.js). Same reasoning as
+  // quests.js getQuest: one door in, so one place to merge.
+  return base ? applyPatchTo(base, getPatch(id)) : null;
+}
+
+/** The encounter as authored, ignoring any live edits — the export's "from". */
+export function getEncounterSource(id) {
   return WORLD[id] || FIELD[id] || null;
+}
+
+/** Every authored encounter, unpatched, for the editor's content browser. */
+export function allEncounterSources() {
+  return { field: { ...FIELD }, world: { ...WORLD } };
 }
 
 /**

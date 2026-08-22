@@ -6,6 +6,7 @@
 // the shared EFFECTS map (same pattern as encounters.js).
 import { QUESTS } from "./content/index.js";
 import { CONFIG } from "./config.js";
+import { applyQuestPatches, patchVersion } from "./contentPatch.js";
 import { normalizeQuest } from "./content-loader.js";
 import { deliverEncounterDef, pickHeldHexByFilter } from "./encounters.js";
 import { beatsRemaining, spendBeat, noteBeatHeld } from "./beatBudget.js";
@@ -22,9 +23,40 @@ for (const [id, def] of Object.entries(QUESTS)) registry[id] = normalizeQuest(de
 export function registerQuest(def) {
   if (!def?.id) return;
   registry[def.id] = normalizeQuest(def);
+  patched.clear();
 }
+
+// Content Edit Mode rewrites beats live (contentPatch.js). getQuest is the
+// only door into a quest anywhere in the engine, so merging here is what makes
+// an edit take effect everywhere at once — delivery, gates, eligibility,
+// effects, the AI's headless pick.
+//
+// Memoised on the patch version rather than merged per call: this runs inside
+// the delivery fan-out and the round-end pulse, several times per beat per
+// quest per player, and with no patches at all `applyQuestPatches` returns
+// the original object so the untouched case stays free either way.
+const patched = new Map();
+let patchedAt = -1;
+
 export function getQuest(id) {
+  const base = registry[id] || null;
+  if (!base) return null;
+  const v = patchVersion();
+  if (v !== patchedAt) { patched.clear(); patchedAt = v; }
+  if (patched.has(id)) return patched.get(id);
+  const out = applyQuestPatches(base);
+  patched.set(id, out);
+  return out;
+}
+
+/** The quest as authored, ignoring any live edits — the export's "from". */
+export function getQuestSource(id) {
   return registry[id] || null;
+}
+
+/** Every authored quest, unpatched, for the editor's content browser. */
+export function allQuestSources() {
+  return { ...registry };
 }
 
 // --- who is running which quest ---------------------------------------
