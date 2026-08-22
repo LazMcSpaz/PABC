@@ -134,7 +134,15 @@ function presentToPlayer(state, enc, pid, ctx) {
       typeof picked === "number"
         ? picked
         : eligible.findIndex((c) => c.id === picked || c.label === picked);
+    // A UI's `interact` is opened for ONE card — the field encounter the
+    // move is about to draw. A Move can surface a second one in the same
+    // action (walking onto a hex that also holds a discovered quest beat),
+    // and that card's id is not the one the UI is answering for. It used to
+    // fall through to headlessPick and resolve at choice 0 without ever
+    // being shown: the player lost a unit, or a quest, to a decision nobody
+    // made. Park it instead, exactly as the no-channel path does.
     if (idx >= 0) pickedIdx = idx;
+    else if (pid === state.humanFactionId) return queueForPlayer(state, enc, pid, eligible, subCtx);
   }
   const choice = eligible[pickedIdx];
 
@@ -178,8 +186,13 @@ function applyChoiceEffects(state, choice, pid, ctx) {
 
 function queueForPlayer(state, enc, pid, eligible, subCtx) {
   state.pendingEncounters = state.pendingEncounters || [];
+  // Keyed off a monotonic counter, not the queue's length. Length is reused
+  // the moment an entry is answered and spliced out, so the same card queued
+  // twice across a game could land on the same id — and the UI tracks the
+  // open card by id ("is the one I am showing still in the queue?").
+  state.pendingEncounterSeq = (state.pendingEncounterSeq || 0) + 1;
   const entry = {
-    id: `pending-${state.pendingEncounters.length}-${enc.id}`,
+    id: `pending-${state.pendingEncounterSeq}-${enc.id}`,
     encounterId: enc.id,
     recipient: pid,
     title: enc.title ?? null,

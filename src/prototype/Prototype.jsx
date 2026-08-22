@@ -42,6 +42,7 @@ import { performDiplomacy } from "../game/diplomacy.js";
 import { isUnitVisibleTo } from "../game/visibility.js";
 import DiplomacyDrawer from "./DiplomacyDrawer.jsx";
 import EncounterModal from "./EncounterModal.jsx";
+import { summarizeResolution } from "./encounterOutcome.js";
 import MoveConfirmOverlay from "./MoveConfirmOverlay.jsx";
 import { WikiProvider, TokenProvider } from "./RichText.jsx";
 import WikiModal from "./WikiModal.jsx";
@@ -399,6 +400,12 @@ export default function Prototype({ config, onNewGame }) {
   // every one of them auto-resolved to the first choice and the player never
   // saw the card at all.
   const [pendingEnc, setPendingEnc] = useState(null);
+  // The card the player just answered, held open on its outcome face. Until
+  // this is dismissed nothing else may take the screen — not the next queued
+  // encounter, not the salvage picker — because the aftermath IS the answer
+  // to "what happened to my unit", and a card that is instantly replaced by
+  // the next one is the bug this exists to fix.
+  const [encOutcome, setEncOutcome] = useState(null);
 
   // Wiki — a clickable [[term]] anywhere in flavor text opens this modal.
   // We keep a small history so the in-modal cross-links have a back button.
@@ -494,20 +501,56 @@ export default function Prototype({ config, onNewGame }) {
   useEffect(() => {
     const game = gameRef.current;
     if (!game) return;
+    if (encOutcome) return; // the last card is still being read
     const queue = pendingEncountersFor(game, game.humanFactionId);
     setPendingEnc((cur) => {
       if (cur && queue.some((p) => p.id === cur.id)) return cur; // still open
       return queue[0] || null;
     });
-  }, [tick]);
+  }, [tick, encOutcome]);
 
   // Answer one. The engine applies the choice's effects at this point —
-  // they were held, not skipped, so nothing has happened until now.
+  // they were held, not skipped, so nothing has happened until now. Which is
+  // also what makes the aftermath cheap to build: everything the choice does
+  // lands inside this call, so the slice of the event log it appends IS the
+  // consequence list.
   function answerPendingEncounter(choiceId) {
     const game = gameRef.current;
     if (!game || !pendingEnc) return;
+    const from = game.log.length;
+    const chosen = pendingEnc.choices.find((c) => c.id === choiceId);
     resolvePendingEncounter(game, pendingEnc.id, choiceId, { interactiveLoot: true });
+    showOutcome(pendingEnc, pendingEnc.choices, chosen, from);
     setPendingEnc(null);
+    bumpTick();
+  }
+
+  // Turn a resolved card over onto its outcome face. `from` is the log length
+  // captured immediately before the effects ran.
+  function showOutcome(encounter, choices, chosen, from) {
+    const game = gameRef.current;
+    const events = game.log.slice(from);
+    const summary = summarizeResolution(events, game, game.humanFactionId);
+    // A dismissal ("Continue") on a purely narrative beat that changed
+    // nothing has no aftermath worth a second click — it would be a card
+    // whose only content is the button you press to leave it.
+    if (chosen?.dismiss && !summary.contest && !summary.roll
+        && !summary.lines.length && !chosen.outcomeText) {
+      maybeOpenLoot();
+      return;
+    }
+    setEncOutcome({
+      encounter, choices,
+      outcome: {
+        choiceLabel: chosen?.label || null,
+        outcomeText: chosen?.outcomeText || null,
+        ...summary,
+      },
+    });
+  }
+
+  function closeOutcome() {
+    setEncOutcome(null);
     bumpTick();
     maybeOpenLoot();
   }
@@ -638,19 +681,35 @@ export default function Prototype({ config, onNewGame }) {
 
   function doMoveWithEncounterChoice(unitUid, dest, choiceId, discards = 0) {
     let redrawsDone = 0;
+    // Which card `interact` is actually authorised to answer. A Move can
+    // surface a second encounter — walking onto a hex that also holds a
+    // discovered quest beat — and answering that one with this one's choice
+    // id resolves it blind. Returning nothing for anything else sends it to
+    // the pending queue instead (see encounters.js presentToPlayer).
+    const answering = encounterPrompt?.encounter?.id ?? null;
     const ctx = {
       interactiveLoot: true,
       interact: (req) => {
         // Replay the player's discards (engine sends them to the bottom),
         // then answer the choice for the card finally drawn.
         if (req.kind === "encounterRedraw") return redrawsDone++ < discards;
-        if (req.kind === "encounterChoice") return choiceId;
+        if (req.kind === "encounterChoice") {
+          return req.encounter === answering ? choiceId : undefined;
+        }
         return req?.options ? req.options[0] : null; // fallback to first
       },
     };
+    const prompt = encounterPrompt;
+    const from = gameRef.current.log.length;
     const r = runAction("move", { unit: unitUid, to: dest }, ctx);
-    if (r.ok) { inspectHex(dest); maybeOpenLoot(); }
     setEncounterPrompt(null);
+    if (r.ok) inspectHex(dest);
+    if (prompt) {
+      const chosen = (prompt.choices || []).find((c) => c.id === choiceId);
+      showOutcome(prompt.encounter, prompt.choices, chosen, from);
+    } else if (r.ok) {
+      maybeOpenLoot();
+    }
   }
 
   // Open the salvage modal if a Move just landed on a loot pile (§ hex loot).
@@ -1145,6 +1204,9 @@ export default function Prototype({ config, onNewGame }) {
   // ("Unit lost") are aftermath, not a roll, so they are excluded.
   const contestRollOnScreen =
     !!contestViz ||
+    // An encounter's narrative CONTEST is a conflict roll like any other and
+    // gets the same stinger — it is the same dice, decided the same way.
+    !!encOutcome?.outcome?.contest ||
     (replay.activeOverlays || []).some((o) => o.kind === "contest" && !o.terse);
   useSfxHold(contestRollOnScreen, "contestRoll");
 
@@ -1450,8 +1512,27 @@ export default function Prototype({ config, onNewGame }) {
         )}
       </AnimatePresence>
 
+      {/* The card the player just answered, face down on its outcome. It
+          outranks both live cards: until it is dismissed there is nothing
+          else to look at. */}
       <AnimatePresence>
-        {encounterPrompt && (
+        {encOutcome && (
+          <EncounterModal
+            key="encounter-outcome"
+            encounter={encOutcome.encounter}
+            choices={encOutcome.choices}
+            eligibleIds={[]}
+            redrawsLeft={0}
+            onRedraw={() => {}}
+            onPick={() => {}}
+            outcome={encOutcome.outcome}
+            onClose={closeOutcome}
+          />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {!encOutcome && encounterPrompt && (
           <EncounterModal
             key="encounter"
             encounter={encounterPrompt.encounter}
@@ -1481,7 +1562,7 @@ export default function Prototype({ config, onNewGame }) {
       </AnimatePresence>
 
       <AnimatePresence>
-        {!encounterPrompt && pendingEnc && (
+        {!encOutcome && !encounterPrompt && pendingEnc && (
           <EncounterModal
             key={`pending-${pendingEnc.id}`}
             encounter={pendingEnc}
@@ -1504,7 +1585,10 @@ export default function Prototype({ config, onNewGame }) {
         />
       )}
 
-      {salvagePrompt && (
+      {/* Same z-index as the encounter card, so a salvage left over from a
+          board contest would render on top of an outcome the player has not
+          read yet. It waits. */}
+      {salvagePrompt && !encOutcome && (
         <SalvageModal prompt={salvagePrompt} onConfirm={onSalvageConfirm} />
       )}
 

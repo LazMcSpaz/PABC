@@ -4,6 +4,15 @@
 import { createGame } from "../src/game/setup.js";
 import { startTurn, endTurn } from "../src/game/turn.js";
 import { registerQuest, activeQuestFor } from "../src/game/quests.js";
+import { CONFIG } from "../src/game/config.js";
+
+// Checks 1–4 are about WHO a quest can reach, which is a different question
+// from how fast it reaches them. `CONFIG.quests.newPerTurn` throttles the
+// second (see config.js — without it every faction started 22 quests on turn
+// one), and a two-round probe under the throttle would be measuring the
+// throttle. Lifted here, and exercised on its own terms in check 5.
+const PACING = CONFIG.quests.newPerTurn;
+CONFIG.quests.newPerTurn = 0;
 
 let fail = 0;
 const check = (n, ok, d) => { if (!ok) fail++; console.log(`${ok ? "PASS" : "FAIL"}  ${n}${ok ? "" : "\n        " + d}`); };
@@ -53,6 +62,24 @@ for (const order of [ALL, ["goldgrass", "lakers", "plainers", "versari"],
       .map((p) => activeQuestFor(g, "q_open", p))).size
       === ALL.filter((p) => activeQuestFor(g, "q_open", p)).length,
     "two players share one run record");
+}
+
+// --- and the throttle delays access without denying it -------------------
+{
+  CONFIG.quests.newPerTurn = PACING;
+  const g = createGame({ seed: 1100, humanFactionId: "lakers" });
+  startTurn(g);
+  const firstTurn = ALL.map((pid) => Object.values(g.activeQuests)
+    .filter((r) => r.claimant === pid).length);
+  check(`5. a faction picks up at most ${PACING} quest(s) on its first turn`,
+    firstTurn.every((n) => n <= PACING), JSON.stringify(firstTurn));
+
+  // Long enough for the throttle to work through the corpus.
+  for (let i = 0; i < 24 * g.turnOrder.length; i++) { try { endTurn(g); } catch { break; } }
+  const took = (pid) => !!activeQuestFor(g, "q_open", pid)
+    || !!g.players[pid]?.completedQuests?.q_open;
+  check("6. …and every seat still gets there in the end",
+    ALL.every(took), JSON.stringify(ALL.map((p) => [p, took(p)])));
 }
 
 console.log(`\n${fail ? `${fail} FAILED` : "all checks passed"}`);

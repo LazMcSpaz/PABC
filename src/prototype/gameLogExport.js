@@ -201,6 +201,19 @@ function formatLine(ev, state) {
     case "encounter_delivered": return `${factionName(p.recipient)} encounter "${p.encounter}" → chose "${p.choiceLabel || p.choiceId}"`;
     case "encounter_resolved": return `Encounter "${p.encounter}" resolved for ${factionName(p.recipient)} (choice: ${p.choiceId})`;
     case "encounter_delivery_skipped": return `Encounter delivery skipped (${p.reason}): ${p.encounterId}`;
+    // The two authored resolution primitives. They used to fall through to
+    // the raw `name: key=value` dump, which is exactly where a playtester
+    // looking for "why did I lose that unit" ends up.
+    case "narrative_contest_resolved": {
+      const allies = p.ally ? ` + ${p.ally} allies` : "";
+      return `${factionName(p.player)} ${p.won ? "WON" : "LOST"} a narrative contest — `
+        + `${p.own} strength${allies} + d${p.sides ?? "?"} ${p.die ?? "?"} = ${p.total} `
+        + `vs ${p.opponent} + d${p.sides ?? "?"} ${p.opponentDie ?? "?"} = ${p.against}`;
+    }
+    case "roll_resolved":
+      return `${factionName(p.player)} rolled ${p.roll} on d${p.sides} against ${p.chance} — `
+        + `${p.success ? "success" : "failure"}`
+        + `${p.modifiedBy ? ` (odds set by ${p.modifiedBy})` : ""}`;
     case "quest_started": return `Quest started: ${p.questId} (mode: ${p.mode}, claimant: ${factionName(p.claimant)})`;
     case "quest_advanced": return `Quest advanced: ${p.questId} → beat ${p.beatId}`;
     case "quest_completed": return `Quest completed: ${p.questId} (claimant: ${factionName(p.claimant)})`;

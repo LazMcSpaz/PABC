@@ -19,6 +19,7 @@ import { motion } from "framer-motion";
 import { C, CornerBrackets, useEscClose } from "./HudChrome.jsx";
 import { RichText } from "./RichText.jsx";
 import { useIsPhone } from "./useViewport.js";
+import EncounterOutcome from "./EncounterOutcome.jsx";
 
 // The image goes in here at a 2:3 ratio. The outer chrome is a slightly
 // raised holo bezel; the inner display is recessed (inset shadows + dark
@@ -102,16 +103,39 @@ function ImageFrame({ imageUrl, onError }) {
 
 // Exported so the event feed titles an encounter exactly the way the modal
 // that showed it did — the feed used to print the raw `fe_grain_silo` id.
+//
+// A quest beat's synthetic id (`quest:q_massacre:beat:qb_mas_compound`) is
+// the case this cannot prettify into anything readable — it came out as
+// "Quest:Q Massacre:Beat:Qb Mas Compound" — so it is only ever a fallback.
+// Beats carry their quest's title now (quests.js `beatAsEncounter`); this
+// keeps the id off the screen if one ever arrives without one.
 export function displayName(id) {
   if (!id) return "Encounter";
-  return id.replace(/^fe_/, "").replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase());
+  const beat = /^quest:([^:]+):beat:(.+)$/.exec(id);
+  if (beat) return prettify(beat[2].replace(/^qb_/, ""));
+  return prettify(id.replace(/^fe_/, "").replace(/^we_/, ""));
 }
 
-export default function EncounterModal({ encounter, choices, eligibleIds, redrawsLeft = 0, onRedraw, onPick }) {
+function prettify(s) {
+  return s.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase());
+}
+
+export default function EncounterModal({
+  encounter, choices, eligibleIds, redrawsLeft = 0, onRedraw, onPick,
+  // Set once the choice has been resolved: the card turns over and shows
+  // what came of it (dice, authored outcome text, consequences) instead of
+  // vanishing. `onClose` dismisses it from there.
+  outcome = null, onClose,
+}) {
   // Block Escape — the encounter must be resolved.
   useEscClose(() => {});
   const isPhone = useIsPhone();
   const title = encounter.title || displayName(encounter.id);
+  // A beat titled after its quest gets the quest as its eyebrow only when it
+  // has a title of its own to be distinct from — otherwise the header would
+  // print the same string twice.
+  const eyebrow = outcome ? "Outcome"
+    : (encounter.questTitle && encounter.questTitle !== title ? encounter.questTitle : "Encounter");
 
   // A path that 404s falls back to the text-only layout rather than
   // leaving a broken-image box in the frame: authored art gets added over
@@ -157,7 +181,7 @@ export default function EncounterModal({ encounter, choices, eligibleIds, redraw
             fontFamily: C.font, fontSize: 10, fontWeight: 600,
             letterSpacing: 3, textTransform: "uppercase",
             color: C.holoHi, opacity: 0.75,
-          }}>Encounter</div>
+          }}>{eyebrow}</div>
           <div style={{
             fontFamily: C.font, fontSize: 22, fontWeight: 700,
             letterSpacing: 1.4, textTransform: "uppercase",
@@ -210,6 +234,13 @@ export default function EncounterModal({ encounter, choices, eligibleIds, redraw
                 <RichText>{encounter.text}</RichText>
               </motion.div>
             )}
+            {/* The scene text stays above the aftermath rather than being
+                replaced by it: read straight down, the card is now scene →
+                what you chose → what came of it, which is the shape the
+                writing was authored in. Only the buttons are swapped out. */}
+            {outcome ? (
+              <EncounterOutcome outcome={outcome} onClose={onClose} />
+            ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               {choices.map((c, i) => {
                 const eligible = eligibleIds.includes(c.id);
@@ -251,11 +282,12 @@ export default function EncounterModal({ encounter, choices, eligibleIds, redraw
                 );
               })}
             </div>
+            )}
           </div>
         </div>
 
         {/* Footer — only the optional Recon redraw; no Cancel any more */}
-        {redrawsLeft > 0 && (
+        {redrawsLeft > 0 && !outcome && (
           <div style={{ padding: "10px 22px 14px", borderTop: "1px solid rgba(86,211,198,0.18)" }}>
             <button
               className="hud-int"

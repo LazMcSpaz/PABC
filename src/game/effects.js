@@ -655,11 +655,18 @@ const EFFECTS = {
     const own = contestingStrength(state, pid, ctx);
     const ally = e.allyStrength ?? 0;
     const sides = CONFIG.contestDieSides;
-    const mine = own + ally + state.rng.roll(sides);
-    const theirs = (e.opponentStrength ?? 0) + state.rng.roll(sides);
+    // Both dice are rolled into named locals rather than inlined into the
+    // sums: the UI replays this contest die-by-die the way a board contest
+    // is replayed, and a payload that carries only the totals leaves it
+    // reconstructing each face by subtraction.
+    const myDie = state.rng.roll(sides);
+    const theirDie = state.rng.roll(sides);
+    const mine = own + ally + myDie;
+    const theirs = (e.opponentStrength ?? 0) + theirDie;
     const won = mine >= theirs; // ties to the player, as the attacker here
     emit(state, "narrative_contest_resolved", {
       player: pid, own, ally, opponent: e.opponentStrength ?? 0,
+      die: myDie, opponentDie: theirDie, sides,
       total: mine, against: theirs, won,
     });
     applyEffects(state, (won ? e.onWin : e.onLose) || [], ctx);

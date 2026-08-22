@@ -5,6 +5,7 @@
 // Registers START_QUEST / ADVANCE_QUEST / COMPLETE_QUEST handlers onto
 // the shared EFFECTS map (same pattern as encounters.js).
 import { QUESTS } from "./content/index.js";
+import { CONFIG } from "./config.js";
 import { normalizeQuest } from "./content-loader.js";
 import { deliverEncounterDef } from "./encounters.js";
 import { applyEffects, EFFECTS } from "./effects.js";
@@ -59,15 +60,38 @@ function actingPlayer(ctx, state) {
     ?? state.turnOrder[state.activeIndex] ?? null;
 }
 
-function prereqsMet(beat, aq) {
-  return (beat.prerequisites || []).every((p) => aq.completedBeats.includes(p));
+function prereqsMet(quest, beat, aq) {
+  const authored = beat.prerequisites || [];
+  if (authored.length) return authored.every((p) => aq.completedBeats.includes(p));
+
+  // No authored prerequisite AND no delivery gate. For the opener that is
+  // the definition of an opener — it waits on nothing. For any LATER beat it
+  // is an authoring omission, and the fan-out below treats an omission as
+  // "ready now": the beat is delivered in the same pass that starts the
+  // quest, before the opener it is supposed to follow.
+  //
+  // q_massacre is exactly this. Its third beat, qb_mas_compound — the wall
+  // built out of haulers, at the END of the tracks — carries no prerequisite
+  // and no gate, so starting the quest dropped BOTH it and the opener onto
+  // the map. Whichever the player walked into first is the one they played,
+  // and the compound beat is a fight whose stakes ("the tracks end at a wall")
+  // only make sense after the massacre and the ride west.
+  //
+  // So an ungated, prerequisite-free beat that is not the opener implicitly
+  // requires the opener. A beat that carries a `deliverCondition` is left
+  // alone: its gate is an authored statement of when it should appear, and
+  // several quests (q_baron, q_signal) legitimately open on one.
+  const opener = openerOf(quest);
+  if (!opener || opener.id === beat.id) return true;
+  if (beatCondition(beat) != null) return true;
+  return aq.completedBeats.includes(opener.id);
 }
 function readyBeats(quest, aq) {
   const ready = [];
   for (const beat of quest.beats || []) {
     if (aq.completedBeats.includes(beat.id)) continue;
     if (aq.deliveredBeats.includes(beat.id)) continue;
-    if (!prereqsMet(beat, aq)) continue;
+    if (!prereqsMet(quest, beat, aq)) continue;
     ready.push(beat);
   }
   return ready;
@@ -104,6 +128,17 @@ function beatAsEncounter(quest, beat) {
   return {
     ...beat,
     id: `quest:${quest.id}:beat:${beat.id}`,
+    // Every card the player sees needs a name. A beat's own `title` is
+    // optional and in practice never authored (0 of 131 beats carry one),
+    // so the quest's title is the fallback — "What the Steel Traders Left",
+    // not the id. Without this the modal fell back to prettifying the
+    // synthetic encounter id and printed
+    // "Pending-0-Quest:Q Massacre:Beat:Qb Mas Compound" as a headline.
+    title: beat.title || quest.title || null,
+    // Kept alongside so a UI can show both when a beat IS named — the beat
+    // as the headline, the quest as the eyebrow above it.
+    questId: quest.id,
+    questTitle: quest.title || null,
     mode: beat.mode || (quest.mode === "global" ? "public" : "private"),
     choices: choices.map((c) => ({
       ...c,
@@ -167,7 +202,7 @@ function evaluateBeatDelivery(state, questId, pid, ctx) {
     aq.routeTo = null; // consume it either way, so a dead route can't loop
     const beat = (quest.beats || []).find((b) => b.id === targetId);
     if (beat && !aq.completedBeats.includes(beat.id) && !aq.deliveredBeats.includes(beat.id)
-        && prereqsMet(beat, aq)) {
+        && prereqsMet(quest, beat, aq)) {
       const cond = beatCondition(beat);
       if (cond == null || evalCond(state, cond,
           { ...ctx, claimant: aq.claimant, asPlayer: aq.claimant ?? ctx.asPlayer })) {
@@ -273,9 +308,21 @@ export function offerQuests(state, ctx = {}) {
   const pid = state.turnOrder[state.activeIndex];
   if (!pid) return [];
   const started = [];
+  // How many a player may pick up in one turn. Every eligible quest used to
+  // start at once — see CONFIG.quests for why that is 22 of them on turn one
+  // — so the limit is what turns the wall into a trickle. It is a pacing
+  // valve, not a filter: whatever is skipped is still eligible next turn,
+  // and this pass runs every turn.
+  const perTurn = CONFIG.quests?.newPerTurn ?? 0;
 
-  for (const quest of Object.values(registry)) {
-    if (!quest?.id) continue;
+  // Shuffled rather than walked in registry order, because with a limit the
+  // order stops being cosmetic: taking the first N of a fixed list would hand
+  // every faction the same quests in the same sequence every game, and bury
+  // whatever sorts last. Seeded, so a replay is still a replay.
+  const pool = state.rng.shuffle(Object.values(registry).filter((q) => q?.id));
+
+  for (const quest of pool) {
+    if (perTurn > 0 && started.length >= perTurn) break;
     if (activeQuestFor(state, quest.id, pid)) continue;        // they already have it
     if (alreadyFinished(state, quest.id, pid)) continue;       // they already finished it
 

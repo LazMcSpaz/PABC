@@ -281,6 +281,23 @@ export const CONFIG = {
   //                   removing the content.
   encounters: { worldPerRound: 2 },
 
+  // How fast a player picks quests up.
+  //
+  // `offerQuests` runs at the start of each turn and starts every quest whose
+  // opener gate currently passes. 15 of the 35 authored quests have no opener
+  // gate at all and several more open on conditions that are already true in
+  // round 1, so without a limit each faction started 22 quests on its FIRST
+  // turn — and since most openers are `discovered`, that dropped 22 markers
+  // per faction onto a 17-location board before anybody had moved. The log
+  // read as a wall of "Quest started / Location revealed", and no single
+  // quest was ever an event.
+  //
+  // Nothing is lost to the limit: an eligible quest that is not offered this
+  // turn is simply offered on a later one, because the pass re-runs every
+  // turn and the gates it skipped are still true. Set `newPerTurn` to 0 for
+  // no limit.
+  quests: { newPerTurn: 2 },
+
   // Capital chip bonuses (content/config.csv).
   capital: { garrisonBonus: 2, productionBonus: 2 },
 

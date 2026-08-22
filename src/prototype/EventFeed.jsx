@@ -196,6 +196,23 @@ function formatEvent(ev, engineState) {
       };
     case "encounter_resolved":
       return null; // already implied by encounter_delivered
+    // A narrative contest is a conflict roll, and the feed is where the
+    // player looks for one after the card is gone. Only theirs: an AI's
+    // quest beats are not their business.
+    case "narrative_contest_resolved": {
+      if (p.player !== you) return null;
+      return {
+        color: p.won ? theme.good : theme.accent2,
+        text: `Your contest ${p.total} vs ${p.against} — ${p.won ? "won" : "lost"}`,
+      };
+    }
+    case "roll_resolved": {
+      if (p.player !== you) return null;
+      return {
+        color: p.success ? theme.good : theme.accent2,
+        text: `Rolled ${p.roll}, needed ${p.chance} or under — ${p.success ? "held" : "failed"}`,
+      };
+    }
     case "resource_gained":
       if (p.resource === "VP") {
         const label = p.source === "capture"
