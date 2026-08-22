@@ -96,6 +96,72 @@ function acceptableOdds(state, pid, atkTotal, defTotal, defenderRollsDie) {
   return winProbability(atkTotal, defTotal, defenderRollsDie) >= threshold;
 }
 
+/**
+ * How many units to commit, and which.
+ *
+ * Concentration is a presence bonus and Strength is a commitment cost, so the
+ * marginal unit is not free but the ones held back are not wasted either — a
+ * unit standing on the hex keeps giving +1 Concentration whether or not it
+ * swings. That makes "how few can I win with" a real question rather than
+ * "attack with everything".
+ *
+ * Worked, three Strength-4 units against a garrison of 10 (Concentration is
+ * +2 throughout, because three bodies are on the hex either way):
+ *
+ *     commit 1 →  4 + 2 = 6,  needs a 5 or 6      33%
+ *     commit 2 →  8 + 2 = 10, needs anything      100%
+ *     commit 3 → 12 + 2 = 14, needs anything      100%  ← two actions wasted
+ *
+ * So it commits two and the third keeps its action. What that third unit then
+ * does falls out of the ordinary turn loop rather than being decided here: it
+ * comes round again, re-plans against the Location as it now stands, and
+ * either attacks alone (if a 33% shot clears its faction's bar — a warlord's
+ * does, a diplomat's does not) or gives up on this hex and moves somewhere it
+ * matters more.
+ *
+ * The bar is `acceptableOdds`, the same one that decides whether to fight at
+ * all. That is deliberate: it is already tuned and already scaled by the
+ * faction's aggression, so a warlord commits fewer units to a given fight
+ * than a cautious minor does, without a second set of numbers to keep in step
+ * with the first.
+ *
+ * Returns `{ lead, support, chance }`, or null when even the whole stack
+ * cannot clear the bar — the caller should not pick that fight.
+ */
+export function planContest(state, pid, hex, { target = null } = {}) {
+  // Only units that can still act may be committed; each one spends its
+  // action. Strongest first, so the minimum is reached with the fewest bodies.
+  const available = ownUnits(state, pid)
+    .filter((u) => u.node === hex && !isImmobilized(state, u) && (u.actionsRemaining ?? 0) >= 1)
+    .sort((a, b) => b.strength - a.strength);
+  if (!available.length) return null;
+
+  // What the attack has to beat. A raid is resolved against the target's whole
+  // side — runContest adds its stack's Strength and Concentration the same way
+  // it adds ours — so pricing it at the target unit's bare Strength would walk
+  // the AI straight into a relief column standing behind one token defender.
+  const defence = target
+    ? { value: previewAttackerStrength(state, hex, state.units[target]?.owner).total,
+        defenderRollsDie: true }
+    : previewLocationContest(state, hex, { attacker: pid });
+  if (!defence) return null;
+
+  for (let k = 1; k <= available.length; k++) {
+    const committed = available.slice(0, k).map((u) => u.uid);
+    const atk = previewAttackerStrength(state, hex, pid, { committed });
+    if (!acceptableOdds(state, pid, atk.total, defence.value, defence.defenderRollsDie)) continue;
+    // `atk.lead` is the strongest committed unit, and the one Concentration
+    // was computed against — root the contest on it so the resolution counts
+    // exactly what this plan priced.
+    return {
+      lead: atk.lead,
+      support: committed.filter((uid) => uid !== atk.lead),
+      chance: winProbability(atk.total, defence.value, defence.defenderRollsDie),
+    };
+  }
+  return null;
+}
+
 // Casus belli — the blind combat loop only opens hostilities with a
 // reason: an existing war, contempt (Wary-or-worse standing), or a
 // warlike temperament. Pacted factions are never blind-attacked, and a
@@ -123,15 +189,20 @@ function tryOneAction(state, pid) {
     const loc = state.locations[unit.node];
     if (loc && !loc.sections.every((s) => s === pid)
       && wouldFight(state, pid, loc.controller)) {
-      const atk = previewAttackerStrength(state, unit.node, pid).total;
-      // Name the attacker so the preview applies the defender-side ally rule
+      // Commit the fewest units that still clear this faction's odds bar,
+      // and leave the rest their actions. The plan names the initiator, so
+      // the loop's current `unit` may not be the one that swings — it is the
+      // unit that brought us to this hex, not necessarily the strongest on it.
+      //
+      // The defender preview names the attacker so it applies the ally rule
       // the resolution will apply: the controller's allies defend with it,
       // minus anyone already fighting for us. An AI that estimated a bare
       // garrison and then walked into an allied stack would misjudge exactly
       // the fights this ruling creates.
-      const def = previewLocationContest(state, unit.node, { attacker: pid });
-      if (def && acceptableOdds(state, pid, atk, def.value, def.defenderRollsDie)) {
-        const r = performAction(state, "contest", { unit: unit.uid });
+      const plan = planContest(state, pid, unit.node);
+      if (plan) {
+        const r = performAction(state, "contest",
+          { unit: plan.lead, coalition: plan.support });
         if (r.ok) return true;
       }
     }
@@ -144,11 +215,10 @@ function tryOneAction(state, pid) {
     );
     if (enemyHere && (!loc || !loc.sections.includes("neutral"))
       && wouldFight(state, pid, enemyHere.owner)) {
-      const atk = previewAttackerStrength(state, unit.node, pid).total;
-      const def = previewAttackerStrength(state, unit.node, enemyHere.owner).total;
-      if (acceptableOdds(state, pid, atk, def, true)) {
+      const plan = planContest(state, pid, unit.node, { target: enemyHere.uid });
+      if (plan) {
         const r = performAction(state, "contest", {
-          unit: unit.uid, target: enemyHere.uid,
+          unit: plan.lead, coalition: plan.support, target: enemyHere.uid,
         });
         if (r.ok) return true;
       }

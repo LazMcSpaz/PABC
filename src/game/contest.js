@@ -164,21 +164,45 @@ function concentration(state, owner, hex, excludeUid) {
 // `hexId` plus its Concentration bonus — what the attacker brings before
 // the d6. Used both by the UI (pre-contest odds) and by the AI (EV-gating
 // whether to pick a fight at all) — no dice, no mutation.
-export function previewAttackerStrength(state, hexId, ownerId, { allies = null } = {}) {
+/**
+ * `committed` names the units actually joining the attack, mirroring
+ * `params.coalition` at resolution. Omit it and the whole stack is assumed,
+ * which is the legacy combined-stack reading.
+ *
+ * This exists because Concentration and committed Strength answer different
+ * questions. Strength is what you SPEND — only the units that join, and each
+ * pays its action. Concentration is what is STANDING THERE — every friendly
+ * unit on the hex, committed or not, because a body on the ground helps
+ * whether or not it swings. So a lone attacker with two idle friends beside
+ * it still gets +2, and that asymmetry is what makes "commit the minimum"
+ * worth calculating: the marginal unit adds its full Strength, but the ones
+ * you hold back were already giving you their Concentration for free.
+ */
+export function previewAttackerStrength(state, hexId, ownerId, { allies = null, committed = null } = {}) {
   const owners = combatSide(state, ownerId, allies);
-  let strength = stackStrength(state, owners, hexId);
+  const stack = Object.values(state.units).filter(
+    (u) => owners.has(u.owner) && u.node === hexId,
+  );
+  const fighters = Array.isArray(committed)
+    ? committed.map((uid) => state.units[uid])
+        .filter((u) => u && owners.has(u.owner) && u.node === hexId)
+    : stack;
+  let strength = fighters.reduce((n, u) => n + u.strength, 0);
   // Fortified Ruins on the contested hex — the preview must show the same
   // suppressed number runContest will use.
   const loc = state.locations[hexId];
   if (loc && !owners.has(loc.controller) && abilitySuppressesChips(loc)) {
-    strength -= stackChipStrength(state, owners, hexId);
+    strength -= fighters.reduce((n, u) => n + unitChipStrength(state, u), 0);
   }
-  const stack = Object.values(state.units).filter(
-    (u) => owners.has(u.owner) && u.node === hexId,
-  );
-  const lead = stack.reduce((a, b) => (!a || b.strength > a.strength ? b : a), null);
+  // Concentration excludes the initiator, and runContest roots the contest on
+  // whichever unit the caller names. Take the strongest COMMITTED unit, which
+  // is the one a planner will lead with, so preview and resolution exclude
+  // the same body.
+  const lead = (fighters.length ? fighters : stack)
+    .reduce((a, b) => (!a || b.strength > a.strength ? b : a), null);
   const conc = concentration(state, owners, hexId, lead?.uid);
   return { strength, concentration: conc, units: stack.length, total: strength + conc,
+           lead: lead?.uid ?? null, committed: fighters.map((u) => u.uid),
            allies: [...owners].filter((f) => f !== ownerId) };
 }
 
