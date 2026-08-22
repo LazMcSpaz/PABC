@@ -368,7 +368,16 @@ export function adaptState(state) {
     const mem = vis?.memory?.[h.id] || null;
     const hex = {
       id: h.id,
-      type: h.type,
+      // The board is not told which hexes carry a field encounter.
+      //
+      // An `encounter` hex used to draw a "?" and a tinted rim, so the player
+      // could see every site on the map and route around them or farm them at
+      // will — and a card you saw coming three turns out is not much of an
+      // encounter. The engine keeps the distinction (actions.js reads
+      // state.board.hexes directly on Move, which is untouched by this); the
+      // VIEW simply never learns it, so no renderer, inspector panel or later
+      // feature can leak it by accident.
+      type: h.type === "encounter" ? "terrain" : h.type,
       row: h.row,
       col: h.col,
       // §19 three-state fog: "visible" | "explored" | "unexplored".

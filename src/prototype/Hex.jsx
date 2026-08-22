@@ -120,7 +120,6 @@ export default function Hex({ hex, units, selected, reachable, selectedUnitId, d
 
   let rim = "#4a4231";
   if (isUnexplored) rim = "#1b1813";
-  else if (hex.type === "encounter") rim = "#3c5b65";
   else if (isLocation) rim = ctrl ? ownerColor(ctrl) : "#5a5040";
   if (reachable) rim = theme.good;
   if (selected) rim = theme.accent;
@@ -202,33 +201,6 @@ export default function Hex({ hex, units, selected, reachable, selectedUnitId, d
               fontSize={11}
               pill
             />
-          </>
-        )}
-        {hex.type === "encounter" && !isUnexplored && (
-          <>
-            <div
-              style={{
-                fontFamily: theme.fontDisplay,
-                fontSize: 36,
-                fontWeight: 700,
-                color: "#7ab0c0",
-                textShadow: "0 0 14px rgba(110,168,184,0.7)",
-                lineHeight: 1,
-              }}
-            >
-              ?
-            </div>
-            <div
-              style={{
-                fontSize: 9,
-                letterSpacing: 1.4,
-                textTransform: "uppercase",
-                color: "#6b97a4",
-                fontWeight: 600,
-              }}
-            >
-              Encounter
-            </div>
           </>
         )}
         {hex.type === "terrain" && !isUnexplored && (

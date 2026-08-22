@@ -164,7 +164,6 @@ function HexTile({
       </svg>
 
 
-      {hex.type === "encounter" && !isUnexplored && <EncounterMark />}
       {hex.loot > 0 && !isUnexplored && <LootMarker count={hex.loot} />}
     </div>
   );
@@ -178,30 +177,6 @@ function HexTile({
 export default memo(HexTile);
 
 
-
-// An unresolved projection — the hologram equivalent of the old flat "?" tile.
-function EncounterMark() {
-  return (
-    <div
-      title="Encounter — resolves on arrival"
-      style={{
-        position: "absolute",
-        left: 0,
-        top: -HEX_H * 0.34,
-        transform: "translate(-50%, -50%)",
-        fontFamily: theme.fontDisplay,
-        fontSize: 26,
-        fontWeight: 700,
-        color: "#9fd8ff",
-        textShadow: "0 0 14px rgba(159,216,255,0.85)",
-        opacity: 0.9,
-        animation: "pc-holo-flicker 3.6s steps(1, end) infinite",
-      }}
-    >
-      ?
-    </div>
-  );
-}
 
 function LootMarker({ count }) {
   return (
