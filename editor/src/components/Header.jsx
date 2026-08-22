@@ -22,7 +22,7 @@ export function Header({
     <header className="bg-slate-900 border-b border-slate-800 px-3 py-3 flex flex-wrap items-center gap-2 sticky top-0 z-10">
       <div className="flex items-center gap-2 mr-auto sm:mr-0">
         <span className="text-amber-400 font-semibold tracking-tight">
-          Ashland
+          Remnant
         </span>
         <span className="text-slate-500 hidden sm:inline">·</span>
         <span className="text-slate-300 text-sm hidden sm:inline">Content Editor</span>

@@ -232,7 +232,7 @@ function WarningAudience({ warning, onRespond }) {
   const who = warning.fromName || "The powers";
   const portrait = warning.from ? portraitFor(warning.from, "envoy") : null;
 
-  const title = coalition ? "Whispers in the Ashlands" : "An Envoy Arrives";
+  const title = coalition ? "Whispers on the Continent" : "An Envoy Arrives";
   const opener = coalition
     ? "Word travels. Riders have been seen between the other capitals, and your name is in every conversation."
     : (OPENER[temperament] || OPENER.honorable)(who);

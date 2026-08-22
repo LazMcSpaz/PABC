@@ -128,7 +128,7 @@ optional `die-frame.png` for the contest overlay.
 
 ### ui/logos/
 
-- `logos/game/` — `wordmark.png`, `icon.png` (the "Ashland Conquest" mark).
+- `logos/game/` — `wordmark.png`, `icon.png` (the "Remnant Continent" mark).
 - `logos/factions/` — faction crest/emblem per id: `versari.png`,
   `goldgrass.png`, `lakers.png`, `plainers.png`.
 

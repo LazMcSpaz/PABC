@@ -1,4 +1,4 @@
-# Ashland Conquest — Design Document v0.1
+# The Remnant Continent — Design Document v0.1
 
 Full design document pending. The README currently holds the authoritative rules summary. Migrate the complete world lore, faction definitions, named characters, and balance philosophy into this file as they are written.
 

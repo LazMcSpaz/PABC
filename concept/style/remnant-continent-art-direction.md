@@ -6,7 +6,7 @@
 
 ## 1. The Setting in One Paragraph
 
-A post-catastrophe future North America, roughly a century into recovery from a pole shift. Civilizations are **rebuilding**, not scavenging. They have institutions, standardized manufacturing, trade networks, and pride. Pre-collapse technology exists but cannot be reproduced — it is harvested, mounted, and revered. The tech level is uneven: excellent metallurgy and optics, no chemistry, no miniaturization, no ammunition industry. Warfare is primarily melee.
+A post-catastrophe future North America, roughly two hundred years into recovery from a pole shift. Civilizations are **rebuilding**, not scavenging. They have institutions, standardized manufacturing, trade networks, and pride. Pre-collapse technology exists but cannot be reproduced — it is harvested, mounted, and revered. The tech level is uneven: excellent metallurgy and optics, no chemistry, no miniaturization, no ammunition industry. Warfare is primarily melee.
 
 ---
 
@@ -194,7 +194,7 @@ what finish it carries]
 
 ## 8. Terrain Reference
 
-**Dambaran mountains (Versari heartland):** high-altitude semi-arid foothills, broken benches and hogback ridges toward snow-streaked peaks. Thin pale buff/grey/rust soil, exposed bedrock, talus. Silver-grey scrub, dry bunchgrass with bare ground between, stunted conifers on north faces. Dry watercourses. Thin clear air, hard-edged shadows. Land slopes consistently east.
+**Dambaran mountains (Dambaran ground; the Versari are established at Dambar and Korad):** high-altitude semi-arid foothills, broken benches and hogback ridges toward snow-streaked peaks. Thin pale buff/grey/rust soil, exposed bedrock, talus. Silver-grey scrub, dry bunchgrass with bare ground between, stunted conifers on north faces. Dry watercourses. Thin clear air, hard-edged shadows. Land slopes consistently east.
 
 **Dambaran plains:** high semi-arid shortgrass in rain shadow. Nearly flat, tilting gently east, shallow dry drainages, low pale sediment bluffs. Short sparse pale buff and blue-grey grass, low scrub and yucca. Mountains as a low blue silhouette on the western horizon. Dust haze.
 
@@ -215,7 +215,7 @@ For orthographic / 3-4 isometric strategy-map views. Each faction needs **one ta
 - **Versari — the Reading Spire.** A slender faceted tower of stacked steel plates on a stepped octagonal base, one horizontal slot band cut around it near the top. Unornamented. *Silhouette: a thin dark needle.* Ground: exact radial causeways and converging rail.
 - **Goldgrass — the Elevator Range.** A row of tall pale grain silos with a headhouse spanning their tops and conveyor gantries angling down; alongside it a skeletal splayed-leg water tower. *Silhouette: a row of fat cylinders plus one spindly-legged tank.* Ground: rectangular field grid, straight tree-row windbreaks.
 - **Grand Lakers — the Pillar of Engines.** A tall cast-iron column with restored pre-collapse automobiles mounted around it at intervals, spiraling upward, each polished and lacquered. Part trophy, part shrine. *Silhouette: a column studded with car shapes.* Ground: paved apron, foundry stacks trailing smoke.
-- **Free Plainers — the Hull Post.** The hull of a captured land vessel stood upright on end, cable-braced, with more taken plating bolted on over the years. *Silhouette: a ragged vertical slab, leaning.* Ground: irregular perimeter wall, vehicle scars fanning across open grass.
+- **Free Plainers — the Hull Post.** The hull of a captured landship stood upright on end, cable-braced, with more taken plating bolted on over the years. *Silhouette: a ragged vertical slab, leaning.* Ground: irregular perimeter wall, vehicle scars fanning across open grass.
 
 ---
 
@@ -235,11 +235,19 @@ Generated and approved — treat as convention when producing anything adjacent.
 
 ## 11. Time Period and Scope (PABC)
 
-PABC is set **earlier** than the period described in sections 1–10. The
-factions exist but are still working out who they are. Boundaries are
-unsettled, the Goldgrass Coalition and the Free Plainers are still separate
-peoples, and the consolidations that define the later era have not happened
-yet.
+PABC is the era section 1 dates: roughly two hundred years after the pole
+shift. The factions exist but are still working out who they are. Boundaries
+are unsettled, the Goldgrass Coalition and the Free Plainers are still
+separate peoples, the Dambarans are a distinct people rather than a lineage
+inside Versari society, and the consolidations that define the later era have
+not happened yet. Where this document refers to a "later era," it means a
+period after the one PABC plays in, not a different reading of section 1.
+
+> **Revised.** This section previously placed PABC *earlier* than sections
+> 1–10 because section 1 read "roughly a century." The author has since ruled
+> the era at approximately two hundred years and section 1 now says so, which
+> removes the offset. The downstream facts below were never dependent on the
+> offset and are unchanged.
 
 Downstream facts that matter for art:
 
@@ -247,7 +255,7 @@ Downstream facts that matter for art:
   logics (woven-and-stitched vs. accreted-and-bolted-on) are the correct
   read for this period. The later absorption of the Free Plainers into the
   Goldgrass has not occurred.
-- **Land vessels are not yet Versari.** In this era they are recovered from
+- **Landships are not yet Versari.** In this era they are recovered from
   the old world by whoever finds one, and all four factions operate them. The
   Versari consolidation of the fleet is a later development.
 - The city-states of the later era — Omara, Kansit, Moyne, Linkor, Dambar, and
@@ -260,9 +268,9 @@ objects and figures, but map-scale work is the near-term need.
 
 ---
 
-## 12. Land Vessels
+## 12. Landships
 
-Land vessels **hover**. They are recovered pre-collapse objects, not
+Landships **hover**. They are recovered pre-collapse objects, not
 manufactured ones, which places them under Rule 3 rather than under any
 faction's fabrication logic.
 
@@ -397,7 +405,7 @@ Tracked so they are not silently resolved by whatever gets generated first.
   mismatched riveted patches, salvaged plate bolted flat without fitting, one
   unpaired pauldron. Maintained rather than ragged, which is the distinction
   that keeps it out of shantytown territory.
-- ~~**No land vessel canon object.**~~ Closed 2026-08-11 by
+- ~~**No landship canon object.**~~ Closed 2026-08-11 by
   `versari-land-vessel-01.jpg` — a Versari hull with the continuous-plating
   form rule and hover skirt. Section 12 is no longer pure inference, though the
   vessel class question below is still open, and the anchor carries §13 text in

@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Quest & Encounter editor for Ashland Conquest",
+  "description": "Quest & Encounter editor for The Remnant Continent",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
