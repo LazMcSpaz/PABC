@@ -402,14 +402,25 @@ export function buildRouteNetwork(rows, hexes, centers, opts = {}) {
     const cb = centers[b];
     const n = shared ? routeNormal(a, b) : edgeNormal(ca, cb);
     const push = shared ? (separation / 2) * SIDE[kind] : 0;
-    // Sample in the chain's direction of travel, but hash on the sorted key, so
-    // a chain walked the other way lays down the same wander.
-    const forward = a < b;
+    // Two different orderings meet here, and they must NOT be conflated.
+    //
+    // POSITION runs in the chain's direction of travel: `a` is the hex the
+    // chain is coming from and `b` the one it is going to, so the samples have
+    // to come out at rising t or the path doubles back on itself between two
+    // hexes — up the edge, back down it, then up again. (It did. A road with
+    // two samples an edge, on any edge whose chain happened to walk it from
+    // the higher hex id to the lower, drew a hairpin in open ground.)
+    //
+    // The HASH runs along the sorted edge instead, so the point one third of
+    // the way from the low hex gets the same wander whichever way a chain
+    // crosses it — which is what keeps a road and a railway sharing an edge
+    // sampling the same base line, and keeps the board stable if the walk
+    // order ever changes.
     const out = [];
     for (let i = 1; i <= p.samples; i++) {
-      const step = forward ? i : p.samples + 1 - i;
-      const t = step / (p.samples + 1);
-      const off = signed(`${key}@${step}`) * p.amp + push;
+      const t = i / (p.samples + 1);
+      const along = a < b ? i : p.samples + 1 - i;
+      const off = signed(`${key}@${along}`) * p.amp + push;
       out.push({
         x: ca.x + (cb.x - ca.x) * t + n.x * off,
         y: ca.y + (cb.y - ca.y) * t + n.y * off,

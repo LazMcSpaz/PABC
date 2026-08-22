@@ -776,6 +776,61 @@ board in thirty, forest about once a board); §12 makes the crossings that do
 happen still cost something. Route around it, and ease rather than delete what
 you cannot route around — the same fix from two ends.
 
+## 13. The hairpin, and a shape audit (2026-08-22)
+
+Reported from a live game: a road climbing out of one hex, turning back on
+itself in the next, and running back down beside its own line. It was a real
+bug, in §10's wander rather than in §11's generation.
+
+`edgePoints` samples the two points a road bends through inside each hex edge.
+Two orderings meet there and they were conflated:
+
+- **position** has to run in the chain's direction of travel — `a` is the hex
+  the chain comes from, `b` the one it goes to — or the points come out
+  backwards;
+- **the hash index** has to run along the edge's SORTED ends, so the point one
+  third of the way from the lower hex id gets the same wander whichever way a
+  chain crosses it. That is what keeps a road and a railway sharing an edge on
+  the same base line.
+
+The flipped index was applied to BOTH. So on any edge whose chain happened to
+walk it from the higher hex id to the lower, a road emitted its samples at t =
+2/3 then t = 1/3: up two thirds of the edge, back to one third, then up again.
+A hairpin in open ground, about 1.6 times a board. Rails were immune (one
+sample an edge, at t = 1/2, which is its own mirror), and so were shared edges,
+which use the rail profile — so it only ever showed on plain road.
+
+The fix is one line: `t` from the walk, the hash index from the sorted ends.
+
+### The audit
+
+Rather than fix the one shape and hope, every road on 72 generated boards was
+walked at 3px and tested for shapes no road takes. Two of the seven classes
+were firing, both from this single bug:
+
+| | before | after |
+|---|---|---|
+| doubles back on itself | 1.61/board | 0 |
+| crosses its own line | 0.78/board | 0 |
+| wanders over ground carrying no route | 0 | 0 |
+| runs inside a settlement's keep-out | 0 | 0 |
+| curve overshoots the hex lattice | 0 | 0 |
+| a stretch drawn twice | 0 | 0 |
+| a stub too short to be a road | 0 | 0 |
+
+The generated network was audited the same way and came back clean: no
+stranded road hex, no road ending in open country (only settlements terminate
+a line), every network one connected piece, every settlement on it. Degree
+distribution over 72 boards is 245 hexes with one road neighbour (all
+settlements), 964 with two, 428 with three, 67 with four, and three with five —
+of which two are towns. A five-way crossroads in open country turns up about
+once in seventy boards, which is a landmark rather than a defect.
+
+All eleven of these now run in `scripts/check-route-geometry.mjs`
+(`npm run check:routes`, ~2s over 30 boards). Reintroducing the one-line bug
+fails two of them, which is the only evidence that a regression test is worth
+having.
+
 ## 8. What this does not change
 
 Worth stating plainly, because it bounds the blast radius: no engine file, no
