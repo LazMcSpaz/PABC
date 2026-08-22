@@ -17,6 +17,7 @@ import { emit } from "./events.js";
 import { hasTechNode } from "./tech.js";
 import { spendBeat, noteBeatHeld } from "./beatBudget.js";
 import { applyPatchTo, getPatch } from "./contentPatch.js";
+import { pickChoice } from "./choicePolicy.js";
 import { CHIPS } from "./content.js";
 
 // One-time normalisation — flatten {type, params} once instead of on
@@ -75,9 +76,16 @@ export function registerFieldEncounter(def) {
 
 // --- delivery dispatch -----------------------------------------------
 
-// Headless default mirrors FORCE_CHOICE: pick the first eligible choice.
-function headlessPick(eligible) {
-  return 0;
+// What an AI seat (or the headless harness) answers with.
+//
+// This used to be `return 0` — the first eligible choice, on every card, for
+// every faction. choicePolicy.js scores the options against the faction's
+// temperament instead, so the Lakers take the fight, the Goldgrass buy their
+// way out of it, the Versari take the thing that opens a door later, and the
+// Free Plainers take whatever pays today. It is deterministic, so a seed still
+// replays identically.
+function headlessPick(state, cardId, eligible, pid, ctx) {
+  return pickChoice(state, pid, cardId, eligible, ctx);
 }
 
 export function deliverEncounter(state, encounterId, options = {}, ctx = {}) {
@@ -136,7 +144,7 @@ function presentToPlayer(state, enc, pid, ctx) {
     return queueForPlayer(state, enc, pid, eligible, subCtx);
   }
 
-  let pickedIdx = headlessPick(eligible);
+  let pickedIdx = headlessPick(state, enc.id, eligible, pid, subCtx);
   if (ctx.interact) {
     const picked = ctx.interact({
       kind: "encounterChoice",
