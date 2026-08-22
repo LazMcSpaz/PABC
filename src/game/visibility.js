@@ -269,9 +269,10 @@ export function recomputeVisibility(state, fid, { emitEvents = true } = {}) {
   // Rail doc §3.2 — a completed blockade sees for its owner. A construction
   // site does not: until it lands there is nothing there but the unit building
   // it, which is already counted above.
+  // Keyed `hex|edge` now, so iterate the records and read each one's own hex.
   const blockades = state.world?.blockades || {};
-  for (const hex in blockades) {
-    const b = blockades[hex];
+  for (const key in blockades) {
+    const b = blockades[key];
     // A dormant (unpaid) blockade is unmanned — nobody is up there watching.
     if (b.owner !== fid || !b.done || b.paid === false) continue;
     const onElev = isElevation(state.board.hexes[b.hex]);

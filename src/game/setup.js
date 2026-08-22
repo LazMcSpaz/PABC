@@ -11,13 +11,42 @@ import { recomputeVisibility } from "./visibility.js";
 import { ensureDiplomacy, seedStanding } from "./diplomacy.js";
 import { recomputeVp } from "./victory.js";
 
+// The name a faction's `seq`-th unit musters under. Walks the faction's
+// authored roster (content.js `unitNames`) in order; past the end it wraps
+// and suffixes a numeral, so a long game reads "Grain Guard II" rather than
+// fielding two formations with the same name. Deterministic in `seq` — no
+// RNG draw — so a seeded game names its units identically every replay.
+const NUMERALS = ["", " II", " III", " IV", " V", " VI", " VII", " VIII"];
+
+// Claim the next roster slot for `owner` and advance the counter. Counts
+// musters rather than living units, so a replacement never inherits a dead
+// formation's name. Takes anything carrying `unitsMustered`, which is how
+// setup can use it while state is still being assembled.
+export function nextMusterIndex(carrier, owner) {
+  carrier.unitsMustered = carrier.unitsMustered || {};
+  const n = carrier.unitsMustered[owner] || 0;
+  carrier.unitsMustered[owner] = n + 1;
+  return n;
+}
+export function unitNameFor(owner, seq) {
+  const roster = factionDef(owner)?.unitNames;
+  if (!roster || !roster.length) return `${factionDef(owner)?.name || owner} unit`;
+  const i = seq % roster.length;
+  const lap = Math.floor(seq / roster.length);
+  return roster[i] + (NUMERALS[lap] ?? ` ${lap + 1}`);
+}
+
 // A fresh unit with the full v0.2 field set (§16.3 / plan). `moveRemaining`
 // seeds to base Movement; the owner's Upkeep refreshes it from effective.
-export function makeUnit(uid, owner, node, factionName) {
+//
+// `seq` is how many units this faction has already mustered this game — the
+// index into its name roster. It counts musters, not living units, so a
+// replacement never inherits a dead formation's name.
+export function makeUnit(uid, owner, node, factionName, seq = 0) {
   return {
     uid,
     owner,
-    name: `${factionName} unit`, // flavor names arrive with content
+    name: unitNameFor(owner, seq),
     node,
     baseStrength: CONFIG.unit.baseStrength,
     baseMovement: CONFIG.unit.baseMovement,
@@ -108,16 +137,22 @@ export function createGame({
   const settlementHexes = Object.keys(layout.placement);
   assignRoads(grid.adjacency, hexes, settlementHexes,
     (hexId) => LOCATIONS[layout.placement[hexId]]?.strategicValue || "medium");
-  // Rail: pre-collapse trunk line between the capitals. Generated, never
-  // built (docs/rail-road-blockade-design.md §2.4).
-  // Rail termini. Sign-named settlements (`noRailTerminus`) are never stations
-  // — they grew up around ROAD signage, and a railway had no reason to stop at
-  // a lay-by. A line may still run THROUGH their hex to reach somewhere that
-  // does matter. Capitals are the only hubs today, so this filter changes
-  // nothing yet; it is here so the rule holds if either end of that ever moves.
-  const railHubs = Object.values(layout.factionStart).filter(
-    (hexId) => !LOCATIONS[layout.placement[hexId]]?.noRailTerminus,
-  );
+  // Rail: pre-collapse trunk line between the major settlements. Generated,
+  // never built (docs/rail-road-blockade-design.md §2.4).
+  //
+  // Stations are every seated Location in `CONFIG.rail.hubTiers`, not just the
+  // four capitals: a trunk line stops at the big places, and stopping only at
+  // capitals gave every board — 30 hexes or 127, ten cities or nineteen — the
+  // same three links, with no faction holding both ends of one at setup.
+  //
+  // Sign-named settlements (`noRailTerminus`) are never stations: they grew up
+  // around ROAD signage and a railway had no reason to stop at a lay-by. A line
+  // may still run THROUGH their hex to reach somewhere that does matter.
+  const railHubs = settlementHexes.filter((hexId) => {
+    const def = LOCATIONS[layout.placement[hexId]];
+    return def && !def.noRailTerminus
+      && CONFIG.rail.hubTiers.includes(def.strategicValue);
+  });
   const rails = assignRails(grid.adjacency, hexes, railHubs);
 
   // --- players ---
@@ -221,19 +256,31 @@ export function createGame({
     };
   }
 
-  // §18.4.1 — give each seeded minor a SEAT: it takes a free neutral
-  // Location nearest its associated major (so it sits as a regional power
-  // near its kin/rival/foil). Landless minors (no free seat) stay political-
-  // only actors. Done before units so the seat can host the minor's unit.
+  // §18.4.1 — give each seeded minor a SEAT. A minor that declares a
+  // `homeLocation` takes that Location: the Dambarans hold Dambar and there is
+  // no reading of the fiction where they open anywhere else, so the seat is
+  // content rather than a proximity accident. Everyone else takes the free
+  // neutral Location nearest its associated major, so it still sits as a
+  // regional power beside its kin/rival/foil — and a home-declaring minor
+  // falls back to that same rule when its home Location did not make the board
+  // (small budgets drop the home bands) or is already held.
+  //
+  // Home-declaring minors are seated FIRST so a proximity pick can never take
+  // the city out from under the faction the city is named for.
   const minorSeat = {}; // minor fid -> hexId
-  for (const fid of seededMinors) {
-    const major = MINOR_FACTIONS[fid].associatedMajor;
-    const majorStart = layout.factionStart[major];
+  const seatOrder = [...seededMinors].sort(
+    (a, b) => (MINOR_FACTIONS[b].homeLocation ? 1 : 0) - (MINOR_FACTIONS[a].homeLocation ? 1 : 0),
+  );
+  for (const fid of seatOrder) {
+    const def = MINOR_FACTIONS[fid];
+    const majorStart = layout.factionStart[def.associatedMajor];
     const free = Object.values(locations).filter((l) => !l.controller && !Object.values(minorSeat).includes(l.hexId));
     if (!free.length) continue;
-    const dist = majorStart ? bfsDistances(grid.adjacency, majorStart) : {};
-    free.sort((a, b) => (dist[a.hexId] ?? 99) - (dist[b.hexId] ?? 99));
-    const seat = free[0];
+    let seat = def.homeLocation ? free.find((l) => l.locationId === def.homeLocation) : null;
+    if (!seat) {
+      const dist = majorStart ? bfsDistances(grid.adjacency, majorStart) : {};
+      seat = [...free].sort((a, b) => (dist[a.hexId] ?? 99) - (dist[b.hexId] ?? 99))[0];
+    }
     seat.controller = fid;
     seat.loyaltyOwner = fid;
     seat.sections = [fid, fid, fid];
@@ -243,6 +290,10 @@ export function createGame({
 
   // --- units: CONFIG.startingUnits per faction (§16.3), on/near start ---
   const units = {};
+  // How many units each faction has mustered all game — the index into its
+  // name roster. Kept on state (below) so recruits and reinforcements keep
+  // counting from where setup left off.
+  const musterBook = { unitsMustered: {} };
   for (const fid of majors) {
     const start = layout.factionStart[fid];
     for (let i = 0; i < (CONFIG.startingUnits || 1); i++) {
@@ -257,14 +308,14 @@ export function createGame({
         node = adj || start;
       }
       const u = uid("unit");
-      units[u] = makeUnit(u, fid, node, FACTIONS[fid].name);
+      units[u] = makeUnit(u, fid, node, FACTIONS[fid].name, nextMusterIndex(musterBook, fid));
     }
   }
   // §18.4.1 — one defending unit on each seated minor's seat.
   for (const fid of seededMinors) {
     if (!minorSeat[fid]) continue;
     const u = uid("unit");
-    units[u] = makeUnit(u, fid, minorSeat[fid], factionDef(fid).name);
+    units[u] = makeUnit(u, fid, minorSeat[fid], factionDef(fid).name, nextMusterIndex(musterBook, fid));
   }
 
   // §20.2 — the Market is retired. Chips are no longer drawn from a shared
@@ -314,10 +365,17 @@ export function createGame({
     // Rule switches, normalised once here so every reader gets a complete
     // object and no site has to cope with a partial or missing `rules`.
     rules: {
+      // One condition now — every surviving faction eliminated, allied or
+      // vassal — so one switch. `conquest` / `recognition` / `elimination`
+      // were three toggles over what turned out to be three faces of the same
+      // thing, and only one of the three code paths honoured its own switch.
+      // Any of the old names still turns it off, so a saved setup or an older
+      // caller keeps working.
       victory: {
-        conquest: rules?.victory?.conquest !== false,
-        recognition: rules?.victory?.recognition !== false,
-        elimination: rules?.victory?.elimination !== false,
+        dominion: rules?.victory?.dominion !== false
+          && rules?.victory?.conquest !== false
+          && rules?.victory?.recognition !== false
+          && rules?.victory?.elimination !== false,
       },
       fogOfWar: rules?.fogOfWar !== false,
       worldEncountersPerRound: rules?.encounters?.world ?? CONFIG.encounters.worldPerRound,
@@ -335,6 +393,7 @@ export function createGame({
     board: { hexes, adjacency: grid.adjacency, rails },
     locations,
     units,
+    unitsMustered: musterBook.unitsMustered,
     chips,
     encounterDeck,
     reactiveDeck,
@@ -343,6 +402,9 @@ export function createGame({
     modifiers: [],
     pendingActionGrants: [],
     surcharges: [],
+    // Encounters waiting on a human decision (encounters.js). Empty for
+    // headless and AI-only games, which resolve inline.
+    pendingEncounters: [],
     winnerId: null,
     reinforcements: [], // v0.2 §16.5 — pending field-reinforcement packets
     pendingSalvage: [], // interactive salvage queue (UI resolves via resolveSalvage)

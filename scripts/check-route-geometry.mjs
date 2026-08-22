@@ -127,7 +127,7 @@ let strayCount = 0;
 let straySample = "";
 let unlinked = 0;
 let unlinkedSample = "";
-const shape = { hairpin: 0, selfCross: 0, stray: 0, intoTown: 0, dupe: 0, stubby: 0, overshoot: 0 };
+const shape = { hairpin: 0, selfCross: 0, stray: 0, intoTown: 0, townStop: 0, dupe: 0, stubby: 0, overshoot: 0 };
 const shapeWhere = {};
 const net = { isolated: 0, deadEnd: 0, islands: 0, unserved: 0 };
 const netWhere = {};
@@ -266,6 +266,30 @@ for (const seed of SEEDS) {
         }
         if (pts.length < 2) continue;
 
+        // Where a chain ENDS at a settlement it must end exactly on the
+        // keep-out boundary. This is the crisp version of the check above, and
+        // the one that catches a broken trim: anything that leaves a point
+        // inside the ellipse makes `cutAtEllipse` cut nothing (the segment
+        // never crosses the boundary), and the route then stops wherever that
+        // point happened to fall. The fuzzy "is it inside" test only notices
+        // once that is deep enough to see; this notices at all.
+        for (const end of [pts[0], pts[pts.length - 1]]) {
+          let town = null;
+          let r = Infinity;
+          for (const t of towns) {
+            const dx = (end.x - centers[t].x) / CLEARANCE;
+            const dy = (end.y - centers[t].y) / RY;
+            const rr = Math.sqrt(dx * dx + dy * dy);
+            if (rr < r) { r = rr; town = t; }
+          }
+          // Only ends that are actually at a settlement — a junction or dead
+          // end in open country sits whole hexes away.
+          if (r > 1.6) continue;
+          if (r < 0.98 || r > 1.02) {
+            note("townStop", `${kind} ends at r=${r.toFixed(2)} from ${town} (seed ${seed}/${mapSize})`);
+          }
+        }
+
         // A subpath drawn twice, or one too short to be a stretch of road.
         let arc = 0;
         for (let i = 1; i < pts.length; i++) arc += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y);
@@ -311,10 +335,13 @@ for (const seed of SEEDS) {
           // Or bulging so far off the lattice that the curve has overshot.
           if (nh.d > HEX_W * 0.56) note("overshoot", `${kind} ${nh.d.toFixed(0)}px from ${nh.id} (seed ${seed}/${mapSize})`);
           // Or running into the settlement it is supposed to stop outside of.
+          // Measured with a little slack: a curve may bow a whisker inside
+          // between two control points that are both on the boundary, which is
+          // sub-pixel on the short axis and not what this is looking for.
           for (const t of towns) {
             const dx = (p.x - centers[t].x) / CLEARANCE;
             const dy = (p.y - centers[t].y) / RY;
-            if (dx * dx + dy * dy < 0.9) { note("intoTown", `${kind} inside ${t} (seed ${seed}/${mapSize})`); break; }
+            if (dx * dx + dy * dy < 0.86) { note("intoTown", `${kind} inside ${t} (seed ${seed}/${mapSize})`); break; }
           }
         }
       }
@@ -382,6 +409,7 @@ const SHAPE_LABEL = {
   selfCross: "no route crosses its own line",
   stray: "no route wanders over ground that carries none",
   intoTown: "no route runs inside a settlement's keep-out",
+  townStop: "a route arriving at a settlement stops ON its keep-out boundary",
   overshoot: "no curve overshoots the hex lattice",
   dupe: "no stretch of route is drawn twice",
   stubby: "no route is a stub too short to be a road",

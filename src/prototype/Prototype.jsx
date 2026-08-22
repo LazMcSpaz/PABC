@@ -32,19 +32,25 @@ import { CONFIG } from "../game/config.js";
 import { downloadGameLog } from "./gameLogExport.js";
 import { NEUTRAL } from "./data.js";
 import { getEncounter } from "../game/encounters.js";
+import { pendingEncountersFor, resolvePendingEncounter } from "../game/encounters.js";
 import { encounterRedrawBudget } from "../game/encounters.js";
 import { evalCond } from "../game/dsl.js";
-import { adaptState, reinforcePreview, engineChipIdToUi, previewLocationContest, previewAttackerStrength, blockadeView, blockadeBuildOffer, postAction, upkeepSummary, economyReport } from "./engineAdapter.js";
+import { adaptState, reinforcePreview, engineChipIdToUi, previewLocationContest, previewAttackerStrength, blockadeView, blockadeBuildOffer, postAction, upkeepSummary, economyReport, homeHexFor } from "./engineAdapter.js";
 import { resolveSalvage } from "../game/contest.js";
 import { assignTechNode } from "../game/stats.js";
 import { performDiplomacy } from "../game/diplomacy.js";
 import { isUnitVisibleTo } from "../game/visibility.js";
 import DiplomacyDrawer from "./DiplomacyDrawer.jsx";
 import EncounterModal from "./EncounterModal.jsx";
+import { summarizeResolution } from "./encounterOutcome.js";
+import ContentEditor from "./ContentEditor.jsx";
+import { readEditMode, writeEditMode, restorePatches, forgetPatches } from "./contentEditMode.js";
+import { downloadContentEdits } from "./contentEditExport.js";
+import { clearPatch } from "../game/contentPatch.js";
 import MoveConfirmOverlay from "./MoveConfirmOverlay.jsx";
 import { WikiProvider, TokenProvider } from "./RichText.jsx";
 import WikiModal from "./WikiModal.jsx";
-import { WIKI_ENTRIES } from "../game/content/index.js";
+import { WIKI_ENTRIES } from "../game/content/wiki-repo.js";
 import { resolveTokens } from "../game/textTokens.js";
 
 // The ECONOMY half of a player's Upkeep, in the order turn.js charges it.
@@ -236,6 +242,13 @@ function buildLocView(state, hex, isYourTurn) {
     valueColor: val.color,
     vp: uiLoc.vp || 0,
     statusLabel: ctrl ? `Held — ${UI_FACTIONS[ctrl]?.name}` : claimed ? "Contested" : "Uncontrolled",
+    // What this place IS, as opposed to what it scores. Nine of the nineteen
+    // have no line written yet and render without one.
+    flavour: uiLoc.flavour || null,
+    basis: uiLoc.basis || null,
+    // Whether the city can still do something — the window is where you spend
+    // a city's action, so it is the one place that has to say so.
+    actionsReady: hex.actionsReady || 0,
     sections: control.sections,
     loyalty: control.loyalty,
     loyaltyMax: control.loyaltyMax,
@@ -323,16 +336,11 @@ function driveAIsThroughHumanTurn(game) {
   }
 }
 
-function Bracket({ corner }) {
-  const c = theme.accent;
-  const map = {
-    tl: { top: 0, left: 0, borderTop: `2px solid ${c}`, borderLeft: `2px solid ${c}` },
-    tr: { top: 0, right: 0, borderTop: `2px solid ${c}`, borderRight: `2px solid ${c}` },
-    bl: { bottom: 0, left: 0, borderBottom: `2px solid ${c}`, borderLeft: `2px solid ${c}` },
-    br: { bottom: 0, right: 0, borderBottom: `2px solid ${c}`, borderRight: `2px solid ${c}` },
-  };
-  return <div className="pc-bracket" style={map[corner]} />;
-}
+// Content Edit Mode's saved edits go back into the engine BEFORE any game is
+// built: offerQuests reads opener gates on the very first turn, so a gate
+// edited last session has to be in place by then or the session starts on the
+// shipped content and diverges from the file on disk.
+restorePatches();
 
 export default function Prototype({ config, onNewGame }) {
   // The engine mutates a single GameState in place; we hold a ref to it
@@ -372,9 +380,23 @@ export default function Prototype({ config, onNewGame }) {
   );
   const replay = useAIReplay({ gameRef, geomRef, bumpTick });
 
+  // Where the camera opens the game: your Capital, in the same content-space
+  // coordinates the replay camera pans to. Computed once — BoardViewport only
+  // reads it on mount, and re-deriving it every render would recompute a
+  // constant on every tick.
+  const openingFocus = useMemo(
+    () => geomRef.current?.centers?.[homeHexFor(gameRef.current, state.youId)] || null,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
+
   const [selectedHexId, setSelectedHexId] = useState(null);
   const [selectedUnitId, setSelectedUnitId] = useState(null);
   const [toast, setToast] = useState(null); // { kind: "error"|"info", text }
+  // Things the player has waved off for now. An offer they said "consider it"
+  // to stays live in the drawer; it just stops knocking. Cleared by nothing —
+  // the ids are one-shot and the offer expires on its own.
+  const [deferredAudience, setDeferredAudience] = useState([]);
   const [encounterPrompt, setEncounterPrompt] = useState(null); // pending move + encounter pick
   const [pendingMove, setPendingMove] = useState(null);          // { unitUid, origin, dest } awaiting confirm
   const [skipMoveConfirm, setSkipMoveConfirm] = useState(readSkipMoveConfirm);
@@ -382,6 +404,24 @@ export default function Prototype({ config, onNewGame }) {
   const [confirmPrompt, setConfirmPrompt] = useState(null); // generic confirm dialog
   const [coalitionPrompt, setCoalitionPrompt] = useState(null); // commit-forces picker
   const [salvagePrompt, setSalvagePrompt] = useState(null); // interactive salvage
+  // World encounters and quest beats arrive from the round-end pipeline,
+  // which is synchronous and cannot wait for a click — so the engine parks
+  // them on a queue (encounters.js) and we drain it here. Until this existed
+  // every one of them auto-resolved to the first choice and the player never
+  // saw the card at all.
+  const [pendingEnc, setPendingEnc] = useState(null);
+  // The card the player just answered, held open on its outcome face. Until
+  // this is dismissed nothing else may take the screen — not the next queued
+  // encounter, not the salvage picker — because the aftermath IS the answer
+  // to "what happened to my unit", and a card that is instantly replaced by
+  // the next one is the bug this exists to fix.
+  const [encOutcome, setEncOutcome] = useState(null);
+  // Content Edit Mode — off by default, remembered between sessions. `target`
+  // is the entity the editor is open on; null means the content browser.
+  const [editMode, setEditMode] = useState(readEditMode);
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [editorTarget, setEditorTarget] = useState(null);
+  const [editTick, setEditTick] = useState(0); // re-render cards after an edit
 
   // Wiki — a clickable [[term]] anywhere in flavor text opens this modal.
   // We keep a small history so the in-modal cross-links have a back button.
@@ -403,6 +443,16 @@ export default function Prototype({ config, onNewGame }) {
   const closeWiki = useCallback(() => {
     setWikiOpen(null);
     setWikiHistory([]);
+  }, []);
+  // Settings → Wiki: open the modal on the first entry (alphabetical by
+  // term) so the sidebar doubles as a browsable index.
+  const openWikiFromSettings = useCallback(() => {
+    const first = Object.values(WIKI_ENTRIES)
+      .sort((a, b) => String(a.term).localeCompare(String(b.term)))[0];
+    if (!first) return;
+    setMenuPanel(null);
+    setWikiHistory([]);
+    setWikiOpen(first.id);
   }, []);
   const [showTechWheel, setShowTechWheel] = useState(false); // §17 wheel overlay
   const [showDiplomacy, setShowDiplomacy] = useState(false); // §18 diplomacy screen
@@ -460,6 +510,87 @@ export default function Prototype({ config, onNewGame }) {
     const ids = new Set(msgs.map((m) => m.id));
     setTimeout(() => setHeralds((q) => q.filter((b) => !ids.has(b.id))), 7000);
   }, [tick, state.youId]);
+
+  // Show the next encounter waiting on the player. Re-checked on every tick,
+  // so a queue that filled during the AI turns is drained one card at a time
+  // as soon as control comes back.
+  useEffect(() => {
+    const game = gameRef.current;
+    if (!game) return;
+    if (encOutcome) return; // the last card is still being read
+    const queue = pendingEncountersFor(game, game.humanFactionId);
+    setPendingEnc((cur) => {
+      if (cur && queue.some((p) => p.id === cur.id)) return cur; // still open
+      return queue[0] || null;
+    });
+  }, [tick, encOutcome]);
+
+  // Answer one. The engine applies the choice's effects at this point —
+  // they were held, not skipped, so nothing has happened until now. Which is
+  // also what makes the aftermath cheap to build: everything the choice does
+  // lands inside this call, so the slice of the event log it appends IS the
+  // consequence list.
+  function answerPendingEncounter(choiceId) {
+    const game = gameRef.current;
+    if (!game || !pendingEnc) return;
+    const from = game.log.length;
+    const chosen = pendingEnc.choices.find((c) => c.id === choiceId);
+    resolvePendingEncounter(game, pendingEnc.id, choiceId, { interactiveLoot: true });
+    showOutcome(pendingEnc, pendingEnc.choices, chosen, from);
+    setPendingEnc(null);
+    bumpTick();
+  }
+
+  // Turn a resolved card over onto its outcome face. `from` is the log length
+  // captured immediately before the effects ran.
+  function showOutcome(encounter, choices, chosen, from) {
+    const game = gameRef.current;
+    const events = game.log.slice(from);
+    const summary = summarizeResolution(events, game, game.humanFactionId);
+    // A dismissal ("Continue") on a purely narrative beat that changed
+    // nothing has no aftermath worth a second click — it would be a card
+    // whose only content is the button you press to leave it.
+    if (chosen?.dismiss && !summary.contest && !summary.roll
+        && !summary.lines.length && !chosen.outcomeText) {
+      maybeOpenLoot();
+      return;
+    }
+    setEncOutcome({
+      encounter, choices,
+      outcome: {
+        choiceLabel: chosen?.label || null,
+        outcomeText: chosen?.outcomeText || null,
+        ...summary,
+      },
+    });
+  }
+
+  // Leaving the mode is what hands over the file — that is the whole point of
+  // the mode, and a designer who forgets to press a button loses a session of
+  // notes. Turning it ON never downloads anything.
+  function toggleEditMode(on) {
+    setEditMode(on);
+    writeEditMode(on);
+    if (!on) {
+      setEditorOpen(false);
+      const doc = downloadContentEdits(gameRef.current);
+      setToast(doc
+        ? { kind: "info", text: `Saved ${doc.counts.changes} change(s) across ${doc.counts.entities} card(s)` }
+        : { kind: "info", text: "Content Edit Mode off — nothing was changed" });
+    }
+  }
+
+  function openEditorOn(entityId) {
+    setEditorTarget(entityId);
+    setEditorOpen(true);
+    setMenuPanel(null);
+  }
+
+  function closeOutcome() {
+    setEncOutcome(null);
+    bumpTick();
+    maybeOpenLoot();
+  }
 
   // Manage the selection's lifetime. Enemy units stay selectable so the
   // player can inspect their stats and owner read-only — control actions
@@ -587,19 +718,35 @@ export default function Prototype({ config, onNewGame }) {
 
   function doMoveWithEncounterChoice(unitUid, dest, choiceId, discards = 0) {
     let redrawsDone = 0;
+    // Which card `interact` is actually authorised to answer. A Move can
+    // surface a second encounter — walking onto a hex that also holds a
+    // discovered quest beat — and answering that one with this one's choice
+    // id resolves it blind. Returning nothing for anything else sends it to
+    // the pending queue instead (see encounters.js presentToPlayer).
+    const answering = encounterPrompt?.encounter?.id ?? null;
     const ctx = {
       interactiveLoot: true,
       interact: (req) => {
         // Replay the player's discards (engine sends them to the bottom),
         // then answer the choice for the card finally drawn.
         if (req.kind === "encounterRedraw") return redrawsDone++ < discards;
-        if (req.kind === "encounterChoice") return choiceId;
+        if (req.kind === "encounterChoice") {
+          return req.encounter === answering ? choiceId : undefined;
+        }
         return req?.options ? req.options[0] : null; // fallback to first
       },
     };
+    const prompt = encounterPrompt;
+    const from = gameRef.current.log.length;
     const r = runAction("move", { unit: unitUid, to: dest }, ctx);
-    if (r.ok) { inspectHex(dest); maybeOpenLoot(); }
     setEncounterPrompt(null);
+    if (r.ok) inspectHex(dest);
+    if (prompt) {
+      const chosen = (prompt.choices || []).find((c) => c.id === choiceId);
+      showOutcome(prompt.encounter, prompt.choices, chosen, from);
+    } else if (r.ok) {
+      maybeOpenLoot();
+    }
   }
 
   // Open the salvage modal if a Move just landed on a loot pile (§ hex loot).
@@ -950,8 +1097,24 @@ export default function Prototype({ config, onNewGame }) {
   // routes params + surfaces the accept/decline result.
   // Answer an envoy's audience (hear / placate / defy). The engine dequeues
   // the warning, so the modal closes to whatever is next in line.
-  function onEnvoyRespond(warning, answer) {
+  // Everything a faction says to you arrives through the same door. An
+  // offer or a demand is not "open the drawer and look" news — somebody has
+  // come to say it, so they get an audience and an answer.
+  function onEnvoyRespond(item, answer) {
     const game = gameRef.current;
+    if (item?.kind === "offer") {
+      if (answer === "later") { setDeferredAudience((d) => [...d, item.offer.id]); return; }
+      onDiplomacy("answer-offer", { offerId: item.offer.id, accept: answer === "accept" });
+      return;
+    }
+    if (item?.kind === "ultimatum") {
+      onDiplomacy("answer-ultimatum", {
+        ultimatumId: item.ultimatum.id, comply: answer === "comply",
+      });
+      if (answer === "defy") setDeferredAudience((d) => [...d, item.ultimatum.id]);
+      return;
+    }
+    const warning = item;
     const r = performDiplomacy(game, state.youId, "respond-warning", {
       warningId: warning.id,
       answer,
@@ -985,7 +1148,19 @@ export default function Prototype({ config, onNewGame }) {
       bumpTick();
       return;
     }
+    if (action === "answer-offer") {
+      msg = !r.ok ? (r.reason || "that offer is gone")
+        : r.accepted ? "Agreed. The terms stand."
+        : "You let it pass.";
+      setDiploResult({ ...r, msg });
+      bumpTick();
+      return;
+    }
     if (!r.ok) msg = r.reason || "no effect";
+    // A counter is not a refusal — it is their price, and it is waiting to be
+    // answered. Say where it went, because it lands in the inbox rather than
+    // in this result line.
+    else if (r.countered) msg = `${name} counter-offers — their terms are on the table.`;
     else if (r.accepted === false) msg = `${name} declines — ${r.reason || ""}`;
     else if (r.accepted === true) msg = `${name} agrees.`;
     else if (r.honored === true) msg = `${name} answers the call.`;
@@ -994,6 +1169,19 @@ export default function Prototype({ config, onNewGame }) {
     setDiploResult({ ...r, msg });
     bumpTick();
   }
+
+  // Who is at the door, in order of how much it can hurt to ignore them. A
+  // demand with a deadline outranks an offer, which outranks a grumble.
+  const audience = useMemo(() => {
+    const d = state.diplomacy;
+    if (!d) return null;
+    const ult = (d.ultimatums || []).find((u) => !u.defied && !deferredAudience.includes(u.id));
+    if (ult) return { kind: "ultimatum", ultimatum: ult };
+    const offer = (d.offers || []).find((o) => !deferredAudience.includes(o.id));
+    if (offer) return { kind: "offer", offer };
+    return d.pendingWarnings?.[0] || null;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tick, deferredAudience]);
 
   // Bind the token resolver to live engine state. Re-fires on every
   // engine tick so a {faction:lowest-standing-with-active} read mid-game
@@ -1053,6 +1241,9 @@ export default function Prototype({ config, onNewGame }) {
   // ("Unit lost") are aftermath, not a roll, so they are excluded.
   const contestRollOnScreen =
     !!contestViz ||
+    // An encounter's narrative CONTEST is a conflict roll like any other and
+    // gets the same stinger — it is the same dice, decided the same way.
+    !!encOutcome?.outcome?.contest ||
     (replay.activeOverlays || []).some((o) => o.kind === "contest" && !o.terse);
   useSfxHold(contestRollOnScreen, "contestRoll");
 
@@ -1074,12 +1265,19 @@ export default function Prototype({ config, onNewGame }) {
           HUD chrome (resource wheel, faction readout, menu orb) floats
           over it as absolute overlays — see below. */}
       <div style={{ position: "relative", flex: 1, display: "flex", minHeight: 0 }}>
-        <BoardViewport cameraTarget={replay.cameraTarget} cameraPanMs={replay.cameraPanMs} controlsTop={hudOffset + 10}>
+        <BoardViewport cameraTarget={replay.cameraTarget} cameraPanMs={replay.cameraPanMs} controlsTop={hudOffset + 10} initialFocus={openingFocus}>
+          {/* No corner brackets here. They used to sit on this element —
+              the pan/zoom CONTENT layer — which put them at the corners of
+              the MAP, not of the screen: the top pair rendered underneath
+              the HUD bar and was never visible, and the moment you panned
+              or zoomed the bottom pair drifted across the board as two
+              stray gold Ls with nothing attached to them. Promoting them
+              to the viewport layer doesn't work either — the board's four
+              screen corners are already occupied by the zoom cluster, the
+              event feed and the menu orb, so a frame drawn there lands on
+              top of live controls. The board is the one surface in this UI
+              that is framed by its own HUD rather than by panel chrome. */}
           <div style={{ position: "relative", padding: 30 }}>
-            <Bracket corner="tl" />
-            <Bracket corner="tr" />
-            <Bracket corner="bl" />
-            <Bracket corner="br" />
             <Board
               state={boardState}
               selectedHexId={selectedHexId}
@@ -1172,6 +1370,7 @@ export default function Prototype({ config, onNewGame }) {
         color={UI_FACTIONS[state.youId]?.color}
         vp={you.vp}
         vpGoal={state.vpGoal}
+        dominion={state.diplomacy?.recognition || null}
         actions={you.actions}
         round={state.round}
         onEndTurn={onEndTurn}
@@ -1264,6 +1463,60 @@ export default function Prototype({ config, onNewGame }) {
           </div>
           <div style={{ marginTop: 16, borderTop: `1px solid ${theme.border}`, paddingTop: 14 }}>
             <span style={{ fontFamily: HUD.font, fontSize: 13, fontWeight: 700, letterSpacing: 0.6, color: HUD.text }}>
+              Wiki
+            </span>
+            <p className="pc-prose" style={{ margin: "4px 0 8px", fontSize: 12, lineHeight: 1.5, color: HUD.textDim }}>
+              The world&rsquo;s reference. Every underlined term in encounter
+              text links into it, and it can be browsed end to end from here.
+            </p>
+            <Btn onClick={openWikiFromSettings} disabled={!Object.keys(WIKI_ENTRIES).length}>
+              Open Wiki
+            </Btn>
+          </div>
+          <div style={{ marginTop: 16, borderTop: `1px solid ${theme.border}`, paddingTop: 14 }}>
+            <span style={{ fontFamily: HUD.font, fontSize: 13, fontWeight: 700, letterSpacing: 0.6, color: HUD.text }}>
+              Content Edit Mode
+            </span>
+            <p className="pc-prose" style={{ margin: "4px 0 8px", fontSize: 12, lineHeight: 1.5, color: HUD.textDim }}>
+              Rewrite quests and encounters while you play them — what gates a
+              beat, its prose, its choices, and exactly what each choice grants
+              or costs. Every card also shows its grants under the options while
+              this is on. Edits apply to this session only; the shipped content
+              is never touched. Switching this off downloads the change file.
+            </p>
+            <label
+              className="hud-int"
+              style={{ display: "flex", alignItems: "center", gap: 9, padding: "7px 9px", borderRadius: 6, border: `1px solid ${editMode ? "rgba(232,169,63,0.5)" : "rgba(86,211,198,0.25)"}`, background: editMode ? "rgba(232,169,63,0.12)" : "rgba(0,0,0,0.2)", color: HUD.text, cursor: "pointer", fontSize: 13 }}
+            >
+              <input type="checkbox" checked={editMode} onChange={(e) => toggleEditMode(e.target.checked)} />
+              {editMode ? "On — editing" : "Off"}
+            </label>
+            {editMode && (
+              <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+                <Btn onClick={() => openEditorOn(null)}>Browse all content</Btn>
+                <Btn onClick={() => {
+                  const doc = downloadContentEdits(gameRef.current);
+                  setToast(doc
+                    ? { kind: "info", text: `Saved ${doc.counts.changes} change(s)` }
+                    : { kind: "info", text: "No changes yet" });
+                }}>Download changes</Btn>
+                <Btn onClick={() => setConfirmPrompt({
+                  title: "Discard every edit?",
+                  body: "Every change made in Content Edit Mode is dropped and the shipped content comes back. This cannot be undone, and anything not already downloaded is lost.",
+                  confirmLabel: "Discard",
+                  danger: true,
+                  onConfirm: () => {
+                    clearPatch(null);
+                    forgetPatches();
+                    setEditTick((n) => n + 1);
+                    setToast({ kind: "info", text: "Edits discarded" });
+                  },
+                })}>Discard edits</Btn>
+              </div>
+            )}
+          </div>
+          <div style={{ marginTop: 16, borderTop: `1px solid ${theme.border}`, paddingTop: 14 }}>
+            <span style={{ fontFamily: HUD.font, fontSize: 13, fontWeight: 700, letterSpacing: 0.6, color: HUD.text }}>
               Playtest log
             </span>
             <p className="pc-prose" style={{ margin: "4px 0 8px", fontSize: 12, lineHeight: 1.5, color: HUD.textDim }}>
@@ -1283,11 +1536,32 @@ export default function Prototype({ config, onNewGame }) {
       )}
       </AnimatePresence>
 
+      <AnimatePresence>
+        {editorOpen && (
+          <TitledWindow
+            key="content-editor"
+            title={editorTarget ? "Edit content" : "All content"}
+            width={720}
+            onClose={() => setEditorOpen(false)}
+          >
+            <ContentEditor
+              entityId={editorTarget}
+              onPick={setEditorTarget}
+              onClose={() => setEditorOpen(false)}
+              // A card on screen is rendered from the live definition, so an
+              // edit has to re-render it — otherwise the prose you just
+              // rewrote is still the old prose behind the panel.
+              onChanged={() => setEditTick((n) => n + 1)}
+            />
+          </TitledWindow>
+        )}
+      </AnimatePresence>
+
       {/* Envoy audience — an AI's warning, answered rather than just read.
           Shown one at a time; only on your own turn so it never interrupts
           an AI replay. */}
       {isYourTurn && !showDiplomacy && (
-        <EnvoyModal warning={state.diplomacy?.pendingWarnings?.[0]} onRespond={onEnvoyRespond} />
+        <EnvoyModal audience={audience} onRespond={onEnvoyRespond} />
       )}
 
       <HeraldLayer banners={heralds} onDismiss={dismissHerald} topOffset={hudOffset + 14} />
@@ -1338,10 +1612,32 @@ export default function Prototype({ config, onNewGame }) {
         )}
       </AnimatePresence>
 
+      {/* The card the player just answered, face down on its outcome. It
+          outranks both live cards: until it is dismissed there is nothing
+          else to look at. */}
       <AnimatePresence>
-        {encounterPrompt && (
+        {encOutcome && (
+          <EncounterModal
+            key="encounter-outcome"
+            encounter={encOutcome.encounter}
+            choices={encOutcome.choices}
+            eligibleIds={[]}
+            redrawsLeft={0}
+            onRedraw={() => {}}
+            onPick={() => {}}
+            outcome={encOutcome.outcome}
+            onClose={closeOutcome}
+          />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {!encOutcome && encounterPrompt && (
           <EncounterModal
             key="encounter"
+            editMode={editMode}
+            editRev={editTick}
+            onEdit={() => openEditorOn(encounterPrompt.encounter.id)}
             encounter={encounterPrompt.encounter}
             choices={encounterPrompt.choices}
             eligibleIds={encounterPrompt.eligibleIds}
@@ -1368,6 +1664,23 @@ export default function Prototype({ config, onNewGame }) {
         )}
       </AnimatePresence>
 
+      <AnimatePresence>
+        {!encOutcome && !encounterPrompt && pendingEnc && (
+          <EncounterModal
+            key={`pending-${pendingEnc.id}`}
+            editMode={editMode}
+            editRev={editTick}
+            onEdit={() => openEditorOn(pendingEnc.encounterId)}
+            encounter={pendingEnc}
+            choices={pendingEnc.choices}
+            eligibleIds={pendingEnc.choices.map((c) => c.id)}
+            redrawsLeft={0}
+            onRedraw={() => {}}
+            onPick={answerPendingEncounter}
+          />
+        )}
+      </AnimatePresence>
+
       {contestViz && (
         <ContestOverlay
           viz={contestViz}
@@ -1378,7 +1691,10 @@ export default function Prototype({ config, onNewGame }) {
         />
       )}
 
-      {salvagePrompt && (
+      {/* Same z-index as the encounter card, so a salvage left over from a
+          board contest would render on top of an outcome the player has not
+          read yet. It waits. */}
+      {salvagePrompt && !encOutcome && (
         <SalvageModal prompt={salvagePrompt} onConfirm={onSalvageConfirm} />
       )}
 
@@ -1490,7 +1806,16 @@ function TurnBanner({ banner }) {
 function EndOverlay({ state, onNewGame }) {
   const winner = state.players[state.winnerId];
   const winnerFaction = UI_FACTIONS[state.winnerId];
-  const sorted = Object.values(state.players).sort((a, b) => b.vp - a.vp);
+  // Winner first, then by score. VP is the closing STANDING — ground held and
+  // friends kept — and it is not what decided the game, so a diplomat can win
+  // the condition while the biggest land power out-scores them. That is a
+  // coherent story, but a table with the winner sitting fifth reads like a
+  // bug, so the ★ goes on top and the real numbers stay honest.
+  const sorted = Object.values(state.players).sort((a, b) => {
+    if (a.id === state.winnerId) return -1;
+    if (b.id === state.winnerId) return 1;
+    return b.vp - a.vp;
+  });
   return (
     <div
       style={{
@@ -1538,6 +1863,28 @@ function EndOverlay({ state, onNewGame }) {
         >
           {winnerFaction?.name || winner?.id}
         </div>
+        {/* HOW it ended. The table below is the closing standing — VP is a
+            score now, not the condition — so without this line a player is
+            left to infer what actually won it. */}
+        {state.winnerBy && (
+          <div
+            style={{
+              fontFamily: theme.fontDisplay,
+              fontSize: 12.5,
+              letterSpacing: 1,
+              color: theme.textDim,
+              marginTop: 8,
+              maxWidth: 320,
+            }}
+          >
+            {{
+              conquest: "By conquest — nobody left standing.",
+              diplomacy: "By treaty — every rival an ally.",
+              submission: "By submission — every rival sworn.",
+              mixed: "By war and treaty together.",
+            }[state.winnerBy] || ""}
+          </div>
+        )}
         <div
           style={{
             marginTop: 18,
@@ -1546,6 +1893,10 @@ function EndOverlay({ state, onNewGame }) {
             gap: 5,
           }}
         >
+          <div style={{
+            fontFamily: theme.fontDisplay, fontSize: 10, letterSpacing: 2,
+            textTransform: "uppercase", color: theme.textFaint, textAlign: "left",
+          }}>Final standing · ground held and friends kept</div>
           {sorted.map((p) => {
             const f = UI_FACTIONS[p.id];
             return (
@@ -1566,7 +1917,7 @@ function EndOverlay({ state, onNewGame }) {
                   {p.id === state.winnerId ? " ★" : ""}
                 </span>
                 <span style={{ fontFamily: theme.fontDisplay, fontWeight: 700 }}>
-                  {p.vp} VP
+                  {p.vp}
                 </span>
               </div>
             );

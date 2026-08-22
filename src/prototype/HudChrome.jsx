@@ -180,6 +180,89 @@ function ResourceCell({ icon, value, label, color, labelColor, title }) {
 }
 
 // A dial paired with a small caption below — the right-side VP / Actions cells.
+// §4 of vp-and-actions-design — the per-entity action roster.
+//
+// The dial's number was always right and always insufficient: "3 actions"
+// while the player still had to click every unit and every city to find out
+// which three. These are the three. Filled = still has its action; hollow =
+// already spent it. Units on the top row, cities beneath, a wildcard row only
+// when the player actually holds one.
+//
+// It marks what is READY rather than what is spent, so the strip empties as
+// the turn does — at Upkeep it is full, and by End Turn a glance says whether
+// anything was left standing about.
+const PIP = 7;
+
+function Pip({ ready, title, color }) {
+  return (
+    <span
+      title={title}
+      style={{
+        width: PIP, height: PIP, borderRadius: "50%", flexShrink: 0,
+        border: `1px solid ${ready ? color : "rgba(207,214,220,0.32)"}`,
+        background: ready ? color : "transparent",
+        boxShadow: ready ? `0 0 4px ${color}bb` : undefined,
+        transition: "background .18s ease, box-shadow .18s ease, border-color .18s ease",
+      }}
+    />
+  );
+}
+
+function PipRow({ icon, glyph, pips }) {
+  if (!pips.length) return null;
+  return (
+    <span style={{ display: "flex", alignItems: "center", gap: 3, maxWidth: 96, flexWrap: "wrap", height: 10 }}>
+      {icon
+        ? <img src={icon} alt="" style={{ width: 9, height: 9, objectFit: "contain", opacity: 0.65, marginRight: 1 }} />
+        : <span style={{ fontFamily: C.font, fontSize: 9, fontWeight: 700, color: C.textFaint, marginRight: 1, lineHeight: 1 }}>{glyph}</span>}
+      {pips}
+    </span>
+  );
+}
+
+function ActionPips({ roster }) {
+  if (!roster) return null;
+  const unitPips = roster.units.map((u) => (
+    <Pip
+      key={u.uid}
+      ready={u.ready && !u.unsupplied}
+      color={C.holo}
+      title={u.unsupplied ? `${u.name} — unsupplied, cannot act` : `${u.name} — ${u.ready ? "has an action" : "already acted"}`}
+    />
+  ));
+  // A Logistics Hub city holds two, so a city contributes a pip per action
+  // rather than one pip that can only be on or off.
+  const locPips = [];
+  for (const l of roster.locations) {
+    const held = Math.max(1, l.capacity || 1);
+    for (let i = 0; i < held; i += 1) {
+      locPips.push(
+        <Pip
+          key={`${l.hexId}-${i}`}
+          ready={i < l.ready}
+          color={C.holo}
+          title={`${l.name} — ${l.ready ? `${l.ready} action${l.ready === 1 ? "" : "s"}` : "already acted"}`}
+        />,
+      );
+    }
+  }
+  const wildPips = Array.from({ length: roster.wildcards }, (_, i) => (
+    <Pip key={`w${i}`} ready color={C.gold} title="A spare action — any unit or city may burn it after its own is gone" />
+  ));
+  if (!unitPips.length && !locPips.length && !wildPips.length) return null;
+  // Its own cell beside the dials rather than a caption beneath one: the top
+  // bar is a fixed 60px and a 46px dial already fills it, so anything stacked
+  // under the dial spilled out over the Event Log below.
+  return (
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 2 }}>
+      <PipRow icon={ICON.units} pips={unitPips} />
+      <PipRow icon={ICON.shield} pips={locPips} />
+      {wildPips.length ? <PipRow glyph="+" pips={wildPips} /> : null}
+      <span style={{ fontFamily: C.font, fontSize: 8, letterSpacing: 1.4, textTransform: "uppercase", color: C.textFaint, fontWeight: 600 }}>Ready</span>
+    </div>
+  );
+}
+
 function DialCell({ label, children }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
@@ -208,7 +291,7 @@ function CompactStat({ icon, value, color }) {
 // name, VP/Actions dials); at phone width those clusters collide. This
 // swaps to a plain three-row rectangular bar: faction/settings, a row of
 // icon+value stats, then a full-width End Turn button underneath.
-function CompactTopBar({ scrap, upkeep, units, tech, name, color = C.red, vp, vpGoal, actions, round, onEndTurn, endDisabled, onSettings }) {
+function CompactTopBar({ scrap, upkeep, units, tech, name, color = C.red, vp, vpGoal, dominion, actions, round, onEndTurn, endDisabled, onSettings }) {
   return (
     <div style={{
       position: "absolute", top: 0, left: 0, right: 0, height: COMPACT_HUD_H, zIndex: 30,
@@ -235,7 +318,7 @@ function CompactTopBar({ scrap, upkeep, units, tech, name, color = C.red, vp, vp
         />
         <CompactStat icon={ICON.units} value={`${units.n}/${units.cap}`} color={RES.units.color} />
         <CompactStat icon={ICON.research} value={`L${tech.level}`} color={RES.tech.color} />
-        <CompactStat icon={ICON.vp} value={`${vp}/${vpGoal}`} color={C.gold} />
+        <CompactStat icon={ICON.vp} value={dominion ? `${dominion.score}/${dominion.threshold}` : `${vp}`} color={C.gold} />
         <CompactStat icon={ICON.shield} value={`${actions.remaining}/${actions.max}`} color={C.red} />
       </div>
       <button className="hud-int" onClick={endDisabled ? undefined : onEndTurn} disabled={endDisabled}
@@ -260,7 +343,7 @@ export function TopBar(props) {
   return <DesktopTopBar {...props} />;
 }
 
-function DesktopTopBar({ scrap, upkeep, units, tech, name, color = C.red, vp, vpGoal, actions, round, onEndTurn, endDisabled, onSettings }) {
+function DesktopTopBar({ scrap, upkeep, units, tech, name, color = C.red, vp, vpGoal, dominion, actions, round, onEndTurn, endDisabled, onSettings }) {
   const H = 60;
   const clip = "polygon(0 0, 100% 0, 100% 60px, 78% 60px, 72% 28px, 28% 28px, 22% 60px, 0 60px)";
   const outline = "M0 0 L100 0 L100 60 L78 60 L72 28 L28 28 L22 60 L0 60 Z";
@@ -297,16 +380,34 @@ function DesktopTopBar({ scrap, upkeep, units, tech, name, color = C.red, vp, vp
       <div style={{ position: "absolute", left: 0, right: 0, top: 3, display: "flex", flexDirection: "column", alignItems: "center", gap: 2, pointerEvents: "none" }}>
         <span style={{ fontFamily: C.font, fontSize: 14, fontWeight: 700, letterSpacing: 2, textTransform: "uppercase", color, textShadow: `0 0 10px ${color}77, 0 1px 2px rgba(0,0,0,0.7)`, lineHeight: 1, whiteSpace: "nowrap" }}>{name}</span>
         <span style={{ width: 70, height: 1.5, background: `linear-gradient(90deg, transparent, ${color}, transparent)` }} />
-        <span style={{ fontFamily: C.font, fontSize: 8.5, letterSpacing: 2.2, textTransform: "uppercase", color: C.textFaint }}>Round {round}</span>
+        {/* Sits directly under the faction name, which throws a wide
+            `0 0 10px <color>77` glow. At textFaint over that halo the round
+            counter was unreadable at every viewport width — lifted to
+            textDim with its own dark shadow to punch back through the glow. */}
+        <span style={{ fontFamily: C.font, fontSize: 9.5, fontWeight: 600, letterSpacing: 2.2, textTransform: "uppercase", color: C.textDim, textShadow: "0 1px 3px rgba(0,0,0,0.9)" }}>Round {round}</span>
       </div>
 
       {/* right flare — VP + Actions dials, End Turn beneath */}
       <div style={{ position: "absolute", right: 16, top: 0, height: H, display: "flex", alignItems: "center", gap: 14, pointerEvents: "auto" }}>
-        <DialCell label="Victory">
-          <Dial size={46} accent={C.gold} progress={vpGoal ? vp / vpGoal : 0}>
-            <DialFace icon={ICON.vp} value={vp} valueColor={C.gold} iconSize={15} valueSize={15} />
+        {/* The dial races the WIN CONDITION — how many rivals are dealt with —
+            not the score. It used to fill toward a VP threshold that turned
+            out not to be a conquest condition at all; VP is the end-of-game
+            standing now and nothing fills toward it. */}
+        <DialCell label={dominion?.roundsLeft != null ? `${dominion.roundsLeft} to win` : "Dominion"}>
+          <Dial
+            size={46}
+            accent={dominion?.roundsLeft != null ? C.holo : C.gold}
+            progress={dominion?.threshold ? dominion.score / dominion.threshold : 0}
+            glow={dominion?.met}
+          >
+            <DialFace
+              value={dominion ? `${dominion.score}/${dominion.threshold}` : vp}
+              valueColor={dominion?.met ? C.holoHi : C.text}
+              valueSize={15}
+            />
           </Dial>
         </DialCell>
+        <ActionPips roster={actions.roster} />
         <DialCell label="Actions">
           <Dial size={46} accent={C.red} progress={actions.max ? actions.remaining / actions.max : 0} glow>
             <DialFace value={`${actions.remaining}/${actions.max}`} valueColor={C.text} valueSize={15} />
@@ -776,7 +877,7 @@ export function EconomyLedger({ report, onOpenHex, onOpenUnit }) {
                   {st.name}
                 </span>
                 <span style={{ ...sub, display: "block", marginTop: 2, color: st.dormant ? C.red : C.textFaint }}>
-                  {st.hexId}{st.dormant ? " · DORMANT — unpaid, so it does nothing" : ""}
+                  {st.at || st.hexId}{st.dormant ? " · DORMANT — unpaid, so it does nothing" : ""}
                 </span>
               </span>
               <span style={num(-st.upkeep, false)}>−{st.upkeep}</span>
@@ -827,7 +928,24 @@ export function LocationWindow({ view, onClose, onActivate, onContest, onRecruit
               <span style={{ fontFamily: C.font, fontSize: 10.5, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", color: "#08100f", background: v.valueColor || C.copperHi, padding: "2px 8px", borderRadius: 3 }}>{v.valueLabel}</span>
               <span style={{ display: "flex", gap: 2 }}>{Array.from({ length: v.vp }).map((_, i) => <img key={i} src={ICON.vp} alt="" style={{ width: 15, height: 15 }} />)}</span>
             </div>
-            <div style={{ fontSize: 10, letterSpacing: 1.4, textTransform: "uppercase", color: C.textDim, marginTop: 7 }}>{v.statusLabel}</div>
+            <div style={{ fontSize: 10, letterSpacing: 1.4, textTransform: "uppercase", color: C.textDim, marginTop: 7 }}>
+              {v.statusLabel}
+              {/* Still has its action — the same holo dot the board and the
+                  HUD's READY strip use. The window is where a city's action
+                  is actually spent, so it is the one place that has to say
+                  whether there is one left. */}
+              {v.actionsReady > 0 && (
+                <span style={{ marginLeft: 8, whiteSpace: "nowrap", color: C.holoHi }}>
+                  {Array.from({ length: v.actionsReady }, (_, i) => (
+                    <span key={i} style={{ display: "inline-block", width: 6, height: 6, borderRadius: "50%", background: C.holo, boxShadow: `0 0 5px ${C.holo}`, marginRight: 5, verticalAlign: "middle" }} />
+                  ))}
+                  {v.actionsReady > 1 ? `${v.actionsReady} actions` : "1 action"}
+                </span>
+              )}
+            </div>
+            {v.basis && (
+              <div style={{ fontSize: 9.5, letterSpacing: 1.6, textTransform: "uppercase", color: C.textFaint, marginTop: 4 }}>{v.basis}</div>
+            )}
           </div>
           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3 }}>
             <div style={{ filter: `drop-shadow(0 0 8px ${C.holo}55)` }}>
@@ -842,6 +960,16 @@ export function LocationWindow({ view, onClose, onActivate, onContest, onRecruit
           <Stat icon={ICON.scrap} value={`+${v.economy ? v.economy.output : v.production}`} label="Output" />
           <Stat icon={ICON.units} value={v.economy ? `${v.economy.slotsUsed}/${v.economy.slotCapacity}` : v.chipSlots} label="Chip Slots" />
         </div>
+
+        {/* What the place IS, before what it scores. The prose is authored in
+            content/locations.csv and reached nothing until now; the nine
+            Locations added after that sheet have no line yet and simply
+            render without one. */}
+        {v.flavour && (
+          <p className="pc-prose" style={{ margin: 0, fontSize: 12.5, lineHeight: 1.6, color: C.textDim, fontStyle: "italic" }}>
+            {v.flavour}
+          </p>
+        )}
 
         {v.economy && (
           <EconomyPanel hexId={v.hexId} eco={v.economy} onBuild={onBuild} onUpgrade={onUpgrade} onRush={onRush} onSetSlider={onSetSlider} onSetPoolTarget={onSetPoolTarget} onSetBuildPriority={onSetBuildPriority} />

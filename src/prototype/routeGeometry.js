@@ -39,6 +39,11 @@ export const LOCATION_CLEARANCE = HEX_W * 0.23;
 // converges slightly on the approach to a junction.
 export const SEPARATION = 17;
 
+// How far along an edge a pair forced to swap sides holds its offset before
+// crossing. Far enough that the crossing is over inside the last fifth of the
+// run and the rest of the corridor keeps its full separation.
+const CROSS_HOLD = 0.8;
+
 // Which way each kind steps off the shared centre line. Half the separation
 // each, so the pair straddles the line the single route would have taken and
 // neither looks displaced.
@@ -297,6 +302,63 @@ export function buildRouteNetwork(rows, hexes, centers, opts = {}) {
     return f === -1 ? { x: -n.x, y: -n.y } : n;
   };
 
+  // Which way a hex steps its pair off the centre line, and how square that
+  // step is to the arms arriving here. Wanted in two places — the crossing
+  // point itself, and the edges either side of it, which need to know whether
+  // this hex agrees with them about which side is which.
+  //
+  // A hex where both kinds pass but share no edge is a LEVEL CROSSING, and
+  // those get stepped apart too — off the average of everything arriving,
+  // which both kinds compute identically and then take opposite ways. They
+  // still have to cross somewhere, but now they cross cleanly at an angle
+  // instead of both running through the exact centre and knotting together
+  // with every other branch that meets there.
+  const axisCache = new Map();
+  const nodeAxis = (id, kind) => {
+    const cacheKey = `${kind}:${id}`;
+    if (axisCache.has(cacheKey)) return axisCache.get(cacheKey);
+    const graph = kind === "road" ? road : rail;
+    const arms = [...(graph.adj[id] || [])].filter((o) => sharedEdges.has(edgeKey(id, o)));
+    if (!arms.length && sharedNodes.has(id)) {
+      const seen = new Set();
+      for (const o of [...(road.adj[id] || []), ...(rail.adj[id] || [])]) {
+        if (seen.has(o)) continue;
+        seen.add(o);
+        arms.push(o);
+      }
+    }
+    let normals = arms.map((other) => routeNormal(id, other));
+    const sum = (ns) => {
+      let x = 0;
+      let y = 0;
+      for (const n of ns) { x += n.x; y += n.y; }
+      const l = Math.hypot(x, y);
+      return l > 1e-6 ? { x: x / l, y: y / l } : null;
+    };
+    let u = sum(normals);
+    // Several shared runs can meet here, each with its own idea of which side
+    // is which (see `flip`). Averaging arms that disagree gives a direction
+    // perpendicular to nothing, and the pair ends up displaced somewhere
+    // useless. Keep the majority side and let the odd arm out swing across on
+    // its own — near a junction it crosses at an angle, which reads correctly,
+    // where a bad average would have both lines wandering.
+    if (u && normals.length > 1) {
+      const keep = normals.filter((n) => n.x * u.x + n.y * u.y > 0.05);
+      if (keep.length && keep.length < normals.length) {
+        normals = keep;
+        u = sum(normals) || u;
+      }
+    }
+    let res = null;
+    if (u) {
+      let dot = 1;
+      for (const n of normals) dot = Math.min(dot, u.x * n.x + u.y * n.y);
+      res = { x: u.x, y: u.y, dot };
+    }
+    axisCache.set(cacheKey, res);
+    return res;
+  };
+
   // Where a route crosses a hex. Drifted off the centre by a hashed amount so
   // the network doesn't visibly pin itself to a lattice of exact centres — the
   // single strongest tell that these are drawn on top of the board rather than
@@ -336,41 +398,8 @@ export function buildRouteNetwork(rows, hexes, centers, opts = {}) {
     // still have to cross somewhere, but now they cross cleanly at an angle
     // instead of both running through the exact centre and knotting together
     // with every other branch that meets there.
-    const graph = kind === "road" ? road : rail;
-    const arms = [...(graph.adj[id] || [])].filter((o) => sharedEdges.has(edgeKey(id, o)));
-    if (!arms.length && shared) {
-      const seen = new Set();
-      for (const o of [...(road.adj[id] || []), ...(rail.adj[id] || [])]) {
-        if (seen.has(o)) continue;
-        seen.add(o);
-        arms.push(o);
-      }
-    }
-    let normals = arms.map((other) => routeNormal(id, other));
-    const sum = (ns) => {
-      let x = 0;
-      let y = 0;
-      for (const n of ns) { x += n.x; y += n.y; }
-      const l = Math.hypot(x, y);
-      return l > 1e-6 ? { x: x / l, y: y / l } : null;
-    };
-    let u = sum(normals);
-    // Several shared runs can meet here, each with its own idea of which side
-    // is which (see `flip`). Averaging arms that disagree gives a direction
-    // perpendicular to nothing, and the pair ends up displaced somewhere
-    // useless. Keep the majority side and let the odd arm out swing across on
-    // its own — near a junction it crosses at an angle, which reads correctly,
-    // where a bad average would have both lines wandering.
-    if (u && normals.length > 1) {
-      const keep = normals.filter((n) => n.x * u.x + n.y * u.y > 0.05);
-      if (keep.length && keep.length < normals.length) {
-        normals = keep;
-        u = sum(normals) || u;
-      }
-    }
-    if (u) {
-      const ux = u.x;
-      const uy = u.y;
+    const a = nodeAxis(id, kind);
+    if (a) {
       // MITRE, not just the average direction. Averaging two normals and
       // stepping half the separation along it looks right and is wrong: at a
       // bend the step is no longer perpendicular to either arm, so the gap
@@ -379,18 +408,16 @@ export function buildRouteNetwork(rows, hexes, centers, opts = {}) {
       // it, which is the two lines touching. Lengthening the step by the same
       // cosine restores a true perpendicular separation on every arm, which is
       // exactly what mitring a stroked polyline does and for the same reason.
-      let dot = 1;
-      for (const n of normals) dot = Math.min(dot, ux * n.x + uy * n.y);
+      //
       // Capped, because a hairpin's mitre runs away to infinity and would fire
       // the crossing point off into the next hex.
-      const k = (separation / 2) * Math.min(1 / Math.max(dot, 0.001), 2.6) * SIDE[kind];
-      pt.x += ux * k;
-      pt.y += uy * k;
+      const k = (separation / 2) * Math.min(1 / Math.max(a.dot, 0.001), 2.6) * SIDE[kind];
+      pt.x += a.x * k;
+      pt.y += a.y * k;
     }
     nodeCache.set(cacheKey, pt);
     return pt;
   };
-
   // The points BETWEEN two hex centres: where the route actually bends. Shared
   // ground falls back to the rail's profile for both kinds, so the two sample
   // the same base points and stay a fixed distance apart the whole way.
@@ -425,6 +452,32 @@ export function buildRouteNetwork(rows, hexes, centers, opts = {}) {
         x: ca.x + (cb.x - ca.x) * t + n.x * off,
         y: ca.y + (cb.y - ca.y) * t + n.y * off,
       });
+    }
+
+    // A junction with three arms has no side that all three agree on, so one
+    // arm's pair is left having to swap over (see nodeAxis). Left alone the
+    // swap is spread across the whole hex edge: the two lines converge from
+    // the moment they leave one hex and only part again as they reach the
+    // next, which reads as a long shallow braid rather than a crossing.
+    //
+    // Held on their own side until the last of the run, they instead cross
+    // once, steeply, right where the arms meet — which is where a level
+    // crossing belongs and what one looks like.
+    if (shared) {
+      const side = (id) => {
+        const ax = nodeAxis(id, kind);
+        return !ax || ax.x * n.x + ax.y * n.y >= 0;
+      };
+      const sa = side(a);
+      const sb = side(b);
+      if (sa !== sb) {
+        const t = sa ? CROSS_HOLD : 1 - CROSS_HOLD;
+        const pt = {
+          x: ca.x + (cb.x - ca.x) * t + n.x * push,
+          y: ca.y + (cb.y - ca.y) * t + n.y * push,
+        };
+        if (sa) out.push(pt); else out.unshift(pt);
+      }
     }
     return out;
   };
@@ -469,15 +522,33 @@ export function buildRouteNetwork(rows, hexes, centers, opts = {}) {
       // Stop outside a settlement rather than running through its middle. The
       // trim is measured from the neighbouring bend, so the route arrives on
       // the line it was already travelling.
+      //
+      // It has to WALK BACK, not just look at the one neighbouring point.
+      // Anything may leave a point inside the keep-out — and the crossing hold
+      // a shared pair uses to swap sides (edgePoints) does exactly that, since
+      // it sits four fifths along an edge, which on this grid's short edges is
+      // ~22px from the far centre and well within the ellipse. Cutting FROM a
+      // point that is already inside cuts nothing: the segment never crosses
+      // the boundary, so the route simply ends wherever that point fell —
+      // in the middle of the settlement art it was meant to stop outside of.
+      // Dropping inside points until one is outside, then cutting from there,
+      // is right whatever put them there.
+      const cutEnd = (centre, head) => {
+        while (pts.length > 1) {
+          const iEnd = head ? 0 : pts.length - 1;
+          const iPrev = head ? 1 : pts.length - 2;
+          const t = cutAtEllipse(pts[iPrev], pts[iEnd], centre, clearance);
+          if (t) { pts[iEnd] = t; return; }
+          if (head) pts.shift(); else pts.pop();
+        }
+      };
       if (!closed) {
         if (hexes[nodes[0]]?.type === "location" && pts.length > 1) {
-          const t = cutAtEllipse(pts[1], pts[0], centers[nodes[0]], clearance);
-          if (t) pts[0] = t; else pts.shift();
+          cutEnd(centers[nodes[0]], true);
         }
         const end = nodes[nodes.length - 1];
         if (pts.length > 1 && hexes[end]?.type === "location") {
-          const t = cutAtEllipse(pts[pts.length - 2], pts[pts.length - 1], centers[end], clearance);
-          if (t) pts[pts.length - 1] = t; else pts.pop();
+          cutEnd(centers[end], false);
         }
       }
       if (pts.length < 2) continue;

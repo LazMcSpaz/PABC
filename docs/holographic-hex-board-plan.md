@@ -826,10 +826,37 @@ settlements), 964 with two, 428 with three, 67 with four, and three with five �
 of which two are towns. A five-way crossroads in open country turns up about
 once in seventy boards, which is a landmark rather than a defect.
 
-All eleven of these now run in `scripts/check-route-geometry.mjs`
+All twelve of these now run in `scripts/check-route-geometry.mjs`
 (`npm run check:routes`, ~2s over 30 boards). Reintroducing the one-line bug
 fails two of them, which is the only evidence that a regression test is worth
 having.
+
+### A second bug, caught by the audit on the way in
+
+Merging this onto main — where the junction work of §12's sibling commit had
+landed in the meantime — the keep-out check fired on eleven routes. Not from
+the hairpin, and not from this branch.
+
+`edgePoints` now inserts a crossing point four fifths along a shared edge, so a
+pair forced to swap sides crosses once and steeply rather than braiding (that
+is the right shape). But four fifths along one of this grid's short vertical
+edges is ~22px from the far hex's centre, and the settlement keep-out ellipse
+is 49.7 × 24.2 — so the inserted point lands INSIDE it. The trim then cut from
+a point already inside, where the segment never crosses the boundary at all, so
+`cutAtEllipse` returned null, the node was dropped, and the route ended
+wherever that crossing point happened to fall rather than on the boundary.
+
+The trim now walks back, dropping points that are already inside the keep-out
+until it finds one outside and cutting from there. That is right whatever put a
+point in there, rather than being a patch for this one cause.
+
+The audit's keep-out test was a fuzzy "is any point inside", which only notices
+an intrusion deep enough to see. It is now paired with the crisp version —
+**a chain ending at a settlement must end ON the boundary**, r within 1 ± 0.02
+— which catches a broken trim the moment it breaks. The fuzzy test keeps a
+little slack, because a curve may bow a fraction of a pixel inside between two
+control points that are both exactly on the boundary, and that is not what
+either test is for.
 
 ## 8. What this does not change
 

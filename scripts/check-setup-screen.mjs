@@ -83,6 +83,9 @@ async function play({ sizeIndex, densityIndex, factions, toggleOff = [] }) {
   }
 
   const summary = await page.evaluate(() => document.body.innerText);
+  // Every rule switch on the screen, by name.
+  const toggles = await page.evaluate(() => [...document.querySelectorAll('button[role="switch"]')]
+    .map((b) => b.getAttribute("aria-label")).filter(Boolean));
   await page.locator("button").filter({ hasText: "BEGIN" }).first().click();
   await page.getByText("End Turn").waitFor({ timeout: 30000 });
   await page.waitForTimeout(800);
@@ -104,7 +107,7 @@ async function play({ sizeIndex, densityIndex, factions, toggleOff = [] }) {
     };
   }, MAJOR_IDS);
   await page.close();
-  return { built, summary, hasSize, hasDensity };
+  return { built, summary, toggles, hasSize, hasDensity };
 }
 
 // --- 1. the sliders exist and drive the board ----------------------------
@@ -145,10 +148,15 @@ check("the human's faction is always seated",
     noFog.built.fogRecords === 0 && noFog.built.rules?.fogOfWar === false,
     `${noFog.built.fogRecords} record(s)`);
 
-  const noConquest = await play({ sizeIndex: 0, densityIndex: 0, factions: 4, toggleOff: ["Conquest"] });
-  check("a victory condition switched off reaches the engine's rules",
-    noConquest.built.rules?.victory?.conquest === false &&
-    noConquest.built.rules?.victory?.elimination === true);
+  // Victory is no longer a menu of switches — there is one condition and it is
+  // always on — so the screen must not still be offering to configure it.
+  const victoryish = on.toggles.filter((l) => /conquest|recognition|victory|elimination/i.test(l));
+  check("the screen offers no victory switches",
+    on.toggles.length > 0 && victoryish.length === 0,
+    `switches: ${on.toggles.join(", ") || "none at all"}`);
+  check("the one victory condition still reaches the engine's rules",
+    on.built.rules?.victory?.dominion === true,
+    JSON.stringify(on.built.rules?.victory));
 
   check("encounter cadence lands on the board and the rules",
     on.built.encounterHexes > 0 &&

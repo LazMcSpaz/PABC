@@ -122,7 +122,10 @@ if (staged) {
       await raise.click();
       await page.waitForTimeout(600);
       const site = await page.evaluate((h) => {
-        const b = window.__ashland.world?.blockades?.[h];
+        // Blockades are keyed `hex|edge` now — one per road out of the hex —
+        // so look them up by the record's own hex rather than by the key.
+        const b = Object.values(window.__ashland.world?.blockades || {})
+          .find((x) => x.hex === h);
         return b ? { done: b.done, cost: b.cost, builder: b.builder } : null;
       }, staged.hex);
       check("clicking it starts a real construction site in the engine",
@@ -135,7 +138,7 @@ if (staged) {
   // by selecting the blockade on the map rather than through the unit.
   await page.evaluate((h) => {
     const g = window.__ashland;
-    const b = g.world.blockades[h];
+    const b = Object.values(g.world.blockades).find((x) => x.hex === h);
     b.done = true; b.paid = true; b.progress = b.cost; b.builder = null;
     window.__ashlandBump?.();
   }, staged.hex);
@@ -187,7 +190,7 @@ if (staged) {
       await entries.first().click();
       await page.waitForTimeout(500);
       const queued = await page.evaluate((h) => {
-        const b = window.__ashland.world.blockades[h];
+        const b = Object.values(window.__ashland.world.blockades).find((x) => x.hex === h);
         return b?.build ? { chipId: b.build.chipId, cost: b.build.cost } : null;
       }, staged.hex);
       check("clicking a chip queues it onto the blockade",
@@ -199,14 +202,14 @@ if (staged) {
   // A dormant blockade has to say so — it is the difference between a road
   // that is shut and one that only looks shut.
   await page.evaluate((h) => {
-    window.__ashland.world.blockades[h].paid = false;
+    Object.values(window.__ashland.world.blockades).find((x) => x.hex === h).paid = false;
     window.__ashlandBump?.();
   }, staged.hex);
   await page.waitForTimeout(500);
   check("a dormant blockade says it is unmanned",
     (await page.getByText(/Dormant — upkeep unpaid/).count()) > 0);
   await page.evaluate((h) => {
-    window.__ashland.world.blockades[h].paid = true;
+    Object.values(window.__ashland.world.blockades).find((x) => x.hex === h).paid = true;
     window.__ashlandBump?.();
   }, staged.hex);
   await page.keyboard.press("Escape");

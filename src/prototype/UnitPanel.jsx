@@ -20,6 +20,17 @@ const READY = "#7bb255";      // green — ready
 const STOPPED = "#d2453f";    // warning red — held
 
 // Compact chevron glyph — two parallel arrowheads pointing right.
+// A unit's one-word status. "Ready" used to mean "supplied and not held" and
+// said nothing about the unit's ACTION — so a unit that had already fought
+// still read as Ready, which is the exact question the panel is open to
+// answer. Ordered by what stops you soonest.
+function unitStatus(unit) {
+  if (unit.unsupplied) return { word: "Unsupplied", blocked: true };
+  if (unit.immobilized) return { word: "Held", blocked: true };
+  if (unit.canAct === false) return { word: "Acted", blocked: true };
+  return { word: "Ready", blocked: false };
+}
+
 function MovementGlyph({ color, size = 20 }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none"
@@ -359,12 +370,17 @@ export default function UnitPanel({ unit, hex, owned = true, canAct, reinforce, 
               label="Moves"
               value={`${unit.moveRemaining ?? eff.movement}/${eff.movement}`}
             />
-            <PhoneStatChip
-              color={unit.immobilized ? STOPPED : READY}
-              icon={<StatusGlyph color={unit.immobilized ? STOPPED : READY} blocked={unit.immobilized} size={9} />}
-              label="Status"
-              value={unit.immobilized ? "Held" : "Ready"}
-            />
+            {(() => {
+              const st = unitStatus(unit);
+              return (
+                <PhoneStatChip
+                  color={st.blocked ? STOPPED : READY}
+                  icon={<StatusGlyph color={st.blocked ? STOPPED : READY} blocked={st.blocked} size={9} />}
+                  label="Status"
+                  value={st.word}
+                />
+              );
+            })()}
           </div>
         ) : (
           <div style={{ flex: 1, display: "flex", gap: 6, alignItems: "center", justifyContent: "center" }}>
@@ -384,12 +400,17 @@ export default function UnitPanel({ unit, hex, owned = true, canAct, reinforce, 
               label="Moves"
               value={`${unit.moveRemaining ?? eff.movement}/${eff.movement}`}
             />
-            <StatCell
-              color={unit.unsupplied ? STOPPED : unit.immobilized ? STOPPED : READY}
-              icon={<StatusGlyph color={unit.unsupplied || unit.immobilized ? STOPPED : READY} blocked={unit.unsupplied || unit.immobilized} size={22} />}
-              label="Status"
-              value={unit.unsupplied ? "Unsupplied" : unit.immobilized ? "Held" : "Ready"}
-            />
+            {(() => {
+              const st = unitStatus(unit);
+              return (
+                <StatCell
+                  color={st.blocked ? STOPPED : READY}
+                  icon={<StatusGlyph color={st.blocked ? STOPPED : READY} blocked={st.blocked} size={22} />}
+                  label="Status"
+                  value={st.word}
+                />
+              );
+            })()}
           </div>
         )}
 

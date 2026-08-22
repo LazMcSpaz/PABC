@@ -19,6 +19,10 @@ export const EVENT_NAMES = new Set([
   "contest_declared", "contest_won", "contest_lost",
   "obstacle_claimed", "encounter_resolved",
   "location_spawned", "section_flipped", "location_captured", "location_decayed",
+  // §3.2 — a city changing hands by treaty rather than by force. Its own
+  // name, because "Omara falls" and "Omara is signed away" are not the
+  // same thing to read in a feed, and only one of them is a conquest.
+  "location_ceded",
   // §18.2 Loyalty
   "loyalty_changed", "loyalty_failing", "control_peeled",
   // §18.3 Influence & Zone of Control
@@ -32,7 +36,21 @@ export const EVENT_NAMES = new Set([
   // Layer 5 — encounter & quest system (spec §15.13)
   "encounter_delivered", "encounter_delivery_skipped", "trigger_fired",
   "quest_started", "quest_advanced", "quest_completed",
+  // Per-choice beat routing: which successor a choice selected, and the
+  // case where the named successor was not deliverable.
+  "quest_routed", "quest_route_missed",
+  // A beat that was ready but would have been the player's fourth this turn.
+  // Held, not dropped — it is offered again on the next pass.
+  "quest_beat_held",
+  // Authored resolution primitives (ROLL / CONTEST) and their consequences.
+  "roll_resolved", "narrative_contest_resolved", "deck_peeked",
+  "safe_passage_granted", "safe_passage_expired",
+  "unit_seconded", "unit_returned", "movement_overridden",
+  "dual_holding_established", "player_flag_expired",
   "standing_changed", "track_changed", "deferred_resolved",
+  // A deferred packet carrying `satisfiedIfFlag` is a visible deadline;
+  // these say which way it went when the clock ran out.
+  "deadline_met", "deadline_expired",
   // §20 Economy & City Development (APPEND-ONLY — distinct keys so a parallel
   // Influence branch never collides). The Market is retired, so `market_churned`
   // is dropped with it.
@@ -78,6 +96,19 @@ export const EVENT_NAMES = new Set([
   "diplomatic_warning",
   // Truces — peace is binding for a window; breaking it is treachery.
   "truce_broken",
+  // Deal flows run for a term and then lapse, honorably.
+  "agreement_expired",
+  // §6.10 the round trip — offers on the table, counters, and pestering.
+  "offer_tabled", "offer_accepted", "offer_declined", "offer_lapsed", "offer_pestered",
+  // The grievance ledger — what was done to you, and what it takes to settle.
+  "grievance_recorded", "grievances_settled",
+  // The win condition: every surviving faction eliminated, allied or vassal.
+  // `reached` starts the hold clock, `lost` stops it, `won` ends the game.
+  "dominion_reached", "dominion_lost", "dominion_won",
+  // Reputation is what the board saw. Some things it doesn't.
+  "attack_unwitnessed",
+  // §6.11 ultimatums — the verb between asking and attacking.
+  "ultimatum_issued", "ultimatum_complied", "ultimatum_defied", "ultimatum_bluffed",
 ]);
 
 // Resolve a chip / card instance uid to its content def. Covers Market

@@ -8,7 +8,7 @@ import { standingTier } from "../game/standing.js";
 import { C } from "./HudChrome.jsx";
 // A banner whose "speaker" is a major carries their portrait; minors (no
 // art yet) fall back to the plain banner.
-import { DIPLO_PORTRAITS } from "./factionPortraits.js";
+import { portraitFor, toneForEvent } from "./factionPortraits.js";
 
 const name = (f) => factionDef(f)?.name || f;
 const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
@@ -20,10 +20,19 @@ const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
 export function heraldFromLog(entries, youId) {
   const out = [];
   let n = 0;
+  // `speaker` is whose face fronts the banner. Which REGISTER of face — the
+  // head of state or the envoy they send — follows from the event: a
+  // declaration of war is the leader's to make, a denouncement is somebody's
+  // job. See factionPortraits.js.
+  let currentEvent = null;
   const push = (icon, text, tone, speaker) =>
-    out.push({ id: `h${Date.now()}-${n++}`, icon, text, tone, portrait: DIPLO_PORTRAITS[speaker] || null });
+    out.push({
+      id: `h${Date.now()}-${n++}`, icon, text, tone,
+      portrait: speaker ? portraitFor(speaker, toneForEvent(currentEvent)) : null,
+    });
   for (const e of entries) {
     const p = e.payload || {};
+    currentEvent = e.name;
     switch (e.name) {
       case "war_declared":
         if (p.a === youId || p.cause === "coalition") break;
@@ -60,12 +69,21 @@ export function heraldFromLog(entries, youId) {
         if (p.lord === youId) break;
         push("🕊", `${name(p.lord)} frees ${name(p.vassal)}`, "info", p.lord);
         break;
-      case "denounced":
+      case "denounced": {
         if (p.denouncer === youId) break;
-        push("📣", p.target === youId
-          ? `${name(p.denouncer)} denounces YOU before the powers`
-          : `${name(p.denouncer)} denounces ${name(p.target)}`, p.target === youId ? "warn" : "info", p.denouncer);
+        // Half the faction names are plural ("The Dambarans", "Free
+        // Plainers") and half singular ("Clan Tempest"); no verb agrees with
+        // both, so the sentence is built around the name rather than after
+        // it. Whether the accusation had grounds is the news, not a detail.
+        const who = name(p.denouncer);
+        const line = p.target === youId
+          ? (p.warrant
+            ? `Denounced before the powers by ${who} — and they had grounds`
+            : `Denounced before the powers by ${who}`)
+          : `${name(p.target)} denounced by ${who}`;
+        push("📣", line, p.target === youId ? "warn" : "info", p.denouncer);
         break;
+      }
       case "recognition_summit":
         push("★", p.player === youId
           ? `${name(p.backer)} backs your claim — +${p.vp} VP`

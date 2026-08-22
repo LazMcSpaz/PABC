@@ -14,30 +14,42 @@
 // side effect of strategicValue ordering. All four capitals are deliberately
 // the same tier (see LOCATIONS below), so nobody opens ahead on garrison,
 // chip slots, production or VP.
+//
+// `unitNames` is the formation roster a faction musters from — setup.js walks
+// it in order, so a faction's units come up named rather than as
+// "<Faction> unit", which is what every unit in the game was called. The four
+// major rosters are the authored ones from content/unit-names.csv (that sheet
+// is legacy and was wired to nothing); the minors' are written to the same
+// brief. Cycling past the end suffixes a numeral rather than repeating a name
+// outright.
 export const FACTIONS = {
   versari: {
     id: "versari", name: "Versari Korad", color: "#3a7d44", affiliatedLocations: ["korad", "dambar", "runaway"], capital: "korad",
     tier: "major", scope: "global", playable: true,
     temperament: "schemer", aggression: 0.4, trust: 0.55, grudge: 0.4, sociability: 0.8,
     victoryLean: "diplomacy", expansion: 0.5,
+    unitNames: ["Adjunct Corps", "Retrieval Units", "Dambaran Blades", "Korad Envoys"],
   },
   goldgrass: {
     id: "goldgrass", name: "Goldgrass Coalition", color: "#d8a72b", affiliatedLocations: ["kansit", "omara", "witcha"], capital: "kansit",
     tier: "major", scope: "global", playable: true,
     temperament: "pacifist", aggression: 0.1, trust: 0.9, grudge: 0.25, sociability: 0.95,
     victoryLean: "diplomacy", expansion: 0.3,
+    unitNames: ["Grain Guard", "Silo Watch", "Coalition Levies", "Flatland Riders"],
   },
   lakers: {
     id: "lakers", name: "Grand Lakers", color: "#21406e", affiliatedLocations: ["droit", "chigan", "dulut"], capital: "droit",
     tier: "major", scope: "global", playable: true,
     temperament: "warlord", aggression: 0.9, trust: 0.6, grudge: 0.7, sociability: 0.2,
     victoryLean: "conquest", expansion: 0.9,
+    unitNames: ["Shore Crew", "Lake Wardens", "Rekoner Guard", "Iron Fleet Marines"],
   },
   plainers: {
     id: "plainers", name: "Free Plainers", color: "#c43b35", affiliatedLocations: ["tin-town", "the-shelf", "linkin"], capital: "tin-town",
     tier: "major", scope: "global", playable: true,
     temperament: "opportunist", aggression: 0.5, trust: 0.3, grudge: 0.3, sociability: 0.65,
     victoryLean: "opportunist", expansion: 0.6,
+    unitNames: ["Dustriders", "Scrap Runners", "Flatwind Raiders", "Shortgrass Rovers"],
   },
 };
 
@@ -48,6 +60,14 @@ export const FACTIONS = {
 // kin (warm) | rival (cold) | foil (wary) seeds default standing toward
 // the associated major. Not added to FACTIONS so the default 4-major
 // headless game (Object.keys(FACTIONS)) is unchanged.
+//
+// `homeLocation` is optional and names the Location a minor actually holds
+// in the fiction. A minor that declares one seats THERE whenever that
+// Location made the board and nobody already holds it; the others (and this
+// one, when its home is off a small board) fall back to the proximity rule
+// in setup.js. Only the Dambarans have one so far: they hold Dambar, and
+// seating them at whatever neutral happened to sit nearest the Versari put
+// them in a random city while their own stood empty.
 export const MINOR_FACTIONS = {
   tempest: {
     id: "tempest", name: "Clan Tempest", color: "#4a6fa5",
@@ -55,6 +75,7 @@ export const MINOR_FACTIONS = {
     associatedMajor: "lakers", relationship: "rival",
     temperament: "warlord", aggression: 0.8, trust: 0.6, grudge: 0.7, sociability: 0.2,
     victoryLean: "conquest", expansion: 0.55,
+    unitNames: ["Storm Crew", "Tempest Outriders", "Squall Wardens", "Breakwater Hands"],
   },
   croppers: {
     id: "croppers", name: "The Croppers", color: "#c9b24e",
@@ -62,6 +83,7 @@ export const MINOR_FACTIONS = {
     associatedMajor: "goldgrass", relationship: "kin",
     temperament: "pacifist", aggression: 0.12, trust: 0.85, grudge: 0.25, sociability: 0.8,
     victoryLean: "economy", expansion: 0.3,
+    unitNames: ["Threshers", "Field Hands", "Harvest Guard", "Furrow Watch"],
   },
   steeltraders: {
     id: "steeltraders", name: "The Steel Traders", color: "#a8584f",
@@ -69,13 +91,15 @@ export const MINOR_FACTIONS = {
     associatedMajor: "plainers", relationship: "rival",
     temperament: "opportunist", aggression: 0.55, trust: 0.3, grudge: 0.35, sociability: 0.5,
     victoryLean: "conquest", expansion: 0.5,
+    unitNames: ["Caravan Guard", "Ledger Men", "Tariff Enforcers", "Road Factors"],
   },
   dambarans: {
     id: "dambarans", name: "The Dambarans", color: "#5fa06e",
     tier: "minor", scope: "local", playable: false,
-    associatedMajor: "versari", relationship: "foil",
+    associatedMajor: "versari", relationship: "foil", homeLocation: "dambar",
     temperament: "honorable", aggression: 0.45, trust: 0.92, grudge: 0.5, sociability: 0.5,
     victoryLean: "conquest", expansion: 0.4,
+    unitNames: ["Old Dambar Line", "Archive Guard", "Terrace Watch", "Signal Corps"],
   },
 };
 
@@ -94,23 +118,29 @@ export function factionDef(fid) {
 // Total board VP = 3·1 (med) + 5·2 (high) + 2·3 (veryHigh) = 19, so
 // the win threshold of 12 needs a little under two-thirds of the map.
 // (Was 18 before Tin Town was promoted to high as the Plainers capital.)
+// `flavour` and `basis` are the authored lines from content/locations.csv —
+// a sheet that, like unit-names.csv before it, was wired to nothing: nineteen
+// cities on the board and not a word of the prose written for them reaching a
+// player. Folded in here so the registry stays the single source the adapter
+// reads. Only the ten Locations that sheet covers carry them; the nine third
+// homes and outposts added later have none written yet and render without.
 export const LOCATIONS = {
-  korad: { id: "korad", name: "Korad", strategicValue: "high", affiliation: "versari", production: [3, 3], vpReward: 2 },
-  dambar: { id: "dambar", name: "Dambar", strategicValue: "veryHigh", affiliation: "versari", production: [4, 5], vpReward: 3 },
-  kansit: { id: "kansit", name: "Kansit", strategicValue: "high", affiliation: "goldgrass", production: [3, 3], vpReward: 2 },
-  omara: { id: "omara", name: "Omara", strategicValue: "medium", affiliation: "goldgrass", production: [2, 3], vpReward: 1 },
-  chigan: { id: "chigan", name: "Chigan", strategicValue: "veryHigh", affiliation: "lakers", production: [4, 5], vpReward: 3 },
-  droit: { id: "droit", name: "Droit", strategicValue: "high", affiliation: "lakers", production: [3, 3], vpReward: 2 },
-  "the-shelf": { id: "the-shelf", name: "The Shelf", strategicValue: "high", affiliation: "plainers", production: [3, 4], vpReward: 2 },
+  korad: { id: "korad", name: "Korad", strategicValue: "high", affiliation: "versari", production: [3, 3], vpReward: 2, basis: "Boulder, CO", flavour: "Where the Versari keep their best work and their worst secrets." },
+  dambar: { id: "dambar", name: "Dambar", strategicValue: "veryHigh", affiliation: "versari", production: [4, 5], vpReward: 3, basis: "Denver, CO", flavour: "The continent's brain. It knows this about itself." },
+  kansit: { id: "kansit", name: "Kansit", strategicValue: "high", affiliation: "goldgrass", production: [3, 3], vpReward: 2, basis: "Kansas City", flavour: "Every trade route on the plains runs through here eventually. The city charges accordingly." },
+  omara: { id: "omara", name: "Omara", strategicValue: "medium", affiliation: "goldgrass", production: [2, 3], vpReward: 1, basis: "Omaha", flavour: "Far enough north to feel the Laker wind. Close enough to Dambar to feel the other kind." },
+  chigan: { id: "chigan", name: "Chigan", strategicValue: "veryHigh", affiliation: "lakers", production: [4, 5], vpReward: 3, basis: "Chicago", flavour: "The factories never fully stopped. Neither did the people who depend on them." },
+  droit: { id: "droit", name: "Droit", strategicValue: "high", affiliation: "lakers", production: [3, 3], vpReward: 2, basis: "Detroit", flavour: "Whoever holds the straits holds the conversation between east and west." },
+  "the-shelf": { id: "the-shelf", name: "The Shelf", strategicValue: "high", affiliation: "plainers", production: [3, 4], vpReward: 2, basis: "New settlement", flavour: "Someone built here because it was defensible. Someone else is always trying to prove them wrong." },
   // The four capitals -- korad, kansit, droit, tin-town -- are deliberately
   // identical: all `high` (same garrison, chip slots and VP) and all with a
   // FIXED production of 3 rather than a [3,4] roll, so every faction's opening
   // is the same rather than merely the same in expectation. Tin Town was
   // raised medium -> high to join them. Non-capital Locations keep their
   // ranges.
-  "tin-town": { id: "tin-town", name: "Tin Town", strategicValue: "high", affiliation: "plainers", production: [3, 3], vpReward: 2 },
-  concordan: { id: "concordan", name: "Concordan", strategicValue: "medium", affiliation: null, production: [2, 3], vpReward: 1 },
-  erport: { id: "erport", name: "Erport", strategicValue: "medium", affiliation: null, production: [2, 3], vpReward: 1 },
+  "tin-town": { id: "tin-town", name: "Tin Town", strategicValue: "high", affiliation: "plainers", production: [3, 3], vpReward: 2, basis: "New settlement", flavour: "It looks like nothing. That's the first mistake people make about it." },
+  concordan: { id: "concordan", name: "Concordan", strategicValue: "medium", affiliation: null, production: [2, 3], vpReward: 1, flavour: "Unaffiliated by choice" },
+  erport: { id: "erport", name: "Erport", strategicValue: "medium", affiliation: null, production: [2, 3], vpReward: 1, flavour: "The last stop before open water. Or the first" },
 
   // Third homes — one per faction, so the group stays a whole fairness group
   // (board.js generateLayout admits them all or none).
@@ -187,7 +217,6 @@ export const CHIPS = {
   broadcast: { id: "broadcast", name: "Broadcast", kind: "location", slots: 1, techLevel: 2, cost: 7, localInfluence: 2, influenceRange: 1, buildCost: 7, loyaltyReq: 3, desc: "+2 Influence and +1 Influence range" },
   "civic-hall": { id: "civic-hall", name: "Civic Hall", kind: "location", slots: 1, techLevel: 2, cost: 5, loyaltyRise: 1, noLoyaltyDecay: true, buildCost: 5, loyaltyReq: 3, desc: "Loyalty rises +1 extra while garrisoned and never decays while neglected" },
   // --- location chips: utility ---
-  "recon-team": { id: "recon-team", name: "Recon Team", kind: "location", slots: 1, techLevel: 1, cost: 3, buildCost: 3, loyaltyReq: 0, encounterRedraws: 1, desc: "Discard a drawn encounter and draw again" },
   "logistics-hub": { id: "logistics-hub", name: "Logistics Hub", kind: "location", slots: 2, techLevel: 3, cost: 12, buildCost: 12, loyaltyReq: 6, upkeep: 1, actionBonus: 1, desc: "+1 Action each turn (rare, 2-slot; upkeep 1)" },
   // --- blockade chips (docs/rail-road-blockade-design.md §3.2) ---
   // kind "blockade" installs into a COMPLETED blockade, never a Location or a
@@ -244,7 +273,6 @@ export const CHIP_SKINS = {
   beacon: { versari: "Wire Service", goldgrass: "Market Fair", lakers: "Radio Tower", plainers: "Circuit Riders" },
   broadcast: { versari: "Signal Authority", goldgrass: "County Fair", lakers: "Clear Channel", plainers: "Camp Meeting" },
   "civic-hall": { versari: "The Ministry", goldgrass: "Grange Hall", lakers: "Company Store", plainers: "Watering Hole" },
-  "recon-team": { versari: "Field Agents", goldgrass: "Town Criers", lakers: "Block Captains", plainers: "Trail Scouts" },
 };
 
 // Resolve a chip's display name for a faction — the skin if one exists,
@@ -273,6 +301,21 @@ export function chipBlocksRail(chipId) {
 export const CAPITAL = {
   id: "capital", name: "Capital", kind: "location", slots: 1, special: true,
   desc: "Decay-immune; +2 garrison Strength, +2 scrap production",
+  // Placed at setup, destroyed when the Location falls (contest.js
+  // captureLocation) — and REBUILDABLE, once, by a faction that still holds
+  // ground but has no seat left anywhere. Losing your capital is meant to be a
+  // catastrophe, not an amputation.
+  //
+  // Priced at 12: the most expensive thing in the game (level with `bombard`
+  // and `landship`), so re-seating costs a full late-game build and can never
+  // be a casual move. Deliberately NOT gated on tech or Loyalty — a faction
+  // that has just lost its capital is precisely the one least able to clear a
+  // tech bar or hold a freshly-taken city at high Loyalty, and a recovery
+  // option that only the strong can take is not a recovery option.
+  //
+  // The "no capital anywhere" condition is what stops this being a relocation
+  // tool: you cannot move your seat to a safer city while you still have one.
+  buildCost: 12, techLevel: 1, loyaltyReq: 0,
 };
 
 // Look up the definition behind a chip instance — covers both the

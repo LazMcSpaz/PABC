@@ -16,7 +16,7 @@ aren't.
 | 2.2 Rail production pooling | built | `economy.js railPoolRecipient` |
 | Rail as a trade route | built | `diplomacy.js tradeRouteOpen` |
 | 2.3 Rail access | built (held stations + granted) | `movement.js unitRailEdges` |
-| 2.4 Rail generation | built (capital spanning tree) | `board.js assignRails` |
+| 2.4 Rail generation | built (spanning tree over `CONFIG.rail.hubTiers`) | `board.js assignRails` |
 | — No terminus at sign-named towns | built | `content.js noRailTerminus`, `setup.js railHubs` |
 | 3.1 Blockade construction | built | `blockades.js`, `actions.js build-blockade` |
 | 3.2 Once complete | built, chips included | `blockades.js`, `contest.js`, `visibility.js` |
@@ -59,12 +59,21 @@ hold, the priority toggle only while a blockade is actually being funded.
 `scripts/check-pooling-ui.mjs` drives a real browser and asserts a click
 changes engine state, not just the DOM.
 
-Worth knowing: **rail is a spanning tree over CAPITALS, and a faction starts
-holding exactly one**, so nobody has a legal pool pair at turn 1. Pooling only
-becomes reachable once you take a second capital. That is why the control was
-never missed — there was nothing to show. If pooling is meant to be an
-early-game tool it needs either non-capital rail termini or a rule change
-letting an ally's station receive (today §2.2 requires you hold both).
+**Where the stations are decides whether pooling is reachable at all**, and
+until 2026-08-20 the answer was "barely". Rail was a spanning tree over the
+four CAPITALS and nothing else, so the only way to hold both ends of a link
+was to take an enemy capital — the hardest target in the game. The control was
+never missed because there was nothing to show.
+
+Rail now stops at every settlement in `CONFIG.rail.hubTiers` (`high` and
+`veryHigh` — 11 of the 19-Location roster). A faction still starts holding
+exactly one city, so **there is still no legal pool pair on turn 1** — that
+follows from the one-city start, not from the rail map, and no rail topology
+can change it. What changed is what you have to take: every faction now has
+one or two *neutral* stations one or two hexes from its capital, so pooling
+opens by taking a nearby unheld city rather than by storming a rival's seat.
+On seed 424242/medium: Versari has Dambar 1 hex out, Lakers has Chigan 1 hex
+out, Goldgrass has Witcha at 2, Plainers has The Shelf at 2 — all neutral.
 
 "Cut" has one definition across all four systems that ask the question —
 rail's line-cut check, blockade construction supply, blockade funding, and
@@ -76,18 +85,26 @@ faction: a trading pact has two, and neither of them cuts its own route.
 whom is a diplomacy question, not a movement one) and are re-exported from
 `movement.js`, where every mover already looks for them.
 
-### Trading pacts route by rail
+### Trading pacts route between the two powers, not between two capitals
 
-A trading pact needs a capital-to-capital route. It used to accept only an
-overland corridor (`reinforcementRoute`), which meant a pact could collapse for
-want of a footpath while a railway ran between the two cities — rail is
-generated as a spanning tree over the CAPITALS, so it is literally the artery
-between the two a pact joins. `tradeRouteOpen` now accepts either.
+A trading pact used to demand a clear **capital-to-capital** route. That is a
+statement about two specific hexes rather than about whether the two powers can
+reach each other: two neighbours whose border towns shared a railway could not
+trade if their capitals sat at opposite ends of the map, and a pact died the
+moment either capital was cut off however well-connected the rest of both
+countries were. It also refused a faction that held three cities but had lost
+its seat.
+
+`tradeRouteOpen` now asks whether **any city one holds can reach any city the
+other holds**, overland or by rail, and returns the pair it found rather than a
+bare boolean — the map draws the line between the two cities actually carrying
+the trade. The gate on forming one is "both parties hold somewhere", not "both
+parties hold a Capital".
 
 Rail is not a free pass: a line is a real sequence of hexes, so a hostile third
-party standing anywhere along it severs that link, and a severed link can
-isolate a capital even though the track is still there. That is what keeps a
-railed pact worth attacking.
+party standing anywhere along it severs that link, and a severed link can cut
+a city off even though the track is still there. That is what keeps a railed
+pact worth attacking.
 
 ### Rail never terminates at a sign-named settlement
 
@@ -127,6 +144,34 @@ Three things read `hasRailAccess`:
 - **Pooling is deliberately NOT included** — §2.2 still requires you hold both
   stations. Sharing a rival's track is commerce; pooling your industrial output
   into their city is not the same promise.
+
+### §3.1 as built — one blockade per road, facing home
+
+A hex holds one blockade **per road leaving it**, not one blockade. A tile the
+road runs straight through takes two; a T-junction takes three; a dead end
+takes one. The capacity is the shape of the road network at that hex, because
+what you are closing is a road — a tile cannot hold more barricades than it has
+ways out.
+
+Records are keyed `hex|edge`, the edge being the neighbour the road runs
+toward. `blockadeAt(state, hex)` still answers with one of them, which is the
+whole question for every caller that only asks whether the tile is held;
+`blockadesOn` returns the set.
+
+**Which road a blockade takes is not a free choice.** It stands on the road
+facing its owner's nearest settlement — the first step of the same supply path
+§3.4 already computes. Anywhere else and a rival could build on the same hex
+*between* your barricade and your own settlement, sitting on the supply line
+behind the thing you built to protect it. Facing home also separates rivals
+naturally: two factions blockading one junction take different roads, because
+their settlements lie in different directions. If the home road is already
+closed, the build falls back to any free road rather than failing.
+
+**Blocking stays per hex.** Part 1 makes a blockade a garrison holding a tile,
+not a gate on one border, and movement halts a mover entering the hex. Two
+blockades on a junction therefore make it harder to CLEAR rather than
+differently shaped: each is separately contestable, separately upgraded and
+separately paid for, and a contest brings down one of them, not all.
 
 ### The blockade UI — a place, not a unit ability
 
@@ -292,10 +337,16 @@ any faction's units benefit, not just whoever's territory it's in. A rail line
 with the same effect would just be road reskinned.
 
 (At the time this was written a road *negated* terrain outright — 1 MP to
-enter, never halting, through mountain and forest alike. It now HALVES the
-toll instead: forest 1 rather than 2, mountain 2 and no halt rather than a
-dead stop. A road that made a mountain cost the same as open grass had
-removed the mountain from the game, and roads reach a third of the board.)
+enter, never halting, through mountain and forest alike. Two changes have
+since landed on top of each other, and both survived because they are about
+different ground. A road HALVES a rough crossing rather than waiving it —
+forest 1 rather than 2, mountain 2 and no halt rather than a dead stop —
+because a road that made a mountain cost the same as open grass had removed
+the mountain from the game, and roads reach a third of the board. And on EASY
+ground a graded surface, road *or* rail, costs half a hex — see §2.5 — because
+that is where a lane is actually a lane. What still separates rail from road
+is the station hop, running rights, and production pooling, none of which road
+has.)
 
 **Rail is NOT player-built.** An earlier pass in this doc differentiated rail
 by making it something a faction constructs and owns; that is overruled. Rail
@@ -401,8 +452,10 @@ still matters the same way it already does everywhere else.
 ### 2.1 Instant unit transport
 
 - A rail hop between two directly rail-linked hexes costs a flat 1 movement
-  point (matching road's per-hex cost-1 pattern), regardless of the
-  geographic distance between the two endpoints.
+  point, regardless of the geographic distance between the two endpoints.
+  (Written when road cost 1 per hex, so the hop was "one hex's worth". Road
+  and rail hexes now cost half a hex — §2.5 — so the hop is worth two hexes
+  of walking, and only pays from a three-hex link upward.)
 - Endpoint-to-endpoint only — a unit must be standing exactly on a
   rail-linked hex to use it, no "boarding mid-route."
 - **Chainable through hub links** (A↔B and B↔C both built): proposed to work
@@ -477,18 +530,86 @@ There is no requirement to hold the hexes a line passes through — ZoC drifts
 constantly at runtime and that would make rail absurdly fragile. The only
 ongoing vulnerability is the per-hex blockade-interruption check (2.1).
 
-**Open: which settlement pairs get track.** Roads now connect every settlement
-to its nearest one or two neighbours, so rail must be much sparser or it adds
-nothing. Candidates, not yet decided:
+**Decided 2026-08-20: value-gated.** Roads connect every settlement to its
+nearest one or two neighbours, so rail has to be much sparser or it adds
+nothing — but capital↔capital only, which is what shipped first, was too
+sparse in a way that broke things downstream. It gave every board the same
+three links whether the map was 30 hexes or 127 and whether it seated ten
+cities or nineteen, and because a faction starts holding one city it meant no
+station pair was ever holdable without taking a rival's seat (see §2.2).
 
-- capital ↔ capital only (4 lines, one per faction pair — very legible, very
-  strategic, and immediately meaningful because capitals are fixed);
-- the *longest* settlement pairs, so rail is specifically the thing that
-  crosses distance road handles badly;
-- value-gated — only `veryHigh`/`high` Locations get a station.
+A trunk line stops at the big places. `CONFIG.rail.hubTiers` is the band —
+`["high", "veryHigh"]`, which is 11 of the 19-Location roster — and the
+spanning tree runs over whichever of those are actually seated. Every capital
+is `high`, so all four remain on the line; sign-named settlements are excluded
+separately (`noRailTerminus`). Rail now scales with the board: 3 links at the
+sparsest density, 6 in the middle, 10 on a full 19-city map.
 
-Whichever it is, it wants a `CONFIG.rail` knob for the count, the same way
-`CONFIG.roads.linksByValue` controls road density.
+The rejected alternative was *longest pairs* — rail as specifically the thing
+that crosses distance road handles badly. It is a good instinct and it stays
+available as a second knob if the trunk turns out too dense, but "the main
+line serves the major cities" is the more legible rule and it is the one that
+makes station ownership a live question early.
+
+### 2.5 Per-hex movement cost — decided 2026-08-20
+
+**A road or rail hex costs half a hex to enter** (`CONFIG.movement.pavedCost
+= 0.5`). A column that stays on the network covers twice the ground: 2
+Movement is two hexes cross-country and **four** down a lane.
+
+That is the rule on EASY ground, and it applies to road and rail alike — both
+are surfaces somebody levelled before the collapse, so both are quick to march
+down and neither halts you. A cutting through a mountain is a cutting whether
+it carries sleepers or tarmac.
+
+**But a lane is not a bulldozer.** Merged 2026-08-21 with "roads ease terrain
+instead of deleting it", which landed on main in parallel and argued the
+opposite case about rough ground — correctly. Both rules stand, because they
+are about different ground:
+
+| ground | unpaved | paved |
+|---|---|---|
+| open | 1 | **`pavedCost` (0.5)** |
+| forest | `forestCost` (2) | `roadForestCost` (1) |
+| mountain | 1 **and halts** | `roadMountainCost` (2), no halt |
+
+So a lane across the plains carries you twice as far, and a road over a pass
+still gets you over the pass and no further. Corridors are routed AROUND rough
+ground anyway (`assignRoads`), so the crossings are rare — high ground on about
+one board in thirty. A toll (`MOVE_TAX`) rides on top and is not absorbed by
+the surface, whatever the ground.
+
+It **replaces** `roadStartBonus` (+1 Movement for beginning the turn on a
+road), which was a patch for the same complaint — roads otherwise differed
+from open ground only on the map's few forest/mountain hexes — but paid out
+whether or not you then used the road, and made a one-hex spur worth exactly
+as much as a highway. Paying per hex travelled fixes both.
+
+**How this sits against the station hop (§2.1).** They are different things
+and both survive. The hop is a property of the LINK and skips the ground
+between entirely at a flat `CONFIG.rail.hopCost` (1); the half-hex is a
+property of the HEXES a line occupies. So walking a link costs 0.5 per hex
+and the hop costs 1 flat: a two-hex link is a wash, and the hop only starts
+paying from three hexes out. That is the right shape — the hop is for
+distance, which is exactly what it was for.
+
+It also gives the network a third job. Rail was already worth holding (the
+hop) and worth cutting (per-hex interruption); now the track itself is worth
+marching along even by a faction with no running rights, because unheld
+track is nobody's to close.
+
+**Measured**, 15 AI-only games, same seeds, only `pavedCost` varying:
+
+| `pavedCost` | unresolved | median length | range |
+|---|---|---|---|
+| 1 (control) | 1/15 | 26 rounds | 12–272 |
+| **0.5 (shipped)** | **0/15** | **17 rounds** | **9–121** |
+
+Armies that can actually reach each other stop circling: the long tail of
+unresolved games goes away and the median game gets about a third shorter.
+Fifteen seeds is a small sample and this is not a law, but it is a real
+isolated signal, and it lands on the "post-self-contest-fix the AI is more
+stalemate-prone" debt from the playtest findings without touching the AI.
 
 ## Part 3 — The Blockade structure
 

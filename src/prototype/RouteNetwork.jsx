@@ -33,6 +33,8 @@ import { useMemo } from "react";
 import { buildRouteNetwork } from "./routeGeometry.js";
 import { LOD_FLAT, useBoardLod } from "./boardLod.js";
 import BlockadeMark from "./BlockadeMark.jsx";
+import { blockadeStance } from "./blockadeStance.js";
+import { structureFor } from "./unitSprites.js";
 
 // Each route is a STACK of strokes rather than a single line, widest first.
 // One flat stroke is what made these read as clip-art laid over the board: the
@@ -122,7 +124,34 @@ function Route({ d, spec }) {
   );
 }
 
-export default function RouteNetwork({ rows, hexes, centers, width, height }) {
+// The route network, memoised on what it actually depends on.
+//
+// Exported because the blockade sprites need the same road nodes to stand on,
+// and building the network twice a render would put the chain walk and the
+// curve fitting back on the hot path. HexBoard3D builds it once and hands it to
+// both layers.
+export function useRouteNetwork(rows, hexes, centers) {
+  // The board object is rebuilt on every tick, so `hexes` is a new reference
+  // several times a turn while the network under it changes perhaps twice a
+  // game. Hashing what this actually depends on — who carries a route, and
+  // which ground has been seen — keeps the work off the hot path.
+  const signature = useMemo(() => {
+    let s = "";
+    for (const id of Object.keys(hexes)) {
+      const h = hexes[id];
+      if (!h.road && !h.rail) continue;
+      s += `${id}${h.road ? "r" : ""}${h.rail ? "l" : ""}${h.fog === "unexplored" ? "?" : ""},`;
+    }
+    return s;
+  }, [hexes]);
+  return useMemo(
+    () => buildRouteNetwork(rows, hexes, centers),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [rows, centers, signature],
+  );
+}
+
+export default function RouteNetwork({ rows, hexes, centers, width, height, net: netIn }) {
   // Below the LOD threshold a hex is under ~130px across and a route is a few
   // pixels wide: the soft trough and the screened glow are invisible at that
   // size, and paying a full-screen compositing pass for something nobody can
@@ -136,21 +165,10 @@ export default function RouteNetwork({ rows, hexes, centers, width, height }) {
   // game. Hashing what this actually depends on — who carries a route, and
   // which ground has been seen — keeps the chain walk and the curve fitting off
   // the hot path.
-  const signature = useMemo(() => {
-    let s = "";
-    for (const id of Object.keys(hexes)) {
-      const h = hexes[id];
-      if (!h.road && !h.rail) continue;
-      s += `${id}${h.road ? "r" : ""}${h.rail ? "l" : ""}${h.fog === "unexplored" ? "?" : ""},`;
-    }
-    return s;
-  }, [hexes]);
-
-  const net = useMemo(
-    () => buildRouteNetwork(rows, hexes, centers),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [rows, centers, signature],
-  );
+  // Built here when nobody hands one down, so this component still stands
+  // alone; HexBoard3D passes one so the blockade layer shares it.
+  const built = useRouteNetwork(rows, hexes, centers);
+  const net = netIn || built;
 
   // Blockades sit ON the road network, so they are drawn with it rather than in
   // the tile layer — which also means they survive the zoom-out unchanged
@@ -158,9 +176,25 @@ export default function RouteNetwork({ rows, hexes, centers, width, height }) {
   // A blockade sits ON the road, so it takes its place and its bearing from
   // the road's own geometry rather than from the hex centre — which is no
   // longer where the road runs.
-  const blockades = Object.values(hexes)
-    .filter((h) => h.blockade && centers[h.id])
-    .map((h) => ({ hex: h, at: net.road.nodes?.[h.id] || { ...centers[h.id], angle: 0 } }));
+  //
+  // A hex holds one blockade per road leaving it, so each takes its stance from
+  // its OWN road rather than from the hex's node: two barricades on a junction
+  // would otherwise stack on the same point at the same angle. A finished
+  // blockade with art is drawn by BlockadeSprites instead; what stays here is
+  // the construction site, whose whole job is to show progress, and any faction
+  // without blockade art.
+  const blockades = [];
+  for (const h of Object.values(hexes)) {
+    if (!centers[h.id]) continue;
+    for (const b of h.blockades || []) {
+      if (b.done && structureFor(b.owner, "tollbooth")) continue;
+      blockades.push({
+        hex: h,
+        blockade: b,
+        at: blockadeStance(h.id, b.edge, net.road.nodes, centers),
+      });
+    }
+  }
   const kinds = [["road", net.road.d], ["rail", net.rail.d]].filter(([, d]) => d);
   if (!kinds.length && !blockades.length) return null;
 
@@ -194,13 +228,13 @@ export default function RouteNetwork({ rows, hexes, centers, width, height }) {
             </g>
           );
         })}
-        {blockades.map(({ hex, at }) => (
+        {blockades.map(({ hex, blockade, at }) => (
           <BlockadeMark
-            key={`blockade-${hex.id}`}
+            key={`blockade-${hex.id}-${blockade.edge || "0"}`}
             x={at.x}
             y={at.y}
             angle={at.angle}
-            blockade={hex.blockade}
+            blockade={blockade}
           />
         ))}
       </svg>
@@ -252,13 +286,13 @@ export default function RouteNetwork({ rows, hexes, centers, width, height }) {
           a unit standing at a blockade reads in front of it. */}
       {blockades.length > 0 && (
         <svg width={width} height={height} style={layer({ zIndex: 8010 })}>
-          {blockades.map(({ hex, at }) => (
+          {blockades.map(({ hex, blockade, at }) => (
             <BlockadeMark
-              key={`blockade-${hex.id}`}
+              key={`blockade-${hex.id}-${blockade.edge || "0"}`}
               x={at.x}
               y={at.y}
               angle={at.angle}
-              blockade={hex.blockade}
+              blockade={blockade}
             />
           ))}
         </svg>

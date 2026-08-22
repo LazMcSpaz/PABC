@@ -164,8 +164,10 @@ const blockade = await page.evaluate(() => {
   if (!hex) return null;
   g.world = g.world || {};
   g.world.blockades = g.world.blockades || {};
-  g.world.blockades[hex] = {
-    hex, owner: me, done: true, paid: true, progress: 4, cost: 4, chips: [], builder: null,
+  // Keyed `hex|edge`: a hex holds one blockade per road leaving it.
+  const edge = (g.board.adjacency[hex] || []).find((n) => g.board.hexes[n]?.road) || null;
+  g.world.blockades[`${hex}|${edge}`] = {
+    hex, edge, owner: me, done: true, paid: true, progress: 4, cost: 4, chips: [], builder: null,
   };
   window.__ashlandBump?.();
   return hex;
@@ -177,15 +179,23 @@ const marks = await page.evaluate(() => {
     const z = getComputedStyle(el).zIndex;
     return z === "auto" ? null : Number(z);
   };
-  // The blockade mark is the only <rect> in the route-range svgs.
+  // A FINISHED blockade draws as a tollbooth sprite in its own HTML layer;
+  // only a construction site still uses the SVG mark, whose rects are the only
+  // ones in the route-range svgs. Accept either, since both are "the blockade".
+  const sprite = document.querySelector("[data-blockade-sprite]");
+  if (sprite) {
+    let layer = sprite.parentElement;
+    while (layer && zOf(layer) == null) layer = layer.parentElement;
+    if (layer) return [{ z: zOf(layer), kind: "sprite" }];
+  }
   const svgs = [...document.querySelectorAll("svg")].filter((el) => {
     const z = zOf(el);
     return z != null && z >= 7000 && z < 9000 && el.querySelectorAll("rect").length > 0;
   });
-  return svgs.map((el) => ({ z: zOf(el), rects: el.querySelectorAll("rect").length }));
+  return svgs.map((el) => ({ z: zOf(el), rects: el.querySelectorAll("rect").length, kind: "mark" }));
 });
 check("a blockade renders", blockade != null && marks.length > 0,
-  blockade ? `on ${blockade}` : "no road hex found");
+  blockade ? `on ${blockade}${marks.length ? ` (${marks[0].kind})` : ""}` : "no road hex found");
 if (marks.length) {
   check("the blockade draws ABOVE both route layers",
     marks[0].z > Math.max(...[...troughs, ...lights].map((s) => s.z)),
@@ -204,12 +214,17 @@ for (let i = 0; i < 6; i++) {
 await page.waitForTimeout(600);
 const zoomed = await page.evaluate(() => {
   const zOf = (el) => { const z = getComputedStyle(el).zIndex; return z === "auto" ? null : Number(z); };
-  let lines = 0;
+  // Routes are fitted curves now, not segment lists, so they are <path>
+  // elements. Count both: the rail ties and the blockade uprights are still
+  // lines, and either kind means the network drew something.
+  let strokes = 0;
   for (const el of document.querySelectorAll("svg")) {
     const z = zOf(el);
-    if (z != null && z >= 7000 && z < 9000) lines += el.querySelectorAll("line").length;
+    if (z != null && z >= 7000 && z < 9000) {
+      strokes += el.querySelectorAll("path, line").length;
+    }
   }
-  return lines;
+  return strokes;
 });
 check("routes still render at the flat level of detail", zoomed > 0, `${zoomed} strokes`);
 await page.screenshot({ path: `${OUT}/board-layers-zoomed.png` });

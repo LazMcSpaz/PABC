@@ -12,8 +12,9 @@ import { recomputeStats, recomputeResearch, citadelGarrison, effectiveVeteran } 
 import { recomputeInfluence } from "./influence.js";
 import { recomputeVisibility, recomputeVisibilityFor, isUnitVisibleTo } from "./visibility.js";
 import { onLocationCaptured, onRaidWon } from "./standing.js";
-import { onAttack } from "./diplomacy.js";
-import { makeUnit } from "./setup.js";
+import { hexIsFull } from "./movement.js";
+import { onAttack, checkDominion, arePacted } from "./diplomacy.js";
+import { makeUnit, nextMusterIndex } from "./setup.js";
 import { TECH_NODES, hasTechNode } from "./tech.js";
 import { destroyPost } from "./posts.js";
 import { blockadeAt, blockadeDefense, destroyBlockade } from "./blockades.js";
@@ -38,10 +39,61 @@ function unitChipStrength(state, u) {
   return n;
 }
 
+// --- allied stacks -----------------------------------------------------
+//
+// Until now every "who is on my side" test in this file was `u.owner === pid`,
+// so a unit belonging to anyone else standing on the hex was neither attacker
+// nor defender — it simply did not exist for combat purposes. **"Fight
+// alongside an ally" had no representation in the combat model at all.** It
+// surfaced on a quest where a third faction joins your siege, but the hole is
+// general.
+//
+// `owners` is therefore a SET of factions fighting on one side, and every
+// stack query below takes one. A bare pid still works — `ownerSet` normalises
+// it — so every existing call site is unchanged.
+//
+// **A pact means you fight together.** Design ruling: an ally's units count as
+// your own for Strength purposes, automatically — not only when a caller
+// remembers to ask.
+//
+// That carries one hazard worth naming at the definition site, because it is
+// the failure mode this codebase keeps producing: if the pre-commit ESTIMATE
+// and the RESOLUTION disagree about who is on your side, the AI evaluates one
+// fight and fights a different one, systematically. `acceptableOdds` gates
+// every AI attack on `previewAttackerStrength`, and `runContest` resolves it.
+//
+// They cannot diverge, by construction: both build their side with this one
+// function, so the ally set is computed once and the same way. Do not
+// reintroduce a second path that assembles a side by hand.
+function ownerSet(owner) {
+  return owner instanceof Set ? owner : new Set([owner]);
+}
+
+/** Factions formally pacted with `pid`. Offered as the natural `allies` source. */
+export function pactedAllies(state, pid) {
+  return Object.keys(state.players || {}).filter(
+    (f) => f !== pid && arePacted(state, pid, f));
+}
+
+/**
+ * The set fighting on `pid`'s side: `pid`, every faction formally pacted with
+ * it, plus any explicitly named extras (a quest ally who is not on a treaty).
+ *
+ * The single source of truth for "who is with me" — preview and resolution
+ * both call it, which is what keeps an AI's estimate honest.
+ */
+export function combatSide(state, pid, allies = null) {
+  const set = new Set([pid]);
+  for (const f of pactedAllies(state, pid)) set.add(f);
+  for (const f of allies || []) if (f && state.players?.[f]) set.add(f);
+  return set;
+}
+
 function stackChipStrength(state, owner, hex) {
+  const owners = ownerSet(owner);
   let n = 0;
   for (const u of Object.values(state.units)) {
-    if (u.owner !== owner || u.node !== hex) continue;
+    if (!owners.has(u.owner) || u.node !== hex) continue;
     n += unitChipStrength(state, u);
   }
   return n;
@@ -79,9 +131,10 @@ function defendingUnit(state, loc) {
 // Stacked units fight as one: their strengths sum (the Concentration
 // bonus is added on top of this, separately).
 function stackStrength(state, owner, hex) {
+  const owners = ownerSet(owner);
   let s = 0;
   for (const u of Object.values(state.units)) {
-    if (u.owner === owner && u.node === hex) s += u.strength;
+    if (owners.has(u.owner) && u.node === hex) s += u.strength;
   }
   return s;
 }
@@ -90,9 +143,10 @@ function stackStrength(state, owner, hex) {
 // stacked on `hex`, excluding `excludeUid` (the contesting / defending
 // unit itself).
 function concentration(state, owner, hex, excludeUid) {
+  const owners = ownerSet(owner);
   let n = 0, banners = 0, capRaise = 0;
   for (const u of Object.values(state.units)) {
-    if (u.owner !== owner || u.node !== hex) continue;
+    if (!owners.has(u.owner) || u.node !== hex) continue;
     // War Banner: every banner in the stack (the contesting unit's own
     // included) counts as an extra body and raises the stack's cap.
     for (const c of u.chips) {
@@ -110,27 +164,34 @@ function concentration(state, owner, hex, excludeUid) {
 // `hexId` plus its Concentration bonus — what the attacker brings before
 // the d6. Used both by the UI (pre-contest odds) and by the AI (EV-gating
 // whether to pick a fight at all) — no dice, no mutation.
-export function previewAttackerStrength(state, hexId, ownerId) {
-  let strength = stackStrength(state, ownerId, hexId);
+export function previewAttackerStrength(state, hexId, ownerId, { allies = null } = {}) {
+  const owners = combatSide(state, ownerId, allies);
+  let strength = stackStrength(state, owners, hexId);
   // Fortified Ruins on the contested hex — the preview must show the same
   // suppressed number runContest will use.
   const loc = state.locations[hexId];
-  if (loc && loc.controller !== ownerId && abilitySuppressesChips(loc)) {
-    strength -= stackChipStrength(state, ownerId, hexId);
+  if (loc && !owners.has(loc.controller) && abilitySuppressesChips(loc)) {
+    strength -= stackChipStrength(state, owners, hexId);
   }
   const stack = Object.values(state.units).filter(
-    (u) => u.owner === ownerId && u.node === hexId,
+    (u) => owners.has(u.owner) && u.node === hexId,
   );
   const lead = stack.reduce((a, b) => (!a || b.strength > a.strength ? b : a), null);
-  const conc = concentration(state, ownerId, hexId, lead?.uid);
-  return { strength, concentration: conc, units: stack.length, total: strength + conc };
+  const conc = concentration(state, owners, hexId, lead?.uid);
+  return { strength, concentration: conc, units: stack.length, total: strength + conc,
+           allies: [...owners].filter((f) => f !== ownerId) };
 }
 
 // Preview a Location contest's defender side exactly as runContest would
 // resolve it, so callers (UI odds, AI EV-gating) see the true number the
 // attacker must beat — not just the bare garrison. Mirrors defenderValue()
 // + the garrison-only no-die house rule. No dice, no mutation.
-export function previewLocationContest(state, hexId) {
+/**
+ * `attacker` (and its `attackerAllies`) may be named so the preview can apply
+ * the no-double-sides rule below. Omit it and the defence is simply the
+ * controller's whole side.
+ */
+export function previewLocationContest(state, hexId, { attacker = null, attackerAllies = null } = {}) {
   const loc = state.locations[hexId];
   if (!loc) return null;
   const hasNeutral = loc.sections.includes("neutral");
@@ -145,13 +206,33 @@ export function previewLocationContest(state, hexId) {
   // the hex — same gate as defendingUnit(). Stacked defenders fight
   // together: sum the controller's units on the hex (the strongest is the
   // "lead" for display / attrition).
+  // **Who defends a Location: its controller, and the controller's allies.**
+  // Stated explicitly because a hex can hold units of several factions and
+  // the rule was previously implicit in `u.owner === loc.controller`.
+  //
+  // Two edges, both decided here rather than left to emerge:
+  //
+  //   * **Nobody fights on both sides.** A third faction pacted with BOTH the
+  //     attacker and the controller is removed from the defence — the
+  //     attacker brought them, so the attacker keeps them. Without this rule
+  //     such a faction's Strength would be counted twice, once per side.
+  //   * **The lead defender is still the CONTROLLER's strongest unit**, never
+  //     an ally's. Allies add Strength and Concentration; they do not take the
+  //     casualty. Attrition, retreat and veterancy all key off the lead, and
+  //     an ally's unit dying for a Location it does not hold would be a
+  //     surprising consequence of a treaty.
+  const defSide = combatSide(state, loc.controller);
+  if (attacker) {
+    for (const f of combatSide(state, attacker, attackerAllies)) defSide.delete(f);
+    defSide.add(loc.controller); // a controller always defends its own place
+  }
   let defender = null;
   let defenderStack = 0;
   if (!hasNeutral && loc.controller) {
     for (const u of Object.values(state.units)) {
-      if (u.owner !== loc.controller || u.node !== loc.hexId) continue;
+      if (!defSide.has(u.owner) || u.node !== loc.hexId) continue;
       defenderStack += u.strength;
-      if (!defender || u.strength > defender.strength) defender = u;
+      if (u.owner === loc.controller && (!defender || u.strength > defender.strength)) defender = u;
     }
     value += defenderStack;
   }
@@ -161,7 +242,7 @@ export function previewLocationContest(state, hexId) {
     state.board.hexes[hexId]?.terrain === "mountain" ? CONFIG.combat.mountainDefenseBonus : 0;
   let conc = 0, fortify = 0, veteran = 0;
   if (defender) {
-    conc = concentration(state, loc.controller, hexId, defender.uid);
+    conc = concentration(state, defSide, hexId, defender.uid);
     if (defender.fortified) {
       let dug = 0;
       for (const c of defender.chips) {
@@ -187,6 +268,7 @@ export function previewLocationContest(state, hexId) {
       mountain, concentration: conc, fortify, veteran,
       allies: defender ? defenderStack - defender.strength : 0,
     },
+    defendingFactions: [...defSide],
     hasNeutral,
     defenderRollsDie,
   };
@@ -407,7 +489,7 @@ function strandReinforcementsFrom(state, capturedHex) {
     const target = state.units[r.targetUnit];
     const node = target ? target.node : capturedHex;
     const u = state.nextId("unit");
-    state.units[u] = makeUnit(u, r.owner, node, factionDef(r.owner)?.name || r.owner);
+    state.units[u] = makeUnit(u, r.owner, node, factionDef(r.owner)?.name || r.owner, nextMusterIndex(state, r.owner));
     state.units[u].baseStrength = Math.min(CONFIG.unit.baseStrengthCap, r.amount);
     recomputeStats(state);
     emit(state, "reinforcement_arrived", { player: r.owner, unit: u, stranded: true });
@@ -595,6 +677,10 @@ export function loseBaseStrength(state, unitUid, n, killerUid, ctx, note) {
 // hostile player, not a still-garrisoned neutral Location.
 function validRetreatHexes(state, unit) {
   return (state.board.adjacency[unit.node] || []).filter((hex) => {
+    // A full hex has no room for one more, however it is arrived at. Without
+    // this the stacking cap would leak: losing a contest would be a way to put
+    // an eleventh unit on a tile.
+    if (hexIsFull(state, hex, unit.uid)) return false;
     const loc = state.locations[hex];
     if (!loc) return true; // terrain / encounter
     if (loc.controller && loc.controller !== unit.owner) return false;
@@ -632,16 +718,15 @@ function offerRetreat(state, unit, ctx, preferred) {
 }
 
 // A player wins immediately at the VP threshold (§3 / §14.1). Checked
-// after every contest so an Obstacle outcome or capture reward that
-// crosses 12 ends the game at once.
+// after every contest, because taking a city can be the move that leaves every
+// surviving rival your ally, your vassal, or dead.
+//
+// This used to be a VP-threshold check of its own — one of THREE copies of the
+// win condition, each with different rules: this one ignored the setup toggle
+// that was supposed to switch it off, and ignored the major/minor filter the
+// copy in victory.js applied. There is one condition now, in one place.
 function checkVictory(state) {
-  if (state.winnerId) return;
-  for (const p of Object.values(state.players)) {
-    if (p.vp >= CONFIG.vpThreshold) {
-      state.winnerId = p.id;
-      break;
-    }
-  }
+  checkDominion(state);
 }
 
 // --- action handlers (plugged into performAction's dispatcher) -------
@@ -763,28 +848,42 @@ export function runContest(state, { pid, params, ctx = {} }) {
   // §combined-stack rule, kept for back-compat until the per-entity action
   // model lands). Under that model, joining a coalition costs each member
   // its action — charged by the dispatcher, not here.
+  // `params.allies` names other factions fighting on this side — the quest
+  // case is a third faction that joins your siege without being formally
+  // pacted. `pactedAllies(state, pid)` is the natural argument where the
+  // fiction is a treaty; see the note above `pactedAllies` for why this is
+  // not applied automatically.
+  const side = combatSide(state, pid, params.allies);
   const coalition = Array.isArray(params.coalition)
     ? params.coalition
         .map((uid) => state.units[uid])
-        .filter((u) => u && u.owner === pid && u.node === unit.node && u.uid !== unit.uid)
+        .filter((u) => u && side.has(u.owner) && u.node === unit.node && u.uid !== unit.uid)
     : null;
   let atkStrength = coalition
     ? unit.strength + coalition.reduce((n, u) => n + u.strength, 0)
-    : stackStrength(state, pid, unit.node);
+    : stackStrength(state, side, unit.node);
   const atkAllies = atkStrength - unit.strength; // contribution from committed allies
   const fighters = coalition ? [unit, ...coalition] : null;
   const chipsSuppressed = t.kind === "location" && abilitySuppressesChips(t.loc)
     ? (fighters
         ? fighters.reduce((n, u) => n + unitChipStrength(state, u), 0)
-        : stackChipStrength(state, pid, unit.node))
+        : stackChipStrength(state, side, unit.node))
     : 0;
   atkStrength -= chipsSuppressed;
+  // The defender's side, by the same rule the preview states: the defending
+  // unit's owner plus its allies, minus anyone already fighting for the
+  // attacker so nobody is counted twice. Built from `combatSide` — the same
+  // function the attacker's side comes from — so an AI that PREVIEWS a fight
+  // and an engine that RESOLVES it cannot disagree about who is on the field.
+  const defSide = defenderUnit ? combatSide(state, defenderUnit.owner) : new Set();
+  for (const f of side) defSide.delete(f);
+  if (defenderUnit) defSide.add(defenderUnit.owner);
   const defAllies = defenderUnit
-    ? stackStrength(state, defenderUnit.owner, defHex) - defenderUnit.strength
+    ? stackStrength(state, defSide, defHex) - defenderUnit.strength
     : 0;
 
   // §16.6 combat levers — additive modifiers computed before the roll.
-  const atkConcentration = concentration(state, pid, unit.node, unit.uid);
+  const atkConcentration = concentration(state, side, unit.node, unit.uid);
   const atkVeteran = effectiveVeteran(state, unit) ? CONFIG.combat.veteranBonus : 0;
   // Bombard (chip `siege`): a siege piece contesting a LOCATION negates the
   // defence's static bonuses — high ground, dug-in fortify (incl. the
@@ -797,7 +896,7 @@ export function runContest(state, { pid, params, ctx = {} }) {
     state.board.hexes[defHex]?.terrain === "mountain" ? CONFIG.combat.mountainDefenseBonus : 0;
   let defConcentration = 0, defFortify = 0, defVeteran = 0;
   if (defenderUnit) {
-    defConcentration = concentration(state, defenderUnit.owner, defHex, defenderUnit.uid);
+    defConcentration = concentration(state, defSide, defHex, defenderUnit.uid);
     // §17.5 Turrets doubles the fortify bonus for a B1 holder on its own hex.
     // Entrenching Tools (chip `fortifyBonus`) adds on top of the doubled base.
     if (defenderUnit.fortified) {
@@ -950,7 +1049,11 @@ export function runContest(state, { pid, params, ctx = {} }) {
   // §18.5/§18.7 — feed the political layer: the attacker takes a Menace
   // swing vs the target's temperament, breaks any pact/promise with them,
   // and establishes the war-state. (The combat math above is untouched.)
-  if (ambushDefOwner) onAttack(state, pid, ambushDefOwner);
+  // The hex it happened on: Menace is scored by who could SEE it (§18.5), so
+  // the political layer needs to know where, not just who.
+  if (ambushDefOwner) {
+    onAttack(state, pid, ambushDefOwner, t.kind === "raid" ? t.unit.node : (t.loc?.hexId ?? unit.node));
+  }
 
   // §16.6 veterancy — credit survivors and the winning unit, then promote.
   tickVeterancy(state, [attackerUnit, defenderUnit], winnerUnit?.uid ?? null);

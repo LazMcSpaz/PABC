@@ -57,6 +57,12 @@ Added: YYYY-MM-DD
 
 ## Vessels
 
+## landship-turnaround-01.png
+URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/landship-turnaround-01.png
+Use for: the landship hull as geometry — eight views round the same form as `landship-base-01.jpg`, untextured, so bow taper, deck plan, flank slot and the open stern read without material getting in the way. This is the sheet to hand a Blender agent under §5.6, and the one to attach when a generation needs the hull from an angle the painted anchor does not show
+Do not use for: **FRAMING** — a near-black ground, further from §15's clean grey than any other anchor, so it will darken and contaminate anything it leads. Also no material, finish or colour information whatsoever: it is form only, and each view is small in a 2538×266 strip, so there is little detail to take
+Added: 2026-08-11
+
 ## landship-base-01.jpg
 URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/landship-base-01.jpg
 Use for: the bare landship hull before anything is built on it — §5.4's form rule made explicit, one continuous armored form with plating unbroken from the rounded bow to the stern and no seam anywhere along it. The lift emitter row recessed into the flank rather than hung off it, the chamfered skirt, the deck left flat and empty with only its mounting hardpoints showing, and the dust plume that sells ground clearance. Attach this first when generating any vessel, then describe only the superstructure
@@ -179,10 +185,22 @@ Use for: Plainer construction at building scale — board siding against corruga
 Do not use for: the accretion depth §4 asks for — this is a single tidy structure without the three-generations-of-additions read, so it understates the logic and should be paired with `plainer-cart-01.jpg` rather than anchoring a settlement alone
 Added: 2026-08-11
 
+## wip-weather-machine-active-04.jpg
+URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/wip-weather-machine-active-04.jpg
+Use for: **NOT CANON, TEMPORARY** — the same object as `oldworld-weather-machine-01.jpg`, stood on end, installed and running. Kept as a working reference while the design changes; the number follows the author's own iteration, so a later pass lands as `-05`. What holds up: the seamless cone against a hand-built cradle of copper bus bars and ceramic insulators, the scale figures at the base, and the storm answering overhead
+Do not use for: **§3 RULE 3** — glowing apertures and visible electrical arcing are exactly what the doc forbids, which says advanced tech reads as precision and never as light. This is the anchor most likely to teach the model the wrong lesson about old-world power, so do not attach it to anything approved. Also **FRAMING**: dramatic dark interior lighting, the opposite of §15's clean flat grey
+Added: 2026-08-11
+
 ## wip-crossbow-01.jpg
 URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/wip-crossbow-01.jpg
 Use for: **NOT CANON, SUPERSEDED** — the stepping stone that produced `plainer-crossbow-01.jpg`, which carried its strap-reinforced limbs, cable string and turnbuckles forward and dropped the stock. Kept only as a record of that step; reach for the Plainer one instead
 Do not use for: anything final, and never as the sole anchor on an approved shot. It carries no faction fabrication logic — the sporting-rifle stock and trigger guard in particular belong to no one in §4 — so it will drag output toward a generic modern crossbow, which is the exact §5.2 trap of naming an object type with a famous instance
+Added: 2026-08-11
+
+## oldworld-weather-machine-01.jpg
+URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/oldworld-weather-machine-01.jpg
+Use for: pre-collapse manufacture at large scale, and §3's rule that advanced tech reads as PRECISION and never as light — a seamless swept hull with no fastener, no panel line and no visible method of assembly anywhere, a single machined slot, plain circular apertures, and a surface that gives away nothing about how it was made. The scale figure is the point: it fixes this at roughly ten times a person, which is what makes it read as inherited rather than built. Two views, including the open end showing the hull is a shell
+Do not use for: any faction's fabrication logic — it is deliberately outside all four, so it will erase Versari faceting and Laker casting alike if allowed to lead; also not for weathering, since the only aging here is the rust bleed at the band joints
 Added: 2026-08-11
 
 ## goldgrass-quilted-cuirass-03.jpg

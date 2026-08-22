@@ -1,5 +1,5 @@
-// LoreScreen.jsx — full-screen Lore / in-game wiki browser for Ashland Conquest.
-// Reads WIKI_ENTRIES from the auto-generated content file (currently empty {}).
+// LoreScreen.jsx — full-screen Lore / in-game wiki browser for The Remnant Continent.
+// Reads the merged WIKI_ENTRIES (repo-authored + editor-exported).
 // Renders a robust skeleton that degrades gracefully when empty and becomes a
 // fully functional two-column wiki browser as entries are authored in the
 // Encounter Builder.
@@ -12,7 +12,7 @@ import { useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { C, CornerBrackets } from "./HudChrome.jsx";
 import { WikiProvider, RichText } from "./RichText.jsx";
-import { WIKI_ENTRIES } from "../game/content/wiki.js";
+import { WIKI_ENTRIES } from "../game/content/wiki-repo.js";
 import "./prototype.css";
 
 // Amber accent used for entry title/term headings — matching the existing wiki
@@ -83,9 +83,11 @@ export default function LoreScreen({ onBack }) {
   }
 
   return (
-    // Full-screen wrapper — same radial bg as SetupScreen / TitleScreen
+    // Full-screen wrapper — same radial bg as SetupScreen / TitleScreen.
+    // The scan raster lives on a dedicated overlay child below, NOT on this
+    // wrapper: .hud-screen-scan sets pointer-events:none, which on the
+    // container itself would make the whole screen unclickable.
     <div
-      className="hud-screen-scan"
       style={{
         position: "relative",
         width: "100vw",
@@ -103,6 +105,8 @@ export default function LoreScreen({ onBack }) {
         boxSizing: "border-box",
       }}
     >
+      <div className="hud-screen-scan" />
+
       {/* ── page header ─────────────────────────────────────────────────── */}
       <motion.div
         initial={{ opacity: 0, y: -12 }}
@@ -127,7 +131,7 @@ export default function LoreScreen({ onBack }) {
             fontWeight: 600,
           }}
         >
-          ◇ Ashland Conquest · Intelligence Archive ◇
+          ◇ The Remnant Continent · Intelligence Archive ◇
         </div>
         <div
           style={{
@@ -276,7 +280,7 @@ export default function LoreScreen({ onBack }) {
           userSelect: "none",
         }}
       >
-        ▸ Ashland Conquest · Lore Archive · Intelligence Database
+        ▸ The Remnant Continent · Lore Archive · Intelligence Database
       </div>
     </div>
   );
@@ -427,8 +431,7 @@ function EmptySidebarNote() {
           fontFamily: "'Inter', system-ui, sans-serif",
         }}
       >
-        Categories appear here as entries are authored in the Encounter
-        Builder.
+        Nothing filed under any heading yet.
       </div>
     </div>
   );
@@ -722,7 +725,7 @@ function ReaderPane({ entry, isEmpty, backStack, onBack, onSelectEntry }) {
                   color: C.textDim,
                 }}
               >
-                ◇ No Lore Entries Yet ◇
+                ◇ The Archive Is Empty ◇
               </div>
               <div
                 style={{
@@ -734,13 +737,9 @@ function ReaderPane({ entry, isEmpty, backStack, onBack, onSelectEntry }) {
                   letterSpacing: 0.3,
                 }}
               >
-                Entries are authored in the{" "}
-                <span style={{ color: C.textDim }}>
-                  Encounter Builder
-                </span>{" "}
-                and will appear here once published. The archive is
-                skeleton-ready — add entries and they will populate the
-                sidebar and reader automatically.
+                Nothing has been recovered and filed here yet. What the
+                continent remembers of itself is still out on the map, in
+                the hands of people who have no reason to share it.
               </div>
 
               {/* decorative rule */}
@@ -763,7 +762,7 @@ function ReaderPane({ entry, isEmpty, backStack, onBack, onSelectEntry }) {
                   opacity: 0.6,
                 }}
               >
-                ▸ Archive awaiting content ingestion
+                ▸ No records on file
               </div>
             </motion.div>
           ) : entry ? (

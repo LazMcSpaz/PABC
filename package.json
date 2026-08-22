@@ -1,9 +1,9 @@
 {
-  "name": "ashland-conquest",
+  "name": "remnant-continent",
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Ashland Conquest — post-apocalyptic strategy card game prototype",
+  "description": "The Remnant Continent — post-pole-shift hex-tile strategy game",
   "scripts": {
     "predev": "node scripts/build-units.mjs",
     "dev": "vite",

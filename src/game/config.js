@@ -2,6 +2,8 @@
 // The engine reads gameplay numbers from here — never hard-code them.
 
 export const CONFIG = {
+  // Kept only as the label on the end-of-game score. Nothing reads it as a
+  // win condition any more — see `victory` below.
   vpThreshold: 12,
   // Per-entity actions (docs/vp-and-actions-design.md §2/§4): every unit
   // and Location gets 1 action per turn; the old global pool survives as a
@@ -14,10 +16,29 @@ export const CONFIG = {
   // vpReward for as long as it holds the place — full value while Loyalty is
   // OVER half the counter, half (floored) below. Dominion's per-Upkeep tick and
   // the one-off capture bounty are both gone; the scoreboard is the map.
+  // Victory is ONE condition with three faces: every surviving faction is
+  // eliminated, your ally, or your vassal. Win it by conquest, by diplomacy,
+  // or — the interesting case — by any mix of the two.
+  //
+  // What it replaced: a VP threshold labelled "conquest" that had nothing to
+  // do with conquering. Across 20 AI-only games it ended every single one,
+  // the winner held 29% of the board on average, and one winner held NOTHING
+  // — 12 points banked from an alliance drip while holding zero cities. The
+  // separate Recognition and last-standing conditions never fired once.
   victory: {
-    // The one faucet that was never about territory, so it still accumulates:
-    // paid PER allied major, once you're pacted with a majority of them.
-    allianceTrickle: 1,
+    // The arrangement has to HOLD for this many consecutive rounds before it
+    // wins. Allying your way to a bloodless victory should be a position you
+    // have to defend for a moment, not a switch that flips the instant the
+    // last signature dries — rivals get a window to denounce you, break a
+    // partner away, or simply attack.
+    //
+    // It only applies while rivals are still ALIVE to break it. Kill everyone
+    // and you have won; there is nothing left to hold against.
+    holdRounds: 3,
+    // Score, purely for the end-of-game standing. Nothing here wins anything.
+    // Both are HELD, like territory: you show them while the relationship
+    // stands and lose them when it doesn't.
+    score: { allied: 2, vassal: 3 },
   },
 
   // §18.2 Loyalty — the 8-slice centre pie that replaces foothold/decay.
@@ -49,6 +70,11 @@ export const CONFIG = {
     veteranStrengthCap: 8, // §16.7 combining (deferred)
   },
   baseUnitCap: 3, // v0.2 §16.3 — cap = baseUnitCap + Training Grounds
+  // How many units may stand on one hex, counting every owner. A stack past
+  // this cannot be told apart on the board — the tile runs out of room to draw
+  // them at a legible size (docs/unit-model-pipeline.md §10.1) — and a rule the
+  // display cannot show is a rule players cannot plan around.
+  hexUnitCap: 10,
   startingUnits: 2, // v0.2 §16.3
   unitRecruitCost: 6, // v0.2 §16.3 — was 10
 
@@ -67,16 +93,37 @@ export const CONFIG = {
   movement: {
     forestCost: 2,     // entering a cover/forest hex costs this (vs 1) — "−1 speed"
     mountainHalts: true, // entering an elevation/mountain hex ends the move
+    // Two rules that met in a merge, both kept, because they are about
+    // different ground.
+    //
+    // GRADED SURFACE — road or rail — costs `pavedCost` instead of 1, so a
+    // column that stays on the network covers twice the ground: 2 Movement is
+    // two hexes cross-country and four down a lane. That is what makes the
+    // network worth routing along, worth holding, and worth cutting.
+    //
+    // …but a road EASES rough ground rather than deleting it. A lane across
+    // the plains is quick; a road over a pass is still a pass. So the paved
+    // discount applies to easy ground only, and a crossing costs the eased
+    // terrain price:
+    //
+    //   open + paved      0.5
+    //   forest + paved    roadForestCost (1, against 2 unpaved)
+    //   mountain + paved  roadMountainCost (2, and no halt — the halt is what
+    //                     a mountain really costs, and easing it is the point)
+    //
+    // Corridors are routed AROUND rough ground (assignRoads), so a road rarely
+    // crosses it at all — high ground about one board in thirty. The crossings
+    // that do happen still cost something.
+    pavedCost: 0.5,
     // What ROAD-GRADE rough ground costs — a road, or a Landship-class mover
     // (chip `ignoresTerrain`), which the engine defines as road-grade too.
     // Roughly half the toll in each case, never none.
     roadForestCost: 1,   // forest is 2 without one
     roadMountainCost: 2, // a mountain otherwise halts you outright
-    // A unit beginning its turn ON a road hex marches +this Movement that
-    // turn — the highway network is a fast lane for armies, not only a
-    // terrain-negator (playtest: roads otherwise only differ from open
-    // ground on the map's few forest/mountain hexes).
-    roadStartBonus: 1,
+    // No `roadStartBonus`. It granted +1 Movement for BEGINNING the turn on a
+    // road — a patch for roads not being worth much, which paying per hex
+    // travelled fixes properly. Keeping both would pay twice for the same
+    // complaint and make 2 Movement carry a unit six hexes rather than four.
   },
 
   // v0.2 §16.4 attrition
@@ -156,10 +203,21 @@ export const CONFIG = {
 
   // Rail (docs/rail-road-blockade-design.md §2). Pre-collapse trunk line,
   // generated at setup, never built or destroyed. A hop between two linked
-  // capitals costs this regardless of how far apart they are — that flat cost
+  // stations costs this regardless of how far apart they are — that flat cost
   // IS the mechanic, so it should stay cheap enough to be worth a detour.
   rail: {
     hopCost: 1,
+    // Which settlements the trunk line stops at. It used to be the four
+    // CAPITALS and nothing else, which made rail three links on every board
+    // size however big the map or however many cities were seated — and, worse,
+    // meant no faction ever held both ends of a link at setup, so production
+    // pooling (which needs both stations) could not be used until you had taken
+    // an enemy capital. A trunk line stops at the big places: every capital is
+    // `high`, so this keeps all four and adds the other major cities.
+    // Sign-named settlements are excluded separately (`noRailTerminus`) — they
+    // grew up around road signage and a railway had no reason to stop at a
+    // lay-by, though a line may still run through their hex.
+    hubTiers: ["high", "veryHigh"],
   },
 
   // The v0.1 test board — still the default when no map size is given, so
@@ -222,6 +280,31 @@ export const CONFIG = {
   //                   (triggers.js). 0 switches world encounters off without
   //                   removing the content.
   encounters: { worldPerRound: 2 },
+
+  // How fast a player picks quests up.
+  //
+  // `offerQuests` runs at the start of each turn and starts every quest whose
+  // opener gate currently passes. 15 of the 35 authored quests have no opener
+  // gate at all and several more open on conditions that are already true in
+  // round 1, so without a limit each faction started 22 quests on its FIRST
+  // turn — and since most openers are `discovered`, that dropped 22 markers
+  // per faction onto a 17-location board before anybody had moved. The log
+  // read as a wall of "Quest started / Location revealed", and no single
+  // quest was ever an event.
+  //
+  // Nothing is lost to the limit: an eligible quest that is not offered this
+  // turn is simply offered on a later one, because the pass re-runs every
+  // turn and the gates it skipped are still true. Set `newPerTurn` to 0 for
+  // no limit.
+  //
+  // `beatsPerTurn` is the other half: how many beats a player may actually be
+  // HANDED in a turn, counted across every delivery mode — the fan-out when a
+  // quest advances, the round-end pulse, and walking onto a discovered marker
+  // alike. A player experiences cards, not delivery modes, so a cap that only
+  // counted one kind would leave the others free to pile up. Nothing is lost
+  // to it: a held beat is offered again on the next pass and a held marker
+  // stays on its hex. 0 for no limit.
+  quests: { newPerTurn: 2, beatsPerTurn: 3 },
 
   // Capital chip bonuses (content/config.csv).
   capital: { garrisonBonus: 2, productionBonus: 2 },
@@ -363,6 +446,25 @@ export const CONFIG = {
     // §18.5 Menace — reputation for UNJUSTIFIED aggression, scored vs target.
     menace: {
       base: 3, // magnitude of a single attack's Menace swing
+      // Declaring an UNJUSTIFIED war is itself unjustified aggression, and
+      // the board reacts to the declaration, not only to the first blow.
+      // A justified war (denounced first, or answering a betrayal) costs
+      // nothing to declare — which is the whole point of earning one.
+      declareUnjustified: 2,
+      // Menace is what the BOARD thinks of you, so it should depend on what
+      // the board saw. An attack is scored by the share of third parties who
+      // could see the hex: seen by everyone it costs full, seen by nobody it
+      // costs nothing. The victim always knows regardless — that is what the
+      // grievance ledger is for, and denouncing is how they tell everyone
+      // else. A declaration of war is always public and is never scaled.
+      witnessedOnly: true,
+      // …but never quite nothing: rumour travels, and an army that vanishes
+      // into the wasteland and comes back bloody invites questions.
+      unwitnessedShare: 0.2,
+      // What a believed accusation does to the accused. This is how a crime
+      // nobody saw catches up with you: the victim was there, holds the
+      // grievance, and can put it in front of the board.
+      denouncedShare: 0.5,
       decayPerRound: 1, // slow decay with clean play / time
       min: 0, max: 24,
     },
@@ -373,6 +475,13 @@ export const CONFIG = {
       breakLoss: 5, // breaking a pact call / treaty / promise (sharp)
       mediateGain: 2, // §18.7 peacemaker reputation
       surpriseAttackLoss: 8, // §1.1 — attacking before declaring war (treachery)
+      // Denouncing cuts both ways, exactly as declaring war does. Naming a
+      // faction the board can already see is dangerous — one past your
+      // Menace tolerance, below your Honor floor, or that has wronged you —
+      // is what Honor IS, and pays a little. Naming a clean-handed neighbour
+      // because you want their cities is a slander, and costs.
+      denounceLoss: 3,
+      denounceWarrantedGain: 1,
       decayToward: 0, decayPerRound: 0, // no passive decay by default
     },
     // §18.5 Tolerance = base + standing·perStanding, ± by the faction's
@@ -449,6 +558,16 @@ export const CONFIG = {
       refuseStandingDropTiers: 2,
     },
     suePeace: { acceptThreshold: 8, standingBoost: 3 }, // §1.5
+    // Deal flows (a per-turn stream, as opposed to a lump sum). Every flow a
+    // DEAL creates is term-limited; vassal tribute is not a deal and stays
+    // perpetual, ending when the vassalage does.
+    flow: {
+      defaultRounds: 5, // a flow proposed without a term runs this long
+      maxRounds: 20, // the deal builder's ceiling
+      // What a perpetual flow (vassal tribute) is worth to a valuer. Only
+      // reached by engine-made agreements; a deal can no longer create one.
+      perpetualHorizon: 8,
+    },
     war: { unitLossWeight: 2, locationLossWeight: 4 }, // §1.5 war-exhaustion weights
     freeVassal: { // §1.7
       honorGain: 5,
@@ -502,9 +621,81 @@ export const CONFIG = {
     // no Menace. You earn one by denouncing the target first (a declared
     // intent the board has heard) or by being wronged by them (broken pact
     // or promise, surprise attack) within the window.
+    // Third-party reaction to a denouncement, scored on whether the
+    // accusation is CREDIBLE rather than on whether they happen to dislike
+    // the target. Saying out loud what everyone was thinking rallies the
+    // board; accusing a faction with clean hands isolates you.
+    denounce: {
+      rallyWarranted: 3, // they agree, and you had grounds
+      rally: 2, // they agree
+      backlash: 2, // they do not, and now they wonder about you
+      allyDefends: 2, // the target's allies close ranks whatever the merits
+      targetHit: 3, // Standing the target loses toward you (always)
+    },
+    // Grievances — the ledger of what has actually been done to you. Each
+    // entry carries a severity, so three small betrayals can weigh like one
+    // large one, and a settlement has a PRICE rather than being a word.
+    grievance: {
+      severity: {
+        "surprise-attack": 3, // struck before declaring
+        "truce-broken": 4, // struck through a promise not to
+        "pact-broken": 4, // abandoned an alliance
+        "promise-broken": 2, // walked away from a term
+        occupation: 2, // holds a place you call yours (a condition, not an event)
+        defiance: 3, // ignored an ultimatum you put your name to
+      },
+      defaultSeverity: 2,
+      maxPerPair: 8, // the ledger keeps this many; older entries fall off
+      // What settling costs the VICTIM: giving up a grievance means giving
+      // up the righteous war it entitles you to, so it is not free to ask
+      // for and cannot be bought with an apology.
+      settlementPerWeight: 1.2,
+      // Making amends is honourable — the one route back for a faction that
+      // has burned its reputation.
+      settlementHonorGain: 2,
+    },
+    // §3.2 — a Location on the table. The map is the thing the war is
+    // about, and until now the only thing anyone could trade was scrap, so
+    // diplomacy ran as a side-market beside the game rather than inside it.
+    // These are the numbers that make "cede Omara and we have peace" a
+    // sentence with a price attached.
+    cession: {
+      // A city's worth, before anybody's feelings about it: its victory
+      // points, weighted, plus what it actually produces each turn.
+      vpWeight: 4,
+      outputWeight: 1.2,
+      // …and what its walls are worth. Bigger places are harder to take, so
+      // they cost more to be handed.
+      valueRank: { low: 0, medium: 1, high: 2, veryHigh: 4 },
+      // A homeland is not priced like a holding. Goldgrass will pay well
+      // past Omara's output to have Omara back, which is what makes
+      // "give it back" a thing a faction can want badly enough to deal for.
+      claimMultiplier: 2.2,
+      // Ground given up is worth more than ground gained — you lose the
+      // place, the ZoC around it, and the base you were operating from.
+      // Scaled by aggression: a warlord does not sell land.
+      cedeReluctanceBase: 1.15,
+      cedeReluctancePerAggression: 0.7,
+      // Handed over, not stormed. A city given is a city intact — no chip
+      // is destroyed — but the people living in it did not choose this, so
+      // Loyalty starts where a capture would leave it.
+      loyaltyOnCede: 2,
+      // Being traded away is a grievance the residents' faction holds
+      // against nobody in particular, but the affiliated faction minds who
+      // ends up standing there. Same penalty a conquest carries: to
+      // Goldgrass, Omara passing from Versari to the Lakers is not an
+      // improvement.
+      thirdPartyStandingHit: 2,
+    },
+
     justWar: {
       denounceWindowRounds: 6, // your denouncement of them counts this long
       grievanceWindowRounds: 8, // their betrayal of you counts this long
+      // You cannot re-denounce the same faction until this clears. Paired
+      // with honor.denounceLoss it makes a standing pretext something you
+      // have to keep paying for, rather than a switch you flip once a round
+      // to keep the window open forever.
+      denounceCooldownRounds: 5,
     },
     // Precursor warnings — the AI telegraphs trouble to the HUMAN before it
     // lands: a faction whose regard sinks to Wary sends word; the board
@@ -518,6 +709,47 @@ export const CONFIG = {
     pact: { // §1.9, §1.10 — toggle costs
       toggleVisionStandingHit: 1,
       toggleBordersStandingHit: 1,
+    },
+
+    // The verb between asking and attacking. A demand with a deadline and a
+    // named consequence — and, crucially, a cost for not following through:
+    // an ultimatum you let lapse is a bluff the whole board watched you make.
+    ultimatum: {
+      deadlineRounds: 3, // how long the other side has to comply
+      graceRounds: 2, // how long the issuer then has to make good on it
+      menaceOnIssue: 1, // a threat is a hostile act, however politely worded
+      bluffHonorLoss: 4, // …and an empty one is worse than never speaking
+      defianceSeverity: 3, // the grievance the issuer earns when defied
+      complyStandingGain: 2, // giving in buys a little warmth; it costs face
+      maxScrap: 30, // ceiling on a tribute demand
+      // How long before the same pair can be threatened again. Without this
+      // a strong AI reissues every other round and the word stops meaning
+      // anything — which is the same reason denouncing has a cooldown.
+      cooldownRounds: 8,
+    },
+
+    // The round trip. A proposal is a thing that sits on a table, not a
+    // button that resolves the instant it is pressed.
+    offers: {
+      // How long an offer waits in the recipient's inbox before it lapses.
+      // Short: an offer nobody answered is an insult that fades, and a stale
+      // inbox is worse than an empty one.
+      expiryRounds: 3,
+      // Asking is free this many times per round, per faction. Past that
+      // you are pestering, and a refusal cools them.
+      freeAsksPerRound: 2,
+      pesterStandingHit: 1,
+      // A counter-offer will not ask the proposer for more scrap than they
+      // actually hold. An unanswerable counter is a refusal with extra
+      // steps, and reads as the AI not listening.
+      counterWithinMeans: true,
+      // Nor will it counter at all when the gap is this far past what the
+      // proposer could cover — at some point "no" is the honest answer.
+      counterGapCeiling: 60,
+      // How often an AI opens with a proposal of its own, as a share of its
+      // sociability. Kept low: an inbox that fills every round stops being
+      // an event.
+      aiProposeChance: 0.35,
     },
   },
 };

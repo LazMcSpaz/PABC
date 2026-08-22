@@ -60,7 +60,7 @@ function PinScreen({ expected, onUnlock }) {
       >
         <div className="flex flex-col gap-1">
           <div className="text-amber-400 font-semibold tracking-tight">
-            Ashland Conquest
+            The Remnant Continent
           </div>
           <div className="text-xs text-slate-400">Content Editor</div>
         </div>

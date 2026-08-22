@@ -10,14 +10,68 @@ import {
   C, ICON, TopBar, MenuOrb, RadialMenu, LocationWindow, TitledWindow,
 } from "./HudChrome.jsx";
 
+// Copied verbatim from the authored corpus (src/game/content/field-encounters.js)
+// rather than invented. The previous mock was `fe_buried_cache`, an encounter
+// that no longer exists in the content and whose "outcome text" was a list of
+// resource deltas — so the look pass was reviewing a card whose prose read
+// nothing like the writing it is built to carry.
 const MOCK_ENCOUNTER = {
-  id: "fe_buried_cache",
-  title: "Buried Cache",
-  text: "Something is buried here. The disturbance is recent — within a season, no longer. Whoever put it here meant to come back.",
+  id: "fe_the_silo",
+  title: "The Silo",
+  text: "You see it for half a day before you reach it — a grain elevator standing alone with nothing around it for miles. Empty inside, and swept. Someone repaints the ladder rungs. The inner wall is carved over with names going back four generations, packed close and overlapping, and one of your plains riders takes out a knife and adds his own without asking anyone or explaining why.",
   choices: [
-    { id: "ch_cache_dig", label: "Dig it up", outcomeText: "+2 scrap, +1 Research" },
-    { id: "ch_cache_mark", label: "Mark the spot and wait", outcomeText: "Return in 3 rounds — ambush or trade" },
-    { id: "ch_cache_leave", label: "Leave it where it lies", outcomeText: null },
+    { id: "ch_silo_carve", label: "Add your own names", outcomeText: "Your people take turns at it and take it more seriously than any of them would admit to." },
+    { id: "ch_silo_shade", label: "Rest in the shade", outcomeText: "An hour out of the sun in the coolest place for forty miles. Nobody says much." },
+    { id: "ch_silo_on", label: "Ride on", outcomeText: "You leave it standing behind you and it takes most of the afternoon to go out of sight." },
+  ],
+};
+
+// The quest beat this whole outcome face was built to repair: q_massacre's
+// compound, the one that showed up titled with its own id, resolved a CONTEST
+// nobody saw, and killed a unit without a word of explanation.
+const MOCK_BEAT = {
+  id: "quest:q_massacre:beat:qb_mas_compound",
+  title: "What the Steel Traders Left",
+  text: "The tracks end at a wall built out of the old world — haulers and freight vehicles dragged into a ring, cut down, welded and packed with earth until the whole thing became a fort. A man on the rampart watches your unit come the last half mile and lets you get close enough to hear him before he asks what you want.",
+  choices: [
+    { id: "ch_mas_challenge", label: "Challenge them for the spoils", outcomeText: "You tell him what they took and from whom and what you intend to do about it, and he does not bother denying any part of it." },
+    { id: "ch_mas_threaten", label: "Threaten to tell the Goldgrass", outcomeText: "You tell him exactly how far this wall is from the nearest Goldgrass hall and how quickly that can be corrected." },
+    { id: "ch_mas_note", label: "Leave — you know where they are", outcomeText: "You turn around in full view and ride out, and every man on that rampart understands that the location is now worth something to somebody." },
+  ],
+};
+
+// Art is optional on every encounter and beat, so the modal has two layouts
+// to look-pass, not one. A leader portrait stands in for encounter art here
+// purely because it is already 2:3 — no encounter art is authored yet.
+const MOCK_ENCOUNTER_ART = {
+  ...MOCK_ENCOUNTER,
+  imagePath: `${import.meta.env.BASE_URL}assets/portraits/factions/versari/versari_leader_1.webp`,
+};
+
+// The card's outcome face — the half a resolved choice turns over onto.
+// Two variants, because the two things it has to carry are different jobs:
+// a lost narrative contest (dice, verdict, a unit gone) and a plain
+// consequence card with no roll behind it at all.
+const MOCK_OUTCOME_CONTEST = {
+  choiceLabel: "Challenge them for the spoils",
+  outcomeText: "You tell him what they took and from whom and what you intend to do about it, and he does not bother denying any part of it.",
+  contest: { own: 4, ally: 0, opponent: 5, die: 1, opponentDie: 6, sides: 6, total: 5, against: 11, won: false },
+  roll: null,
+  lines: [
+    { tone: "bad", text: "Your unit was destroyed" },
+    { tone: "flat", text: "Kit left behind at The Shelf" },
+    { tone: "flat", text: "This is where it ends" },
+  ],
+};
+const MOCK_OUTCOME_PLAIN = {
+  choiceLabel: "Add your own names",
+  outcomeText: "Your people take turns at it and take it more seriously than any of them would admit to.",
+  contest: null,
+  roll: null,
+  lines: [
+    { tone: "good", text: "+2 scrap" },
+    { tone: "good", text: "+1 research" },
+    { tone: "bad", text: "Standing with Goldgrass Coalition ▼ 1" },
   ],
 };
 
@@ -93,23 +147,43 @@ export default function HudShowcase({ onExit }) {
           <p className="pc-prose" style={{ margin: 0, fontSize: 13, lineHeight: 1.6, color: C.textDim }}>Your fielded units, their strength and movement, installed chips, and reinforcement options.</p>
         </TitledWindow>}
         {panel === "diplomacy" && <TitledWindow key="diplomacy" title="Diplomacy" icon={ICON.diplomacy} onClose={() => setPanel(null)}>
-          <p className="pc-prose" style={{ margin: 0, fontSize: 13, lineHeight: 1.6, color: C.textDim }}>Broker deals, pacts and coalitions with rival factions — manage reputation and pursue a Recognition victory.</p>
+          <p className="pc-prose" style={{ margin: 0, fontSize: 13, lineHeight: 1.6, color: C.textDim }}>Broker deals, pacts and coalitions with rival factions — manage reputation, and deal with every rival by treaty or by force.</p>
         </TitledWindow>}
-        {panel === "encounter" && (
-          <EncounterModal
-            key="encounter"
-            encounter={MOCK_ENCOUNTER}
-            choices={MOCK_ENCOUNTER.choices}
-            eligibleIds={MOCK_ENCOUNTER.choices.map((c) => c.id)}
-            redrawsLeft={1}
-            onRedraw={() => {}}
-            onPick={() => setPanel(null)}
-          />
-        )}
+        {(panel === "encounter" || panel === "encounterArt" || panel === "encounterEdit"
+          || panel === "outcome" || panel === "outcomePlain") && (() => {
+          const enc = (panel === "outcome" || panel === "encounterEdit") ? MOCK_BEAT
+            : panel === "encounterArt" ? MOCK_ENCOUNTER_ART : MOCK_ENCOUNTER;
+          const outcome = panel === "outcome" ? MOCK_OUTCOME_CONTEST
+            : panel === "outcomePlain" ? MOCK_OUTCOME_PLAIN : null;
+          return (
+            <EncounterModal
+              key={panel}
+              encounter={enc}
+              choices={enc.choices}
+              eligibleIds={enc.choices.map((c) => c.id)}
+              redrawsLeft={outcome ? 0 : 1}
+              onRedraw={() => {}}
+              onPick={() => setPanel(null)}
+              outcome={outcome}
+              onClose={() => setPanel(null)}
+              // MOCK_BEAT carries the REAL beat id, so edit mode resolves the
+              // real authored effects for it — this look pass is showing the
+              // actual grants, not a fixture of them.
+              editMode={panel === "encounterEdit"}
+              onEdit={() => {}}
+            />
+          );
+        })()}
       </AnimatePresence>
       <div style={{ position: "absolute", bottom: 18, left: 24, color: C.textFaint, zIndex: 20, display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 6 }}>
         <div style={{ fontFamily: C.font, fontSize: 11, letterSpacing: 3, textTransform: "uppercase" }}>HUD Look Pass · v2</div>
-        <button className="hud-int" onClick={() => setPanel("encounter")} style={{ fontFamily: C.font, fontSize: 10.5, letterSpacing: 1.6, textTransform: "uppercase", color: C.holoHi, background: "rgba(86,211,198,0.08)", border: `1px solid ${C.holo}66`, borderRadius: 5, padding: "5px 12px", cursor: "pointer" }}>Encounter preview</button>
+        <div style={{ display: "flex", gap: 6 }}>
+          <button className="hud-int" onClick={() => setPanel("encounter")} style={{ fontFamily: C.font, fontSize: 10.5, letterSpacing: 1.6, textTransform: "uppercase", color: C.holoHi, background: "rgba(86,211,198,0.08)", border: `1px solid ${C.holo}66`, borderRadius: 5, padding: "5px 12px", cursor: "pointer" }}>Encounter · no art</button>
+          <button className="hud-int" onClick={() => setPanel("encounterArt")} style={{ fontFamily: C.font, fontSize: 10.5, letterSpacing: 1.6, textTransform: "uppercase", color: C.holoHi, background: "rgba(86,211,198,0.08)", border: `1px solid ${C.holo}66`, borderRadius: 5, padding: "5px 12px", cursor: "pointer" }}>Encounter · with art</button>
+          <button className="hud-int" onClick={() => setPanel("outcome")} style={{ fontFamily: C.font, fontSize: 10.5, letterSpacing: 1.6, textTransform: "uppercase", color: C.holoHi, background: "rgba(86,211,198,0.08)", border: `1px solid ${C.holo}66`, borderRadius: 5, padding: "5px 12px", cursor: "pointer" }}>Outcome · contest</button>
+          <button className="hud-int" onClick={() => setPanel("outcomePlain")} style={{ fontFamily: C.font, fontSize: 10.5, letterSpacing: 1.6, textTransform: "uppercase", color: C.holoHi, background: "rgba(86,211,198,0.08)", border: `1px solid ${C.holo}66`, borderRadius: 5, padding: "5px 12px", cursor: "pointer" }}>Outcome · no roll</button>
+          <button className="hud-int" onClick={() => setPanel("encounterEdit")} style={{ fontFamily: C.font, fontSize: 10.5, letterSpacing: 1.6, textTransform: "uppercase", color: C.holoHi, background: "rgba(86,211,198,0.08)", border: `1px solid ${C.holo}66`, borderRadius: 5, padding: "5px 12px", cursor: "pointer" }}>Card · edit mode</button>
+        </div>
         {onExit && <button className="hud-int" onClick={onExit} style={{ fontFamily: C.font, fontSize: 11, letterSpacing: 1.5, textTransform: "uppercase", color: C.textDim, background: "transparent", border: `1px solid ${C.steelHi}`, borderRadius: 5, padding: "5px 14px", cursor: "pointer" }}>← Back to game</button>}
       </div>
     </div>

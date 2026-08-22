@@ -62,24 +62,6 @@ export default function FlatTileLayer({
       );
     }
 
-    if (!unexplored && hex.type === "encounter") {
-      marks.push(
-        <text
-          key={`enc-${hexId}`}
-          x={c.x}
-          y={c.y - HEX_H * 0.34}
-          textAnchor="middle"
-          dominantBaseline="central"
-          fontFamily={theme.fontDisplay}
-          fontSize={26}
-          fontWeight={700}
-          fill="#9fd8ff"
-          opacity={0.9}
-        >
-          ?
-        </text>,
-      );
-    }
     if (!unexplored && hex.loot > 0) {
       // Salvage is a "go there" signal, so it survives the zoom-out; it just
       // loses the chrome of its full-detail badge and becomes a dot.
