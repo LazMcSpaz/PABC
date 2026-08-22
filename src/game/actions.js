@@ -507,8 +507,32 @@ function reinforcePayer(state, { pid, params }) {
   return route ? { locations: [route.originHex] } : null;
 }
 
+// Whoever's Strength is counted, pays.
+//
+// runContest builds the attack from `params.coalition` when it is given, and
+// from the WHOLE STACK when it is not (the legacy combined-stack rule). This
+// used to charge only the named units either way, so a caller that omitted a
+// coalition got every friendly unit's Strength for free — and each of those
+// units, still holding its own action, could then attack again beside it. The
+// AI omitted it. Two stacked Strength-4 units therefore made two attacks at
+// 4+4+1 apiece instead of one at 4+4+1 or two at 4+1, which is how a
+// two-unit stack took a garrison-10 Location in two rounds.
+//
+// Charging the stack in the fallback makes that impossible from any caller,
+// not just the one that was fixed. Only the initiator's OWN units are
+// charged: another faction fighting alongside (`params.allies`, the quest
+// case) lends its Strength without spending your actions, which is the point
+// of an ally.
 function contestPayer(state, { params }) {
-  return { units: [params.unit, ...(params.coalition || [])] };
+  if (Array.isArray(params.coalition)) {
+    return { units: [params.unit, ...params.coalition] };
+  }
+  const unit = state.units[params.unit];
+  if (!unit) return { units: [params.unit] };
+  const stack = Object.values(state.units)
+    .filter((u) => u.owner === unit.owner && u.node === unit.node)
+    .map((u) => u.uid);
+  return { units: stack.length ? stack : [params.unit] };
 }
 
 function buildPostPayer(state, { pid, params }) {
