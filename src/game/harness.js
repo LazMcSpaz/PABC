@@ -1614,20 +1614,26 @@ line("\n  [Tech Wheel] entry-node effects");
       g.players[me].resource - before === expected);
   }
 
-  // Intelligence: the redraw stacks with the Recon Team chip (budget 2).
+  // Intelligence: the redraw now comes from the TECH WHEEL, not from a
+  // town-buildable chip. `recon-team` was removed by design ruling — encounter
+  // foresight is a tech-wheel entry or a unit chip, never a settlement build —
+  // so this asserts the tech grants it and that a unit chip stacks on top,
+  // which is the only remaining way to reach a budget of 2.
   {
     const g = createGame({ seed }); startTurn(g);
     const me = g.turnOrder[0];
-    const home = Object.values(g.locations).find((l) => l.controller === me);
     g.players[me].techLevel = 2; g.players[me].techWheel = ["int-entry"];
-    const rc = g.nextId("chip"); g.chips[rc] = { uid: rc, chipId: "recon-team" };
-    home.chips.push(rc); // +1 discard; with int-entry = 2 total
     const encHex = Object.values(g.board.hexes).find(
       (h) => h.type === "encounter" && g.board.adjacency[h.id]?.length,
     );
     const staging = g.board.adjacency[encHex.id][0];
     const u = Object.values(g.units).find((x) => x.owner === me);
-    u.node = staging; u.moveRemaining = 9; recomputeStats(g);
+    u.node = staging; u.moveRemaining = 9;
+    // Trailwise is a UNIT chip and remains buildable; it is what stacks with
+    // the tech entry now that no Location chip grants a redraw.
+    const tw = g.nextId("chip"); g.chips[tw] = { uid: tw, chipId: "trailwise" };
+    u.chips.push(tw);
+    recomputeStats(g);
     g.players[me].actions.remaining = 5;
     const original = [...g.encounterDeck];
     let discards = 0;
@@ -1638,7 +1644,7 @@ line("\n  [Tech Wheel] entry-node effects");
     } };
     performAction(g, "move", { unit: u.uid, to: encHex.id }, ctx);
     const delivered = [...g.log].reverse().find((e) => e.name === "encounter_delivered");
-    check("Intelligence + Recon Team grant 2 discards (3rd card drawn)",
+    check("Intelligence (tech) + Trailwise (unit chip) grant 2 discards (3rd card drawn)",
       discards === 2 && delivered && delivered.payload.encounter === original[2]);
   }
 }

@@ -32,6 +32,7 @@ import { CONFIG } from "../game/config.js";
 import { downloadGameLog } from "./gameLogExport.js";
 import { NEUTRAL } from "./data.js";
 import { getEncounter } from "../game/encounters.js";
+import { pendingEncountersFor, resolvePendingEncounter } from "../game/encounters.js";
 import { encounterRedrawBudget } from "../game/encounters.js";
 import { evalCond } from "../game/dsl.js";
 import { adaptState, reinforcePreview, engineChipIdToUi, previewLocationContest, previewAttackerStrength, blockadeView, blockadeBuildOffer, postAction, upkeepSummary, economyReport, homeHexFor } from "./engineAdapter.js";
@@ -392,6 +393,12 @@ export default function Prototype({ config, onNewGame }) {
   const [confirmPrompt, setConfirmPrompt] = useState(null); // generic confirm dialog
   const [coalitionPrompt, setCoalitionPrompt] = useState(null); // commit-forces picker
   const [salvagePrompt, setSalvagePrompt] = useState(null); // interactive salvage
+  // World encounters and quest beats arrive from the round-end pipeline,
+  // which is synchronous and cannot wait for a click — so the engine parks
+  // them on a queue (encounters.js) and we drain it here. Until this existed
+  // every one of them auto-resolved to the first choice and the player never
+  // saw the card at all.
+  const [pendingEnc, setPendingEnc] = useState(null);
 
   // Wiki — a clickable [[term]] anywhere in flavor text opens this modal.
   // We keep a small history so the in-modal cross-links have a back button.
@@ -470,6 +477,30 @@ export default function Prototype({ config, onNewGame }) {
     const ids = new Set(msgs.map((m) => m.id));
     setTimeout(() => setHeralds((q) => q.filter((b) => !ids.has(b.id))), 7000);
   }, [tick, state.youId]);
+
+  // Show the next encounter waiting on the player. Re-checked on every tick,
+  // so a queue that filled during the AI turns is drained one card at a time
+  // as soon as control comes back.
+  useEffect(() => {
+    const game = gameRef.current;
+    if (!game) return;
+    const queue = pendingEncountersFor(game, game.humanFactionId);
+    setPendingEnc((cur) => {
+      if (cur && queue.some((p) => p.id === cur.id)) return cur; // still open
+      return queue[0] || null;
+    });
+  }, [tick]);
+
+  // Answer one. The engine applies the choice's effects at this point —
+  // they were held, not skipped, so nothing has happened until now.
+  function answerPendingEncounter(choiceId) {
+    const game = gameRef.current;
+    if (!game || !pendingEnc) return;
+    resolvePendingEncounter(game, pendingEnc.id, choiceId, { interactiveLoot: true });
+    setPendingEnc(null);
+    bumpTick();
+    maybeOpenLoot();
+  }
 
   // Manage the selection's lifetime. Enemy units stay selectable so the
   // player can inspect their stats and owner read-only — control actions
@@ -1423,6 +1454,20 @@ export default function Prototype({ config, onNewGame }) {
                 encounterPrompt.idx,
               )
             }
+          />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {!encounterPrompt && pendingEnc && (
+          <EncounterModal
+            key={`pending-${pendingEnc.id}`}
+            encounter={pendingEnc}
+            choices={pendingEnc.choices}
+            eligibleIds={pendingEnc.choices.map((c) => c.id)}
+            redrawsLeft={0}
+            onRedraw={() => {}}
+            onPick={answerPendingEncounter}
           />
         )}
       </AnimatePresence>

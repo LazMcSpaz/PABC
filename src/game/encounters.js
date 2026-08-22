@@ -10,8 +10,8 @@ import { FIELD_ENCOUNTERS, WORLD_ENCOUNTERS } from "./content/index.js";
 import { LOCATIONS } from "./content.js";
 import { normalizeEncounter } from "./content-loader.js";
 import { evalCond } from "./dsl.js";
-import { applyEffects, EFFECTS } from "./effects.js";
-import { resolveTargets } from "./targeting.js";
+import { applyEffects, EFFECTS, __bindWorldRegistry } from "./effects.js";
+import { resolveTargets, resolveHex } from "./targeting.js";
 import { bfsDistances } from "./board.js";
 import { emit } from "./events.js";
 import { hasTechNode } from "./tech.js";
@@ -31,6 +31,31 @@ function normalizeAll(rawMap) {
 
 export function getEncounter(id) {
   return WORLD[id] || FIELD[id] || null;
+}
+
+/**
+ * The live world-encounter registry. triggers.js reads through this rather
+ * than closing over the imported constant, so injected content is visible to
+ * trigger evaluation — without it the trigger pipeline can only ever see
+ * whatever was in src/game/content at module load, and a harness driving
+ * authored content sees an empty world.
+ */
+export function worldEncounters() {
+  return WORLD;
+}
+
+/**
+ * Inject an encounter at runtime. Mirrors quests.js registerQuest, and
+ * exists for the same reason: the harness and the coverage walk need to
+ * drive authored content without writing generated files first.
+ */
+export function registerWorldEncounter(def) {
+  if (!def?.id) return;
+  WORLD[def.id] = normalizeEncounter(def);
+}
+export function registerFieldEncounter(def) {
+  if (!def?.id) return;
+  FIELD[def.id] = normalizeEncounter(def);
 }
 
 // --- delivery dispatch -----------------------------------------------
@@ -71,11 +96,30 @@ function resolveRecipients(state, enc, mode, options, ctx) {
 function presentToPlayer(state, enc, pid, ctx) {
   // Filter choices by their own condition (the DSL `condition` on each
   // choice row).
-  const subCtx = { ...ctx, sourcePlayer: pid };
+  // Choice conditions are the recipient's question — "can YOU take this
+  // option" — so they resolve `active` to whoever is being shown the card,
+  // which is not necessarily the seat whose turn it is.
+  const subCtx = { ...ctx, sourcePlayer: pid, asPlayer: pid };
   const eligible = (enc.choices || []).filter((c) =>
     c.condition == null ? true : evalCond(state, c.condition, subCtx),
   );
   if (!eligible.length) return null;
+
+  // The human player, with no interactive channel open.
+  //
+  // This is the case that made every world encounter and every quest beat
+  // invisible: they are delivered from the round-end pipeline (turn.js
+  // runRoundEnd), which is synchronous and passes no `ctx.interact`, so
+  // headlessPick silently took choice 0 on the player's behalf and the card
+  // was never shown. A UI cannot answer synchronously from inside endTurn.
+  //
+  // So instead of deciding for them, park it: the encounter goes on a queue
+  // with everything needed to resolve it later, and the UI drains that queue
+  // once control returns. AI players and the headless harness are unaffected
+  // — they still resolve inline, which keeps the harness deterministic.
+  if (pid === state.humanFactionId && !ctx.interact) {
+    return queueForPlayer(state, enc, pid, eligible, subCtx);
+  }
 
   let pickedIdx = headlessPick(eligible);
   if (ctx.interact) {
@@ -83,7 +127,8 @@ function presentToPlayer(state, enc, pid, ctx) {
       kind: "encounterChoice",
       encounter: enc.id, player: pid,
       title: enc.title, art: enc.art, imagePath: enc.imagePath, text: enc.text,
-      choices: eligible.map((c) => ({ id: c.id, label: c.label, outcomeText: c.outcomeText })),
+      choices: eligible.map((c) => ({ id: c.id, label: c.label, outcomeText: c.outcomeText,
+                                      dismiss: c.dismiss === true })),
     });
     const idx =
       typeof picked === "number"
@@ -122,6 +167,85 @@ function applyChoiceEffects(state, choice, pid, ctx) {
   } else {
     applyEffects(state, effects, ctx);
   }
+}
+
+// --- pending player encounters ---------------------------------------
+//
+// A queue of encounters waiting on a human decision. Each entry carries the
+// definition (so the UI can render text, art and choices without another
+// lookup) and the slice of context the effects will need when they finally
+// run — who it is for, where it happened, and which quest beat it belongs to.
+
+function queueForPlayer(state, enc, pid, eligible, subCtx) {
+  state.pendingEncounters = state.pendingEncounters || [];
+  const entry = {
+    id: `pending-${state.pendingEncounters.length}-${enc.id}`,
+    encounterId: enc.id,
+    recipient: pid,
+    title: enc.title ?? null,
+    text: enc.text ?? "",
+    art: enc.art ?? null,
+    imagePath: enc.imagePath ?? null,
+    choices: eligible.map((c) => ({
+      id: c.id, label: c.label, outcomeText: c.outcomeText ?? null,
+      // Set on the single synthesised choice of a narrative beat, so the UI can
+      // show an acknowledgement rather than a one-item list of options.
+      dismiss: c.dismiss === true,
+    })),
+    // Only the transferable parts of ctx — no functions, so this stays
+    // plain data that could be serialised with the rest of the state.
+    ctx: {
+      sourcePlayer: pid,
+      // The card is theirs; its effects must resolve as theirs whenever
+      // they get round to answering it.
+      asPlayer: pid,
+      sourceHex: subCtx.sourceHex ?? null,
+      sourceUnit: subCtx.sourceUnit ?? null,
+      questId: subCtx.questId ?? null,
+      beatId: subCtx.beatId ?? null,
+      claimant: subCtx.claimant ?? null,
+    },
+    def: enc,
+    queuedAt: state.round,
+  };
+  state.pendingEncounters.push(entry);
+  return { encounterId: enc.id, recipient: pid, queued: true };
+}
+
+/** Anything waiting on this player right now. */
+export function pendingEncountersFor(state, pid) {
+  return (state.pendingEncounters || []).filter((p) => p.recipient === pid);
+}
+
+/**
+ * Resolve the queued encounter `pendingId` by taking choice `choiceId`.
+ * This is the deferred half of presentToPlayer: same events, same effect
+ * application, same ordering — only the decision arrives later.
+ */
+export function resolvePendingEncounter(state, pendingId, choiceId, ctx = {}) {
+  const queue = state.pendingEncounters || [];
+  const idx = queue.findIndex((p) => p.id === pendingId);
+  if (idx < 0) return null;
+  const entry = queue[idx];
+  queue.splice(idx, 1);
+
+  const enc = entry.def;
+  const choice = (enc.choices || []).find((c) => c.id === choiceId)
+    // Fall back to the first still-offered choice rather than doing nothing,
+    // so a stale id from the UI cannot strand the queue.
+    || (enc.choices || []).find((c) => entry.choices.some((e) => e.id === c.id));
+  if (!choice) return null;
+
+  const subCtx = { ...ctx, ...entry.ctx };
+  emit(state, "encounter_delivered", {
+    encounter: enc.id, recipient: entry.recipient,
+    choiceId: choice.id, choiceLabel: choice.label,
+  });
+  applyChoiceEffects(state, choice, entry.recipient, subCtx);
+  emit(state, "encounter_resolved", {
+    encounter: enc.id, recipient: entry.recipient, choiceId: choice.id,
+  });
+  return { recipient: entry.recipient, choiceId: choice.id, choiceLabel: choice.label };
 }
 
 // --- field-encounter draw (§15.8) ------------------------------------
@@ -196,15 +320,32 @@ export function drawFieldEncounter(state, unit, ctx = {}) {
 function placeEncounterMarker(state, enc, options, ctx) {
   const hex =
     options.hex ||
-    pickHexByFilter(state, options.hexFilter || enc.placementFilter);
+    pickHexByFilter(state, options.hexFilter || enc.placementFilter, ctx);
   if (!hex) return null;
   const expiresIn = options.expiresIn ?? enc.expiresIn;
+  // A hex holds a QUEUE of discoveries, not one. This used to be a single
+  // slot, and with 22 quests dropping "discovered" openers onto a board
+  // that had 7 terrain hexes to offer, most placements silently destroyed
+  // an earlier one — the quest stayed active with its opening beat sitting
+  // on a tile that no longer pointed at it. Nothing logged; the quest just
+  // never happened.
   state.world.encounterMarkers = state.world.encounterMarkers || {};
-  state.world.encounterMarkers[hex] = {
+  const queue = markerQueue(state, hex);
+  queue.push({
     encounterId: enc.id,
+    // Quest beats are encounter-SHAPED but live in the quest registry, not
+    // in WORLD/FIELD — so `getEncounter(id)` cannot find one and a marker
+    // that stored only an id could never be resolved. Every "discovered"
+    // quest beat went onto the map and stayed there. Carrying the def (and
+    // the quest context its ADVANCE_QUEST needs to tell routing from
+    // advancing) makes the marker self-contained whatever dropped it.
+    def: enc,
+    questId: ctx?.questId ?? null,
+    beatId: ctx?.beatId ?? null,
+    claimant: ctx?.claimant ?? null,
     expiresAt: expiresIn != null ? state.round + expiresIn : null,
     placedAt: state.round,
-  };
+  });
   emit(state, "location_spawned", { hex, kind: "encounter-marker", encounterId: enc.id });
   return { placedAt: hex };
 }
@@ -215,19 +356,59 @@ function placeEncounterMarker(state, enc, options, ctx) {
 export function resolveMarkerOnHex(state, hex, unit, ctx = {}) {
   const markers = state.world?.encounterMarkers;
   if (!markers?.[hex]) return null;
-  const { encounterId } = markers[hex];
-  delete markers[hex];
-  return deliverEncounter(
-    state, encounterId,
-    { mode: "private", recipient: unit.owner },
-    // §18.3 — carry the marker hex for `zoc_contains` choice conditions.
-    { ...ctx, sourcePlayer: unit.owner, sourceHex: hex },
+  if (!markerQueue(state, hex).length) return null;
+  // Take the oldest discovery waiting here; any others keep waiting, so a
+  // busy tile is visited more than once rather than losing its backlog.
+  const queue = markerQueue(state, hex);
+  // A quest marker belongs to the RUN that placed it. Quest runs are per
+  // player, so the same `discovered` opener now drops a marker for each player
+  // who takes that quest — and without this, whoever walked onto any of them
+  // received it, including a player who had already played that beat in their
+  // own run. That is how the same opener was delivered to one player twice.
+  //
+  // A marker with no claimant (a world encounter placed by PLACE_ENCOUNTER) is
+  // open to anyone, as before.
+  const idx = queue.findIndex((m) => !m.claimant || m.claimant === unit.owner);
+  if (idx < 0) return null;
+  const marker = queue.splice(idx, 1)[0];
+  if (!marker) return null;
+  if (!queue.length) delete markers[hex];
+  // §18.3 — carry the marker hex for `zoc_contains` choice conditions, and
+  // the quest context so a beat delivered by discovery advances (and routes)
+  // exactly as one delivered directly would.
+  const markerCtx = {
+    ...ctx,
+    sourcePlayer: unit.owner,
+    sourceHex: hex,
+    sourceUnit: unit.uid,
+    ...(marker.questId ? { questId: marker.questId } : {}),
+    ...(marker.beatId ? { beatId: marker.beatId } : {}),
+    ...(marker.claimant ? { claimant: marker.claimant } : {}),
+  };
+  // A quest discovered at a place remembers that place. Its later beats are
+  // usually delivered directly (conditional / auto) and carry no hex of
+  // their own, but they still talk about where it started — "this ford does
+  // not go dark to you again", "leave it as it stands". Without this,
+  // `encounter-hex` in an ending beat resolves to nothing and the effect
+  // fizzles silently.
+  if (marker.questId) {
+    // Quest runs are per player, so remember the origin on the run belonging
+    // to whoever walked onto the marker (falling back to the marker's own
+    // claimant when it carries one).
+    const owner = marker.claimant || unit.owner;
+    const aq = state.activeQuests?.[`${marker.questId}|${owner}`];
+    if (aq && !aq.originHex) aq.originHex = hex;
+  }
+  const def = marker.def || getEncounter(marker.encounterId);
+  if (!def) return null;
+  return deliverEncounterDef(
+    state, def, { mode: "private", recipient: unit.owner }, markerCtx,
   );
 }
 
 // --- HexFilter resolver (content-schema §4) --------------------------
 
-function hexMatches(state, hex, f) {
+function hexMatches(state, hex, f, ctx = {}) {
   if (!f) return true;
   const h = state.board.hexes[hex];
   if (!h) return false;
@@ -251,13 +432,29 @@ function hexMatches(state, hex, f) {
     if (loc?.controller === f.notControlledBy) return false;
   }
 
+  // Range filters anchor on another hex. The anchor may be a symbolic token
+  // ("encounter-hex"), and on a freshly generated board it may name a hex
+  // that does not exist at all — a named location that did not get placed,
+  // or a filter authored against a different map size. bfsDistances walks
+  // the adjacency table directly, so an unknown anchor used to throw and
+  // take down whatever turn was placing the marker. An anchor that cannot
+  // be resolved now simply matches nothing, which is how every other
+  // unsatisfiable clause in this filter already behaves.
   if (f.withinHexesOf) {
-    const d = bfsDistances(state.board.adjacency, f.withinHexesOf.hex);
+    const anchor = resolveHex(state, f.withinHexesOf.hex, ctx);
+    if (!anchor || !state.board.adjacency[anchor]) return false;
+    const d = bfsDistances(state.board.adjacency, anchor);
     if ((d[hex] ?? Infinity) > f.withinHexesOf.range) return false;
   }
   if (f.outsideHexesOf) {
-    const d = bfsDistances(state.board.adjacency, f.outsideHexesOf.hex);
-    if ((d[hex] ?? Infinity) <= f.outsideHexesOf.range) return false;
+    const anchor = resolveHex(state, f.outsideHexesOf.hex, ctx);
+    // An unresolvable "stay away from X" is vacuously satisfied: there is
+    // no X to be near. That is the opposite default to withinHexesOf, and
+    // deliberately so — both fail in the direction that loses no content.
+    if (anchor && state.board.adjacency[anchor]) {
+      const d = bfsDistances(state.board.adjacency, anchor);
+      if ((d[hex] ?? Infinity) <= f.outsideHexesOf.range) return false;
+    }
   }
 
   if (f.hasChip && !loc?.chips?.some((c) => state.chips[c]?.chipId === f.hasChip)) return false;
@@ -289,11 +486,55 @@ function hexMatches(state, hex, f) {
   return true;
 }
 
-export function pickHexByFilter(state, filter) {
-  const matching = Object.keys(state.board.hexes).filter((h) => hexMatches(state, h, filter));
+/**
+ * Pick a hex matching `filter`.
+ *
+ * `filter` may be a single HexFilter object OR an **ordered list** of them,
+ * tried in order until one matches. The list is the fallback clause content
+ * could not otherwise express: `hexMatches` ANDs every key and has no OR and
+ * no NOT, so "put it beside the tracks if you can, anywhere in their land if
+ * you can't" had no way to be written.
+ *
+ * That mattered because a filter which merely *usually* matches is not a
+ * softer version of one that always does — a beat whose placement misses is
+ * a beat nobody sees, and where a later quest gates on a flag only that beat
+ * writes, one unlucky board silently costs two quests. An ordered list lets
+ * an author state the preferred placement and the guaranteed one, and get
+ * both.
+ */
+export function pickHexByFilter(state, filter, ctx = {}) {
+  if (Array.isArray(filter)) {
+    for (const f of filter) {
+      const hit = pickHexByFilter(state, f, ctx);
+      if (hit) return hit;
+    }
+    return null;
+  }
+  const matching = Object.keys(state.board.hexes).filter((h) => hexMatches(state, h, filter, ctx));
   if (!matching.length) return null;
-  return state.rng.pick(matching);
+  // Spread discoveries out: prefer a matching hex that is not already
+  // holding one. Falls back to the full set when every match is occupied,
+  // so a congested board stacks rather than failing to place.
+  const free = matching.filter((h) => !markerQueue(state, h, false).length);
+  return state.rng.pick(free.length ? free : matching);
 }
+
+// The discovery queue on a hex. Tolerates the pre-queue single-object shape
+// so a state saved before this change still reads.
+function markerQueue(state, hex, create = true) {
+  const markers = state.world?.encounterMarkers;
+  if (!markers) return [];
+  let q = markers[hex];
+  if (q == null) {
+    if (!create) return [];
+    q = markers[hex] = [];
+  } else if (!Array.isArray(q)) {
+    q = markers[hex] = [q];
+  }
+  return q;
+}
+
+export { markerQueue };
 
 // --- effect handlers — registered into the shared EFFECTS map ---
 
@@ -321,3 +562,7 @@ EFFECTS.DELIVER_ENCOUNTER = function (state, e, ctx) {
     mode: e.mode, recipient: e.recipient,
   }, ctx);
 };
+
+// Let effects.js (PEEK scope:"settlement") see the live world registry
+// without importing this module and closing the cycle.
+__bindWorldRegistry(worldEncounters);

@@ -7,7 +7,8 @@
 // Boolean expressions return bool; the named helpers (controls_count,
 // control_duration) return ints — both usable as Vals in `op` predicates.
 
-import { resolveTargets } from "./targeting.js";
+import { resolveTargets, resolveHex } from "./targeting.js";
+import { TECH_NODES } from "./tech.js";
 import {
   menaceOf,
   honorOf,
@@ -19,32 +20,83 @@ import {
 // Resolve a dot-path string against the engine state. Unknown paths
 // return null. `null` in any numeric comparison renders the predicate
 // false (§5).
-export function resolvePath(state, path) {
+//
+// The state object IS the root, so a leading `state.` segment is stripped:
+// the schema doc (§5) documents `state.round`, and without this that path
+// walks `state.state` and resolves to null. Both forms now work.
+//
+// Recipient tokens are substituted per-segment, so `players.active.vp`
+// resolves against whoever `active` currently names instead of looking for
+// a player literally called "active".
+export function resolvePath(state, path, ctx = {}) {
   if (typeof path !== "string") return null;
-  const parts = path.split(".");
+  let parts = path.split(".");
+  if (parts[0] === "state") parts = parts.slice(1);
   let cur = state;
-  for (const p of parts) {
+  for (const raw of parts) {
     if (cur == null || typeof cur !== "object") return null;
+    const p = TOKEN_SEGMENTS.has(raw) ? (resolvePlayer(state, raw, ctx) ?? raw) : raw;
     cur = cur[p];
   }
   return cur ?? null;
 }
 
+// Segments that name a player by token rather than by id. Kept narrow on
+// purpose: only tokens that resolve to exactly one player belong here, so
+// a path can never silently pick one of several.
+const TOKEN_SEGMENTS = new Set([
+  "active", "active_player", "self", "controller", "claimant",
+  "triggering-player", "triggering_player",
+]);
+
 function resolvePlayer(state, tok, ctx) {
+  if (state.players[tok]) return tok;
+  // `ctx.asPlayer` evaluates a condition on behalf of somebody who is not
+  // the active seat. Quest beat gates are the reason: they are checked from
+  // the round-end pipeline, which runs AFTER endTurn has already wrapped
+  // activeIndex back to seat 0 — so an authored gate reading
+  // `{op:"ne", left:"active", right:"versari"}` was tested against seat 0
+  // every single time, whoever the quest actually belonged to. Two quests
+  // gated exactly that way could never open.
+  if (ctx?.asPlayer && (tok === "active" || tok === "active_player" || tok == null)) {
+    return ctx.asPlayer;
+  }
   if (state.players[tok]) return tok;
   return resolveTargets(state, tok, ctx)[0] ?? null;
 }
 
-// Evaluate a Val: literal | path expression | recursive Cond returning int.
+// Evaluate a Val:
+//   number | boolean            → itself
+//   { path: "..." }             → explicit path (unambiguous; preferred form)
+//   object                      → recursive Cond returning an int
+//   string containing "."       → path expression
+//   string naming a player token→ that player's id
+//   string naming a top-level
+//     numeric/boolean state key → that value  (this is what makes `round` work)
+//   any other string            → literal
+//
+// The bare-string cases exist because the dot heuristic alone cannot express
+// a top-level scalar: `"round"` has no dot so it read as the literal string
+// "round", and `"state.round"` walked a `state.state` that does not exist —
+// so a round comparison was unwriteable in either form. Authored content
+// used both. `{ path: "round" }` is the explicit escape for new content.
 function evalVal(state, val, ctx) {
   if (val == null) return null;
   if (typeof val === "number" || typeof val === "boolean") return val;
+  if (typeof val === "object") {
+    if (typeof val.path === "string") return resolvePath(state, val.path, ctx);
+    return evalCond(state, val, ctx);
+  }
   if (typeof val === "string") {
-    // Dotted forms are paths; bare strings are literals.
-    if (val.includes(".")) return resolvePath(state, val);
+    if (val.includes(".")) return resolvePath(state, val, ctx);
+    if (TOKEN_SEGMENTS.has(val)) return resolvePlayer(state, val, ctx) ?? val;
+    // A bare word naming a top-level scalar on the state. Restricted to
+    // numbers and booleans so a literal string can never be shadowed by an
+    // unrelated state key (`phase`, `winnerId`, … stay literals).
+    const top = state?.[val];
+    if (typeof top === "number" || typeof top === "boolean") return top;
     return val;
   }
-  if (typeof val === "object") return evalCond(state, val, ctx);
   return null;
 }
 
@@ -88,7 +140,13 @@ export function evalCond(state, cond, ctx = {}) {
       typeof cond.quest_active === "string"
         ? cond.quest_active
         : cond.quest_active.questId;
-    return !!state.activeQuests?.[id];
+    // Per player: "is this quest running FOR ME". A quest is no longer a
+    // single global object, so asking whether it exists at all would answer a
+    // different (and useless) question — whether anyone anywhere is on it.
+    const qpid = resolvePlayer(state,
+      (typeof cond.quest_active === "object" ? cond.quest_active.player : null), ctx);
+    return Object.values(state.activeQuests || {})
+      .some((r) => r.questId === id && r.claimant === qpid);
   }
 
   if (cond.quest_completed) {
@@ -144,12 +202,19 @@ export function evalCond(state, cond, ctx = {}) {
   //   - "any-location-on-hex"     : the location on `hex` (if any)
   if (cond.has_chip) {
     const h = cond.has_chip;
+    // `chipId` accepts a single id OR a list of ids (matches any of them).
+    // "Do you have a lab?" is a list question: `labs` and `advanced-lab` are
+    // both labs, and content should not have to know which tier you built.
+    const wanted = h.chipId == null ? null
+      : new Set(Array.isArray(h.chipId) ? h.chipId : [h.chipId]);
+    if (!wanted || wanted.size === 0) return false;
     const chipId = h.chipId;
-    if (!chipId) return false;
-    const hex = h.hex != null && typeof h.hex === "string" && h.hex.includes(".")
-      ? resolvePath(state, h.hex) : h.hex;
+    // `hex` accepts a symbolic token ("encounter-hex"), a dot-path, or a
+    // literal id. Defaults to the hex this encounter fired on, which is the
+    // overwhelmingly common intent for an on-hex scope.
+    const hex = resolveHex(state, h.hex ?? "encounter-hex", ctx);
     const pid = h.player ? resolvePlayer(state, h.player, ctx) : ctx.sourcePlayer ?? null;
-    const chipMatches = (uid) => state.chips?.[uid]?.chipId === chipId;
+    const chipMatches = (uid) => wanted.has(state.chips?.[uid]?.chipId);
     switch (h.holder) {
       case "active-player-units": {
         if (!pid) return false;
@@ -175,10 +240,19 @@ export function evalCond(state, cond, ctx = {}) {
         }
         return false;
       }
+      // "Is there one of these HERE?" — the chip must be installed at the
+      // named hex, not merely somewhere in the player's territory. That
+      // distinction is the whole point for place-bound content: a lab
+      // anywhere in your land cannot study THIS ruin; a lab built at it can.
+      //
+      // `player` is optional and adds an ownership requirement on top.
+      case "location-on-hex":
       case "any-location-on-hex": {
         if (!hex) return false;
-        const loc = Object.values(state.locations).find((l) => l.hexId === hex);
+        const loc = state.locations?.[hex]
+          || Object.values(state.locations).find((l) => l.hexId === hex);
         if (!loc) return false;
+        if (h.player && loc.controller !== pid) return false;
         return (loc.chips || []).some(chipMatches);
       }
       default:
@@ -197,6 +271,119 @@ export function evalCond(state, cond, ctx = {}) {
       if (u.owner !== pid) continue;
       if (t && u.type !== t) continue;
       n++;
+    }
+    return n;
+  }
+
+  // --- capability predicates -------------------------------------------
+  //
+  // "Does this player have X?" across the three things a player can invest
+  // in: technology, buildings, and installed chips. Content gates choices on
+  // these ("you have a lab, so your technicians can open it carefully"), so
+  // they must express the general question, not one hard-coded case.
+
+  // `count_tech` — how many wheel nodes the player holds, optionally narrowed
+  // to a path and/or a branch within it. Returns an int, usable as a Val.
+  //
+  //   { path: "intelligence" }              every node on the Intelligence path
+  //   { path: "intelligence", branch: "b" } the Espionage branch only
+  //   { layer: 3 }                          capstones only
+  //
+  // Branch is read off the node id suffix (`int-b1` → branch "b"); the entry
+  // node belongs to no branch, so a branch query deliberately excludes it —
+  // "invested in Espionage" means having gone down that fork, not merely
+  // having opened the path.
+  if (cond.count_tech) {
+    const c = cond.count_tech;
+    const pid = resolvePlayer(state, c.player ?? "active", ctx);
+    const held = state.players?.[pid]?.techWheel || [];
+    let n = 0;
+    for (const id of held) {
+      const node = TECH_NODES[id];
+      if (!node) continue;
+      if (c.path && node.path !== c.path) continue;
+      if (c.layer != null && node.layer !== c.layer) continue;
+      if (c.branch) {
+        const m = /-([ab])\d$/.exec(id);
+        if (!m || m[1] !== c.branch) continue;
+      }
+      n++;
+    }
+    return n;
+  }
+
+  // `has_tech` — the boolean form. `node` tests one specific node; otherwise
+  // it counts via the same filters as `count_tech` and compares against
+  // `minNodes` (default 1). `{ path: "intelligence", branch: "b" }` is
+  // "has this player put anything into Espionage".
+  if (cond.has_tech) {
+    const c = cond.has_tech;
+    const pid = resolvePlayer(state, c.player ?? "active", ctx);
+    if (c.node) return !!state.players?.[pid]?.techWheel?.includes(c.node);
+    const n = evalCond(state, { count_tech: c }, ctx);
+    return n >= (c.minNodes ?? 1);
+  }
+
+  // `count_chips` — how many matching chip instances the player has installed,
+  // across their Locations, their units, or both (`holder`, default "any").
+  // `chipId` accepts an id or a list; `kind` filters by the chip def's kind
+  // ("location" chips are the game's buildings). Returns an int.
+  if (cond.count_chips) {
+    const c = cond.count_chips;
+    const pid = resolvePlayer(state, c.player ?? "active", ctx);
+    if (!pid) return 0;
+    const wanted = c.chipId == null ? null
+      : new Set(Array.isArray(c.chipId) ? c.chipId : [c.chipId]);
+    const holder = c.holder ?? "any";
+    let n = 0;
+    const tally = (uids) => {
+      for (const uid of uids || []) {
+        const inst = state.chips?.[uid];
+        if (!inst) continue;
+        if (c.includeDisabled !== true && inst.disabled) continue;
+        if (wanted && !wanted.has(inst.chipId)) continue;
+        n++;
+      }
+    };
+    if (holder === "any" || holder === "locations") {
+      for (const loc of Object.values(state.locations || {})) {
+        if (loc.controller === pid) tally(loc.chips);
+      }
+    }
+    if (holder === "any" || holder === "units") {
+      for (const u of Object.values(state.units || {})) {
+        if (u.owner === pid) tally(u.chips);
+      }
+    }
+    // Place-scoped: only what is installed at one hex.
+    if (holder === "location-on-hex" || holder === "at-hex") {
+      const hex = resolveHex(state, c.hex ?? "encounter-hex", ctx);
+      const loc = hex && (state.locations?.[hex]
+        || Object.values(state.locations || {}).find((l) => l.hexId === hex));
+      if (loc && (!c.player || loc.controller === pid)) tally(loc.chips);
+    }
+    return n;
+  }
+
+  // `count_flags` — how many of a player's flags whose name starts with
+  // `prefix` are currently set. The content's moral ledger: every ruling the
+  // player hands down writes one `rule_*` / `rule_hard_*` flag, and the gates
+  // ask "have you ruled harshly at least twice?". Returns an int, so it is
+  // usable anywhere a Val is.
+  //
+  // Only truthy flags count, and flag expiry (turn.js sweepPlayerFlags) has
+  // already removed anything time-limited that lapsed, so this reads a live
+  // tally rather than a historical one.
+  if (cond.count_flags) {
+    const c = cond.count_flags;
+    const pid = resolvePlayer(state, c.player ?? "active", ctx);
+    const flags = state.players?.[pid]?.flags;
+    if (!flags) return 0;
+    const prefix = c.prefix ?? "";
+    let n = 0;
+    for (const [name, rec] of Object.entries(flags)) {
+      if (!name.startsWith(prefix)) continue;
+      if (rec && rec.value) n++;
     }
     return n;
   }
@@ -244,6 +431,52 @@ export function evalCond(state, cond, ctx = {}) {
     }
   }
 
+  return unknownForm(state, cond);
+}
+
+// --- unknown-form handling -------------------------------------------
+//
+// This used to be a bare `return false`, and that one line is the shape of
+// almost every silent failure this content import turned up: a condition the
+// engine does not understand gates a choice, the gate reads false, the choice
+// is filtered out of `eligible`, and the player simply never sees it. Nothing
+// logs. `count_flags` sat undiscovered behind exactly this until the corpus
+// was swept by hand.
+//
+// Failing closed is still the right RUNTIME behaviour — a typo in one gate
+// should not take down the turn that evaluates it — but it must not be
+// silent. So: warn once per distinct form, record it on the state for the
+// harness and the content build to inspect, and offer a strict mode that
+// throws for the places where loud-and-early is what you want (content
+// validation, tests, CI).
+let STRICT = false;
+
+/** Throw on unrecognised condition forms instead of warning. */
+export function setConditionStrictness(on) {
+  STRICT = !!on;
+}
+
+/** Every unrecognised form seen so far, for assertions and build checks. */
+export function unknownConditionForms(state) {
+  return [...(state?.__unknownCondForms || [])];
+}
+
+const WARNED = new Set();
+
+function unknownForm(state, cond) {
+  const key = Object.keys(cond || {}).sort().join("+") || "(empty)";
+  if (state) {
+    state.__unknownCondForms = state.__unknownCondForms || new Set();
+    state.__unknownCondForms.add(key);
+  }
+  const msg = `dsl: unrecognised condition form "${key}" — evaluated as false. `
+    + `Add a handler in dsl.js or fix the authored condition.`;
+  if (STRICT) throw new Error(msg);
+  if (!WARNED.has(key)) {
+    WARNED.add(key);
+    // eslint-disable-next-line no-console
+    console.warn(msg, JSON.stringify(cond)?.slice(0, 200));
+  }
   return false;
 }
 

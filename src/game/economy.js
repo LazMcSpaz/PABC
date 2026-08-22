@@ -8,7 +8,7 @@
 // build action (actions.js), the Upkeep loop (turn.js), the capture path
 // (contest.js), and the HUD exposures (engineAdapter.js).
 import { CONFIG } from "./config.js";
-import { CHIPS, chipDefOf } from "./content.js";
+import { CHIPS, CAPITAL, chipDefOf } from "./content.js";
 import { emit } from "./events.js";
 import { recomputeStats, recomputeResearch } from "./stats.js";
 import { recomputeInfluence } from "./influence.js";
@@ -94,10 +94,33 @@ export function locationOutput(state, loc) {
 // `locked` (true when Loyalty is short) with a human reason. Tech-forbidden
 // chips are omitted entirely. Unit chips are included only as `unit`-kind
 // (the caller checks for a stationed friendly unit + bay space).
+/** Does `pid` hold a capital chip anywhere on the board? */
+export function hasCapital(state, pid) {
+  return Object.values(state.locations).some(
+    (l) => l.controller === pid
+      && (l.chips || []).some((c) => state.chips[c]?.chipId === "capital"));
+}
+
+/**
+ * May `pid` build a capital at `loc`? Only a faction that still holds ground
+ * and has no seat left anywhere — so this is a recovery from losing your
+ * capital, never a way to relocate one you still have.
+ */
+export function canRebuildCapital(state, loc) {
+  return !!loc?.controller && !hasCapital(state, loc.controller);
+}
+
 export function buildableChips(state, loc) {
   const player = state.players[loc.controller];
   if (!player) return [];
   const out = [];
+  // The Capital lives outside CHIPS (it is placed, not sold), so it is offered
+  // here explicitly and only when the rebuild condition holds.
+  if (canRebuildCapital(state, loc)) {
+    const locked = !meetsLoyalty(loc, CAPITAL);
+    out.push({ chipId: CAPITAL.id, def: CAPITAL, locked,
+               reason: locked ? `needs Loyalty ${CAPITAL.loyaltyReq}` : null });
+  }
   for (const def of Object.values(CHIPS)) {
     // Signature chips are faction-locked — invisible to everyone else,
     // including a captor browsing a captured Location's menu.

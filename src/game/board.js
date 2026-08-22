@@ -40,7 +40,7 @@ export function bfsDistances(adjacency, start) {
   const queue = [start];
   while (queue.length) {
     const cur = queue.shift();
-    for (const nb of adjacency[cur]) {
+    for (const nb of adjacency[cur] || []) {
       if (dist[nb] === undefined) {
         dist[nb] = dist[cur] + 1;
         queue.push(nb);

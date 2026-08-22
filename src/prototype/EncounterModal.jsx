@@ -126,6 +126,12 @@ export default function EncounterModal({ encounter, choices, eligibleIds, redraw
   useEscClose(() => {});
   const isPhone = useIsPhone();
   const title = encounter.title || displayName(encounter.id);
+  // Most encounters have no art, and most never will — art is commissioned
+  // per card. Text-and-choices is therefore the DEFAULT presentation and the
+  // image is the enhancement, not the other way round: with no image the
+  // prose takes the full width instead of sitting in a narrow column beside
+  // an empty frame.
+  const imageUrl = encounter.imagePath || encounter.imageUrl || null;
 
   return (
     <motion.div
@@ -175,14 +181,16 @@ export default function EncounterModal({ encounter, choices, eligibleIds, redraw
             gap left only ~80px for text and squeezed every line of prose
             and every choice button down to one word per line. */}
         <div style={{ display: "flex", flexDirection: isPhone ? "column" : "row", gap: isPhone ? 12 : 18, padding: isPhone ? "14px 16px 16px" : "18px 24px 18px", flex: 1, minHeight: 0, overflowY: isPhone ? "auto" : "visible" }}>
-          <motion.div
-            initial={{ opacity: 0, scale: 0.96 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ delay: 0.1, duration: 0.32, ease: "easeOut" }}
-            style={isPhone ? { width: "38%", maxWidth: 150, alignSelf: "center", flexShrink: 0 } : { width: 220, flexShrink: 0 }}
-          >
-            <ImageFrame imageUrl={encounter.imagePath || encounter.imageUrl} />
-          </motion.div>
+          {imageUrl && (
+            <motion.div
+              initial={{ opacity: 0, scale: 0.96 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ delay: 0.1, duration: 0.32, ease: "easeOut" }}
+              style={isPhone ? { width: "38%", maxWidth: 150, alignSelf: "center", flexShrink: 0 } : { width: 220, flexShrink: 0 }}
+            >
+              <ImageFrame imageUrl={imageUrl} />
+            </motion.div>
+          )}
 
           <div className="pc-scroll" style={{
             flex: 1, display: "flex", flexDirection: "column", gap: 14,
@@ -194,7 +202,11 @@ export default function EncounterModal({ encounter, choices, eligibleIds, redraw
                 initial={{ opacity: 0, y: 4 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.14, duration: 0.28 }}
-                style={{ fontSize: 13, color: "#d0d7dd", lineHeight: 1.6, whiteSpace: "pre-wrap" }}
+                style={{
+                  fontSize: imageUrl ? 13 : 14, color: "#d0d7dd",
+                  lineHeight: 1.65, whiteSpace: "pre-wrap",
+                  maxWidth: imageUrl ? "none" : "62ch",
+                }}
               >
                 <RichText>{encounter.text}</RichText>
               </motion.div>
@@ -230,6 +242,13 @@ export default function EncounterModal({ encounter, choices, eligibleIds, redraw
                       fontFamily: C.font, fontSize: 13.5, fontWeight: 700,
                       letterSpacing: 0.8, textTransform: "uppercase",
                     }}><RichText>{c.label}</RichText></div>
+                    {c.outcomeText && eligible && (
+                      <div style={{
+                        fontSize: 11.5, color: "rgba(208,215,221,0.75)",
+                        marginTop: 5, lineHeight: 1.45, textTransform: "none",
+                        letterSpacing: 0,
+                      }}><RichText>{c.outcomeText}</RichText></div>
+                    )}
                     {!eligible && (
                       <div style={{
                         fontFamily: C.font, fontSize: 9, letterSpacing: 1.6,

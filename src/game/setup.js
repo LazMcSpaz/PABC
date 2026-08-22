@@ -390,6 +390,9 @@ export function createGame({
     modifiers: [],
     pendingActionGrants: [],
     surcharges: [],
+    // Encounters waiting on a human decision (encounters.js). Empty for
+    // headless and AI-only games, which resolve inline.
+    pendingEncounters: [],
     winnerId: null,
     reinforcements: [], // v0.2 §16.5 — pending field-reinforcement packets
     pendingSalvage: [], // interactive salvage queue (UI resolves via resolveSalvage)

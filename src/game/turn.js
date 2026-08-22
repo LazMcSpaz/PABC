@@ -10,7 +10,7 @@ import { CONFIG } from "./config.js";
 import { activePlayerId } from "./targeting.js";
 import { sweepDeferred } from "./deferred.js";
 import { evaluateTriggers } from "./triggers.js";
-import { evaluateConditionalBeats } from "./quests.js";
+import { evaluateConditionalBeats, offerQuests } from "./quests.js";
 import {
   applyOutputAndBuilds, chargeChipUpkeep, chargeUnitUpkeep, enforceLoyaltySlotCap,
 } from "./economy.js";
@@ -218,6 +218,11 @@ function refreshMoveBudget(state, pid) {
   for (const u of Object.values(state.units)) {
     if (u.owner !== pid) continue;
     u.moveRemaining = u.movement;
+    // SET_MOVEMENT is an absolute override, not a modifier: the unit's
+    // movement BECOMES the authored value for the turn it applies to.
+    const ov = (state.movementOverrides || []).find(
+      (o) => o.player === pid && !o.consumed && o.appliesOnRound <= state.round);
+    if (ov) u.moveRemaining = Math.max(0, ov.value);
     // No road start-bonus any more: the network pays out per hex travelled
     // (CONFIG.movement.pavedCost), not as a lump for happening to be parked on
     // it at Upkeep. See config.js.
@@ -287,6 +292,11 @@ export function startTurn(state) {
   // Trespass presence sweep — units still parked in foreign ZoC keep the
   // citation streak alive (warning → −1 → −2), even without moving.
   sweepTrespass(state, pid);
+
+  // Offer any quest whose opening beat is available to THIS player. Runs
+  // here, inside their own turn, so an opener gate reading `active` means
+  // the player being offered it (see quests.js offerQuests).
+  offerQuests(state);
 
   const p = state.players[pid];
   p.actions.remaining = p.actions.max; // wildcard pool (base 0)
@@ -392,6 +402,13 @@ export function endTurn(state) {
   const pid = activePlayerId(state);
   state.phase = "Cleanup";
   state.modifiers = state.modifiers.filter((m) => m.duration !== "this_turn");
+  // A movement override covers exactly the turn it landed on.
+  for (const o of state.movementOverrides || []) {
+    if (o.player === pid && !o.consumed && o.appliesOnRound <= state.round) o.consumed = true;
+  }
+  if (state.movementOverrides?.length) {
+    state.movementOverrides = state.movementOverrides.filter((o) => !o.consumed);
+  }
   emit(state, "turn_ended", { player: pid });
 
   state.activeIndex += 1;
@@ -408,6 +425,8 @@ export function endTurn(state) {
 // queued consequence can update the state that triggers then read.
 function runRoundEnd(state) {
   sweepDeferred(state);
+  sweepPlayerFlags(state);
+  sweepSecondments(state);
   sweepReinforcements(state);
   evaluateTriggers(state);
   evaluateConditionalBeats(state);
@@ -417,6 +436,69 @@ function runRoundEnd(state) {
   // drift, flows, AI-to-AI politics, vassal tick, coalitions, then the
   // Recognition win check (sets winnerId if a peaceful victory has landed).
   runDiplomacyRound(state);
+}
+
+// Player flags with a finite lifetime lapse here. SET_PLAYER_FLAG stored a
+// `duration` from the beginning but nothing ever expired it, so every
+// "for a while" arrangement in authored content was silently permanent —
+// one escort job granting safe passage for the rest of the game. Flags
+// without an expiry round are untouched: the moral ledger is meant to be
+// permanent, and count_flags reads it.
+function sweepPlayerFlags(state) {
+  for (const p of Object.values(state.players || {})) {
+    if (!p.flags) continue;
+    for (const [name, rec] of Object.entries(p.flags)) {
+      if (!rec || rec.expiresAtRound == null) continue;
+      if (state.round < rec.expiresAtRound) continue;
+      delete p.flags[name];
+      emit(state, "player_flag_expired", { player: p.id, flag: name });
+      // Safe passage written against this flag lapses with it.
+      for (const [fid, grant] of Object.entries(p.safePassage || {})) {
+        if (grant?.whileFlag === name) {
+          delete p.safePassage[fid];
+          emit(state, "safe_passage_expired", { player: p.id, faction: fid, reason: "flag_expired" });
+        }
+      }
+    }
+  }
+  // Round-bounded passage grants expire on their own clock too.
+  for (const p of Object.values(state.players || {})) {
+    for (const [fid, grant] of Object.entries(p.safePassage || {})) {
+      if (grant?.until != null && state.round >= grant.until) {
+        delete p.safePassage[fid];
+        emit(state, "safe_passage_expired", { player: p.id, faction: fid, reason: "elapsed" });
+      }
+    }
+  }
+}
+
+// Units lent out by TAKE_UNIT come home. They return to the hex they left
+// from if it is still theirs to stand on, at the agreed strength cost, and
+// set whatever flag the arrangement promised.
+function sweepSecondments(state) {
+  if (!state.secondedUnits?.length) return;
+  const keep = [];
+  for (const s of state.secondedUnits) {
+    if (state.round < s.returnRound) { keep.push(s); continue; }
+    const u = s.record;
+    u.baseStrength = Math.max(0, (u.baseStrength ?? 0) + (s.strengthDelta ?? 0));
+    if (u.baseStrength <= 0) {
+      emit(state, "unit_returned", { unit: u.uid, player: s.owner, destroyed: true });
+      continue; // came back in no state to serve
+    }
+    u.node = s.node;
+    state.units[u.uid] = u;
+    if (s.returnFlag && state.players[s.owner]) {
+      const p = state.players[s.owner];
+      p.flags = p.flags || {};
+      p.flags[s.returnFlag] = { value: true, duration: "permanent", setAt: state.round, expiresAtRound: null };
+    }
+    emit(state, "unit_returned", {
+      unit: u.uid, player: s.owner, hex: s.node, strengthDelta: s.strengthDelta ?? 0,
+    });
+  }
+  state.secondedUnits = keep;
+  recomputeStats(state);
 }
 
 // v0.2 §16.5 — advance in-transit field reinforcements. Each round the
@@ -452,8 +534,11 @@ function sweepReinforcements(state) {
 function expirePlacementMarkers(state) {
   const markers = state.world?.encounterMarkers;
   if (!markers) return;
-  for (const [hex, m] of Object.entries(markers)) {
-    if (m.expiresAt != null && m.expiresAt < state.round) delete markers[hex];
+  for (const [hex, entry] of Object.entries(markers)) {
+    const queue = Array.isArray(entry) ? entry : [entry];
+    const live = queue.filter((m) => m.expiresAt == null || m.expiresAt >= state.round);
+    if (!live.length) delete markers[hex];
+    else markers[hex] = live;
   }
 }
 

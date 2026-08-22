@@ -64,7 +64,6 @@ const ENGINE_TO_UI_CHIP = {
   "training-grounds": "trainingGrounds",
   "defense-turrets": "defenseTurrets",
   "logistics-hub": "logisticsHub",
-  "recon-team": "reconTeam",
   "civic-hall": "civicHall",
   "burning-glass": "burningGlass",
   "guest-house": "guestHouse",
@@ -1896,3 +1895,6 @@ export function reinforcePreview(state, unitUid) {
 // too, not just this UI adapter) — re-exported here so Inspector.jsx /
 // Prototype.jsx don't need to change their import path.
 export { previewAttackerStrength, previewLocationContest } from "../game/contest.js";
+// Visible deadlines for the HUD countdown — read straight off the deferred
+// queue, so the number shown is the number that will fire.
+export { activeDeadlines } from "../game/deferred.js";

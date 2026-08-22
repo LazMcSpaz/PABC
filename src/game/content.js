@@ -209,7 +209,6 @@ export const CHIPS = {
   broadcast: { id: "broadcast", name: "Broadcast", kind: "location", slots: 1, techLevel: 2, cost: 7, localInfluence: 2, influenceRange: 1, buildCost: 7, loyaltyReq: 3, desc: "+2 Influence and +1 Influence range" },
   "civic-hall": { id: "civic-hall", name: "Civic Hall", kind: "location", slots: 1, techLevel: 2, cost: 5, loyaltyRise: 1, noLoyaltyDecay: true, buildCost: 5, loyaltyReq: 3, desc: "Loyalty rises +1 extra while garrisoned and never decays while neglected" },
   // --- location chips: utility ---
-  "recon-team": { id: "recon-team", name: "Recon Team", kind: "location", slots: 1, techLevel: 1, cost: 3, buildCost: 3, loyaltyReq: 0, encounterRedraws: 1, desc: "Discard a drawn encounter and draw again" },
   "logistics-hub": { id: "logistics-hub", name: "Logistics Hub", kind: "location", slots: 2, techLevel: 3, cost: 12, buildCost: 12, loyaltyReq: 6, upkeep: 1, actionBonus: 1, desc: "+1 Action each turn (rare, 2-slot; upkeep 1)" },
   // --- blockade chips (docs/rail-road-blockade-design.md §3.2) ---
   // kind "blockade" installs into a COMPLETED blockade, never a Location or a
@@ -266,7 +265,6 @@ export const CHIP_SKINS = {
   beacon: { versari: "Wire Service", goldgrass: "Market Fair", lakers: "Radio Tower", plainers: "Circuit Riders" },
   broadcast: { versari: "Signal Authority", goldgrass: "County Fair", lakers: "Clear Channel", plainers: "Camp Meeting" },
   "civic-hall": { versari: "The Ministry", goldgrass: "Grange Hall", lakers: "Company Store", plainers: "Watering Hole" },
-  "recon-team": { versari: "Field Agents", goldgrass: "Town Criers", lakers: "Block Captains", plainers: "Trail Scouts" },
 };
 
 // Resolve a chip's display name for a faction — the skin if one exists,
@@ -295,6 +293,21 @@ export function chipBlocksRail(chipId) {
 export const CAPITAL = {
   id: "capital", name: "Capital", kind: "location", slots: 1, special: true,
   desc: "Decay-immune; +2 garrison Strength, +2 scrap production",
+  // Placed at setup, destroyed when the Location falls (contest.js
+  // captureLocation) — and REBUILDABLE, once, by a faction that still holds
+  // ground but has no seat left anywhere. Losing your capital is meant to be a
+  // catastrophe, not an amputation.
+  //
+  // Priced at 12: the most expensive thing in the game (level with `bombard`
+  // and `landship`), so re-seating costs a full late-game build and can never
+  // be a casual move. Deliberately NOT gated on tech or Loyalty — a faction
+  // that has just lost its capital is precisely the one least able to clear a
+  // tech bar or hold a freshly-taken city at high Loyalty, and a recovery
+  // option that only the strong can take is not a recovery option.
+  //
+  // The "no capital anywhere" condition is what stops this being a relocation
+  // tool: you cannot move your seat to a safer city while you still have one.
+  buildCost: 12, techLevel: 1, loyaltyReq: 0,
 };
 
 // Look up the definition behind a chip instance — covers both the

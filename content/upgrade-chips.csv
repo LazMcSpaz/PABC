@@ -21,7 +21,6 @@ watchtower,Watchtower,location,,1,1,3,,0,,,"This location: +1 Vision, +1 Detecti
 beacon,Beacon,location,,1,1,4,,0,broadcast,,+2 Influence projected by this location,Wire Service,Market Fair,Radio Tower,Circuit Riders
 broadcast,Broadcast,location,,1,2,7,,3,,,+2 Influence and +1 Influence range,Signal Authority,County Fair,Clear Channel,Camp Meeting
 civic-hall,Civic Hall,location,,1,2,5,,3,,,Loyalty rises +1 extra while garrisoned and never decays while neglected,The Ministry,Grange Hall,Company Store,Watering Hole
-recon-team,Recon Team,location,,1,1,3,,0,,,Discard a drawn encounter and draw again,Field Agents,Town Criers,Block Captains,Trail Scouts
 logistics-hub,Logistics Hub,location,,2,3,12,1,6,,,"+1 Action each turn (rare, 2-slot; upkeep 1)",,,,
 field-medics,Field Medics,unit,,1,2,4,,3,,,"Heals +1 at Upkeep anywhere, not only on a held Location",,,,
 pathfinders,Pathfinders,unit,,1,2,5,,3,,,Forest costs 1 to enter; mountains don't halt the move,,,,

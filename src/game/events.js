@@ -36,7 +36,18 @@ export const EVENT_NAMES = new Set([
   // Layer 5 — encounter & quest system (spec §15.13)
   "encounter_delivered", "encounter_delivery_skipped", "trigger_fired",
   "quest_started", "quest_advanced", "quest_completed",
+  // Per-choice beat routing: which successor a choice selected, and the
+  // case where the named successor was not deliverable.
+  "quest_routed", "quest_route_missed",
+  // Authored resolution primitives (ROLL / CONTEST) and their consequences.
+  "roll_resolved", "narrative_contest_resolved", "deck_peeked",
+  "safe_passage_granted", "safe_passage_expired",
+  "unit_seconded", "unit_returned", "movement_overridden",
+  "dual_holding_established", "player_flag_expired",
   "standing_changed", "track_changed", "deferred_resolved",
+  // A deferred packet carrying `satisfiedIfFlag` is a visible deadline;
+  // these say which way it went when the clock ran out.
+  "deadline_met", "deadline_expired",
   // §20 Economy & City Development (APPEND-ONLY — distinct keys so a parallel
   // Influence branch never collides). The Market is retired, so `market_churned`
   // is dropped with it.

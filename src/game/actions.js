@@ -7,7 +7,7 @@ import { activePlayerId } from "./targeting.js";
 import { bfsDistances, reinforcementRoute } from "./board.js";
 import { unitReach, supplyCutter, unseenBlockers, hexIsFull } from "./movement.js";
 import { CONFIG } from "./config.js";
-import { FACTIONS, CHIPS, ABILITIES, chipDefOf, factionDef } from "./content.js";
+import { FACTIONS, CHIPS, CAPITAL, ABILITIES, chipDefOf, factionDef } from "./content.js";
 import { validateContest, runContest } from "./contest.js";
 import { recomputeStats, recomputeResearch, effectiveVeteran } from "./stats.js";
 import { recomputeInfluence } from "./influence.js";
@@ -24,6 +24,7 @@ import {
 import {
   meetsTech, meetsLoyalty, slotCapacity, slotsUsed, stationedUnitWithBay,
   techLevelReqFor, upgradeOption, completeBuildIfDone, bankBuildSurplus, effectiveBuildCost,
+  canRebuildCapital,
 } from "./economy.js";
 
 const fail = (reason) => ({ ok: false, reason });
@@ -303,12 +304,24 @@ function runReinforce(state, { pid, player, params }) {
 // (§20.6): the player's Tech Level must allow the chip at all, and the city's
 // Loyalty must clear its rung. Unit chips need a friendly unit stationed here
 // (the city arms the army); the chip installs on completion (turn.js Upkeep).
+// The Capital is placed at setup rather than sold, so it lives outside CHIPS.
+// It is buildable in exactly one situation — see `canRebuildCapital` — and this
+// is the only resolver that will hand it back.
+function buildDefOf(chipId) {
+  return chipId === CAPITAL.id ? CAPITAL : CHIPS[chipId];
+}
+
 function validateBuild(state, { pid, player, params }) {
   const loc = state.locations[params.at];
   if (!loc) return fail("no such location");
   if (loc.controller !== pid) return fail("you do not fully control that location");
-  const def = CHIPS[params.chipId];
+  const def = buildDefOf(params.chipId);
   if (!def) return fail("unknown chip");
+  // Re-seating is for a faction that has lost its capital and still holds
+  // ground; it is never a way to move a seat you still have.
+  if (def.id === CAPITAL.id && !canRebuildCapital(state, loc)) {
+    return fail("you already hold a capital");
+  }
   if (def.faction && def.faction !== pid) return fail("that chip is another faction's signature");
   if (def.reward) return fail("that chip cannot be built — it is found, not made");
   if (!meetsTech(player, def)) return fail(`needs Tech Level ${techLevelReqFor(def.techLevel || 1)}`);
@@ -326,7 +339,7 @@ function validateBuild(state, { pid, player, params }) {
 
 function runBuild(state, { params }) {
   const loc = state.locations[params.at];
-  const def = CHIPS[params.chipId];
+  const def = buildDefOf(params.chipId);
   const targetUnit = def.kind === "unit"
     ? (params.into?.unit && state.units[params.into.unit]?.node === loc.hexId
         ? params.into.unit

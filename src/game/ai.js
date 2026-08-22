@@ -124,7 +124,12 @@ function tryOneAction(state, pid) {
     if (loc && !loc.sections.every((s) => s === pid)
       && wouldFight(state, pid, loc.controller)) {
       const atk = previewAttackerStrength(state, unit.node, pid).total;
-      const def = previewLocationContest(state, unit.node);
+      // Name the attacker so the preview applies the defender-side ally rule
+      // the resolution will apply: the controller's allies defend with it,
+      // minus anyone already fighting for us. An AI that estimated a bare
+      // garrison and then walked into an allied stack would misjudge exactly
+      // the fights this ruling creates.
+      const def = previewLocationContest(state, unit.node, { attacker: pid });
       if (def && acceptableOdds(state, pid, atk, def.value, def.defenderRollsDie)) {
         const r = performAction(state, "contest", { unit: unit.uid });
         if (r.ok) return true;
