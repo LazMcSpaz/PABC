@@ -10,7 +10,11 @@ import EncounterPopup from "./overlays/EncounterPopup.jsx";
 
 export default function ReplayLayer({ pawns, overlays }) {
   return (
-    <div style={{ position: "absolute", inset: 0, pointerEvents: "none", zIndex: 6 }}>
+    // Above every board layer. This div and the board's internals share one
+    // stacking context — BoardViewport's transformed content — so their
+    // z-indexes compete directly, and the board's tokens (9200) and radials
+    // (9000) were painting straight over the replay popups.
+    <div style={{ position: "absolute", inset: 0, pointerEvents: "none", zIndex: 9600 }}>
       {pawns.map((p) => (
         <AnimatedPawn
           key={p.key}

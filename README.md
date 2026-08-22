@@ -1,10 +1,19 @@
-# Ashland Conquest
+# The Remnant Continent
 
 > Explore. Contest. Conquer.
 
-A post-apocalyptic strategy game for 2–4 players, set in the Ashlands — a
-retro-futuristic world wrecked by a simultaneous plague and solar
-catastrophe. Rival factions fight for control of a contested wasteland map.
+A strategy game for 2–4 players, set on the Remnant Continent — what is
+left of western North America roughly two hundred years after a pole shift
+broke the old world. This is a rebuilding era, not a scavenging one: the
+factions have institutions, standardized manufacturing, trade networks, and
+pride. Pre-collapse technology survives but cannot be reproduced, so it is
+recovered, mounted, and revered. Rival factions contest a hex-tile map for
+control of it.
+
+Setting canon lives in
+[`concept/style/remnant-continent-art-direction.md`](concept/style/remnant-continent-art-direction.md)
+and the in-game wiki
+([`src/game/content/wiki-repo.js`](src/game/content/wiki-repo.js)).
 
 > **Status — playable, content phase.** The spatial hex-board redesign's
 > engine is built and wired to the UI: every system in the mechanical spec
@@ -19,7 +28,7 @@ catastrophe. Rival factions fight for control of a contested wasteland map.
 ## The game
 
 Four factions — **Versari Korad**, the **Grand Lakers**, the **Goldgrass
-Coalition** and the **Free Plainers** — contest a hex map of the Ashlands.
+Coalition** and the **Free Plainers** — contest a hex map of the Remnant Continent.
 Each begins holding one faction Capital and races to the victory-point goal.
 
 Core ideas:
@@ -100,11 +109,47 @@ src/
                              loyalty, influence, fog, economy, diplomacy)
   game/content/             auto-generated from the editor — do not hand-edit
   prototype/                the live UI, wired to src/game/ via engineAdapter.js
+  audio/                    soundtrack + sound effects (see below)
   App.jsx                   renders the prototype
 editor/                     content-authoring tool (Supabase-backed)
 content/                    legacy CSV content source (thin, superseded by editor)
 public/assets/              art assets — drop new art here
+public/assets/audio/        music and sfx — README there covers the mastering
 ```
+
+### Audio
+
+`AudioProvider` sits above `App` so the soundtrack survives every screen
+change. The title theme is pinned to the menus and plays every time; a match
+switches to a shuffled rotation of all four cuts, with ten seconds of quiet
+between songs. Sound effects are separate one-shots plus one held loop, mixed
+against the score by the `gain` field in `src/audio/sfxLibrary.js`.
+
+Both buses share one `AudioContext` (`src/audio/audioContext.js`) so a single
+user gesture unlocks everything — browsers block audio until then, and the
+player parks in a `blocked` state and starts on the first click rather than
+going silently dead. Level runs through gain nodes rather than
+`audio.volume`, which iOS Safari ignores.
+
+Every button, toggle and selection clicks, driven by one delegated listener in
+`AudioProvider` rather than wiring ~70 components by hand. It recognises
+`button`, form controls, and the project's own `.hud-int` marker; `data-sfx="select"`
+tags the few clickables that are none of those (the radial menu's SVG sectors),
+and `data-sfx="none"` opts a subtree out — the audio widget uses it, so setting
+a level doesn't click at you while you do it.
+
+Levels live in `src/audio/VolumeSliders.jsx`, shared by the corner widget and
+the in-game Settings window so the two can't drift apart.
+
+Adding a cue: drop the file in `public/assets/audio/sfx/` (mastering recipe in
+that folder's README), add an entry to `src/audio/sfxLibrary.js`, and fire it
+with `useSfxOn` (once per game object), `useSfxOnChange` (every time a UI
+element opens) or `useSfxHold` (sounded while a state is true, and faded out
+when it ends — for beds that repeat and for long stingers that should be cut
+short gracefully rather than trail over what comes next).
+
+`npm run check:audio` drives all of it in a real browser — run `npm run dev`
+first.
 
 ## Documentation
 

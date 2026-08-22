@@ -5,21 +5,26 @@
 import { emit } from "./events.js";
 import { activePlayerId } from "./targeting.js";
 import { bfsDistances, reinforcementRoute } from "./board.js";
-import { unitReach } from "./movement.js";
+import { unitReach, supplyCutter, unseenBlockers, hexIsFull } from "./movement.js";
 import { CONFIG } from "./config.js";
-import { FACTIONS, CHIPS, ABILITIES, chipDefOf, factionDef } from "./content.js";
+import { FACTIONS, CHIPS, CAPITAL, ABILITIES, chipDefOf, factionDef } from "./content.js";
 import { validateContest, runContest } from "./contest.js";
 import { recomputeStats, recomputeResearch, effectiveVeteran } from "./stats.js";
 import { recomputeInfluence } from "./influence.js";
 import { recomputeVisibility } from "./visibility.js";
 import { applyEffects } from "./effects.js";
 import { drawFieldEncounter, resolveMarkerOnHex } from "./encounters.js";
-import { makeUnit } from "./setup.js";
+import { makeUnit, nextMusterIndex } from "./setup.js";
 import { hasTechNode } from "./tech.js";
 import { postAt, buildPost, revealPost } from "./posts.js";
 import {
+  blockadeAt, startBlockade, supplyStatus, blockadeSlotsUsed,
+  blockadesOn, freeRoadEdges, roadEdgesOf, blockadeCapacity,
+} from "./blockades.js";
+import {
   meetsTech, meetsLoyalty, slotCapacity, slotsUsed, stationedUnitWithBay,
-  techLevelReqFor, upgradeOption, completeBuildIfDone, effectiveBuildCost,
+  techLevelReqFor, upgradeOption, completeBuildIfDone, bankBuildSurplus, effectiveBuildCost,
+  canRebuildCapital,
 } from "./economy.js";
 
 const fail = (reason) => ({ ok: false, reason });
@@ -42,11 +47,18 @@ function validateMove(state, { pid, params }) {
   if (unit.owner !== pid) return fail("not your unit");
   if (unit.immobilizedUntil != null && turnOrdinal(state) <= unit.immobilizedUntil)
     return fail("unit is immobilized");
+  // Arrears strand a unit where it stands. Its budget was already zeroed at
+  // Upkeep, but say so plainly rather than reporting "out of range".
+  if (unit.unsupplied) return fail("unit is unsupplied — pay its upkeep first");
   if (!state.board.hexes[params.to]) return fail("no such hex");
   if (params.to === unit.node) return fail("unit is already on that hex");
   // v0.2 §16.2 — Move spends the per-turn move budget (not Actions), consumed
   // by terrain entry costs and roads, and stopped by blockades (a non-passing
   // foreign unit / enemy Location halts you on that hex).
+  // Said before the range check, because unitReach prunes full hexes out of the
+  // field and "out of range" would be a lie about a hex two steps away.
+  if (hexIsFull(state, params.to, unit.uid))
+    return fail(`that hex is full (${CONFIG.hexUnitCap} units)`);
   const field = unitReach(state, unit);
   if (!(params.to in field))
     return fail(`out of range (moves left ${unit.moveRemaining})`);
@@ -57,10 +69,24 @@ function runMove(state, { params, ctx }) {
   const unit = state.units[params.unit];
   const from = unit.node;
   const field = unitReach(state, unit);
+  // Did the mover just walk into something it could not see? Read BEFORE the
+  // move, while the destination is still unexplored/unlit for this faction.
+  const ambushed = unseenBlockers(state, unit.owner).has(params.to);
   unit.node = params.to;
   // The field already accounts for forest/road cost, the mountain halt and any
-  // blockade stop, so the remaining budget at the destination is exact.
+  // blockade stop, so the remaining budget at the destination is exact. An
+  // unseen halt leaves the remainder intact rather than zeroing it.
   unit.moveRemaining = Math.max(0, field[params.to] ?? 0);
+  if (ambushed) {
+    // Checked: it keeps its movement but may only fall back or sidestep for the
+    // rest of the turn (unitReach). Being surprised costs you the advance, not
+    // the whole turn.
+    unit.checked = true;
+    unit.turnStartNode = unit.turnStartNode || from;
+    emit(state, "advance_checked", {
+      unit: unit.uid, player: unit.owner, hex: params.to, moveRemaining: unit.moveRemaining,
+    });
+  }
   unit.movedSinceUpkeep = true; // §16.6 fortify — moving voids "dug in"
   // movement/moveRemaining are snapshotted here (not left for a log
   // consumer to read off the live unit later) because both are mutable —
@@ -166,6 +192,9 @@ function validateRecruit(state, { pid, player, params }) {
   if (capBonus < 1) return fail("requires a chip that unlocks recruiting");
   if (player.resource < recruitCostAt(state, loc)) return fail("not enough scrap");
   if (ownedUnitCount(state, pid) >= CONFIG.baseUnitCap + capBonus) return fail("unit cap reached");
+  // A recruit appears on the Location's own hex, so it is subject to the same
+  // stacking cap as a unit walking in.
+  if (hexIsFull(state, loc.hexId)) return fail(`that hex is full (${CONFIG.hexUnitCap} units)`);
   return { ok: true };
 }
 
@@ -178,7 +207,7 @@ function runRecruit(state, { pid, player, params }) {
 
   const loc = state.locations[params.at];
   const u = state.nextId("unit");
-  state.units[u] = makeUnit(u, pid, loc.hexId, factionDef(pid)?.name || pid);
+  state.units[u] = makeUnit(u, pid, loc.hexId, factionDef(pid)?.name || pid, nextMusterIndex(state, pid));
   emit(state, "unit_recruited", { unit: u, player: pid, hex: loc.hexId });
   recomputeVisibility(state, pid); // §19 — a new unit is a new Vision source
   return { unit: u };
@@ -275,12 +304,24 @@ function runReinforce(state, { pid, player, params }) {
 // (§20.6): the player's Tech Level must allow the chip at all, and the city's
 // Loyalty must clear its rung. Unit chips need a friendly unit stationed here
 // (the city arms the army); the chip installs on completion (turn.js Upkeep).
+// The Capital is placed at setup rather than sold, so it lives outside CHIPS.
+// It is buildable in exactly one situation — see `canRebuildCapital` — and this
+// is the only resolver that will hand it back.
+function buildDefOf(chipId) {
+  return chipId === CAPITAL.id ? CAPITAL : CHIPS[chipId];
+}
+
 function validateBuild(state, { pid, player, params }) {
   const loc = state.locations[params.at];
   if (!loc) return fail("no such location");
   if (loc.controller !== pid) return fail("you do not fully control that location");
-  const def = CHIPS[params.chipId];
+  const def = buildDefOf(params.chipId);
   if (!def) return fail("unknown chip");
+  // Re-seating is for a faction that has lost its capital and still holds
+  // ground; it is never a way to move a seat you still have.
+  if (def.id === CAPITAL.id && !canRebuildCapital(state, loc)) {
+    return fail("you already hold a capital");
+  }
   if (def.faction && def.faction !== pid) return fail("that chip is another faction's signature");
   if (def.reward) return fail("that chip cannot be built — it is found, not made");
   if (!meetsTech(player, def)) return fail(`needs Tech Level ${techLevelReqFor(def.techLevel || 1)}`);
@@ -298,7 +339,7 @@ function validateBuild(state, { pid, player, params }) {
 
 function runBuild(state, { params }) {
   const loc = state.locations[params.at];
-  const def = CHIPS[params.chipId];
+  const def = buildDefOf(params.chipId);
   const targetUnit = def.kind === "unit"
     ? (params.into?.unit && state.units[params.into.unit]?.node === loc.hexId
         ? params.into.unit
@@ -309,7 +350,9 @@ function runBuild(state, { params }) {
     targetSlot: loc.chips.length, targetUnit,
   };
   emit(state, "build_started", { hex: loc.hexId, chipId: def.id, kind: "build", cost: loc.activeBuild.cost });
-  completeBuildIfDone(state, loc); // carried-over progress may finish it at once
+  // Carried-over progress may finish it at once; anything past the cost is
+  // scrap rather than a pile sitting on the Location.
+  bankBuildSurplus(state, loc.controller, completeBuildIfDone(state, loc));
   return { hex: loc.hexId, chipId: def.id };
 }
 
@@ -339,7 +382,7 @@ function runUpgrade(state, { pid, params }) {
     targetUnit: holder.kind === "unit" ? holder.uid : null,
   };
   emit(state, "build_started", { hex: loc.hexId, chipId: opt.chipId, kind: "upgrade", cost: loc.activeBuild.cost });
-  completeBuildIfDone(state, loc);
+  bankBuildSurplus(state, loc.controller, completeBuildIfDone(state, loc));
   return { hex: loc.hexId, chipId: opt.chipId };
 }
 
@@ -380,7 +423,8 @@ function runRush(state, { pid, player, params }) {
   player.resource -= spend;
   emit(state, "resource_spent", { player: pid, resource: "Resource", amount: -spend, source: "rush" });
   loc.buildProgress = (loc.buildProgress || 0) + points;
-  completeBuildIfDone(state, loc);
+  // Rushing past the cost refunds the overshoot as scrap.
+  bankBuildSurplus(state, loc.controller, completeBuildIfDone(state, loc));
   return { hex: loc.hexId, points, spent: spend };
 }
 
@@ -400,6 +444,52 @@ function runSetSlider(state, { params }) {
   return { hex: loc.hexId, value: loc.buildSlider };
 }
 
+// Rail doc §3.4 — which claim on this city's build output wins when it is both
+// building a chip and funding a blockade down the road. Persists until changed,
+// like the slider. Costs no Action (it is a standing policy, not a move).
+function validateSetBuildPriority(state, { pid, params }) {
+  const loc = state.locations[params.at];
+  if (!loc) return fail("no such location");
+  if (loc.controller !== pid) return fail("you do not fully control that location");
+  if (params.value !== "blockade" && params.value !== "chips")
+    return fail('build priority must be "blockade" or "chips"');
+  return { ok: true };
+}
+
+function runSetBuildPriority(state, { params }) {
+  const loc = state.locations[params.at];
+  loc.buildPriority = params.value;
+  emit(state, "build_priority_changed", { hex: loc.hexId, value: loc.buildPriority });
+  return { hex: loc.hexId, value: loc.buildPriority };
+}
+
+// Rail doc §2.2 — choose which rail-linked settlement this one pools its idle
+// build output into (null clears it). Persists until changed and costs no
+// Action, like the slider: it is a standing policy, not a move.
+function validateSetPoolTarget(state, { pid, params }) {
+  const loc = state.locations[params.at];
+  if (!loc) return fail("no such location");
+  if (loc.controller !== pid) return fail("you do not fully control that location");
+  if (params.to == null) return { ok: true };            // clearing is always legal
+  if (params.to === params.at) return fail("a settlement cannot pool into itself");
+  const dest = state.locations[params.to];
+  if (!dest) return fail("no such location");
+  if (dest.controller !== pid) return fail("you do not fully control the recipient");
+  // §2.2 direct pairs only, §2.3 you must hold both stations (checked above).
+  const linked = (state.board.rails || []).some(
+    (l) => (l.a === params.at && l.b === params.to) || (l.b === params.at && l.a === params.to),
+  );
+  if (!linked) return fail("those settlements are not directly rail-linked");
+  return { ok: true };
+}
+
+function runSetPoolTarget(state, { params }) {
+  const loc = state.locations[params.at];
+  loc.poolTarget = params.to ?? null;
+  emit(state, "pool_target_changed", { hex: loc.hexId, to: loc.poolTarget });
+  return { hex: loc.hexId, to: loc.poolTarget };
+}
+
 // --- Activate --------------------------------------------------------
 // Invoke a location ability (§13.2). The dispatcher charges the
 // ability's own `cost.action`; the ability also pays any `cost.resource`
@@ -417,8 +507,32 @@ function reinforcePayer(state, { pid, params }) {
   return route ? { locations: [route.originHex] } : null;
 }
 
+// Whoever's Strength is counted, pays.
+//
+// runContest builds the attack from `params.coalition` when it is given, and
+// from the WHOLE STACK when it is not (the legacy combined-stack rule). This
+// used to charge only the named units either way, so a caller that omitted a
+// coalition got every friendly unit's Strength for free — and each of those
+// units, still holding its own action, could then attack again beside it. The
+// AI omitted it. Two stacked Strength-4 units therefore made two attacks at
+// 4+4+1 apiece instead of one at 4+4+1 or two at 4+1, which is how a
+// two-unit stack took a garrison-10 Location in two rounds.
+//
+// Charging the stack in the fallback makes that impossible from any caller,
+// not just the one that was fixed. Only the initiator's OWN units are
+// charged: another faction fighting alongside (`params.allies`, the quest
+// case) lends its Strength without spending your actions, which is the point
+// of an ally.
 function contestPayer(state, { params }) {
-  return { units: [params.unit, ...(params.coalition || [])] };
+  if (Array.isArray(params.coalition)) {
+    return { units: [params.unit, ...params.coalition] };
+  }
+  const unit = state.units[params.unit];
+  if (!unit) return { units: [params.unit] };
+  const stack = Object.values(state.units)
+    .filter((u) => u.owner === unit.owner && u.node === unit.node)
+    .map((u) => u.uid);
+  return { units: stack.length ? stack : [params.unit] };
 }
 
 function buildPostPayer(state, { pid, params }) {
@@ -496,6 +610,95 @@ function runBuildPost(state, { pid, player, params }) {
   const post = buildPost(state, pid, params.hex);
   recomputeVisibility(state, pid, { emitEvents: false }); // §17.7 — a new Vision source
   return { hex: post.hex };
+}
+
+// --- Build Blockade (rail doc §3.1) ----------------------------------
+// A road-only fortification, funded down the road it sits on. Validates a road
+// hex with no Location and no existing blockade, a friendly unit to pin there,
+// an uninterrupted road connection to the nearest settlement this player fully
+// holds, and the scrap. Costs 1 Action + scrap up front; the structure itself
+// then accrues over at least two Upkeeps (turn.js).
+function buildBlockadePayer(state, { pid, params }) {
+  const crew = Object.values(state.units).find((u) => u.owner === pid && u.node === params.hex);
+  return crew ? { units: [crew.uid] } : null;
+}
+
+function validateBuildBlockade(state, { pid, player, params }) {
+  const hex = params.hex;
+  const cell = state.board.hexes[hex];
+  if (!cell) return fail("no such hex");
+  if (!cell.road) return fail("a blockade can only be built on a road hex");
+  if (state.locations[hex]) return fail("cannot build a blockade on a Location hex");
+  // One blockade per ROAD, so the cap is however many roads leave this hex: two
+  // where a road runs through, three at a T. `params.edge` names which road;
+  // omitted, it takes the first free one.
+  const roads = roadEdgesOf(state, hex);
+  const free = freeRoadEdges(state, hex);
+  if (params.edge != null && !roads.includes(params.edge))
+    return fail("no road runs that way from this hex");
+  if (params.edge != null && !free.includes(params.edge))
+    return fail("a blockade already closes that road");
+  if (!free.length) {
+    return fail(blockadeCapacity(state, hex) === 1
+      ? "a blockade already occupies that hex"
+      : `every road out of this hex is already blockaded (${blockadesOn(state, hex).length})`);
+  }
+  if (postAt(state, hex)) return fail("a listening post already occupies that hex");
+  const crew = Object.values(state.units).filter((u) => u.owner === pid && u.node === hex);
+  if (!crew.length) return fail("needs a friendly unit on the target hex");
+  const supply = supplyStatus(state, pid, hex, supplyCutter(state, pid));
+  if (!supply.path) return fail("no road connection to a settlement you hold");
+  if (!supply.ok) return fail("that road connection is cut");
+  if (player.resource < CONFIG.blockades.buildCost) return fail("not enough scrap");
+  return { ok: true, crew };
+}
+
+function runBuildBlockade(state, { pid, player, params }) {
+  player.resource -= CONFIG.blockades.buildCost;
+  emit(state, "resource_spent", {
+    player: pid, resource: "Resource", amount: -CONFIG.blockades.buildCost, source: "build-blockade",
+  });
+  // The pinned builder is the unit that paid the Action, so the player's own
+  // choice of crew is honoured rather than re-picked here.
+  const crew = Object.values(state.units).find((u) => u.owner === pid && u.node === params.hex);
+  const b = startBlockade(state, pid, params.hex, crew.uid, params.edge ?? null);
+  return { hex: b.hex, edge: b.edge, unit: crew.uid, cost: b.cost };
+}
+
+// --- Upgrade Blockade (rail doc §3.2) --------------------------------
+// Queue a chip into a COMPLETED blockade. Free to queue, like a Location build:
+// the cost is paid out of the funding settlement's build output over the
+// following Upkeeps (§3.4), not from banked scrap up front. No unit has to be
+// present — the builder was released when the structure landed.
+function validateUpgradeBlockade(state, { pid, player, params }) {
+  // `params.edge` names one of several barricades on a junction; without it
+  // this takes the first, which is the whole answer on a hex that holds one.
+  const b = blockadeAt(state, params.hex, params.edge ?? null);
+  if (!b) return fail("no blockade on that hex");
+  if (b.owner !== pid) return fail("not your blockade");
+  if (!b.done) return fail("that blockade is still under construction");
+  if (b.build) return fail("that blockade is already building something");
+  const def = CHIPS[params.chipId];
+  if (!def || def.kind !== "blockade") return fail("not a blockade chip");
+  if (!meetsTech(player, def)) return fail(`needs Tech L${techLevelReqFor(def.techLevel || 1)}`);
+  if (blockadeSlotsUsed(state, b) + (def.slots || 1) > CONFIG.blockades.chipSlots)
+    return fail("no free slot on that blockade");
+  if (b.chips.some((c) => state.chips[c]?.chipId === params.chipId))
+    return fail("that chip is already installed here");
+  // The same road that pays for it has to be open, or the queue would sit at
+  // zero progress with nothing saying why.
+  const supply = supplyStatus(state, pid, b.hex, supplyCutter(state, pid));
+  if (!supply.path) return fail("no road connection to a settlement you hold");
+  if (!supply.ok) return fail("that road connection is cut");
+  return { ok: true, def };
+}
+
+function runUpgradeBlockade(state, { pid, params }) {
+  const b = blockadeAt(state, params.hex, params.edge ?? null);
+  const def = CHIPS[params.chipId];
+  b.build = { chipId: def.id, cost: effectiveBuildCost(state, pid, def), progress: 0 };
+  emit(state, "build_started", { hex: b.hex, chipId: def.id, cost: b.build.cost });
+  return { hex: b.hex, chipId: def.id, cost: b.build.cost };
 }
 
 // --- Remove chip (design ruling: chips are removable/replaceable) ------
@@ -624,9 +827,14 @@ const ACTIONS = {
   // Action (and scrap). Queuing a build/upgrade and the slider stay free.
   rush: { payer: payLoc("at"), validate: validateRush, run: runRush },
   "set-slider": { validate: validateSetSlider, run: runSetSlider },
+  "set-build-priority": { validate: validateSetBuildPriority, run: runSetBuildPriority },
+  "set-pool-target": { validate: validateSetPoolTarget, run: runSetPoolTarget },
   activate: { payer: payLoc("location"), validate: validateActivate, run: runActivate },
   // §17.7 / §17.5 Intelligence A2 + B2 — deploy a Listening Post, run a Saboteur.
   "build-post": { payer: buildPostPayer, validate: validateBuildPost, run: runBuildPost },
+  "build-blockade": { payer: buildBlockadePayer, validate: validateBuildBlockade, run: runBuildBlockade },
+  // Queuing an upgrade is free, exactly as queuing a Location build is.
+  "upgrade-blockade": { validate: validateUpgradeBlockade, run: runUpgradeBlockade },
   sabotage: { validate: validateSabotage, run: runSabotage }, // once/round stamp is its cost
 };
 
@@ -649,6 +857,11 @@ export function performAction(state, type, params = {}, ctx = {}) {
   if (payer) {
     const units = (payer.units || []).map((u) => state.units[u]).filter(Boolean);
     const locs = (payer.locations || []).map((h) => state.locations[h]).filter(Boolean);
+    // An unsupplied unit is stranded outright — its own action was zeroed at
+    // Upkeep, and it may not reach for a player wildcard either. Without this
+    // the wildcard pool would quietly buy back exactly what arrears took away.
+    const starving = units.find((u) => u.unsupplied);
+    if (starving) return fail("that unit is unsupplied — pay its upkeep first");
     let shortfall = 0;
     for (const u of units) if ((u.actionsRemaining ?? 0) < 1) shortfall += 1;
     for (const l of locs) if ((l.actionsRemaining ?? 0) < 1) shortfall += 1;

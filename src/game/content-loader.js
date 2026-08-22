@@ -23,6 +23,13 @@ export function normalizeEffect(raw) {
   if (Array.isArray(base.effects)) {
     base.effects = base.effects.map(normalizeEffect);
   }
+  // Outcome branches. ROLL and CONTEST carry their consequences in named
+  // lists rather than a single `effects`, and those nested rows are in the
+  // editor's {type, params} shape too — without this they arrive unflattened
+  // and every parameter inside them reads as undefined.
+  for (const branch of ["onSuccess", "onFail", "onWin", "onLose"]) {
+    if (Array.isArray(base[branch])) base[branch] = base[branch].map(normalizeEffect);
+  }
   if (Array.isArray(base.options)) {
     base.options = base.options.map((o) => ({
       ...o,
@@ -78,6 +85,9 @@ export function findUnsupportedTypes(snapshot) {
     if (eff.type && !EFFECTS[eff.type]) missing.add(eff.type);
     for (const child of eff.effects || []) walk(child);
     for (const opt of eff.options || []) (opt.effects || []).forEach(walk);
+    for (const b of ["onSuccess", "onFail", "onWin", "onLose"]) {
+      for (const child of eff[b] || []) walk(child);
+    }
   };
   for (const enc of Object.values(snapshot)) {
     for (const ch of enc.choices || []) ch.effects.forEach(walk);
@@ -93,6 +103,9 @@ export function choiceIsRunnable(choice) {
     if (!EFFECTS[eff.type]) return false;
     if (eff.effects && !eff.effects.every(ok)) return false;
     if (eff.options && !eff.options.every((o) => (o.effects || []).every(ok))) return false;
+    for (const b of ["onSuccess", "onFail", "onWin", "onLose"]) {
+      if (eff[b] && !eff[b].every(ok)) return false;
+    }
     return true;
   };
   return (choice.effects || []).every(ok);

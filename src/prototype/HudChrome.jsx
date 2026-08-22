@@ -4,9 +4,10 @@
 // the static look-pass (HudShowcase.jsx).
 import { useEffect, useState } from "react";
 import { CONFIG } from "../game/config.js";
-import { motion } from "framer-motion";
+import { motion, useDragControls } from "framer-motion";
 import ControlMeter from "./ControlMeter.jsx";
 import { useIsPhone, useViewportSize } from "./useViewport.js";
+import { ownerColor } from "./data.js";
 
 // Close the active modal on Escape.
 export function useEscClose(onClose) {
@@ -115,6 +116,11 @@ function HoloSegments({ svgW, svgH, cx, cy, ri, ro, accent = C.holo, segments, p
               onMouseEnter={() => setHover(i)}
               onMouseLeave={() => setHover((h) => (h === i ? -1 : h))}
               onClick={s.onClick}
+              // Audio-only hook. These are <path>s, not buttons, so the
+              // global click cue has nothing else to recognise them by — and
+              // tagging them .hud-int instead would apply that class's
+              // translateY to an SVG path and visibly shift the segment.
+              data-sfx={s.onClick ? "select" : undefined}
             />
           );
         })}
@@ -131,6 +137,9 @@ function HoloSegments({ svgW, svgH, cx, cy, ri, ro, accent = C.holo, segments, p
             onMouseEnter={() => setHover(i)}
             onMouseLeave={() => setHover((h) => (h === i ? -1 : h))}
             onClick={s.onClick}
+            // The icon/label layer sits over the <path> and takes the click a
+            // player actually aims at, so the audio hook has to be on both.
+            data-sfx={s.onClick ? "select" : undefined}
             style={{ position: "absolute", left: x, top: y, transform: on ? "translate(-50%,-50%) scale(1.12)" : "translate(-50%,-50%)", transition: "transform .14s cubic-bezier(.2,.9,.3,1.4)", display: "flex", flexDirection: "column", alignItems: "center", gap: 1, pointerEvents: s.onClick ? "auto" : "none", cursor: s.onClick ? "pointer" : "default", textShadow: "0 1px 3px rgba(0,0,0,0.85)" }}
           >
             {s.icon && (
@@ -156,21 +165,104 @@ const RES = {
 };
 
 // A compact resource readout: glowing colour-coded icon node + value + label.
-function ResourceCell({ icon, value, label, color }) {
+function ResourceCell({ icon, value, label, color, labelColor, title }) {
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+    <div style={{ display: "flex", alignItems: "center", gap: 7 }} title={title}>
       <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 30, height: 30, borderRadius: "50%", background: "radial-gradient(circle at 50% 40%, rgba(19,42,44,0.95), rgba(4,10,11,0.96))", border: `1px solid ${color}`, boxShadow: `0 0 8px ${color}77, inset 0 0 6px rgba(0,0,0,0.5)`, flexShrink: 0 }}>
         <img src={icon} alt="" style={{ width: 18, height: 18, objectFit: "contain", filter: "brightness(1.12)" }} />
       </span>
       <div style={{ display: "flex", flexDirection: "column", lineHeight: 1 }}>
         <span style={{ fontFamily: C.font, fontWeight: 700, fontSize: 16, color: "#f4efe2", textShadow: `0 0 8px ${color}` }}>{value}</span>
-        <span style={{ fontFamily: C.font, fontSize: 8, letterSpacing: 1.4, textTransform: "uppercase", color, fontWeight: 600, marginTop: 2 }}>{label}</span>
+        <span style={{ fontFamily: C.font, fontSize: 8, letterSpacing: 1.4, textTransform: "uppercase", color: labelColor || color, fontWeight: 600, marginTop: 2 }}>{label}</span>
       </div>
     </div>
   );
 }
 
 // A dial paired with a small caption below — the right-side VP / Actions cells.
+// §4 of vp-and-actions-design — the per-entity action roster.
+//
+// The dial's number was always right and always insufficient: "3 actions"
+// while the player still had to click every unit and every city to find out
+// which three. These are the three. Filled = still has its action; hollow =
+// already spent it. Units on the top row, cities beneath, a wildcard row only
+// when the player actually holds one.
+//
+// It marks what is READY rather than what is spent, so the strip empties as
+// the turn does — at Upkeep it is full, and by End Turn a glance says whether
+// anything was left standing about.
+const PIP = 7;
+
+function Pip({ ready, title, color }) {
+  return (
+    <span
+      title={title}
+      style={{
+        width: PIP, height: PIP, borderRadius: "50%", flexShrink: 0,
+        border: `1px solid ${ready ? color : "rgba(207,214,220,0.32)"}`,
+        background: ready ? color : "transparent",
+        boxShadow: ready ? `0 0 4px ${color}bb` : undefined,
+        transition: "background .18s ease, box-shadow .18s ease, border-color .18s ease",
+      }}
+    />
+  );
+}
+
+function PipRow({ icon, glyph, pips }) {
+  if (!pips.length) return null;
+  return (
+    <span style={{ display: "flex", alignItems: "center", gap: 3, maxWidth: 96, flexWrap: "wrap", height: 10 }}>
+      {icon
+        ? <img src={icon} alt="" style={{ width: 9, height: 9, objectFit: "contain", opacity: 0.65, marginRight: 1 }} />
+        : <span style={{ fontFamily: C.font, fontSize: 9, fontWeight: 700, color: C.textFaint, marginRight: 1, lineHeight: 1 }}>{glyph}</span>}
+      {pips}
+    </span>
+  );
+}
+
+function ActionPips({ roster }) {
+  if (!roster) return null;
+  const unitPips = roster.units.map((u) => (
+    <Pip
+      key={u.uid}
+      ready={u.ready && !u.unsupplied}
+      color={C.holo}
+      title={u.unsupplied ? `${u.name} — unsupplied, cannot act` : `${u.name} — ${u.ready ? "has an action" : "already acted"}`}
+    />
+  ));
+  // A Logistics Hub city holds two, so a city contributes a pip per action
+  // rather than one pip that can only be on or off.
+  const locPips = [];
+  for (const l of roster.locations) {
+    const held = Math.max(1, l.capacity || 1);
+    for (let i = 0; i < held; i += 1) {
+      locPips.push(
+        <Pip
+          key={`${l.hexId}-${i}`}
+          ready={i < l.ready}
+          color={C.holo}
+          title={`${l.name} — ${l.ready ? `${l.ready} action${l.ready === 1 ? "" : "s"}` : "already acted"}`}
+        />,
+      );
+    }
+  }
+  const wildPips = Array.from({ length: roster.wildcards }, (_, i) => (
+    <Pip key={`w${i}`} ready color={C.gold} title="A spare action — any unit or city may burn it after its own is gone" />
+  ));
+  if (!unitPips.length && !locPips.length && !wildPips.length) return null;
+  // Its own cell beside the dials rather than a caption beneath one: the top
+  // bar is a fixed 60px and a 46px dial already fills it, so anything stacked
+  // under the dial spilled out over the Event Log below.
+  return (
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 2 }}>
+      <PipRow icon={ICON.units} pips={unitPips} />
+      <PipRow icon={ICON.shield} pips={locPips} />
+      {wildPips.length ? <PipRow glyph="+" pips={wildPips} /> : null}
+      <span style={{ fontFamily: C.font, fontSize: 8, letterSpacing: 1.4, textTransform: "uppercase", color: C.textFaint, fontWeight: 600 }}>Ready</span>
+    </div>
+  );
+}
+
 function DialCell({ label, children }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
@@ -199,7 +291,7 @@ function CompactStat({ icon, value, color }) {
 // name, VP/Actions dials); at phone width those clusters collide. This
 // swaps to a plain three-row rectangular bar: faction/settings, a row of
 // icon+value stats, then a full-width End Turn button underneath.
-function CompactTopBar({ scrap, units, tech, name, color = C.red, vp, vpGoal, actions, round, onEndTurn, endDisabled, onSettings }) {
+function CompactTopBar({ scrap, upkeep, units, tech, name, color = C.red, vp, vpGoal, dominion, actions, round, onEndTurn, endDisabled, onSettings }) {
   return (
     <div style={{
       position: "absolute", top: 0, left: 0, right: 0, height: COMPACT_HUD_H, zIndex: 30,
@@ -219,10 +311,14 @@ function CompactTopBar({ scrap, units, tech, name, color = C.red, vp, vpGoal, ac
         <span style={{ fontFamily: C.font, fontSize: 8, letterSpacing: 1.4, textTransform: "uppercase", color: C.textFaint, flexShrink: 0 }}>Rnd {round}</span>
       </div>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 4, height: 26, marginBottom: 8 }}>
-        <CompactStat icon={ICON.scrap} value={scrap} color={RES.scrap.color} />
+        <CompactStat
+          icon={ICON.scrap}
+          value={upkeep ? `${scrap} (${upkeep.net >= 0 ? "+" : ""}${upkeep.net})` : scrap}
+          color={upkeep && upkeep.net < 0 ? C.red : RES.scrap.color}
+        />
         <CompactStat icon={ICON.units} value={`${units.n}/${units.cap}`} color={RES.units.color} />
         <CompactStat icon={ICON.research} value={`L${tech.level}`} color={RES.tech.color} />
-        <CompactStat icon={ICON.vp} value={`${vp}/${vpGoal}`} color={C.gold} />
+        <CompactStat icon={ICON.vp} value={dominion ? `${dominion.score}/${dominion.threshold}` : `${vp}`} color={C.gold} />
         <CompactStat icon={ICON.shield} value={`${actions.remaining}/${actions.max}`} color={C.red} />
       </div>
       <button className="hud-int" onClick={endDisabled ? undefined : onEndTurn} disabled={endDisabled}
@@ -247,7 +343,7 @@ export function TopBar(props) {
   return <DesktopTopBar {...props} />;
 }
 
-function DesktopTopBar({ scrap, units, tech, name, color = C.red, vp, vpGoal, actions, round, onEndTurn, endDisabled, onSettings }) {
+function DesktopTopBar({ scrap, upkeep, units, tech, name, color = C.red, vp, vpGoal, dominion, actions, round, onEndTurn, endDisabled, onSettings }) {
   const H = 60;
   const clip = "polygon(0 0, 100% 0, 100% 60px, 78% 60px, 72% 28px, 28% 28px, 22% 60px, 0 60px)";
   const outline = "M0 0 L100 0 L100 60 L78 60 L72 28 L28 28 L22 60 L0 60 Z";
@@ -266,7 +362,16 @@ function DesktopTopBar({ scrap, units, tech, name, color = C.red, vp, vpGoal, ac
           style={{ width: 28, height: 28, borderRadius: "50%", border: `1px solid ${C.holo}`, background: "radial-gradient(circle at 40% 34%, rgba(86,211,198,0.16), rgba(8,16,16,0.9) 78%)", boxShadow: `0 0 8px ${C.holo}55`, display: "flex", alignItems: "center", justifyContent: "center", padding: 0, color: C.holoHi, cursor: "pointer", flexShrink: 0 }}>
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3.2" /><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5 5l2.1 2.1M16.9 16.9L19 19M19 5l-2.1 2.1M7.1 16.9L5 19" strokeLinecap="round" /></svg>
         </button>
-        <ResourceCell {...RES.scrap} value={`${scrap}`} label="Scrap" />
+        {/* The label carries the NET per turn. Units, blockades, posts and
+            some chips all bill every Upkeep, and without a running total a
+            player only discovers they overspent when the army starves. */}
+        <ResourceCell
+          {...RES.scrap}
+          value={`${scrap}`}
+          label={upkeep ? `Scrap ${upkeep.net >= 0 ? "+" : ""}${upkeep.net}/turn` : "Scrap"}
+          labelColor={upkeep && upkeep.net < 0 ? C.red : undefined}
+          title={upkeep ? `+${upkeep.income} output · −${upkeep.army} army · −${upkeep.structures} structures · −${upkeep.chips} chips` : undefined}
+        />
         <ResourceCell {...RES.units} value={`${units.n}/${units.cap}`} label="Units" />
         <ResourceCell {...RES.tech} value={`L${tech.level}`} label={tech.label} />
       </div>
@@ -275,16 +380,34 @@ function DesktopTopBar({ scrap, units, tech, name, color = C.red, vp, vpGoal, ac
       <div style={{ position: "absolute", left: 0, right: 0, top: 3, display: "flex", flexDirection: "column", alignItems: "center", gap: 2, pointerEvents: "none" }}>
         <span style={{ fontFamily: C.font, fontSize: 14, fontWeight: 700, letterSpacing: 2, textTransform: "uppercase", color, textShadow: `0 0 10px ${color}77, 0 1px 2px rgba(0,0,0,0.7)`, lineHeight: 1, whiteSpace: "nowrap" }}>{name}</span>
         <span style={{ width: 70, height: 1.5, background: `linear-gradient(90deg, transparent, ${color}, transparent)` }} />
-        <span style={{ fontFamily: C.font, fontSize: 8.5, letterSpacing: 2.2, textTransform: "uppercase", color: C.textFaint }}>Round {round}</span>
+        {/* Sits directly under the faction name, which throws a wide
+            `0 0 10px <color>77` glow. At textFaint over that halo the round
+            counter was unreadable at every viewport width — lifted to
+            textDim with its own dark shadow to punch back through the glow. */}
+        <span style={{ fontFamily: C.font, fontSize: 9.5, fontWeight: 600, letterSpacing: 2.2, textTransform: "uppercase", color: C.textDim, textShadow: "0 1px 3px rgba(0,0,0,0.9)" }}>Round {round}</span>
       </div>
 
       {/* right flare — VP + Actions dials, End Turn beneath */}
       <div style={{ position: "absolute", right: 16, top: 0, height: H, display: "flex", alignItems: "center", gap: 14, pointerEvents: "auto" }}>
-        <DialCell label="Victory">
-          <Dial size={46} accent={C.gold} progress={vpGoal ? vp / vpGoal : 0}>
-            <DialFace icon={ICON.vp} value={vp} valueColor={C.gold} iconSize={15} valueSize={15} />
+        {/* The dial races the WIN CONDITION — how many rivals are dealt with —
+            not the score. It used to fill toward a VP threshold that turned
+            out not to be a conquest condition at all; VP is the end-of-game
+            standing now and nothing fills toward it. */}
+        <DialCell label={dominion?.roundsLeft != null ? `${dominion.roundsLeft} to win` : "Dominion"}>
+          <Dial
+            size={46}
+            accent={dominion?.roundsLeft != null ? C.holo : C.gold}
+            progress={dominion?.threshold ? dominion.score / dominion.threshold : 0}
+            glow={dominion?.met}
+          >
+            <DialFace
+              value={dominion ? `${dominion.score}/${dominion.threshold}` : vp}
+              valueColor={dominion?.met ? C.holoHi : C.text}
+              valueSize={15}
+            />
           </Dial>
         </DialCell>
+        <ActionPips roster={actions.roster} />
         <DialCell label="Actions">
           <Dial size={46} accent={C.red} progress={actions.max ? actions.remaining / actions.max : 0} glow>
             <DialFace value={`${actions.remaining}/${actions.max}`} valueColor={C.text} valueSize={15} />
@@ -443,21 +566,54 @@ export function CornerBrackets({ color = C.holo, len = 16, inset = 7, w = 2 }) {
 // Pure-holographic floating window — translucent teal-lit plate, glowing edge,
 // corner brackets, scanlines and a spring entrance. Optional title/icon header
 // and footer slot. Replaces the old painted-frame image.
-export function FrameWindow({ children, onClose, footer, width = 470, title, icon }) {
+// `floating` turns the window from a modal into a movable panel: no scrim, no
+// blur, and the board underneath stays live — you can pan, zoom and click hexes
+// with a city open. Desktop only, and by choice: on a phone the window is most
+// of the screen anyway, so a scrim is the honest thing and there is nowhere to
+// drag it to.
+export function FrameWindow({ children, onClose, footer, width = 470, title, icon, floating = false }) {
   useEscClose(onClose);
+  const dragControls = useDragControls();
   return (
-    <motion.div onClick={onClose}
+    <motion.div onClick={floating ? undefined : onClose}
       initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, transition: { duration: 0.2 } }} transition={{ duration: 0.16 }}
-      style={{ position: "fixed", inset: 0, zIndex: 58, background: "radial-gradient(ellipse at center, rgba(8,14,14,0.82), rgba(2,5,5,0.93))", backdropFilter: "blur(3px)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+      style={{ position: "fixed", inset: 0, zIndex: 58, display: "flex", alignItems: "center",
+        // Floating: hug the right edge and let every event fall through to the
+        // board. Modal: centred over a scrim that eats them.
+        justifyContent: floating ? "flex-end" : "center",
+        padding: floating ? "0 22px" : 0,
+        pointerEvents: floating ? "none" : "auto",
+        background: floating ? "none" : "radial-gradient(ellipse at center, rgba(8,14,14,0.82), rgba(2,5,5,0.93))",
+        backdropFilter: floating ? undefined : "blur(3px)" }}>
       <motion.div onClick={(e) => e.stopPropagation()} className="hud-scratch"
+        drag={floating} dragControls={dragControls} dragListener={false} dragMomentum={false}
+        // Keep it reachable: it may be dragged well off-centre but never
+        // entirely off the window.
+        dragConstraints={{ left: -window.innerWidth + 120, right: 60, top: -window.innerHeight + 140, bottom: window.innerHeight - 140 }}
         initial={{ opacity: 0, scale: 0.95, y: 10 }} animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.96, y: 8, transition: { duration: 0.18, ease: "easeIn" } }}
         transition={{ type: "spring", stiffness: 300, damping: 26 }}
         style={{ position: "relative", width, maxWidth: "94vw", maxHeight: "88vh", display: "flex", flexDirection: "column",
+          pointerEvents: "auto",
           background: "linear-gradient(158deg, rgba(18,31,32,0.97) 0%, rgba(9,17,18,0.98) 58%, rgba(6,11,12,0.99) 100%)",
           border: `1px solid ${C.holo}`, borderRadius: 8,
           boxShadow: `inset 0 0 34px rgba(86,211,198,0.07), 0 0 0 1px rgba(86,211,198,0.12), 0 0 36px rgba(86,211,198,0.22), 0 26px 70px rgba(0,0,0,0.72)` }}>
         <div style={{ position: "absolute", top: 0, left: 20, right: 20, height: 2, background: `linear-gradient(90deg, transparent, ${C.holoHi}, transparent)`, opacity: 0.7, pointerEvents: "none" }} />
+        {/* Grab strip. A dedicated handle rather than dragging the whole panel:
+            the body holds buttons, a slider and a scroll area, all of which a
+            panel-wide drag would fight. */}
+        {floating && (
+          <div
+            onPointerDown={(e) => dragControls.start(e)}
+            title="Drag to move"
+            style={{ position: "relative", height: 18, flexShrink: 0, cursor: "grab", display: "flex",
+              alignItems: "center", justifyContent: "center", gap: 3, touchAction: "none" }}
+          >
+            {[0, 1, 2].map((i) => (
+              <span key={i} style={{ width: 16, height: 2, borderRadius: 1, background: C.holo, opacity: 0.4 }} />
+            ))}
+          </div>
+        )}
         <CornerBrackets />
         <div className="hud-scanlines" style={{ position: "absolute", inset: 0, borderRadius: 8 }} />
         {title != null && (
@@ -492,13 +648,259 @@ function Stat({ icon, value, label }) {
 }
 
 // Single-window Location view. `view` is a plain object built by the host.
-export function LocationWindow({ view, onClose, onActivate, onContest, onRecruit, onBuild, onUpgrade, onRush, onSetSlider }) {
+// Rail doc §3 — a blockade's own window, opened by selecting it on the map the
+// way a settlement is.
+//
+// A blockade outlives the unit that raised it, so reaching it through whichever
+// unit happens to be parked on it made a structure feel like a unit ability and
+// meant you had to keep a soldier standing there to manage one. It is a place.
+export function BlockadeWindow({ view, canAct, onClose, onFit }) {
   const v = view;
+  const [open, setOpen] = useState(false);
+  const floating = !useIsPhone();
+  const hair = "1px solid rgba(86,211,198,0.22)";
+  const owner = ownerColor(v.owner);
+  const note = { fontSize: 10.5, color: C.textFaint, lineHeight: 1.5 };
+
+  const status = !v.done
+    ? "Under construction"
+    : v.paid ? "Manned" : "Dormant — upkeep unpaid";
+
+  return (
+    <FrameWindow
+      onClose={onClose}
+      floating={floating}
+      footer={
+        <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+          <span style={{ fontFamily: C.font, fontWeight: 800, fontSize: 22, color: v.done && !v.paid ? C.red : C.gold, lineHeight: 1 }}>
+            {v.done ? `${v.upkeep}` : `${Math.floor(v.progress)}/${v.cost}`}
+          </span>
+          <span style={{ fontSize: 9, letterSpacing: 1.8, textTransform: "uppercase", color: C.holoHi }}>
+            {v.done ? "Scrap / turn" : "Built"}
+          </span>
+        </div>
+      }
+    >
+      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        <div>
+          <div style={{ fontFamily: C.font, fontSize: 28, fontWeight: 700, letterSpacing: 1.5, textTransform: "uppercase", color: C.text, lineHeight: 1, textShadow: `0 0 12px ${C.holo}44` }}>
+            Blockade
+          </div>
+          <div style={{ display: "flex", gap: 6, marginTop: 8, alignItems: "center" }}>
+            <span style={{ fontFamily: C.font, fontSize: 10.5, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", color: "#08100f", background: owner, padding: "2px 8px", borderRadius: 3 }}>
+              {v.mine ? "Yours" : "Foreign"}
+            </span>
+            <span style={{ fontSize: 10, letterSpacing: 1.4, textTransform: "uppercase", color: v.done && !v.paid ? C.red : C.textDim }}>
+              {status}
+            </span>
+          </div>
+        </div>
+
+        <div style={{ display: "flex", gap: 18, padding: "10px 0", borderTop: hair, borderBottom: hair }}>
+          <Stat icon={ICON.shield} value={v.defense} label="Defense" />
+          <Stat icon={ICON.scrap} value={`−${v.upkeep}`} label="Upkeep / turn" />
+          {v.mine && <Stat icon={ICON.units} value={`${v.slotsUsed}/${v.slotCap}`} label="Slots" />}
+        </div>
+
+        {!v.done && (
+          <div style={note}>
+            {v.mine
+              ? `Building — ${Math.floor(v.progress)}/${v.cost}. Its builder is pinned here until it lands, and it halts nobody until then.`
+              : "Someone else is building here."}
+          </div>
+        )}
+
+        {v.done && !v.paid && (
+          <div style={{ ...note, color: C.red }}>
+            Nobody is manning it. It halts no one, sees nothing, collects no toll
+            and adds no defense until the arrears are paid.
+          </div>
+        )}
+
+        {v.mine && v.done && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            <SectionLabel>Upgrades</SectionLabel>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+              {v.installed.map((c) => (
+                <span key={c.uid} title={c.desc}
+                  style={{ fontFamily: C.font, fontSize: 11, fontWeight: 700, padding: "5px 9px", borderRadius: 5, border: `1px solid ${c.disabled ? C.red : "rgba(86,211,198,0.4)"}`, color: c.disabled ? C.red : C.text }}>
+                  {c.name}{c.disabled ? " (dormant)" : ""}
+                  {c.upkeep > 0 && <span style={{ color: C.textFaint, fontWeight: 600 }}> · −{c.upkeep}/turn</span>}
+                </span>
+              ))}
+              {v.slotsUsed < v.slotCap && !v.building && (
+                <button className="hud-int" disabled={!canAct}
+                  onClick={canAct ? () => setOpen((o) => !o) : undefined}
+                  style={{ fontFamily: C.font, fontSize: 11, fontWeight: 700, padding: "5px 11px", borderRadius: 5, border: "1px dashed rgba(86,211,198,0.5)", background: "rgba(86,211,198,0.06)", color: C.holoHi, cursor: canAct ? "pointer" : "default" }}>
+                  + Fit
+                </button>
+              )}
+            </div>
+            {v.building && (
+              <div style={note}>
+                Fitting {v.building.name} — {Math.floor(v.building.progress)}/{v.building.cost},
+                paid out of the settlement down the road.
+              </div>
+            )}
+            {v.supply && !v.supply.ok && (
+              <div style={{ ...note, color: C.red }}>
+                {v.supply.path ? "Its supply road is cut — nothing reaches it." : "No road back to a settlement you hold."}
+              </div>
+            )}
+            {open && (
+              <BuildList
+                items={v.chips}
+                can={canAct}
+                empty="Nothing your Tech Level can fit yet."
+                onPick={(chipId) => { onFit?.(chipId); setOpen(false); }}
+              />
+            )}
+          </div>
+        )}
+      </div>
+    </FrameWindow>
+  );
+}
+
+// The Economy ledger — what everything you hold earns, what everything you
+// keep costs, and the net.
+//
+// This replaces the old Locations list, which named your cities but said
+// nothing about them. Since units, blockades, posts and some chips all bill
+// every Upkeep, a bare roster answered the wrong question: the one a player
+// actually has is "where is my scrap going, and can I afford the next thing".
+// Rows still open the thing they name, so it is a list AND a ledger.
+export function EconomyLedger({ report, onOpenHex, onOpenUnit }) {
+  const r = report;
+  const hair = "1px solid rgba(86,211,198,0.22)";
+  const row = {
+    display: "flex", alignItems: "center", gap: 10, width: "100%",
+    padding: "7px 9px", borderRadius: 7, border: "1px solid rgba(86,211,198,0.22)",
+    background: "rgba(0,0,0,0.25)", color: C.text, textAlign: "left",
+  };
+  const num = (n, good) => ({
+    fontFamily: C.font, fontWeight: 700, fontSize: 14, flexShrink: 0,
+    color: n === 0 ? C.textFaint : good ? C.holoHi : C.gold,
+  });
+  const sub = { fontSize: 9.5, letterSpacing: 0.8, color: C.textFaint };
+
+  const Section = ({ label, total, children }) => (
+    <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+        <SectionLabel>{label}</SectionLabel>
+        <span style={{ fontFamily: C.font, fontWeight: 700, fontSize: 12, color: C.textDim }}>{total}</span>
+      </div>
+      {children}
+    </div>
+  );
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      {/* The bottom line first — it is the thing you opened this for. */}
+      <div style={{ display: "flex", gap: 18, padding: "10px 0", borderTop: hair, borderBottom: hair }}>
+        <Stat icon={ICON.scrap} value={`+${r.income}`} label="Income / turn" />
+        <Stat icon={ICON.units} value={`−${r.upkeep}`} label="Upkeep / turn" />
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginLeft: "auto" }}>
+          <div style={{ display: "flex", flexDirection: "column", lineHeight: 1, alignItems: "flex-end" }}>
+            <span style={{ fontFamily: C.font, fontSize: 22, fontWeight: 800, color: r.net < 0 ? C.red : C.holoHi }}>
+              {r.net >= 0 ? "+" : ""}{r.net}
+            </span>
+            <span style={{ fontFamily: C.font, fontSize: 8, letterSpacing: 1.4, textTransform: "uppercase", color: r.net < 0 ? C.red : C.holoHi, fontWeight: 600, marginTop: 2 }}>
+              Net / turn
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <Section label="Settlements" total={`+${r.income - r.tolls}`}>
+        {r.locations.length === 0 && (
+          <span style={{ color: C.textDim, fontSize: 12 }}>
+            You hold no sections yet. Move a unit onto a location and contest it.
+          </span>
+        )}
+        {r.locations.map((l) => (
+          <button key={l.hexId} className="hud-int" style={{ ...row, cursor: "pointer" }}
+            onClick={() => onOpenHex?.(l.hexId)}>
+            <span style={{ flex: 1, minWidth: 0 }}>
+              <span style={{ fontFamily: C.font, fontSize: 14, fontWeight: 700 }}>{l.name}</span>
+              <span style={{ ...sub, display: "block", marginTop: 2 }}>
+                {/* Output vs banked: a settlement mid-build keeps only its
+                    butter half, and a player reading a low number should see
+                    it is a choice, not a loss. */}
+                {l.diverting
+                  ? `output ${l.output} · ${l.diverting === "building" ? "building" : "pooling"} the rest`
+                  : `output ${l.output}`}
+                {l.besieged ? " · besieged" : ""}
+                {l.chipUpkeep > 0 ? ` · chips −${l.chipUpkeep}` : ""}
+              </span>
+            </span>
+            <span style={num(l.banked, true)}>+{l.banked}</span>
+            {l.chipUpkeep > 0 && <span style={num(-l.chipUpkeep, false)}>−{l.chipUpkeep}</span>}
+          </button>
+        ))}
+        {r.tolls > 0 && (
+          <div style={{ ...row, cursor: "default" }}>
+            <span style={{ flex: 1 }}>
+              <span style={{ fontFamily: C.font, fontSize: 14, fontWeight: 700 }}>Tolls</span>
+              <span style={{ ...sub, display: "block", marginTop: 2 }}>Toll Booths on your blockades</span>
+            </span>
+            <span style={num(r.tolls, true)}>+{r.tolls}</span>
+          </div>
+        )}
+      </Section>
+
+      <Section label="Standing army" total={`−${r.army}`}>
+        {r.units.length === 0 && <span style={{ color: C.textDim, fontSize: 12 }}>No units in the field.</span>}
+        {r.units.map((u) => (
+          <button key={u.uid} className="hud-int" style={{ ...row, cursor: "pointer" }}
+            onClick={() => onOpenUnit?.(u.uid)}>
+            <span style={{ flex: 1, minWidth: 0 }}>
+              <span style={{ fontFamily: C.font, fontSize: 14, fontWeight: 700, color: u.unsupplied ? C.red : C.text }}>
+                {u.name}
+              </span>
+              <span style={{ ...sub, display: "block", marginTop: 2, color: u.unsupplied ? C.red : C.textFaint }}>
+                {u.at}{u.unsupplied ? " · UNSUPPLIED — cannot move or act" : ""}
+              </span>
+            </span>
+            <span style={num(-u.upkeep, false)}>−{u.upkeep}</span>
+          </button>
+        ))}
+      </Section>
+
+      {r.structureList.length > 0 && (
+        <Section label="Structures" total={`−${r.structures}`}>
+          {r.structureList.map((st) => (
+            <button key={`${st.kind}-${st.hexId}`} className="hud-int" style={{ ...row, cursor: "pointer" }}
+              onClick={() => onOpenHex?.(st.hexId)}>
+              <span style={{ flex: 1, minWidth: 0 }}>
+                <span style={{ fontFamily: C.font, fontSize: 14, fontWeight: 700, color: st.dormant ? C.red : C.text }}>
+                  {st.name}
+                </span>
+                <span style={{ ...sub, display: "block", marginTop: 2, color: st.dormant ? C.red : C.textFaint }}>
+                  {st.at || st.hexId}{st.dormant ? " · DORMANT — unpaid, so it does nothing" : ""}
+                </span>
+              </span>
+              <span style={num(-st.upkeep, false)}>−{st.upkeep}</span>
+            </button>
+          ))}
+        </Section>
+      )}
+    </div>
+  );
+}
+
+export function LocationWindow({ view, onClose, onActivate, onContest, onRecruit, onBuild, onUpgrade, onRush, onSetSlider, onSetPoolTarget, onSetBuildPriority }) {
+  const v = view;
+  // On desktop a city is a panel you consult while still working the map, not a
+  // modal that takes the screen hostage. On a phone it fills the screen either
+  // way, so it stays a modal there.
+  const floating = !useIsPhone();
   const hair = "1px solid rgba(86,211,198,0.22)";
   const holoBtn = { fontFamily: C.font, fontSize: 12, fontWeight: 700, letterSpacing: 1.4, textTransform: "uppercase", color: "#08100f", padding: "9px 16px", borderRadius: 7, border: `1px solid ${C.holo}`, background: `linear-gradient(180deg, ${C.holoHi}, ${C.holo})`, boxShadow: `0 0 14px ${C.holo}55` };
   return (
     <FrameWindow
       onClose={onClose}
+      floating={floating}
       footer={
         <>
           <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
@@ -526,7 +928,24 @@ export function LocationWindow({ view, onClose, onActivate, onContest, onRecruit
               <span style={{ fontFamily: C.font, fontSize: 10.5, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", color: "#08100f", background: v.valueColor || C.copperHi, padding: "2px 8px", borderRadius: 3 }}>{v.valueLabel}</span>
               <span style={{ display: "flex", gap: 2 }}>{Array.from({ length: v.vp }).map((_, i) => <img key={i} src={ICON.vp} alt="" style={{ width: 15, height: 15 }} />)}</span>
             </div>
-            <div style={{ fontSize: 10, letterSpacing: 1.4, textTransform: "uppercase", color: C.textDim, marginTop: 7 }}>{v.statusLabel}</div>
+            <div style={{ fontSize: 10, letterSpacing: 1.4, textTransform: "uppercase", color: C.textDim, marginTop: 7 }}>
+              {v.statusLabel}
+              {/* Still has its action — the same holo dot the board and the
+                  HUD's READY strip use. The window is where a city's action
+                  is actually spent, so it is the one place that has to say
+                  whether there is one left. */}
+              {v.actionsReady > 0 && (
+                <span style={{ marginLeft: 8, whiteSpace: "nowrap", color: C.holoHi }}>
+                  {Array.from({ length: v.actionsReady }, (_, i) => (
+                    <span key={i} style={{ display: "inline-block", width: 6, height: 6, borderRadius: "50%", background: C.holo, boxShadow: `0 0 5px ${C.holo}`, marginRight: 5, verticalAlign: "middle" }} />
+                  ))}
+                  {v.actionsReady > 1 ? `${v.actionsReady} actions` : "1 action"}
+                </span>
+              )}
+            </div>
+            {v.basis && (
+              <div style={{ fontSize: 9.5, letterSpacing: 1.6, textTransform: "uppercase", color: C.textFaint, marginTop: 4 }}>{v.basis}</div>
+            )}
           </div>
           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3 }}>
             <div style={{ filter: `drop-shadow(0 0 8px ${C.holo}55)` }}>
@@ -542,8 +961,18 @@ export function LocationWindow({ view, onClose, onActivate, onContest, onRecruit
           <Stat icon={ICON.units} value={v.economy ? `${v.economy.slotsUsed}/${v.economy.slotCapacity}` : v.chipSlots} label="Chip Slots" />
         </div>
 
+        {/* What the place IS, before what it scores. The prose is authored in
+            content/locations.csv and reached nothing until now; the nine
+            Locations added after that sheet have no line yet and simply
+            render without one. */}
+        {v.flavour && (
+          <p className="pc-prose" style={{ margin: 0, fontSize: 12.5, lineHeight: 1.6, color: C.textDim, fontStyle: "italic" }}>
+            {v.flavour}
+          </p>
+        )}
+
         {v.economy && (
-          <EconomyPanel hexId={v.hexId} eco={v.economy} onBuild={onBuild} onUpgrade={onUpgrade} onRush={onRush} onSetSlider={onSetSlider} />
+          <EconomyPanel hexId={v.hexId} eco={v.economy} onBuild={onBuild} onUpgrade={onUpgrade} onRush={onRush} onSetSlider={onSetSlider} onSetPoolTarget={onSetPoolTarget} onSetBuildPriority={onSetBuildPriority} />
         )}
 
         {v.ability && (
@@ -594,18 +1023,78 @@ export function LocationWindow({ view, onClose, onActivate, onContest, onRecruit
 // installed chip opens its upgrade view (always shows the next tier, greyed
 // if Tech or Loyalty is short). Construction advances at Upkeep; Rush spends
 // banked scrap to finish now.
-function EconomyPanel({ hexId, eco, onBuild, onUpgrade, onRush, onSetSlider }) {
+// One installed chip, in a city slot or a unit bay. Clicking a chip that has
+// a next tier opens its upgrade view; one with none is inert but still shown,
+// because "what is fitted here" is worth reading on its own.
+function ChipButton({ chip, can, onClick }) {
+  const live = can && !!chip.upgrade;
+  return (
+    <button
+      className="hud-int"
+      disabled={!live}
+      onClick={live ? onClick : undefined}
+      title={chip.upgrade ? `Upgrade → ${chip.upgrade.name}` : "No upgrade"}
+      style={{ fontFamily: C.font, fontSize: 11, fontWeight: 700, padding: "6px 9px", borderRadius: 6, border: `1px solid ${chip.disabled ? C.red : "rgba(86,211,198,0.4)"}`, background: "rgba(0,0,0,0.3)", color: chip.disabled ? C.red : C.text, cursor: live ? "pointer" : "default" }}
+    >
+      {chip.name}{chip.disabled ? " (dormant)" : ""}
+      {chip.upkeep > 0 && (
+        <span style={{ color: chip.disabled ? C.red : C.textFaint, fontWeight: 600 }}> −{chip.upkeep}/t</span>
+      )}
+      {chip.upgrade ? " ▲" : ""}
+    </button>
+  );
+}
+
+// §20.6 display contract, shared by the city build menu and the per-unit
+// outfit menu: only Tech-allowed chips appear at all, and anything otherwise
+// gated is greyed with the reason rather than hidden — you should be able to
+// see what you are working toward.
+function BuildList({ items, can, empty, onPick }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 4, background: "rgba(0,0,0,0.3)", border: "1px solid rgba(86,211,198,0.3)", borderRadius: 7, padding: 8 }}>
+      {items.length === 0 && <div style={{ fontSize: 11, color: C.textFaint }}>{empty}</div>}
+      {items.map((b) => {
+        const enabled = can && b.buildable;
+        return (
+          <button key={b.chipId} className="hud-int" disabled={!enabled}
+            onClick={enabled ? () => onPick(b.chipId) : undefined}
+            style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, textAlign: "left", padding: "6px 9px", borderRadius: 5, border: "1px solid rgba(86,211,198,0.25)", background: enabled ? "rgba(0,0,0,0.2)" : "rgba(0,0,0,0.35)", color: enabled ? C.text : C.textFaint, cursor: enabled ? "pointer" : "not-allowed", opacity: b.locked ? 0.55 : 1 }}>
+            <span>
+              <b style={{ color: enabled ? C.text : C.textFaint }}>{b.name}</b>
+              <span style={{ fontSize: 10, color: C.textFaint }}> · {b.desc}</span>
+              {b.reason && <span style={{ fontSize: 9.5, color: C.red }}> · {b.reason}</span>}
+            </span>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
+              <img src={ICON.scrap} alt="" style={{ width: 13, height: 13 }} />
+              <span style={{ fontFamily: C.font, fontWeight: 700 }}>{b.cost}</span>
+              {/* A chip's price is one payment; its upkeep is every turn after,
+                  which is the number that actually decides whether you can
+                  afford it. */}
+              {b.upkeep > 0 && (
+                <span style={{ fontSize: 9, color: C.gold, fontWeight: 700 }}>−{b.upkeep}/t</span>
+              )}
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function EconomyPanel({ hexId, eco, onBuild, onUpgrade, onRush, onSetSlider, onSetPoolTarget, onSetBuildPriority }) {
   const [open, setOpen] = useState(null); // null | "build" | { upgrade: chipUid }
   const can = eco.canManage;
-  const slot = (label, active, val) => (
+  // One pill button, shared by the guns/butter slider, the pooling picker and
+  // the funding-priority toggle so all three read as the same control.
+  const slotButton = (label, active, enabled, onClick) => (
     <button
       key={label}
       className="hud-int"
-      disabled={!can}
-      onClick={can ? () => onSetSlider?.(hexId, val) : undefined}
+      disabled={!enabled}
+      onClick={enabled ? onClick : undefined}
       style={{
         flex: 1, fontFamily: C.font, fontSize: 10, fontWeight: 700, letterSpacing: 1,
-        textTransform: "uppercase", padding: "5px 4px", borderRadius: 5, cursor: can ? "pointer" : "default",
+        textTransform: "uppercase", padding: "5px 4px", borderRadius: 5, cursor: enabled ? "pointer" : "default",
         border: `1px solid ${active ? C.holo : "rgba(86,211,198,0.3)"}`,
         background: active ? "rgba(86,211,198,0.18)" : "rgba(0,0,0,0.25)",
         color: active ? C.holoHi : C.textDim,
@@ -614,8 +1103,15 @@ function EconomyPanel({ hexId, eco, onBuild, onUpgrade, onRush, onSetSlider }) {
       {label}
     </button>
   );
+  const slot = (label, active, val) =>
+    slotButton(label, active, can, () => onSetSlider?.(hexId, val));
   const f = eco.slider ?? 0;
   const emptySlots = Math.max(0, eco.slotCapacity - eco.slotsUsed);
+  // The two economies are split at the menu as well as the grid: a city slot
+  // can never hold a unit chip and a unit bay can never hold a city chip, so
+  // offering both in one list only ever produced a greyed-out half.
+  const cityMenu = (eco.buildMenu || []).filter((b) => b.kind !== "unit");
+  const unitMenu = (eco.buildMenu || []).filter((b) => b.kind === "unit");
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -654,15 +1150,13 @@ function EconomyPanel({ hexId, eco, onBuild, onUpgrade, onRush, onSetSlider }) {
         <div style={{ fontSize: 11, color: C.textFaint }}>No active build — click an empty slot below.</div>
       )}
 
-      {/* slot grid: installed chips (click → upgrade) + empty slots (click → build) */}
+      {/* City slot grid: installed Location chips (click → upgrade) + empty
+          slots (click → build). Location chips only — the garrison's bays are
+          a separate economy and live in their own section below. */}
       <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
         {eco.chips.map((c) => (
-          <button key={c.uid} className="hud-int" disabled={!can || !c.upgrade}
-            onClick={can && c.upgrade ? () => setOpen((o) => (o && o.upgrade === c.uid ? null : { upgrade: c.uid })) : undefined}
-            title={c.upgrade ? `Upgrade → ${c.upgrade.name}` : "No upgrade"}
-            style={{ fontFamily: C.font, fontSize: 11, fontWeight: 700, padding: "6px 9px", borderRadius: 6, border: `1px solid ${c.disabled ? C.red : "rgba(86,211,198,0.4)"}`, background: "rgba(0,0,0,0.3)", color: c.disabled ? C.red : C.text, cursor: can && c.upgrade ? "pointer" : "default" }}>
-            {c.name}{c.disabled ? " (dormant)" : ""}{c.upgrade ? " ▲" : ""}
-          </button>
+          <ChipButton key={c.uid} chip={c} can={can}
+            onClick={() => setOpen((o) => (o && o.upgrade === c.uid ? null : { upgrade: c.uid }))} />
         ))}
         {Array.from({ length: emptySlots }).map((_, i) => (
           <button key={`empty-${i}`} className="hud-int" disabled={!can}
@@ -671,32 +1165,129 @@ function EconomyPanel({ hexId, eco, onBuild, onUpgrade, onRush, onSetSlider }) {
             + Build
           </button>
         ))}
+        {emptySlots === 0 && (
+          <div style={{ fontSize: 10, color: C.textFaint, alignSelf: "center" }}>
+            All city slots full.
+          </div>
+        )}
       </div>
 
-      {/* build menu — §20.6: only Tech-allowed chips; Loyalty-locked greyed */}
-      {open === "build" && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 4, background: "rgba(0,0,0,0.3)", border: "1px solid rgba(86,211,198,0.3)", borderRadius: 7, padding: 8 }}>
-          <SectionLabel>Build menu</SectionLabel>
-          {eco.buildMenu.length === 0 && <div style={{ fontSize: 11, color: C.textFaint }}>Nothing your Tech Level can build yet.</div>}
-          {eco.buildMenu.map((b) => {
-            const enabled = can && b.buildable;
+      {/* Garrison bays — a SEPARATE economy from the city's slots.
+          Unit chips never consumed a Location slot in the engine, but the
+          build menu used to be reachable only by clicking an empty Location
+          slot, so a full city could no longer outfit its own troops, and a
+          unit chip's upgrade had nowhere to render at all. */}
+      {(eco.garrison?.length > 0) && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <SectionLabel>Garrison · unit bays</SectionLabel>
+          {eco.garrison.map((u) => {
+            const free = u.baySlots - u.bayUsed;
             return (
-              <button key={b.chipId} className="hud-int" disabled={!enabled}
-                onClick={enabled ? () => { onBuild?.(hexId, b.chipId); setOpen(null); } : undefined}
-                style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, textAlign: "left", padding: "6px 9px", borderRadius: 5, border: "1px solid rgba(86,211,198,0.25)", background: enabled ? "rgba(0,0,0,0.2)" : "rgba(0,0,0,0.35)", color: enabled ? C.text : C.textFaint, cursor: enabled ? "pointer" : "not-allowed", opacity: b.locked ? 0.55 : 1 }}>
-                <span>
-                  <b style={{ color: enabled ? C.text : C.textFaint }}>{b.name}</b>
-                  <span style={{ fontSize: 10, color: C.textFaint }}> · {b.desc}</span>
-                  {b.reason && <span style={{ fontSize: 9.5, color: C.red }}> · {b.reason}</span>}
-                </span>
-                <span style={{ display: "inline-flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
-                  <img src={ICON.scrap} alt="" style={{ width: 13, height: 13 }} />
-                  <span style={{ fontFamily: C.font, fontWeight: 700 }}>{b.cost}</span>
-                </span>
-              </button>
+              <div key={u.uid} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ fontFamily: C.font, fontSize: 11.5, fontWeight: 700, color: C.text }}>
+                    {u.name}
+                  </span>
+                  <span style={{ fontSize: 9.5, color: C.textFaint }}>
+                    bay {u.bayUsed}/{u.baySlots}
+                  </span>
+                  <span style={{ fontSize: 9.5, color: u.unsupplied ? C.red : C.gold, fontWeight: 700 }}>
+                    −{u.upkeep}/turn{u.unsupplied ? " · UNSUPPLIED" : ""}
+                  </span>
+                </div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                  {u.chips.map((c) => (
+                    <ChipButton key={c.uid} chip={c} can={can}
+                      onClick={() => setOpen((o) => (o && o.upgrade === c.uid ? null : { upgrade: c.uid }))} />
+                  ))}
+                  {free > 0 ? (
+                    <button className="hud-int" disabled={!can}
+                      onClick={can ? () => setOpen((o) => (o && o.outfit === u.uid ? null : { outfit: u.uid })) : undefined}
+                      style={{ fontFamily: C.font, fontSize: 11, fontWeight: 700, padding: "6px 12px", borderRadius: 6, border: "1px dashed rgba(86,211,198,0.5)", background: "rgba(86,211,198,0.06)", color: C.holoHi, cursor: can ? "pointer" : "default" }}>
+                      + Outfit
+                    </button>
+                  ) : (
+                    <span style={{ fontSize: 10, color: C.textFaint, alignSelf: "center" }}>Bay full.</span>
+                  )}
+                </div>
+                {open?.outfit === u.uid && (
+                  <BuildList
+                    items={unitMenu.map((b) => {
+                      // Per-unit eligibility. The adapter's `buildable` asks
+                      // whether ANY stationed unit could take the chip; here the
+                      // player has named one, so the answer has to be about it.
+                      const fits = (b.slots || 1) <= free;
+                      const clash = b.statType && u.statTypes.includes(b.statType);
+                      return {
+                        ...b,
+                        buildable: !b.locked && fits && !clash,
+                        reason: b.locked ? b.reason
+                          : !fits ? "no bay space on this unit"
+                          : clash ? `already carries a ${b.statType} chip`
+                          : null,
+                      };
+                    })}
+                    can={can}
+                    empty="Nothing your Tech Level can fit yet."
+                    onPick={(chipId) => { onBuild?.(hexId, chipId, { unit: u.uid }); setOpen(null); }}
+                  />
+                )}
+              </div>
             );
           })}
         </div>
+      )}
+
+      {/* Rail doc §2.2 — pool this settlement's build output down a rail link.
+          Only rendered when a legal recipient exists, so a settlement with no
+          rail never shows a control it could not use. */}
+      {eco.poolTargets?.length > 0 && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+          <SectionLabel>Rail · pool build output</SectionLabel>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+            {slotButton("Keep", !eco.poolTarget, can, () => onSetPoolTarget?.(hexId, null))}
+            {eco.poolTargets.map((t) => slotButton(
+              `→ ${t.name}`, eco.poolTarget === t.hexId, can,
+              () => onSetPoolTarget?.(hexId, eco.poolTarget === t.hexId ? null : t.hexId),
+            ))}
+          </div>
+          <div style={{ fontSize: 9.5, color: C.textFaint, lineHeight: 1.45 }}>
+            {eco.poolBlocked
+              ? `Pooling paused — ${eco.poolBlocked}.`
+              : eco.poolTarget
+                ? `Shipping this settlement's build output to ${eco.poolTargetName} each Upkeep. Anyone parked on the line cuts the shipment.`
+                : "Ship your idle build output down the rail to a settlement you also hold."}
+          </div>
+        </div>
+      )}
+
+      {/* Rail doc §3.4 — who gets the output first when a blockade is being
+          funded. Hidden entirely when there is no site to argue over. */}
+      {eco.fundsBlockade && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+          <SectionLabel>Funding priority</SectionLabel>
+          <div style={{ display: "flex", gap: 6 }}>
+            {slotButton("Blockade first", eco.buildPriority !== "chips", can,
+              () => onSetBuildPriority?.(hexId, "blockade"))}
+            {slotButton("Chips first", eco.buildPriority === "chips", can,
+              () => onSetBuildPriority?.(hexId, "chips"))}
+          </div>
+          <div style={{ fontSize: 9.5, color: C.textFaint, lineHeight: 1.45 }}>
+            {eco.buildPriority === "chips"
+              ? "This settlement finishes its own chip before it pays for the blockade."
+              : "The blockade takes its share first; the rest goes to this settlement's own build."}
+          </div>
+        </div>
+      )}
+
+      {/* City build menu — Location chips only. */}
+      {open === "build" && (
+        <BuildList
+          items={cityMenu}
+          can={can}
+          empty="Nothing your Tech Level can build yet."
+          onPick={(chipId) => { onBuild?.(hexId, chipId); setOpen(null); }}
+        />
       )}
 
       {/* upgrade view — §20.6: always shows the next tier, greyed if gated */}

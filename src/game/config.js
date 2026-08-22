@@ -2,6 +2,8 @@
 // The engine reads gameplay numbers from here — never hard-code them.
 
 export const CONFIG = {
+  // Kept only as the label on the end-of-game score. Nothing reads it as a
+  // win condition any more — see `victory` below.
   vpThreshold: 12,
   // Per-entity actions (docs/vp-and-actions-design.md §2/§4): every unit
   // and Location gets 1 action per turn; the old global pool survives as a
@@ -10,24 +12,33 @@ export const CONFIG = {
   // action is gone.
   baseActions: 0,
 
-  // Repeatable VP faucets (docs/vp-and-actions-design.md §1). Dominion:
-  // +vpPerCity per Upkeep for each high/veryHigh Location the player (or a
-  // vassal of theirs) fully holds at Loyalty >= loyaltyMin that is NOT one
-  // of the player's own affiliated cities — dominion is rule over others'
-  // land, so a homeland never ticks. Alliance trickle: +allianceTrickle
-  // per Upkeep while pacted with a majority of the other surviving majors.
+  // VP is HELD, not banked (src/game/victory.js): a faction draws a Location's
+  // vpReward for as long as it holds the place — full value while Loyalty is
+  // OVER half the counter, half (floored) below. Dominion's per-Upkeep tick and
+  // the one-off capture bounty are both gone; the scoreboard is the map.
+  // Victory is ONE condition with three faces: every surviving faction is
+  // eliminated, your ally, or your vassal. Win it by conquest, by diplomacy,
+  // or — the interesting case — by any mix of the two.
+  //
+  // What it replaced: a VP threshold labelled "conquest" that had nothing to
+  // do with conquering. Across 20 AI-only games it ended every single one,
+  // the winner held 29% of the board on average, and one winner held NOTHING
+  // — 12 points banked from an alliance drip while holding zero cities. The
+  // separate Recognition and last-standing conditions never fired once.
   victory: {
-    // 4 (was 6): the rung was calibrated for the old all-or-nothing control
-    // model, where a city you held was quiet. Under graduated control a
-    // contested city hovers around Loyalty 1–4 for most of a war, so the
-    // Dominion faucet ran bone dry — sim leaders plateaued at 9–11 VP with
-    // nothing left to earn. 4 keeps it a real bar (a neglected city still
-    // misses) while rewarding the "hold and settle it" play.
-    dominionLoyaltyMin: 4,
-    dominionPerCity: 1,
-    // Paid PER allied major, once you're pacted with a majority of them —
-    // so breadth of alliance scales the way breadth of conquest does.
-    allianceTrickle: 1,
+    // The arrangement has to HOLD for this many consecutive rounds before it
+    // wins. Allying your way to a bloodless victory should be a position you
+    // have to defend for a moment, not a switch that flips the instant the
+    // last signature dries — rivals get a window to denounce you, break a
+    // partner away, or simply attack.
+    //
+    // It only applies while rivals are still ALIVE to break it. Kill everyone
+    // and you have won; there is nothing left to hold against.
+    holdRounds: 3,
+    // Score, purely for the end-of-game standing. Nothing here wins anything.
+    // Both are HELD, like territory: you show them while the relationship
+    // stands and lose them when it doesn't.
+    score: { allied: 2, vassal: 3 },
   },
 
   // §18.2 Loyalty — the 8-slice centre pie that replaces foothold/decay.
@@ -48,10 +59,22 @@ export const CONFIG = {
     baseStrength: 4,
     baseMovement: 2, // v0.2 §16.2 — was 1; movement is now its own budget
     baySlots: 2,
+    // Standing armies eat. 1 scrap per unit each Upkeep, doubled once BOTH
+    // bay slots are filled — whether by two 1-slot chips or one 2-slot chip,
+    // so the heavy kit (Bombard, Landship) carries a supply tail. An unpaid
+    // unit is UNSUPPLIED: it holds ground but cannot move or act until it is
+    // paid again. Never destroyed by arrears.
+    upkeep: 1,
+    upkeepFullyChipped: 2,
     baseStrengthCap: 4, // v0.2 §16.3 — base Strength doubles as HP, capped here
     veteranStrengthCap: 8, // §16.7 combining (deferred)
   },
   baseUnitCap: 3, // v0.2 §16.3 — cap = baseUnitCap + Training Grounds
+  // How many units may stand on one hex, counting every owner. A stack past
+  // this cannot be told apart on the board — the tile runs out of room to draw
+  // them at a legible size (docs/unit-model-pipeline.md §10.1) — and a rule the
+  // display cannot show is a rule players cannot plan around.
+  hexUnitCap: 10,
   startingUnits: 2, // v0.2 §16.3
   unitRecruitCost: 6, // v0.2 §16.3 — was 10
 
@@ -60,15 +83,47 @@ export const CONFIG = {
   // §16.2 terrain movement — per-hex entry costs over the base 1/hex.
   // Forest (cover) costs extra; mountains (elevation) HALT a move (you may
   // climb onto one but advance no further that turn — "speed 1 in mountains").
-  // (Roads, when added, will reduce these.)
+  //
+  // A road EASES rough ground; it does not delete it. That distinction is the
+  // whole reason terrain survives contact with the road network: a road that
+  // makes a mountain cost the same as open grass has removed the mountain from
+  // the game, and once a third of the board carries road, a third of the
+  // board's terrain stops mattering. A road through a mountain is a winding
+  // road — it gets you over, it does not make the climb free.
   movement: {
     forestCost: 2,     // entering a cover/forest hex costs this (vs 1) — "−1 speed"
     mountainHalts: true, // entering an elevation/mountain hex ends the move
-    // A unit beginning its turn ON a road hex marches +this Movement that
-    // turn — the highway network is a fast lane for armies, not only a
-    // terrain-negator (playtest: roads otherwise only differ from open
-    // ground on the map's few forest/mountain hexes).
-    roadStartBonus: 1,
+    // Two rules that met in a merge, both kept, because they are about
+    // different ground.
+    //
+    // GRADED SURFACE — road or rail — costs `pavedCost` instead of 1, so a
+    // column that stays on the network covers twice the ground: 2 Movement is
+    // two hexes cross-country and four down a lane. That is what makes the
+    // network worth routing along, worth holding, and worth cutting.
+    //
+    // …but a road EASES rough ground rather than deleting it. A lane across
+    // the plains is quick; a road over a pass is still a pass. So the paved
+    // discount applies to easy ground only, and a crossing costs the eased
+    // terrain price:
+    //
+    //   open + paved      0.5
+    //   forest + paved    roadForestCost (1, against 2 unpaved)
+    //   mountain + paved  roadMountainCost (2, and no halt — the halt is what
+    //                     a mountain really costs, and easing it is the point)
+    //
+    // Corridors are routed AROUND rough ground (assignRoads), so a road rarely
+    // crosses it at all — high ground about one board in thirty. The crossings
+    // that do happen still cost something.
+    pavedCost: 0.5,
+    // What ROAD-GRADE rough ground costs — a road, or a Landship-class mover
+    // (chip `ignoresTerrain`), which the engine defines as road-grade too.
+    // Roughly half the toll in each case, never none.
+    roadForestCost: 1,   // forest is 2 without one
+    roadMountainCost: 2, // a mountain otherwise halts you outright
+    // No `roadStartBonus`. It granted +1 Movement for BEGINNING the turn on a
+    // road — a patch for roads not being worth much, which paying per hex
+    // travelled fixes properly. Keeping both would pay twice for the same
+    // complaint and make 2 Movement carry a unit six hexes rather than four.
   },
 
   // v0.2 §16.4 attrition
@@ -113,9 +168,143 @@ export const CONFIG = {
   // across the board; the Loyalty-6 bonus slot still adds one more.
   chipSlotsByValue: { low: 1, medium: 2, high: 3, veryHigh: 4 },
 
-  // The v0.1 test board.
+  // §16.2 roads. Every settlement is road-linked to its nearest neighbour;
+  // bigger ones also reach their second-nearest, which is what turns a chain
+  // of towns into a network with alternate routes worth cutting. Raising the
+  // high/veryHigh numbers thickens the network (and makes blockades less
+  // decisive, since traffic can route around); lowering them to 1 across the
+  // board yields a bare spanning chain.
+  roads: {
+    linksByValue: { low: 1, medium: 1, high: 2, veryHigh: 2 },
+    // What one hex of corridor costs to route through, when a road is being
+    // laid (assignRoads). These are ROUTING weights, not movement costs.
+    //
+    // reuseCost — ground that already carries road. Well under 1, so a later
+    // corridor will detour to merge with an existing trunk rather than lay a
+    // second lane a hex away from it. That is what stops the network reading
+    // as a lattice: `road` is a per-hex boolean, so two lanes running side by
+    // side are welded into a ladder by adjacency alone. Raise it towards 1 for
+    // more independent, more redundant routes; lower it for a network that
+    // funnels harder onto shared trunks.
+    reuseCost: 0.3,
+    // terrainCost — rough ground. Roads run round a ridge rather than over it,
+    // which is what a surveyor does when there is a valley to follow, and also
+    // keeps rough ground rough: a road EASES what it crosses (see
+    // CONFIG.movement), so a corridor driven straight over the high ground
+    // softens exactly the terrain the map put there to matter.
+    //
+    // Measured: at mountain 4 a road crosses high ground on about one board in
+    // thirty; dropping it to 3 or 2.5 barely moves that, because there is
+    // nearly always a way round. So the few that do happen are genuine passes
+    // — the one gap in a ridge — which is the right place for a road and the
+    // right place for a chokepoint.
+    terrainCost: { forest: 2, mountain: 4 },
+  },
+
+  // Rail (docs/rail-road-blockade-design.md §2). Pre-collapse trunk line,
+  // generated at setup, never built or destroyed. A hop between two linked
+  // stations costs this regardless of how far apart they are — that flat cost
+  // IS the mechanic, so it should stay cheap enough to be worth a detour.
+  rail: {
+    hopCost: 1,
+    // Which settlements the trunk line stops at. It used to be the four
+    // CAPITALS and nothing else, which made rail three links on every board
+    // size however big the map or however many cities were seated — and, worse,
+    // meant no faction ever held both ends of a link at setup, so production
+    // pooling (which needs both stations) could not be used until you had taken
+    // an enemy capital. A trunk line stops at the big places: every capital is
+    // `high`, so this keeps all four and adds the other major cities.
+    // Sign-named settlements are excluded separately (`noRailTerminus`) — they
+    // grew up around road signage and a railway had no reason to stop at a
+    // lay-by, though a line may still run through their hex.
+    hubTiers: ["high", "veryHigh"],
+  },
+
+  // The v0.1 test board — still the default when no map size is given, so
+  // headless games and the harness keep their existing layouts.
   testMap: [3, 4, 5, 6, 5, 4, 3], // 30 hexes
-  hexSplit: { location: 10, encounter: 13, terrain: 7 },
+  // …and how many Locations it seats. PINNED at 10 (the count that existed
+  // before the 2026-08-16 content pass took the roster to 19) precisely so the
+  // headless harness keeps its fixtures. Leaving it unset would have handed the
+  // legacy 30-hex board all 19 Locations — two thirds of the map a settlement.
+  testMapLocations: 10,
+
+  // Board sizes offered on the setup screen. `rows` is the row-width array
+  // fed to buildHexGrid; the bigger ones are hexagons-of-hexes of radius
+  // 4/5/6, which is what keeps the board round rather than lozenge-shaped.
+  //
+  // `locations` is how many of the named Locations get placed. This is the
+  // real scarcity dial: a small map with all ten settlements has an objective
+  // every other hex and nothing to march across. Placement fills in a fixed
+  // order that keeps factions symmetric — every capital first, then the
+  // unaffiliated prizes, then each faction's second home Location — so a
+  // budget of 6 gives everyone exactly one home and two neutral targets
+  // rather than handing one faction two cities and another none.
+  //
+  // Locations arrive in fairness BANDS (board.js generateLayout): capitals,
+  // then every faction's second home, then every faction's third, each taken
+  // whole or not at all; the unaffiliated prizes then fill whatever room is
+  // left. So a budget lands on a band boundary — 4, 8, 12 — plus prizes.
+  mapSizes: {
+    // `locations` is the DEFAULT budget; `locationTiers` is what the setup
+    // screen's density slider offers (low / medium / high / very high). Density
+    // and size are independent on purpose — a cramped small board and a sparse
+    // huge one are both legitimate games, and tying the two made "small" mean
+    // "few cities" whether or not that is what anyone wanted.
+    //
+    // Ceilings are measured, not guessed: a 30-hex board reliably seats 11
+    // Locations before the placement rules start dropping them, so small stops
+    // at 10. Every larger board can seat the whole 19-Location roster, which is
+    // why the top tiers converge there.
+    small:  { rows: [3, 4, 5, 6, 5, 4, 3], locations: 6, locationTiers: [4, 6, 8, 10] },   //  30 hexes, diameter 6
+    medium: { rows: [5, 6, 7, 8, 9, 8, 7, 6, 5], locations: 8, locationTiers: [6, 9, 13, 17] },  //  61 hexes, diameter 8
+    // Raised from 10 with the 2026-08-16 content pass (19 Locations now
+    // exist, up from 10). At 10 the big boards could not reach past every
+    // faction's SECOND home, so the third-home band never appeared on any map
+    // — the new content would have been unreachable. 14/19 keeps roughly the
+    // medium board's Location density on a much bigger field.
+    large:  { rows: [6, 7, 8, 9, 10, 11, 10, 9, 8, 7, 6], locations: 14, locationTiers: [8, 14, 17, 19] }, // 91, diameter 10
+    huge:   { rows: [7, 8, 9, 10, 11, 12, 13, 12, 11, 10, 9, 8, 7], locations: 19, locationTiers: [10, 15, 19, 19] }, // 127, d 12
+  },
+
+  // Of the hexes left over after Locations are placed, this share become
+  // encounters and the rest plain terrain. Was an absolute count (13), which
+  // silently stopped scaling the moment the board could grow.
+  hexSplit: { encounterShare: 0.65 },
+
+  // Encounter cadence, both settable from the setup screen.
+  //   fieldShare      the share of spare hexes that become encounter sites.
+  //                   Overrides hexSplit.encounterShare when the screen sends
+  //                   one; the default IS hexSplit.encounterShare.
+  //   worldPerRound   how many world triggers fire at each round end
+  //                   (triggers.js). 0 switches world encounters off without
+  //                   removing the content.
+  encounters: { worldPerRound: 2 },
+
+  // How fast a player picks quests up.
+  //
+  // `offerQuests` runs at the start of each turn and starts every quest whose
+  // opener gate currently passes. 15 of the 35 authored quests have no opener
+  // gate at all and several more open on conditions that are already true in
+  // round 1, so without a limit each faction started 22 quests on its FIRST
+  // turn — and since most openers are `discovered`, that dropped 22 markers
+  // per faction onto a 17-location board before anybody had moved. The log
+  // read as a wall of "Quest started / Location revealed", and no single
+  // quest was ever an event.
+  //
+  // Nothing is lost to the limit: an eligible quest that is not offered this
+  // turn is simply offered on a later one, because the pass re-runs every
+  // turn and the gates it skipped are still true. Set `newPerTurn` to 0 for
+  // no limit.
+  //
+  // `beatsPerTurn` is the other half: how many beats a player may actually be
+  // HANDED in a turn, counted across every delivery mode — the fan-out when a
+  // quest advances, the round-end pulse, and walking onto a discovered marker
+  // alike. A player experiences cards, not delivery modes, so a cap that only
+  // counted one kind would leave the others free to pile up. Nothing is lost
+  // to it: a held beat is offered again on the next pass and a held marker
+  // stays on its hex. 0 for no limit.
+  quests: { newPerTurn: 2, beatsPerTurn: 3 },
 
   // Capital chip bonuses (content/config.csv).
   capital: { garrisonBonus: 2, productionBonus: 2 },
@@ -198,6 +387,31 @@ export const CONFIG = {
   // §17.7 Listening Post (Intelligence A2) — a unit-built, concealed Vision
   // source that survives by stealth, not toughness. Costs scrap to build and
   // a trickle of scrap per Upkeep to keep paid (else it goes dormant).
+  // Blockade structures (docs/rail-road-blockade-design.md §3). Numbers are
+  // the doc's placeholders pending a balance pass — the mechanics are settled,
+  // these are not.
+  blockades: {
+    buildCost: 8,  // §3.1 — 1 Action + scrap to break ground
+    cost: 4,       // §3.1 — total construction progress needed
+    // §3.1's floor. Construction is funded from the connected settlement's build
+    // output (§3.4), so without this a rich city could raise one in a single
+    // Upkeep; a site takes at most ceil(cost/minTurns) per turn and the rest
+    // flows on to whatever else that city is building.
+    minTurns: 2,
+    defense: 4,    // §3.2 — Location-style static baseline, before stacking
+    vision: 1,     // §3.2 — its own sight footprint
+    // A blockade is a manned position, not a wall you walk away from: 1 scrap
+    // each Upkeep or it goes DORMANT — blocks nobody and sees nothing until
+    // it is paid again. Never destroyed by arrears; the garrison drifts off
+    // and comes back. Same contract as a listening post (§17.7).
+    upkeep: 1,
+    // §3.2 upgrade slots. Deliberately fewer than a settlement's: a blockade is
+    // a chokepoint, not a second city. Palisade / Signal Mast / Toll Booth are
+    // in content.js as kind "blockade"; their bonuses are read off the chip def
+    // (blockadeDefense / blockadeVision / output), never branched on by id.
+    chipSlots: 2,
+  },
+
   posts: {
     buildCost: 3, // §17.7 — 1 Action + 3 scrap to deploy
     upkeep: 1,    // §17.7 — 1 scrap per Upkeep; unpaid → dormant
@@ -232,6 +446,25 @@ export const CONFIG = {
     // §18.5 Menace — reputation for UNJUSTIFIED aggression, scored vs target.
     menace: {
       base: 3, // magnitude of a single attack's Menace swing
+      // Declaring an UNJUSTIFIED war is itself unjustified aggression, and
+      // the board reacts to the declaration, not only to the first blow.
+      // A justified war (denounced first, or answering a betrayal) costs
+      // nothing to declare — which is the whole point of earning one.
+      declareUnjustified: 2,
+      // Menace is what the BOARD thinks of you, so it should depend on what
+      // the board saw. An attack is scored by the share of third parties who
+      // could see the hex: seen by everyone it costs full, seen by nobody it
+      // costs nothing. The victim always knows regardless — that is what the
+      // grievance ledger is for, and denouncing is how they tell everyone
+      // else. A declaration of war is always public and is never scaled.
+      witnessedOnly: true,
+      // …but never quite nothing: rumour travels, and an army that vanishes
+      // into the wasteland and comes back bloody invites questions.
+      unwitnessedShare: 0.2,
+      // What a believed accusation does to the accused. This is how a crime
+      // nobody saw catches up with you: the victim was there, holds the
+      // grievance, and can put it in front of the board.
+      denouncedShare: 0.5,
       decayPerRound: 1, // slow decay with clean play / time
       min: 0, max: 24,
     },
@@ -242,6 +475,13 @@ export const CONFIG = {
       breakLoss: 5, // breaking a pact call / treaty / promise (sharp)
       mediateGain: 2, // §18.7 peacemaker reputation
       surpriseAttackLoss: 8, // §1.1 — attacking before declaring war (treachery)
+      // Denouncing cuts both ways, exactly as declaring war does. Naming a
+      // faction the board can already see is dangerous — one past your
+      // Menace tolerance, below your Honor floor, or that has wronged you —
+      // is what Honor IS, and pays a little. Naming a clean-handed neighbour
+      // because you want their cities is a slander, and costs.
+      denounceLoss: 3,
+      denounceWarrantedGain: 1,
       decayToward: 0, decayPerRound: 0, // no passive decay by default
     },
     // §18.5 Tolerance = base + standing·perStanding, ± by the faction's
@@ -318,6 +558,16 @@ export const CONFIG = {
       refuseStandingDropTiers: 2,
     },
     suePeace: { acceptThreshold: 8, standingBoost: 3 }, // §1.5
+    // Deal flows (a per-turn stream, as opposed to a lump sum). Every flow a
+    // DEAL creates is term-limited; vassal tribute is not a deal and stays
+    // perpetual, ending when the vassalage does.
+    flow: {
+      defaultRounds: 5, // a flow proposed without a term runs this long
+      maxRounds: 20, // the deal builder's ceiling
+      // What a perpetual flow (vassal tribute) is worth to a valuer. Only
+      // reached by engine-made agreements; a deal can no longer create one.
+      perpetualHorizon: 8,
+    },
     war: { unitLossWeight: 2, locationLossWeight: 4 }, // §1.5 war-exhaustion weights
     freeVassal: { // §1.7
       honorGain: 5,
@@ -371,9 +621,81 @@ export const CONFIG = {
     // no Menace. You earn one by denouncing the target first (a declared
     // intent the board has heard) or by being wronged by them (broken pact
     // or promise, surprise attack) within the window.
+    // Third-party reaction to a denouncement, scored on whether the
+    // accusation is CREDIBLE rather than on whether they happen to dislike
+    // the target. Saying out loud what everyone was thinking rallies the
+    // board; accusing a faction with clean hands isolates you.
+    denounce: {
+      rallyWarranted: 3, // they agree, and you had grounds
+      rally: 2, // they agree
+      backlash: 2, // they do not, and now they wonder about you
+      allyDefends: 2, // the target's allies close ranks whatever the merits
+      targetHit: 3, // Standing the target loses toward you (always)
+    },
+    // Grievances — the ledger of what has actually been done to you. Each
+    // entry carries a severity, so three small betrayals can weigh like one
+    // large one, and a settlement has a PRICE rather than being a word.
+    grievance: {
+      severity: {
+        "surprise-attack": 3, // struck before declaring
+        "truce-broken": 4, // struck through a promise not to
+        "pact-broken": 4, // abandoned an alliance
+        "promise-broken": 2, // walked away from a term
+        occupation: 2, // holds a place you call yours (a condition, not an event)
+        defiance: 3, // ignored an ultimatum you put your name to
+      },
+      defaultSeverity: 2,
+      maxPerPair: 8, // the ledger keeps this many; older entries fall off
+      // What settling costs the VICTIM: giving up a grievance means giving
+      // up the righteous war it entitles you to, so it is not free to ask
+      // for and cannot be bought with an apology.
+      settlementPerWeight: 1.2,
+      // Making amends is honourable — the one route back for a faction that
+      // has burned its reputation.
+      settlementHonorGain: 2,
+    },
+    // §3.2 — a Location on the table. The map is the thing the war is
+    // about, and until now the only thing anyone could trade was scrap, so
+    // diplomacy ran as a side-market beside the game rather than inside it.
+    // These are the numbers that make "cede Omara and we have peace" a
+    // sentence with a price attached.
+    cession: {
+      // A city's worth, before anybody's feelings about it: its victory
+      // points, weighted, plus what it actually produces each turn.
+      vpWeight: 4,
+      outputWeight: 1.2,
+      // …and what its walls are worth. Bigger places are harder to take, so
+      // they cost more to be handed.
+      valueRank: { low: 0, medium: 1, high: 2, veryHigh: 4 },
+      // A homeland is not priced like a holding. Goldgrass will pay well
+      // past Omara's output to have Omara back, which is what makes
+      // "give it back" a thing a faction can want badly enough to deal for.
+      claimMultiplier: 2.2,
+      // Ground given up is worth more than ground gained — you lose the
+      // place, the ZoC around it, and the base you were operating from.
+      // Scaled by aggression: a warlord does not sell land.
+      cedeReluctanceBase: 1.15,
+      cedeReluctancePerAggression: 0.7,
+      // Handed over, not stormed. A city given is a city intact — no chip
+      // is destroyed — but the people living in it did not choose this, so
+      // Loyalty starts where a capture would leave it.
+      loyaltyOnCede: 2,
+      // Being traded away is a grievance the residents' faction holds
+      // against nobody in particular, but the affiliated faction minds who
+      // ends up standing there. Same penalty a conquest carries: to
+      // Goldgrass, Omara passing from Versari to the Lakers is not an
+      // improvement.
+      thirdPartyStandingHit: 2,
+    },
+
     justWar: {
       denounceWindowRounds: 6, // your denouncement of them counts this long
       grievanceWindowRounds: 8, // their betrayal of you counts this long
+      // You cannot re-denounce the same faction until this clears. Paired
+      // with honor.denounceLoss it makes a standing pretext something you
+      // have to keep paying for, rather than a switch you flip once a round
+      // to keep the window open forever.
+      denounceCooldownRounds: 5,
     },
     // Precursor warnings — the AI telegraphs trouble to the HUMAN before it
     // lands: a faction whose regard sinks to Wary sends word; the board
@@ -387,6 +709,47 @@ export const CONFIG = {
     pact: { // §1.9, §1.10 — toggle costs
       toggleVisionStandingHit: 1,
       toggleBordersStandingHit: 1,
+    },
+
+    // The verb between asking and attacking. A demand with a deadline and a
+    // named consequence — and, crucially, a cost for not following through:
+    // an ultimatum you let lapse is a bluff the whole board watched you make.
+    ultimatum: {
+      deadlineRounds: 3, // how long the other side has to comply
+      graceRounds: 2, // how long the issuer then has to make good on it
+      menaceOnIssue: 1, // a threat is a hostile act, however politely worded
+      bluffHonorLoss: 4, // …and an empty one is worse than never speaking
+      defianceSeverity: 3, // the grievance the issuer earns when defied
+      complyStandingGain: 2, // giving in buys a little warmth; it costs face
+      maxScrap: 30, // ceiling on a tribute demand
+      // How long before the same pair can be threatened again. Without this
+      // a strong AI reissues every other round and the word stops meaning
+      // anything — which is the same reason denouncing has a cooldown.
+      cooldownRounds: 8,
+    },
+
+    // The round trip. A proposal is a thing that sits on a table, not a
+    // button that resolves the instant it is pressed.
+    offers: {
+      // How long an offer waits in the recipient's inbox before it lapses.
+      // Short: an offer nobody answered is an insult that fades, and a stale
+      // inbox is worse than an empty one.
+      expiryRounds: 3,
+      // Asking is free this many times per round, per faction. Past that
+      // you are pestering, and a refusal cools them.
+      freeAsksPerRound: 2,
+      pesterStandingHit: 1,
+      // A counter-offer will not ask the proposer for more scrap than they
+      // actually hold. An unanswerable counter is a refusal with extra
+      // steps, and reads as the AI not listening.
+      counterWithinMeans: true,
+      // Nor will it counter at all when the gap is this far past what the
+      // proposer could cover — at some point "no" is the honest answer.
+      counterGapCeiling: 60,
+      // How often an AI opens with a proposal of its own, as a share of its
+      // sociability. Kept low: an inbox that fills every round stops being
+      // an event.
+      aiProposeChance: 0.35,
     },
   },
 };

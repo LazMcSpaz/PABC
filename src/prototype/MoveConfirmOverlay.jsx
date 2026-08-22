@@ -27,7 +27,46 @@ function getHexCenter(hexId) {
   return getCenter(document.querySelector(`[data-hex="${CSS.escape(hexId)}"]`));
 }
 
+// Copy the real token's appearance off the DOM rather than rebuilding it here.
+// The board applies its own zoom transform, so a hardcoded size would drift out
+// of step with the unit it is previewing; reading the live element keeps the
+// preview the same size and the same art at every zoom level. Returns null for
+// factions still on the disc token, which falls through to the disc preview.
+function spritePreviewStyle(uid) {
+  if (typeof document === "undefined") return null;
+  const real = document.querySelector(`[data-unit-uid="${CSS.escape(uid)}"]`);
+  const sprite = real?.parentElement?.querySelector("[data-unit-sprite]");
+  if (!sprite) return null;
+  const r = sprite.getBoundingClientRect();
+  const cs = getComputedStyle(sprite);
+  return {
+    width: r.width,
+    height: r.height,
+    backgroundImage: cs.backgroundImage,
+    backgroundSize: cs.backgroundSize,
+    backgroundPositionX: cs.backgroundPositionX,
+    backgroundPositionY: cs.backgroundPositionY,
+    backgroundRepeat: "no-repeat",
+    // The preview stands on the destination hex, so put the sprite's anchor on
+    // the point we were handed — same rule the board token follows.
+    transform: cs.transform === "none" ? undefined : cs.transform,
+  };
+}
+
 function PreviewToken({ unit, color, x, y, size = 32 }) {
+  const sprite = unit?.uid ? spritePreviewStyle(unit.uid) : null;
+  if (sprite) {
+    return (
+      <div style={{
+        position: "fixed",
+        left: x, top: y,
+        pointerEvents: "none",
+        zIndex: 51,
+        filter: `drop-shadow(0 0 6px ${C.holo}) drop-shadow(0 2px 3px rgba(0,0,0,0.6))`,
+        ...sprite,
+      }} />
+    );
+  }
   const half = size / 2;
   return (
     <div style={{

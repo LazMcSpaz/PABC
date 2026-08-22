@@ -7,46 +7,87 @@ import "./prototype.css";
 import { FACTIONS as UI_FACTIONS, LOCATIONS as UI_LOCATIONS, valueOf, fullController, theme } from "./data.js";
 import { Btn } from "./kit.jsx";
 import HexBoard from "./HexBoard.jsx";
+import HexBoard3D from "./HexBoard3D.jsx";
 import BoardViewport from "./BoardViewport.jsx";
-import Inspector from "./Inspector.jsx";
 import UnitCard from "./UnitCard.jsx";
 import ControlMeter from "./ControlMeter.jsx";
 import {
-  TopBar, MenuOrb, RadialMenu, LocationWindow, TitledWindow, ICON, C as HUD, COMPACT_HUD_H,
+  TopBar, MenuOrb, RadialMenu, LocationWindow, BlockadeWindow, EconomyLedger, TitledWindow, ICON, C as HUD, COMPACT_HUD_H,
 } from "./HudChrome.jsx";
 import { useIsPhone } from "./useViewport.js";
+import { useSfxHold, useSfxOn, useSfxOnChange } from "../audio/AudioProvider.jsx";
+import VolumeSliders from "../audio/VolumeSliders.jsx";
 import { createGame } from "../game/setup.js";
 import { startTurn, endTurn } from "../game/turn.js";
 import { performAction } from "../game/actions.js";
+import { applyOutputAndBuilds, chargeChipUpkeep, chargeUnitUpkeep } from "../game/economy.js";
+import { chargePostUpkeep } from "../game/posts.js";
+import { chargeBlockadeUpkeep } from "../game/blockades.js";
 import { takeAITurn } from "../game/ai.js";
 import { activePlayerId } from "../game/targeting.js";
 import { bfsDistances } from "../game/board.js";
 import { unitReach, unitMovePath } from "../game/movement.js";
-import { CHIPS as ENGINE_CHIPS, LOCATIONS as ENGINE_LOCATIONS, ABILITIES as ENGINE_ABILITIES, chipDisplayName } from "../game/content.js";
+import { CHIPS as ENGINE_CHIPS, LOCATIONS as ENGINE_LOCATIONS, ABILITIES as ENGINE_ABILITIES, FACTIONS as ENGINE_FACTIONS, chipDisplayName } from "../game/content.js";
 import { CONFIG } from "../game/config.js";
 import { downloadGameLog } from "./gameLogExport.js";
 import { NEUTRAL } from "./data.js";
 import { getEncounter } from "../game/encounters.js";
+import { pendingEncountersFor, resolvePendingEncounter } from "../game/encounters.js";
 import { encounterRedrawBudget } from "../game/encounters.js";
 import { evalCond } from "../game/dsl.js";
-import { adaptState, reinforcePreview, engineChipIdToUi, previewLocationContest, previewAttackerStrength } from "./engineAdapter.js";
+import { adaptState, reinforcePreview, engineChipIdToUi, previewLocationContest, previewAttackerStrength, blockadeView, blockadeBuildOffer, postAction, upkeepSummary, economyReport, homeHexFor } from "./engineAdapter.js";
 import { resolveSalvage } from "../game/contest.js";
 import { assignTechNode } from "../game/stats.js";
 import { performDiplomacy } from "../game/diplomacy.js";
 import { isUnitVisibleTo } from "../game/visibility.js";
 import DiplomacyDrawer from "./DiplomacyDrawer.jsx";
 import EncounterModal from "./EncounterModal.jsx";
+import { summarizeResolution } from "./encounterOutcome.js";
+import ContentEditor from "./ContentEditor.jsx";
+import { readEditMode, writeEditMode, restorePatches, forgetPatches } from "./contentEditMode.js";
+import { downloadContentEdits } from "./contentEditExport.js";
+import { clearPatch } from "../game/contentPatch.js";
 import MoveConfirmOverlay from "./MoveConfirmOverlay.jsx";
 import { WikiProvider, TokenProvider } from "./RichText.jsx";
 import WikiModal from "./WikiModal.jsx";
-import { WIKI_ENTRIES } from "../game/content/index.js";
+import { WIKI_ENTRIES } from "../game/content/wiki-repo.js";
 import { resolveTokens } from "../game/textTokens.js";
+
+// The ECONOMY half of a player's Upkeep, in the order turn.js charges it.
+// Exposed as a dev handle so the upkeep-UI check can compare what the HUD
+// promises against what the engine actually takes, rather than reimplementing
+// the sum inside the test and proving only that two copies of a bug agree.
+function runUpkeepFor(game, pid) {
+  applyOutputAndBuilds(game, pid);
+  chargeChipUpkeep(game, pid);
+  chargePostUpkeep(game, pid);
+  chargeBlockadeUpkeep(game, pid);
+  chargeUnitUpkeep(game, pid);
+}
 
 // Local-storage key for the "Don't ask again" preference on move confirm.
 const SKIP_MOVE_CONFIRM_KEY = "pabc.skipMoveConfirm";
 function readSkipMoveConfirm() {
   try { return typeof localStorage !== "undefined" && localStorage.getItem(SKIP_MOVE_CONFIRM_KEY) === "1"; }
   catch { return false; }
+}
+
+// Board renderer selection. The holographic tile board is the default; the old
+// flat board is still reachable for side-by-side comparison on the same save.
+// `?board=flat` / `?board=holo` wins for the session and is remembered, so a
+// screenshot run or a bug report can pin one without touching code.
+const BOARD_KEY = "pc.board";
+function useHoloBoard() {
+  try {
+    const q = typeof location !== "undefined" && new URLSearchParams(location.search).get("board");
+    if (q === "flat" || q === "holo") {
+      localStorage.setItem(BOARD_KEY, q);
+      return q === "holo";
+    }
+    return localStorage.getItem(BOARD_KEY) !== "flat";
+  } catch {
+    return true;
+  }
 }
 import TechWheel from "./TechWheel.jsx";
 import EventFeed from "./EventFeed.jsx";
@@ -117,7 +158,7 @@ function contestMods(r) {
 const MENU_ITEMS = [
   { key: "research", icon: ICON.research, label: "Research" },
   { key: "units", icon: ICON.units, label: "Units" },
-  { key: "locations", icon: ICON.shield, label: "Locations" },
+  { key: "economy", icon: ICON.scrap, label: "Economy" },
   { key: "diplomacy", icon: ICON.diplomacy, label: "Diplomacy" },
 ];
 
@@ -168,6 +209,7 @@ function buildLocView(state, hex, isYourTurn) {
         chipId: engineId,
         name: chipDisplayName(engineId, ctrl),
         disabled: !!state.engineState.chips[uid]?.disabled,
+        upkeep: ENGINE_CHIPS[engineId]?.upkeep || 0,
         upgrade: e.upgrades[uid] || null,
       };
     });
@@ -182,6 +224,14 @@ function buildLocView(state, hex, isYourTurn) {
       chips: chipDefs,
       canManage: isYourTurn,
       scrap: you.scrap,
+      // Rail doc §2.2 pooling + §3.4 funding priority.
+      garrison: e.garrison,
+      poolTarget: e.poolTarget,
+      poolTargetName: e.poolTargetName,
+      poolTargets: e.poolTargets,
+      poolBlocked: e.poolBlocked,
+      buildPriority: e.buildPriority,
+      fundsBlockade: e.fundsBlockade,
     };
   }
 
@@ -192,6 +242,13 @@ function buildLocView(state, hex, isYourTurn) {
     valueColor: val.color,
     vp: uiLoc.vp || 0,
     statusLabel: ctrl ? `Held — ${UI_FACTIONS[ctrl]?.name}` : claimed ? "Contested" : "Uncontrolled",
+    // What this place IS, as opposed to what it scores. Nine of the nineteen
+    // have no line written yet and render without one.
+    flavour: uiLoc.flavour || null,
+    basis: uiLoc.basis || null,
+    // Whether the city can still do something — the window is where you spend
+    // a city's action, so it is the one place that has to say so.
+    actionsReady: hex.actionsReady || 0,
     sections: control.sections,
     loyalty: control.loyalty,
     loyaltyMax: control.loyaltyMax,
@@ -224,9 +281,47 @@ function buildLocView(state, hex, isYourTurn) {
 // §18.4.1 — field a VARIABLE subset of minors per game so no two casts (and
 // therefore no two political webs) recur. Two distinct minors chosen by seed.
 const MINOR_POOL = ["tempest", "croppers", "steeltraders", "dambarans"];
-function bootGame(seed, humanFactionId) {
-  const minors = [MINOR_POOL[seed % 4], MINOR_POOL[(seed + 2) % 4]];
-  const game = createGame({ seed, humanFactionId, minors });
+
+// Which majors are in play. The human is always seated; the rest fill up to
+// `count` in registry order, so a 2-faction game is you and one rival rather
+// than a random pair that might exclude you.
+function majorsFor(humanFactionId, count) {
+  const all = Object.keys(ENGINE_FACTIONS);
+  const n = Math.max(2, Math.min(all.length, count || all.length));
+  if (n >= all.length) return undefined; // undefined = "all of them", createGame's default
+  const picked = [humanFactionId].filter((f) => all.includes(f));
+  for (const f of all) {
+    if (picked.length >= n) break;
+    if (!picked.includes(f)) picked.push(f);
+  }
+  // Keep registry order, so turn order does not depend on who the human picked.
+  return all.filter((f) => picked.includes(f));
+}
+
+function bootGame(config) {
+  const seed = config?.seed ?? 42;
+  const humanFactionId = config?.humanFactionId ?? "versari";
+  // §18.4.1 — a VARIABLE subset of minors per game so no two political webs
+  // recur. The setup screen can switch them off entirely.
+  const minors = config?.minorFactions === false
+    ? []
+    : [MINOR_POOL[seed % 4], MINOR_POOL[(seed + 2) % 4]];
+  const game = createGame({
+    seed,
+    humanFactionId,
+    minors,
+    mapSize: config?.mapSize,
+    factionIds: majorsFor(humanFactionId, config?.factionCount),
+    locationBudget: config?.locationBudget ?? null,
+    // Victory conditions, encounter cadence and fog all come straight from
+    // the setup screen. Anything the screen omits falls back to the engine's
+    // own defaults inside createGame.
+    rules: {
+      victory: config?.victory,
+      fogOfWar: config?.fogOfWar,
+      encounters: config?.encounters,
+    },
+  });
   startTurn(game);
   driveAIsThroughHumanTurn(game);
   return game;
@@ -241,25 +336,24 @@ function driveAIsThroughHumanTurn(game) {
   }
 }
 
-function Bracket({ corner }) {
-  const c = theme.accent;
-  const map = {
-    tl: { top: 0, left: 0, borderTop: `2px solid ${c}`, borderLeft: `2px solid ${c}` },
-    tr: { top: 0, right: 0, borderTop: `2px solid ${c}`, borderRight: `2px solid ${c}` },
-    bl: { bottom: 0, left: 0, borderBottom: `2px solid ${c}`, borderLeft: `2px solid ${c}` },
-    br: { bottom: 0, right: 0, borderBottom: `2px solid ${c}`, borderRight: `2px solid ${c}` },
-  };
-  return <div className="pc-bracket" style={map[corner]} />;
-}
+// Content Edit Mode's saved edits go back into the engine BEFORE any game is
+// built: offerQuests reads opener gates on the very first turn, so a gate
+// edited last session has to be in place by then or the session starts on the
+// shipped content and diverges from the file on disk.
+restorePatches();
 
 export default function Prototype({ config, onNewGame }) {
   // The engine mutates a single GameState in place; we hold a ref to it
   // and bump a tick to trigger a re-adapt + re-render after each mutation.
   const gameRef = useRef(null);
   if (!gameRef.current) {
-    gameRef.current = bootGame(config?.seed ?? 42, config?.humanFactionId ?? "versari");
+    gameRef.current = bootGame(config);
     // Dev handle — lets the screenshot harness / console stage scenarios.
     if (typeof window !== "undefined") window.__ashland = gameRef.current;
+    // Dev handle: run the engine's own Upkeep for one player. Exists so the
+    // upkeep-UI check can compare what the HUD promises against what the
+    // engine actually charges, rather than reimplementing the sum in the test.
+    if (typeof window !== "undefined") window.__ashlandUpkeep = runUpkeepFor;
   }
   const [tick, setTick] = useState(0);
   const bumpTick = useCallback(() => setTick((t) => t + 1), []);
@@ -269,14 +363,40 @@ export default function Prototype({ config, onNewGame }) {
 
   const state = useMemo(() => adaptState(gameRef.current), [tick]);
 
+  // Which board renders. The holographic tile board is the direction of
+  // travel; the flat board stays reachable (`?board=flat`, or localStorage
+  // `pc.board`) so the two can be compared on the same save while the art and
+  // the overlays are still being tuned.
+  const holoBoard = useHoloBoard();
+  const Board = holoBoard ? HexBoard3D : HexBoard;
+
   // §AI replay — hex → content-space centre geometry (for camera + pawns).
+  // The two boards project hexes differently, so the camera has to be told
+  // which one it is flying over.
   const geomRef = useRef(null);
-  geomRef.current = useMemo(() => buildHexGeometry(state.rows), [state.rows]);
+  geomRef.current = useMemo(
+    () => buildHexGeometry(state.rows, { holo: holoBoard }),
+    [state.rows, holoBoard],
+  );
   const replay = useAIReplay({ gameRef, geomRef, bumpTick });
+
+  // Where the camera opens the game: your Capital, in the same content-space
+  // coordinates the replay camera pans to. Computed once — BoardViewport only
+  // reads it on mount, and re-deriving it every render would recompute a
+  // constant on every tick.
+  const openingFocus = useMemo(
+    () => geomRef.current?.centers?.[homeHexFor(gameRef.current, state.youId)] || null,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
 
   const [selectedHexId, setSelectedHexId] = useState(null);
   const [selectedUnitId, setSelectedUnitId] = useState(null);
   const [toast, setToast] = useState(null); // { kind: "error"|"info", text }
+  // Things the player has waved off for now. An offer they said "consider it"
+  // to stays live in the drawer; it just stops knocking. Cleared by nothing —
+  // the ids are one-shot and the offer expires on its own.
+  const [deferredAudience, setDeferredAudience] = useState([]);
   const [encounterPrompt, setEncounterPrompt] = useState(null); // pending move + encounter pick
   const [pendingMove, setPendingMove] = useState(null);          // { unitUid, origin, dest } awaiting confirm
   const [skipMoveConfirm, setSkipMoveConfirm] = useState(readSkipMoveConfirm);
@@ -284,6 +404,24 @@ export default function Prototype({ config, onNewGame }) {
   const [confirmPrompt, setConfirmPrompt] = useState(null); // generic confirm dialog
   const [coalitionPrompt, setCoalitionPrompt] = useState(null); // commit-forces picker
   const [salvagePrompt, setSalvagePrompt] = useState(null); // interactive salvage
+  // World encounters and quest beats arrive from the round-end pipeline,
+  // which is synchronous and cannot wait for a click — so the engine parks
+  // them on a queue (encounters.js) and we drain it here. Until this existed
+  // every one of them auto-resolved to the first choice and the player never
+  // saw the card at all.
+  const [pendingEnc, setPendingEnc] = useState(null);
+  // The card the player just answered, held open on its outcome face. Until
+  // this is dismissed nothing else may take the screen — not the next queued
+  // encounter, not the salvage picker — because the aftermath IS the answer
+  // to "what happened to my unit", and a card that is instantly replaced by
+  // the next one is the bug this exists to fix.
+  const [encOutcome, setEncOutcome] = useState(null);
+  // Content Edit Mode — off by default, remembered between sessions. `target`
+  // is the entity the editor is open on; null means the content browser.
+  const [editMode, setEditMode] = useState(readEditMode);
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [editorTarget, setEditorTarget] = useState(null);
+  const [editTick, setEditTick] = useState(0); // re-render cards after an edit
 
   // Wiki — a clickable [[term]] anywhere in flavor text opens this modal.
   // We keep a small history so the in-modal cross-links have a back button.
@@ -306,6 +444,16 @@ export default function Prototype({ config, onNewGame }) {
     setWikiOpen(null);
     setWikiHistory([]);
   }, []);
+  // Settings → Wiki: open the modal on the first entry (alphabetical by
+  // term) so the sidebar doubles as a browsable index.
+  const openWikiFromSettings = useCallback(() => {
+    const first = Object.values(WIKI_ENTRIES)
+      .sort((a, b) => String(a.term).localeCompare(String(b.term)))[0];
+    if (!first) return;
+    setMenuPanel(null);
+    setWikiHistory([]);
+    setWikiOpen(first.id);
+  }, []);
   const [showTechWheel, setShowTechWheel] = useState(false); // §17 wheel overlay
   const [showDiplomacy, setShowDiplomacy] = useState(false); // §18 diplomacy screen
   const [diploResult, setDiploResult] = useState(null); // last action feedback
@@ -313,16 +461,13 @@ export default function Prototype({ config, onNewGame }) {
   // its detail view is open. `null` means no highlight.
   const [highlightedFactionId, setHighlightedFactionId] = useState(null);
   const [menuOpen, setMenuOpen] = useState(false); // radial menu visible
-  const [menuPanel, setMenuPanel] = useState(null); // "units"|"market"|"locations"|"settings"
+  const [menuPanel, setMenuPanel] = useState(null); // "units"|"market"|"economy"|"settings"
   const [aiSpeed, setAiSpeed] = useState(getAiTurnSpeed()); // §AI replay speed (persisted)
   const you = state.players[state.youId];
   // During an AI replay the engine has already advanced (often to the human),
   // but the player must not act until the cinematics finish — gate on it too.
   const isYourTurn = state.activeId === state.youId && !state.winnerId && !replay.isReplaying;
   const yourUnits = Object.values(state.units).filter((u) => u.owner === state.youId);
-  const yourLocationHexes = Object.values(state.hexes).filter(
-    (h) => h.type === "location" && h.control?.sections?.some((s) => s === state.youId),
-  );
   const techLabel = (() => {
     const research = you.research || 0;
     const thresholds = state.techThresholds || [];
@@ -365,6 +510,87 @@ export default function Prototype({ config, onNewGame }) {
     const ids = new Set(msgs.map((m) => m.id));
     setTimeout(() => setHeralds((q) => q.filter((b) => !ids.has(b.id))), 7000);
   }, [tick, state.youId]);
+
+  // Show the next encounter waiting on the player. Re-checked on every tick,
+  // so a queue that filled during the AI turns is drained one card at a time
+  // as soon as control comes back.
+  useEffect(() => {
+    const game = gameRef.current;
+    if (!game) return;
+    if (encOutcome) return; // the last card is still being read
+    const queue = pendingEncountersFor(game, game.humanFactionId);
+    setPendingEnc((cur) => {
+      if (cur && queue.some((p) => p.id === cur.id)) return cur; // still open
+      return queue[0] || null;
+    });
+  }, [tick, encOutcome]);
+
+  // Answer one. The engine applies the choice's effects at this point —
+  // they were held, not skipped, so nothing has happened until now. Which is
+  // also what makes the aftermath cheap to build: everything the choice does
+  // lands inside this call, so the slice of the event log it appends IS the
+  // consequence list.
+  function answerPendingEncounter(choiceId) {
+    const game = gameRef.current;
+    if (!game || !pendingEnc) return;
+    const from = game.log.length;
+    const chosen = pendingEnc.choices.find((c) => c.id === choiceId);
+    resolvePendingEncounter(game, pendingEnc.id, choiceId, { interactiveLoot: true });
+    showOutcome(pendingEnc, pendingEnc.choices, chosen, from);
+    setPendingEnc(null);
+    bumpTick();
+  }
+
+  // Turn a resolved card over onto its outcome face. `from` is the log length
+  // captured immediately before the effects ran.
+  function showOutcome(encounter, choices, chosen, from) {
+    const game = gameRef.current;
+    const events = game.log.slice(from);
+    const summary = summarizeResolution(events, game, game.humanFactionId);
+    // A dismissal ("Continue") on a purely narrative beat that changed
+    // nothing has no aftermath worth a second click — it would be a card
+    // whose only content is the button you press to leave it.
+    if (chosen?.dismiss && !summary.contest && !summary.roll
+        && !summary.lines.length && !chosen.outcomeText) {
+      maybeOpenLoot();
+      return;
+    }
+    setEncOutcome({
+      encounter, choices,
+      outcome: {
+        choiceLabel: chosen?.label || null,
+        outcomeText: chosen?.outcomeText || null,
+        ...summary,
+      },
+    });
+  }
+
+  // Leaving the mode is what hands over the file — that is the whole point of
+  // the mode, and a designer who forgets to press a button loses a session of
+  // notes. Turning it ON never downloads anything.
+  function toggleEditMode(on) {
+    setEditMode(on);
+    writeEditMode(on);
+    if (!on) {
+      setEditorOpen(false);
+      const doc = downloadContentEdits(gameRef.current);
+      setToast(doc
+        ? { kind: "info", text: `Saved ${doc.counts.changes} change(s) across ${doc.counts.entities} card(s)` }
+        : { kind: "info", text: "Content Edit Mode off — nothing was changed" });
+    }
+  }
+
+  function openEditorOn(entityId) {
+    setEditorTarget(entityId);
+    setEditorOpen(true);
+    setMenuPanel(null);
+  }
+
+  function closeOutcome() {
+    setEncOutcome(null);
+    bumpTick();
+    maybeOpenLoot();
+  }
 
   // Manage the selection's lifetime. Enemy units stay selectable so the
   // player can inspect their stats and owner read-only — control actions
@@ -471,18 +697,16 @@ export default function Prototype({ config, onNewGame }) {
     };
   }
 
-  // Terrain (wasteland) hexes carry no info worth a dialogue, so they
-  // never open the Inspector. Encounter hexes still in their refresh
-  // cooldown (already drawn this run) are skipped too — the player
-  // doesn't need a popup telling them the timer.
+  // Only Locations are worth a window. Terrain carries no info, and an
+  // encounter hex has nothing to say either until you actually move onto it and
+  // draw the card — the board's own `?` mark already tells you it is there, so
+  // a panel that repeats it is a click you have to dismiss for nothing.
+  // What opens a window on click. A Location always has, and a blockade now
+  // does too: it is a structure that outlives the unit that raised it, so it
+  // gets selected like a place rather than reached through a passing soldier.
   function isInspectableHex(hexId) {
-    const hex = state.hexes[hexId];
-    if (!hex || hex.type === "terrain") return false;
-    if (hex.type === "encounter") {
-      const cd = gameRef.current.world?.encounterHexCooldowns?.[hex.id] || 0;
-      if (gameRef.current.round < cd) return false;
-    }
-    return true;
+    const h = state.hexes[hexId];
+    return h?.type === "location" || (!!h?.blockade && h.fog === "visible");
   }
   function inspectHex(hexId) {
     if (!isInspectableHex(hexId)) {
@@ -494,19 +718,35 @@ export default function Prototype({ config, onNewGame }) {
 
   function doMoveWithEncounterChoice(unitUid, dest, choiceId, discards = 0) {
     let redrawsDone = 0;
+    // Which card `interact` is actually authorised to answer. A Move can
+    // surface a second encounter — walking onto a hex that also holds a
+    // discovered quest beat — and answering that one with this one's choice
+    // id resolves it blind. Returning nothing for anything else sends it to
+    // the pending queue instead (see encounters.js presentToPlayer).
+    const answering = encounterPrompt?.encounter?.id ?? null;
     const ctx = {
       interactiveLoot: true,
       interact: (req) => {
         // Replay the player's discards (engine sends them to the bottom),
         // then answer the choice for the card finally drawn.
         if (req.kind === "encounterRedraw") return redrawsDone++ < discards;
-        if (req.kind === "encounterChoice") return choiceId;
+        if (req.kind === "encounterChoice") {
+          return req.encounter === answering ? choiceId : undefined;
+        }
         return req?.options ? req.options[0] : null; // fallback to first
       },
     };
+    const prompt = encounterPrompt;
+    const from = gameRef.current.log.length;
     const r = runAction("move", { unit: unitUid, to: dest }, ctx);
-    if (r.ok) { inspectHex(dest); maybeOpenLoot(); }
     setEncounterPrompt(null);
+    if (r.ok) inspectHex(dest);
+    if (prompt) {
+      const chosen = (prompt.choices || []).find((c) => c.id === choiceId);
+      showOutcome(prompt.encounter, prompt.choices, chosen, from);
+    } else if (r.ok) {
+      maybeOpenLoot();
+    }
   }
 
   // Open the salvage modal if a Move just landed on a loot pile (§ hex loot).
@@ -748,8 +988,24 @@ export default function Prototype({ config, onNewGame }) {
   }
   // §20.4–20.7 — economy directives (all free of Actions). Construction
   // advances at Upkeep off the city's Output via its guns/butter slider.
-  function onBuild(hexId, chipId) {
-    return runAction("build", { at: hexId, chipId }, null, "Build queued.");
+  // `into` names which stationed unit a UNIT chip is destined for, so a city
+  // with two units in it does not silently arm whichever the engine happens to
+  // scan first. Omitted for city chips, where it means nothing.
+  function onBuild(hexId, chipId, into) {
+    return runAction("build", { at: hexId, chipId, ...(into ? { into } : {}) },
+      null, "Build queued.");
+  }
+  // Rail doc §3 — raise a blockade on the hex this unit stands on, and fit
+  // chips to one already standing there.
+  function onBuildBlockade(hexId) {
+    return runAction("build-blockade", { hex: hexId }, null, "Blockade started.");
+  }
+  function onUpgradeBlockade(hexId, chipId) {
+    return runAction("upgrade-blockade", { hex: hexId, chipId }, null, "Blockade upgrade queued.");
+  }
+  // §17.7 — dig a listening post in where this unit stands.
+  function onBuildPost(unitUid, hexId) {
+    return runAction("build-post", { unit: unitUid, hex: hexId }, null, "Listening post built.");
   }
   function onUpgrade(hexId, chipUid) {
     return runAction("upgrade", { at: hexId, chip: chipUid }, null, "Upgrade queued.");
@@ -777,6 +1033,16 @@ export default function Prototype({ config, onNewGame }) {
   }
   function onSetSlider(hexId, value) {
     return runAction("set-slider", { at: hexId, value });
+  }
+  // Rail doc §2.2 / §3.4 — both are free (no action cost), so they run
+  // straight through without a confirm.
+  function onSetPoolTarget(hexId, to) {
+    return runAction("set-pool-target", { at: hexId, to },
+      null, to ? "Rail shipment set." : "Rail shipment stopped.");
+  }
+  function onSetBuildPriority(hexId, value) {
+    return runAction("set-build-priority", { at: hexId, value },
+      null, value === "chips" ? "Chips funded first." : "Blockade funded first.");
   }
 
   function onEndTurn() {
@@ -831,8 +1097,24 @@ export default function Prototype({ config, onNewGame }) {
   // routes params + surfaces the accept/decline result.
   // Answer an envoy's audience (hear / placate / defy). The engine dequeues
   // the warning, so the modal closes to whatever is next in line.
-  function onEnvoyRespond(warning, answer) {
+  // Everything a faction says to you arrives through the same door. An
+  // offer or a demand is not "open the drawer and look" news — somebody has
+  // come to say it, so they get an audience and an answer.
+  function onEnvoyRespond(item, answer) {
     const game = gameRef.current;
+    if (item?.kind === "offer") {
+      if (answer === "later") { setDeferredAudience((d) => [...d, item.offer.id]); return; }
+      onDiplomacy("answer-offer", { offerId: item.offer.id, accept: answer === "accept" });
+      return;
+    }
+    if (item?.kind === "ultimatum") {
+      onDiplomacy("answer-ultimatum", {
+        ultimatumId: item.ultimatum.id, comply: answer === "comply",
+      });
+      if (answer === "defy") setDeferredAudience((d) => [...d, item.ultimatum.id]);
+      return;
+    }
+    const warning = item;
     const r = performDiplomacy(game, state.youId, "respond-warning", {
       warningId: warning.id,
       answer,
@@ -866,7 +1148,19 @@ export default function Prototype({ config, onNewGame }) {
       bumpTick();
       return;
     }
+    if (action === "answer-offer") {
+      msg = !r.ok ? (r.reason || "that offer is gone")
+        : r.accepted ? "Agreed. The terms stand."
+        : "You let it pass.";
+      setDiploResult({ ...r, msg });
+      bumpTick();
+      return;
+    }
     if (!r.ok) msg = r.reason || "no effect";
+    // A counter is not a refusal — it is their price, and it is waiting to be
+    // answered. Say where it went, because it lands in the inbox rather than
+    // in this result line.
+    else if (r.countered) msg = `${name} counter-offers — their terms are on the table.`;
     else if (r.accepted === false) msg = `${name} declines — ${r.reason || ""}`;
     else if (r.accepted === true) msg = `${name} agrees.`;
     else if (r.honored === true) msg = `${name} answers the call.`;
@@ -875,6 +1169,19 @@ export default function Prototype({ config, onNewGame }) {
     setDiploResult({ ...r, msg });
     bumpTick();
   }
+
+  // Who is at the door, in order of how much it can hurt to ignore them. A
+  // demand with a deadline outranks an offer, which outranks a grumble.
+  const audience = useMemo(() => {
+    const d = state.diplomacy;
+    if (!d) return null;
+    const ult = (d.ultimatums || []).find((u) => !u.defied && !deferredAudience.includes(u.id));
+    if (ult) return { kind: "ultimatum", ultimatum: ult };
+    const offer = (d.offers || []).find((o) => !deferredAudience.includes(o.id));
+    if (offer) return { kind: "offer", offer };
+    return d.pendingWarnings?.[0] || null;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tick, deferredAudience]);
 
   // Bind the token resolver to live engine state. Re-fires on every
   // engine tick so a {faction:lowest-standing-with-active} read mid-game
@@ -885,6 +1192,60 @@ export default function Prototype({ config, onNewGame }) {
     }),
     [tick, encounterPrompt?.encounter?.recipient],
   );
+
+  // Detail windows announce themselves with a whoosh. Two keys rather than
+  // one, because a unit panel and a location window can be open at the same
+  // time and a single key would let the second one slide in silently. The
+  // conditions mirror the render below exactly — the cue has to fire when a
+  // window actually appears, not merely when something is selected (an
+  // ordinary terrain hex opens nothing). Simultaneous fires collapse in the
+  // sfx player's retrigger guard, so this never doubles up.
+  const selectedUnitForPanel = selectedUnitId && state.units[selectedUnitId] ? selectedUnitId : null;
+  const selectedHexForWindow = (() => {
+    const h = selectedHexId ? state.hexes[selectedHexId] : null;
+    if (!h || h.fog !== "visible") return null;
+    return h.type === "location" || h.blockade ? selectedHexId : null;
+  })();
+  useSfxOnChange(selectedUnitForPanel && `unit:${selectedUnitForPanel}`, "windowOpen");
+  useSfxOnChange(selectedHexForWindow && `hex:${selectedHexForWindow}`, "windowOpen");
+
+  // Whatever the radial menu opened gets the same window cue — the diplomacy
+  // drawer, the tech wheel, and the Units / Economy / Settings panels. One key
+  // rather than four hooks: onMenuPick opens exactly one of these at a time,
+  // and a single key means switching straight from one to another still reads
+  // as a new window opening.
+  const radialDestination =
+    showDiplomacy ? "diplomacy"
+    : showTechWheel ? "tech"
+    : menuPanel ? `panel:${menuPanel}`
+    : null;
+  useSfxOnChange(radialDestination, "windowOpen");
+  // Herald banners — the small, option-less callouts at the top of the screen
+  // announcing what the powers just did to each other. Keyed on the newest
+  // banner's id: they arrive in batches and the retrigger guard collapses a
+  // batch into one hit, which is what a batch should sound like.
+  // (The envoy audience gets its own, heavier cue, fired from EnvoyModal.)
+  useSfxOn(heralds.length ? heralds[heralds.length - 1].id : null, "diplomacyAlert");
+
+  // The radial menu hums while it is open and waiting on a choice. It stops
+  // the moment a sector is picked — onMenuPick closes the radial before it
+  // opens anything, and the extra clauses hold even if a panel is opened by
+  // some other route while the radial is still up.
+  useSfxHold(menuOpen && !menuPanel && !showTechWheel && !showDiplomacy, "radialAmbience");
+
+  // The battle under a conflict roll — both surfaces that show one. The
+  // player's own contest gets the dramatised overlay; an AI's gets a fast
+  // popup during the turn replay. Held rather than fired, so the stinger is
+  // released with the roll instead of running on over whatever comes next,
+  // and so two contests in quick succession cannot stack. `terse` overlays
+  // ("Unit lost") are aftermath, not a roll, so they are excluded.
+  const contestRollOnScreen =
+    !!contestViz ||
+    // An encounter's narrative CONTEST is a conflict roll like any other and
+    // gets the same stinger — it is the same dice, decided the same way.
+    !!encOutcome?.outcome?.contest ||
+    (replay.activeOverlays || []).some((o) => o.kind === "contest" && !o.terse);
+  useSfxHold(contestRollOnScreen, "contestRoll");
 
   return (
     <WikiProvider entries={WIKI_ENTRIES} openEntry={openWikiEntry}>
@@ -904,13 +1265,20 @@ export default function Prototype({ config, onNewGame }) {
           HUD chrome (resource wheel, faction readout, menu orb) floats
           over it as absolute overlays — see below. */}
       <div style={{ position: "relative", flex: 1, display: "flex", minHeight: 0 }}>
-        <BoardViewport cameraTarget={replay.cameraTarget} cameraPanMs={replay.cameraPanMs} controlsTop={hudOffset + 10}>
+        <BoardViewport cameraTarget={replay.cameraTarget} cameraPanMs={replay.cameraPanMs} controlsTop={hudOffset + 10} initialFocus={openingFocus}>
+          {/* No corner brackets here. They used to sit on this element —
+              the pan/zoom CONTENT layer — which put them at the corners of
+              the MAP, not of the screen: the top pair rendered underneath
+              the HUD bar and was never visible, and the moment you panned
+              or zoomed the bottom pair drifted across the board as two
+              stray gold Ls with nothing attached to them. Promoting them
+              to the viewport layer doesn't work either — the board's four
+              screen corners are already occupied by the zoom cluster, the
+              event feed and the menu orb, so a frame drawn there lands on
+              top of live controls. The board is the one surface in this UI
+              that is framed by its own HUD rather than by panel chrome. */}
           <div style={{ position: "relative", padding: 30 }}>
-            <Bracket corner="tl" />
-            <Bracket corner="tr" />
-            <Bracket corner="bl" />
-            <Bracket corner="br" />
-            <HexBoard
+            <Board
               state={boardState}
               selectedHexId={selectedHexId}
               selectedUnitId={selectedUnitId}
@@ -942,16 +1310,21 @@ export default function Prototype({ config, onNewGame }) {
             reinforce={reinforcePreview(gameRef.current, selectedUnitId)}
             scrap={you.scrap}
             raidTargets={raidTargets}
+            blockade={blockadeBuildOffer(gameRef.current, selectedUnitId)}
+            post={postAction(gameRef.current, selectedUnitId)}
             onReinforce={onReinforce}
             onContest={onContest}
+            onBuildBlockade={() => onBuildBlockade(state.units[selectedUnitId].node)}
+            onBuildPost={() => onBuildPost(selectedUnitId, state.units[selectedUnitId].node)}
             onClose={() => setSelectedUnitId(null)}
           />
         )}
         <EventFeed engineState={gameRef.current} tick={tick} topOffset={hudOffset + 10} />
       </div>
 
-      {/* HEX DETAIL — locations open the single-window Location view;
-          encounter / terrain hexes keep the tabbed Inspector. */}
+      {/* HEX DETAIL — a Location opens the single-window Location view. It is
+          the only hex kind that opens anything: terrain and encounter hexes
+          have nothing to say that the board is not already showing. */}
       <AnimatePresence>
         {selectedHexId && state.hexes[selectedHexId]?.type === "location" &&
           state.hexes[selectedHexId]?.fog === "visible" && (
@@ -965,37 +1338,39 @@ export default function Prototype({ config, onNewGame }) {
             onUpgrade={onUpgrade}
             onRush={onRush}
             onSetSlider={onSetSlider}
+            onSetPoolTarget={onSetPoolTarget}
+            onSetBuildPriority={onSetBuildPriority}
             onContest={(p) => {
               onContest(p);
               setSelectedHexId(null);
             }}
           />
         )}
+        {selectedHexId && state.hexes[selectedHexId]?.type !== "location" &&
+          state.hexes[selectedHexId]?.blockade &&
+          state.hexes[selectedHexId]?.fog === "visible" && (
+          <BlockadeWindow
+            key="blockade-window"
+            view={blockadeView(gameRef.current, selectedHexId, state.youId)}
+            canAct={isYourTurn}
+            onClose={() => setSelectedHexId(null)}
+            onFit={(chipId) => onUpgradeBlockade(selectedHexId, chipId)}
+          />
+        )}
       </AnimatePresence>
-      {selectedHexId && state.hexes[selectedHexId]?.type !== "location" && (
-        <Inspector
-          state={state}
-          selectedHexId={selectedHexId}
-          selectedUnitId={selectedUnitId}
-          isYourTurn={isYourTurn}
-          onClose={() => setSelectedHexId(null)}
-          onSelectUnit={onSelectUnit}
-          onContest={onContest}
-          onActivate={onActivate}
-          onRecruit={onRecruit}
-        />
-      )}
 
       {/* HUD CHROME — radial / holographic overlays replacing the old
           top bar and bottom dock. */}
       <TopBar
         scrap={you.scrap}
+        upkeep={upkeepSummary(gameRef.current, state.youId)}
         units={{ n: yourUnits.length, cap: you.unitCap }}
         tech={{ level: you.techLevel, label: techLabel }}
         name={UI_FACTIONS[state.youId]?.name}
         color={UI_FACTIONS[state.youId]?.color}
         vp={you.vp}
         vpGoal={state.vpGoal}
+        dominion={state.diplomacy?.recognition || null}
         actions={you.actions}
         round={state.round}
         onEndTurn={onEndTurn}
@@ -1031,42 +1406,32 @@ export default function Prototype({ config, onNewGame }) {
         </TitledWindow>
       )}
 
-      {menuPanel === "locations" && (
-        <TitledWindow key="locations" title="Locations" icon={ICON.shield} onClose={() => setMenuPanel(null)}>
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {yourLocationHexes.length === 0 && (
-              <span style={{ color: HUD.textDim, fontSize: 13 }}>
-                You hold no sections yet. Move a unit onto a location and contest it.
-              </span>
-            )}
-            {yourLocationHexes.map((h) => {
-              const ctrl = fullController(h.control.sections);
-              return (
-                <button
-                  key={h.id}
-                  className="hud-int"
-                  onClick={() => { setMenuPanel(null); setSelectedHexId(h.id); }}
-                  style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 10px", borderRadius: 8, border: "1px solid rgba(86,211,198,0.3)", background: "rgba(0,0,0,0.25)", color: HUD.text, cursor: "pointer", textAlign: "left" }}
-                >
-                  <ControlMeter sections={h.control.sections} loyalty={h.control.loyalty} danger={h.control.loyaltyDanger} size={40} />
-                  <div style={{ display: "flex", flexDirection: "column" }}>
-                    <span style={{ fontFamily: HUD.font, fontSize: 16, fontWeight: 700 }}>
-                      {UI_LOCATIONS[h.locationId]?.name || h.locationId}
-                    </span>
-                    <span style={{ fontSize: 10, letterSpacing: 1, textTransform: "uppercase", color: HUD.textFaint }}>
-                      {ctrl === state.youId ? "Held" : ctrl ? `Held — ${UI_FACTIONS[ctrl]?.short}` : "Contested"}
-                    </span>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
+      {menuPanel === "economy" && (
+        <TitledWindow key="economy" title="Economy" icon={ICON.scrap} onClose={() => setMenuPanel(null)}>
+          <EconomyLedger
+            report={economyReport(gameRef.current, state.youId)}
+            onOpenHex={(h) => { setMenuPanel(null); setSelectedHexId(h); }}
+            onOpenUnit={(uid) => { setMenuPanel(null); setSelectedUnitId(uid); }}
+          />
         </TitledWindow>
       )}
 
       {menuPanel === "settings" && (
         <TitledWindow key="settings" title="Settings" onClose={() => setMenuPanel(null)}>
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 16 }}>
+            <span style={{ fontFamily: HUD.font, fontSize: 13, fontWeight: 700, letterSpacing: 0.6, color: HUD.text }}>
+              Volume
+            </span>
+            <p className="pc-prose" style={{ margin: "0 0 8px", fontSize: 12, lineHeight: 1.5, color: HUD.textDim }}>
+              The score and the interface run on separate levels — turn either
+              one down without losing the other. Both are remembered between
+              sessions.
+            </p>
+            {/* Same component the corner audio widget uses, so the two can
+                never disagree about what these are called or where they sit. */}
+            <VolumeSliders />
+          </div>
+          <div style={{ borderTop: `1px solid ${theme.border}`, paddingTop: 14, display: "flex", flexDirection: "column", gap: 6 }}>
             <span style={{ fontFamily: HUD.font, fontSize: 13, fontWeight: 700, letterSpacing: 0.6, color: HUD.text }}>
               AI turn speed
             </span>
@@ -1098,6 +1463,60 @@ export default function Prototype({ config, onNewGame }) {
           </div>
           <div style={{ marginTop: 16, borderTop: `1px solid ${theme.border}`, paddingTop: 14 }}>
             <span style={{ fontFamily: HUD.font, fontSize: 13, fontWeight: 700, letterSpacing: 0.6, color: HUD.text }}>
+              Wiki
+            </span>
+            <p className="pc-prose" style={{ margin: "4px 0 8px", fontSize: 12, lineHeight: 1.5, color: HUD.textDim }}>
+              The world&rsquo;s reference. Every underlined term in encounter
+              text links into it, and it can be browsed end to end from here.
+            </p>
+            <Btn onClick={openWikiFromSettings} disabled={!Object.keys(WIKI_ENTRIES).length}>
+              Open Wiki
+            </Btn>
+          </div>
+          <div style={{ marginTop: 16, borderTop: `1px solid ${theme.border}`, paddingTop: 14 }}>
+            <span style={{ fontFamily: HUD.font, fontSize: 13, fontWeight: 700, letterSpacing: 0.6, color: HUD.text }}>
+              Content Edit Mode
+            </span>
+            <p className="pc-prose" style={{ margin: "4px 0 8px", fontSize: 12, lineHeight: 1.5, color: HUD.textDim }}>
+              Rewrite quests and encounters while you play them — what gates a
+              beat, its prose, its choices, and exactly what each choice grants
+              or costs. Every card also shows its grants under the options while
+              this is on. Edits apply to this session only; the shipped content
+              is never touched. Switching this off downloads the change file.
+            </p>
+            <label
+              className="hud-int"
+              style={{ display: "flex", alignItems: "center", gap: 9, padding: "7px 9px", borderRadius: 6, border: `1px solid ${editMode ? "rgba(232,169,63,0.5)" : "rgba(86,211,198,0.25)"}`, background: editMode ? "rgba(232,169,63,0.12)" : "rgba(0,0,0,0.2)", color: HUD.text, cursor: "pointer", fontSize: 13 }}
+            >
+              <input type="checkbox" checked={editMode} onChange={(e) => toggleEditMode(e.target.checked)} />
+              {editMode ? "On — editing" : "Off"}
+            </label>
+            {editMode && (
+              <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+                <Btn onClick={() => openEditorOn(null)}>Browse all content</Btn>
+                <Btn onClick={() => {
+                  const doc = downloadContentEdits(gameRef.current);
+                  setToast(doc
+                    ? { kind: "info", text: `Saved ${doc.counts.changes} change(s)` }
+                    : { kind: "info", text: "No changes yet" });
+                }}>Download changes</Btn>
+                <Btn onClick={() => setConfirmPrompt({
+                  title: "Discard every edit?",
+                  body: "Every change made in Content Edit Mode is dropped and the shipped content comes back. This cannot be undone, and anything not already downloaded is lost.",
+                  confirmLabel: "Discard",
+                  danger: true,
+                  onConfirm: () => {
+                    clearPatch(null);
+                    forgetPatches();
+                    setEditTick((n) => n + 1);
+                    setToast({ kind: "info", text: "Edits discarded" });
+                  },
+                })}>Discard edits</Btn>
+              </div>
+            )}
+          </div>
+          <div style={{ marginTop: 16, borderTop: `1px solid ${theme.border}`, paddingTop: 14 }}>
+            <span style={{ fontFamily: HUD.font, fontSize: 13, fontWeight: 700, letterSpacing: 0.6, color: HUD.text }}>
               Playtest log
             </span>
             <p className="pc-prose" style={{ margin: "4px 0 8px", fontSize: 12, lineHeight: 1.5, color: HUD.textDim }}>
@@ -1117,11 +1536,32 @@ export default function Prototype({ config, onNewGame }) {
       )}
       </AnimatePresence>
 
+      <AnimatePresence>
+        {editorOpen && (
+          <TitledWindow
+            key="content-editor"
+            title={editorTarget ? "Edit content" : "All content"}
+            width={720}
+            onClose={() => setEditorOpen(false)}
+          >
+            <ContentEditor
+              entityId={editorTarget}
+              onPick={setEditorTarget}
+              onClose={() => setEditorOpen(false)}
+              // A card on screen is rendered from the live definition, so an
+              // edit has to re-render it — otherwise the prose you just
+              // rewrote is still the old prose behind the panel.
+              onChanged={() => setEditTick((n) => n + 1)}
+            />
+          </TitledWindow>
+        )}
+      </AnimatePresence>
+
       {/* Envoy audience — an AI's warning, answered rather than just read.
           Shown one at a time; only on your own turn so it never interrupts
           an AI replay. */}
       {isYourTurn && !showDiplomacy && (
-        <EnvoyModal warning={state.diplomacy?.pendingWarnings?.[0]} onRespond={onEnvoyRespond} />
+        <EnvoyModal audience={audience} onRespond={onEnvoyRespond} />
       )}
 
       <HeraldLayer banners={heralds} onDismiss={dismissHerald} topOffset={hudOffset + 14} />
@@ -1172,10 +1612,32 @@ export default function Prototype({ config, onNewGame }) {
         )}
       </AnimatePresence>
 
+      {/* The card the player just answered, face down on its outcome. It
+          outranks both live cards: until it is dismissed there is nothing
+          else to look at. */}
       <AnimatePresence>
-        {encounterPrompt && (
+        {encOutcome && (
+          <EncounterModal
+            key="encounter-outcome"
+            encounter={encOutcome.encounter}
+            choices={encOutcome.choices}
+            eligibleIds={[]}
+            redrawsLeft={0}
+            onRedraw={() => {}}
+            onPick={() => {}}
+            outcome={encOutcome.outcome}
+            onClose={closeOutcome}
+          />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {!encOutcome && encounterPrompt && (
           <EncounterModal
             key="encounter"
+            editMode={editMode}
+            editRev={editTick}
+            onEdit={() => openEditorOn(encounterPrompt.encounter.id)}
             encounter={encounterPrompt.encounter}
             choices={encounterPrompt.choices}
             eligibleIds={encounterPrompt.eligibleIds}
@@ -1202,6 +1664,23 @@ export default function Prototype({ config, onNewGame }) {
         )}
       </AnimatePresence>
 
+      <AnimatePresence>
+        {!encOutcome && !encounterPrompt && pendingEnc && (
+          <EncounterModal
+            key={`pending-${pendingEnc.id}`}
+            editMode={editMode}
+            editRev={editTick}
+            onEdit={() => openEditorOn(pendingEnc.encounterId)}
+            encounter={pendingEnc}
+            choices={pendingEnc.choices}
+            eligibleIds={pendingEnc.choices.map((c) => c.id)}
+            redrawsLeft={0}
+            onRedraw={() => {}}
+            onPick={answerPendingEncounter}
+          />
+        )}
+      </AnimatePresence>
+
       {contestViz && (
         <ContestOverlay
           viz={contestViz}
@@ -1212,7 +1691,10 @@ export default function Prototype({ config, onNewGame }) {
         />
       )}
 
-      {salvagePrompt && (
+      {/* Same z-index as the encounter card, so a salvage left over from a
+          board contest would render on top of an outcome the player has not
+          read yet. It waits. */}
+      {salvagePrompt && !encOutcome && (
         <SalvageModal prompt={salvagePrompt} onConfirm={onSalvageConfirm} />
       )}
 
@@ -1324,7 +1806,16 @@ function TurnBanner({ banner }) {
 function EndOverlay({ state, onNewGame }) {
   const winner = state.players[state.winnerId];
   const winnerFaction = UI_FACTIONS[state.winnerId];
-  const sorted = Object.values(state.players).sort((a, b) => b.vp - a.vp);
+  // Winner first, then by score. VP is the closing STANDING — ground held and
+  // friends kept — and it is not what decided the game, so a diplomat can win
+  // the condition while the biggest land power out-scores them. That is a
+  // coherent story, but a table with the winner sitting fifth reads like a
+  // bug, so the ★ goes on top and the real numbers stay honest.
+  const sorted = Object.values(state.players).sort((a, b) => {
+    if (a.id === state.winnerId) return -1;
+    if (b.id === state.winnerId) return 1;
+    return b.vp - a.vp;
+  });
   return (
     <div
       style={{
@@ -1372,6 +1863,28 @@ function EndOverlay({ state, onNewGame }) {
         >
           {winnerFaction?.name || winner?.id}
         </div>
+        {/* HOW it ended. The table below is the closing standing — VP is a
+            score now, not the condition — so without this line a player is
+            left to infer what actually won it. */}
+        {state.winnerBy && (
+          <div
+            style={{
+              fontFamily: theme.fontDisplay,
+              fontSize: 12.5,
+              letterSpacing: 1,
+              color: theme.textDim,
+              marginTop: 8,
+              maxWidth: 320,
+            }}
+          >
+            {{
+              conquest: "By conquest — nobody left standing.",
+              diplomacy: "By treaty — every rival an ally.",
+              submission: "By submission — every rival sworn.",
+              mixed: "By war and treaty together.",
+            }[state.winnerBy] || ""}
+          </div>
+        )}
         <div
           style={{
             marginTop: 18,
@@ -1380,6 +1893,10 @@ function EndOverlay({ state, onNewGame }) {
             gap: 5,
           }}
         >
+          <div style={{
+            fontFamily: theme.fontDisplay, fontSize: 10, letterSpacing: 2,
+            textTransform: "uppercase", color: theme.textFaint, textAlign: "left",
+          }}>Final standing · ground held and friends kept</div>
           {sorted.map((p) => {
             const f = UI_FACTIONS[p.id];
             return (
@@ -1400,7 +1917,7 @@ function EndOverlay({ state, onNewGame }) {
                   {p.id === state.winnerId ? " ★" : ""}
                 </span>
                 <span style={{ fontFamily: theme.fontDisplay, fontWeight: 700 }}>
-                  {p.vp} VP
+                  {p.vp}
                 </span>
               </div>
             );

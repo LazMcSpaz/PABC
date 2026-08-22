@@ -10,19 +10,35 @@ import { CONFIG } from "./config.js";
 import { activePlayerId } from "./targeting.js";
 import { sweepDeferred } from "./deferred.js";
 import { evaluateTriggers } from "./triggers.js";
-import { evaluateConditionalBeats } from "./quests.js";
-import { applyOutputAndBuilds, chargeChipUpkeep, enforceLoyaltySlotCap } from "./economy.js";
-import { runDiplomacyRound, vassalsOf, arePacted, adjustMenace, sweepTrespass } from "./diplomacy.js";
+import { evaluateConditionalBeats, offerQuests } from "./quests.js";
+import { resetBeatBudget } from "./beatBudget.js";
+import {
+  applyOutputAndBuilds, chargeChipUpkeep, chargeUnitUpkeep, enforceLoyaltySlotCap,
+} from "./economy.js";
+import {
+  runDiplomacyRound, vassalsOf, arePacted, adjustMenace, sweepTrespass,
+  checkDominion, dominionStanding,
+} from "./diplomacy.js";
 import { holdsLocation } from "./control.js";
 import { adjustStanding } from "./standing.js";
 import { pressureSource } from "./influence.js";
 import { hasTechNode } from "./tech.js";
 import { chargePostUpkeep } from "./posts.js";
+import { chargeBlockadeUpkeep } from "./blockades.js";
+import { bankVp, recomputeVp, registerAllyReader } from "./victory.js";
 import { CHIPS, LOCATIONS, ABILITIES, factionDef } from "./content.js";
 
 // Sum a numeric chip field across a Location's installed, non-dormant
 // chips — the shared reader for the per-Location behavior chips
 // (loyaltyRise, healBonus, actionBonus, …).
+// How many actions a Location refreshes to at Upkeep — one, plus whatever a
+// Logistics Hub adds. Exported because the HUD has to draw the same number:
+// the action readout used to assume one per city, so a hub city could put the
+// dial at "8/7" and its pip row a pip short of what it actually holds.
+export function locationActionCapacity(state, loc) {
+  return 1 + locChipSum(state, loc, "actionBonus");
+}
+
 function locChipSum(state, loc, field) {
   let n = 0;
   for (const c of loc.chips) {
@@ -155,73 +171,31 @@ export function tickLoyalty(state, pid) {
   recomputeVisibility(state, pid, { emitEvents: false });
 }
 
-// docs/vp-and-actions-design.md §1 — the repeatable VP faucets, awarded at
-// the player's Upkeep (after the Loyalty tick so a city that just reached
-// the rung counts this turn).
-function dominionQualifies(state, loc, beneficiary) {
-  const def = LOCATIONS[loc.locationId];
-  if (!def) return false;
-  if (def.strategicValue !== "high" && def.strategicValue !== "veryHigh") return false;
-  if (def.affiliation === beneficiary) return false; // your homeland never ticks
-  const loy = loc.loyalty == null ? CONFIG.loyalty.ceiling : loc.loyalty;
-  return loy >= CONFIG.victory.dominionLoyaltyMin;
-}
-
+// The repeatable VP faucet, awarded at the player's Upkeep.
+//
+// DOMINION IS GONE. VP is held, not ticked (victory.js): a city you hold is
+// already worth its value every moment you hold it, so paying again each
+// Upkeep counted the same ground twice and made an early land-grab impossible
+// to catch up with. What remains is the one faucet that was never about
+// territory.
 function awardVp(state, pid, amount, source) {
   if (amount <= 0) return;
-  const p = state.players[pid];
-  p.vp += amount;
-  emit(state, "resource_gained", { player: pid, resource: "VP", amount, source });
-  // Only MAJOR factions race the victory threshold — a seeded minor can
-  // bank VP (captures etc.) but never wins the game.
-  if (p.vp >= CONFIG.vpThreshold && !state.winnerId && factionDef(pid)?.tier === "major") {
-    state.winnerId = pid;
-  }
+  bankVp(state, pid, amount, source);
 }
 
-function tickVictoryFaucets(state, pid) {
-  // The victory faucets are the MAJORS' race — seeded minors hold their
-  // ground but don't tick dominion or collect the alliance trickle
-  // (playtest log: Croppers/Dambarans were quietly accruing dominion VP).
-  if (factionDef(pid)?.tier !== "major") return;
-  // Foreign dominion — cities you hold yourself. "Hold" means outright OR
-  // by majority: a besieged city whose people are still loyal to you is
-  // still yours to draw prestige from (and without this, a city stuck in
-  // majority-limbo silently switched the faucet off).
-  let dominion = 0;
-  for (const loc of Object.values(state.locations)) {
-    if (holdsLocation(loc, pid) && dominionQualifies(state, loc, pid)) dominion += 1;
-  }
-  awardVp(state, pid, dominion * CONFIG.victory.dominionPerCity, "dominion");
-  // Vassal dominion — qualifying cities your vassals hold tick for YOU
-  // (still never your own affiliated cities, even in a vassal's hands).
-  let vassalCities = 0;
-  for (const vid of vassalsOf(state, pid)) {
-    for (const loc of Object.values(state.locations)) {
-      if (holdsLocation(loc, vid) && dominionQualifies(state, loc, pid)) vassalCities += 1;
-    }
-  }
-  awardVp(state, pid, vassalCities * CONFIG.victory.dominionPerCity, "vassal-dominion");
-  // Alliance trickle — you must be pacted with a MAJORITY of the other
-  // surviving MAJORS to draw anything (seeded minors don't move the
-  // denominator), and past that bar every allied major pays. The flat
-  // version was diplomacy's structural weakness: Dominion scales with each
-  // city you take, but a second, third, fourth ally added nothing, so the
-  // peaceful route had a hard ceiling the conquest route did not.
-  const others = state.turnOrder.filter(
-    (f) => f !== pid && !state.players[f]?.eliminated && factionDef(f)?.tier === "major",
-  );
-  if (others.length > 0) {
-    const pacts = others.filter((f) => arePacted(state, pid, f)).length;
-    if (pacts > others.length / 2) {
-      awardVp(state, pid, pacts * CONFIG.victory.allianceTrickle, "alliance");
-    }
-  }
-}
+// The alliance trickle used to live here: +1 VP per allied major every round,
+// forever, once you were pacted with a majority of them. It was 77% of all
+// banked VP across 20 games and enough on its own to win while holding no
+// ground at all. Alliances and vassals are worth a HELD score now (victory.js
+// `diplomacyVp`), which every recompute picks up.
+function tickVictoryFaucets() {}
 
 // Elimination (docs/vp-and-actions-design.md §1): a faction with no
-// Locations and no units is out — flagged, skipped by the turn loop, and
-// excluded from the trickle majority. Last faction standing wins outright.
+// Locations and no units is out — flagged and skipped by the turn loop.
+//
+// Being last standing is no longer its own win condition: it is the pure-
+// conquest face of the one condition (checkDominion), which every surviving
+// faction being dead satisfies vacuously.
 function sweepEliminations(state) {
   for (const pid of state.turnOrder) {
     const p = state.players[pid];
@@ -234,8 +208,7 @@ function sweepEliminations(state) {
       emit(state, "faction_eliminated", { player: pid });
     }
   }
-  const survivors = state.turnOrder.filter((f) => !state.players[f]?.eliminated);
-  if (survivors.length === 1 && !state.winnerId) state.winnerId = survivors[0];
+  checkDominion(state);
 }
 
 // v0.2 §16.2 — refresh each owned unit's move budget from its effective
@@ -246,14 +219,21 @@ function refreshMoveBudget(state, pid) {
   for (const u of Object.values(state.units)) {
     if (u.owner !== pid) continue;
     u.moveRemaining = u.movement;
-    // §16.2 road march — starting the turn on the highway network is
-    // worth +1 Movement this turn (roads as fast lanes, not only
-    // terrain-negators).
-    if (state.board.hexes[u.node]?.road) {
-      u.moveRemaining += CONFIG.movement.roadStartBonus || 0;
-    }
+    // SET_MOVEMENT is an absolute override, not a modifier: the unit's
+    // movement BECOMES the authored value for the turn it applies to.
+    const ov = (state.movementOverrides || []).find(
+      (o) => o.player === pid && !o.consumed && o.appliesOnRound <= state.round);
+    if (ov) u.moveRemaining = Math.max(0, ov.value);
+    // No road start-bonus any more: the network pays out per hex travelled
+    // (CONFIG.movement.pavedCost), not as a lump for happening to be parked on
+    // it at Upkeep. See config.js.
+
     u.fortified = !u.movedSinceUpkeep;
     u.movedSinceUpkeep = false;
+    // Where this unit's turn began, and whether an unseen blocker has since
+    // checked its advance. Both drive the retreat/lateral rule in unitReach.
+    u.turnStartNode = u.node;
+    u.checked = false;
   }
 }
 
@@ -314,6 +294,17 @@ export function startTurn(state) {
   // citation streak alive (warning → −1 → −2), even without moving.
   sweepTrespass(state, pid);
 
+  // A fresh beat allowance for the seat about to play (CONFIG.quests
+  // .beatsPerTurn). Reset HERE rather than at round end so the pulse that
+  // runs after everyone has played draws on the same allowance the turn did
+  // — one turn cycle, one budget, however the beats arrive.
+  resetBeatBudget(state, pid);
+
+  // Offer any quest whose opening beat is available to THIS player. Runs
+  // here, inside their own turn, so an opener gate reading `active` means
+  // the player being offered it (see quests.js offerQuests).
+  offerQuests(state);
+
   const p = state.players[pid];
   p.actions.remaining = p.actions.max; // wildcard pool (base 0)
   // Per-entity actions: every owned unit and held Location refreshes to 1.
@@ -323,7 +314,7 @@ export function startTurn(state) {
   }
   for (const loc of Object.values(state.locations)) {
     if (loc.controller !== pid) continue;
-    loc.actionsRemaining = 1 + locChipSum(state, loc, "actionBonus");
+    loc.actionsRemaining = locationActionCapacity(state, loc);
   }
   state.pendingActionGrants = state.pendingActionGrants.filter((g) => {
     if (g.player === pid) {
@@ -388,7 +379,21 @@ export function startTurn(state) {
   // post goes dormant (no Vision) until repaid. Refresh fog so a post that
   // just went dormant stops contributing sight this turn.
   chargePostUpkeep(state, pid);
+  // Rail doc §3.1 — a finished blockade is manned, so it costs scrap; unpaid
+  // it goes dormant and the road opens back up through it.
+  chargeBlockadeUpkeep(state, pid);
+  // Standing armies eat. Charged LAST of the four, so structures a player has
+  // already sunk scrap into keep running and it is the army that goes hungry
+  // first. Must follow the action reset and refreshMoveBudget above — an
+  // unsupplied unit is stranded by having those zeroed back out.
+  chargeUnitUpkeep(state, pid);
+  // Refresh fog last: a post that just went dormant stops contributing sight
+  // this turn, and a blockade that completed during the economy step (rail doc
+  // §3.4 funds construction out of Output) starts.
   recomputeVisibility(state, pid, { emitEvents: false });
+  // VP is held, not banked — Loyalty ticked and Control may have peeled, and a
+  // city sliding under half its Loyalty is worth half as much from now on.
+  recomputeVp(state);
 
   // Preparation (the optional stat-buy step) is folded in once Layer 3
   // gives it something to do; for now the turn opens straight into Main.
@@ -404,6 +409,13 @@ export function endTurn(state) {
   const pid = activePlayerId(state);
   state.phase = "Cleanup";
   state.modifiers = state.modifiers.filter((m) => m.duration !== "this_turn");
+  // A movement override covers exactly the turn it landed on.
+  for (const o of state.movementOverrides || []) {
+    if (o.player === pid && !o.consumed && o.appliesOnRound <= state.round) o.consumed = true;
+  }
+  if (state.movementOverrides?.length) {
+    state.movementOverrides = state.movementOverrides.filter((o) => !o.consumed);
+  }
   emit(state, "turn_ended", { player: pid });
 
   state.activeIndex += 1;
@@ -420,6 +432,8 @@ export function endTurn(state) {
 // queued consequence can update the state that triggers then read.
 function runRoundEnd(state) {
   sweepDeferred(state);
+  sweepPlayerFlags(state);
+  sweepSecondments(state);
   sweepReinforcements(state);
   evaluateTriggers(state);
   evaluateConditionalBeats(state);
@@ -429,6 +443,69 @@ function runRoundEnd(state) {
   // drift, flows, AI-to-AI politics, vassal tick, coalitions, then the
   // Recognition win check (sets winnerId if a peaceful victory has landed).
   runDiplomacyRound(state);
+}
+
+// Player flags with a finite lifetime lapse here. SET_PLAYER_FLAG stored a
+// `duration` from the beginning but nothing ever expired it, so every
+// "for a while" arrangement in authored content was silently permanent —
+// one escort job granting safe passage for the rest of the game. Flags
+// without an expiry round are untouched: the moral ledger is meant to be
+// permanent, and count_flags reads it.
+function sweepPlayerFlags(state) {
+  for (const p of Object.values(state.players || {})) {
+    if (!p.flags) continue;
+    for (const [name, rec] of Object.entries(p.flags)) {
+      if (!rec || rec.expiresAtRound == null) continue;
+      if (state.round < rec.expiresAtRound) continue;
+      delete p.flags[name];
+      emit(state, "player_flag_expired", { player: p.id, flag: name });
+      // Safe passage written against this flag lapses with it.
+      for (const [fid, grant] of Object.entries(p.safePassage || {})) {
+        if (grant?.whileFlag === name) {
+          delete p.safePassage[fid];
+          emit(state, "safe_passage_expired", { player: p.id, faction: fid, reason: "flag_expired" });
+        }
+      }
+    }
+  }
+  // Round-bounded passage grants expire on their own clock too.
+  for (const p of Object.values(state.players || {})) {
+    for (const [fid, grant] of Object.entries(p.safePassage || {})) {
+      if (grant?.until != null && state.round >= grant.until) {
+        delete p.safePassage[fid];
+        emit(state, "safe_passage_expired", { player: p.id, faction: fid, reason: "elapsed" });
+      }
+    }
+  }
+}
+
+// Units lent out by TAKE_UNIT come home. They return to the hex they left
+// from if it is still theirs to stand on, at the agreed strength cost, and
+// set whatever flag the arrangement promised.
+function sweepSecondments(state) {
+  if (!state.secondedUnits?.length) return;
+  const keep = [];
+  for (const s of state.secondedUnits) {
+    if (state.round < s.returnRound) { keep.push(s); continue; }
+    const u = s.record;
+    u.baseStrength = Math.max(0, (u.baseStrength ?? 0) + (s.strengthDelta ?? 0));
+    if (u.baseStrength <= 0) {
+      emit(state, "unit_returned", { unit: u.uid, player: s.owner, destroyed: true });
+      continue; // came back in no state to serve
+    }
+    u.node = s.node;
+    state.units[u.uid] = u;
+    if (s.returnFlag && state.players[s.owner]) {
+      const p = state.players[s.owner];
+      p.flags = p.flags || {};
+      p.flags[s.returnFlag] = { value: true, duration: "permanent", setAt: state.round, expiresAtRound: null };
+    }
+    emit(state, "unit_returned", {
+      unit: u.uid, player: s.owner, hex: s.node, strengthDelta: s.strengthDelta ?? 0,
+    });
+  }
+  state.secondedUnits = keep;
+  recomputeStats(state);
 }
 
 // v0.2 §16.5 — advance in-transit field reinforcements. Each round the
@@ -464,8 +541,11 @@ function sweepReinforcements(state) {
 function expirePlacementMarkers(state) {
   const markers = state.world?.encounterMarkers;
   if (!markers) return;
-  for (const [hex, m] of Object.entries(markers)) {
-    if (m.expiresAt != null && m.expiresAt < state.round) delete markers[hex];
+  for (const [hex, entry] of Object.entries(markers)) {
+    const queue = Array.isArray(entry) ? entry : [entry];
+    const live = queue.filter((m) => m.expiresAt == null || m.expiresAt >= state.round);
+    if (!live.length) delete markers[hex];
+    else markers[hex] = live;
   }
 }
 
@@ -483,3 +563,12 @@ function decayWorldCounters(state) {
     w.ignoreCounts[k] = Math.floor(w.ignoreCounts[k] * 0.9);
   }
 }
+
+
+// victory.js scores alliances and vassals but must not import diplomacy.js —
+// diplomacy already imports victory, and the cycle would bite at load. turn.js
+// sits above both, so it is the natural place to hand the reader across.
+registerAllyReader((state, fid) => {
+  const st = dominionStanding(state, fid);
+  return { allied: st.allied, vassals: st.vassals };
+});

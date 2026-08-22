@@ -7,8 +7,15 @@ import Chip from "./Chip.jsx";
 function StatBlock({ label, base, total, color }) {
   const delta = total - base;
   return (
-    <div style={{ flex: 1 }}>
-      <Label>{label}</Label>
+    // `minWidth: 0` so a long label can never push the column past its
+    // share of the row: without it a flex item's basis is its content
+    // width, and "Movement" at the shared Label spec measured 86px against
+    // the 78px each column actually gets inside a 190px card — enough to
+    // shove it under the card's `overflow: hidden` edge and render as
+    // "MOVEMEN". The tighter local Label spec is what makes it fit; the
+    // minWidth is the backstop for any future longer label.
+    <div style={{ flex: 1, minWidth: 0 }}>
+      <Label style={{ fontSize: 10, letterSpacing: 0.8 }}>{label}</Label>
       <div style={{ display: "flex", alignItems: "baseline", gap: 5 }}>
         <span style={{ fontFamily: theme.fontDisplay, fontSize: 27, fontWeight: 700, color }}>
           {total}

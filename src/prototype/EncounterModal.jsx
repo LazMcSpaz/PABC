@@ -1,19 +1,35 @@
-// Modal that pops when a Move would draw a field-encounter card. By the
-// time the player sees this, the move is already committed (the pre-move
-// confirm overlay handles their last-chance to back out); the modal is
-// just choose-your-resolution. Layout: title top-left; left half is a
-// holographic display frame (placeholder until per-encounter art lands);
-// right half holds the narrative + choices.
+// Modal that pops when a Move would draw a field-encounter card, and the
+// same window quest beats are delivered through (quests.js dispatches each
+// beat as an encounter). By the time the player sees this, the move is
+// already committed (the pre-move confirm overlay handles their last-chance
+// to back out); the modal is just choose-your-resolution.
+//
+// Art is optional and always will be: only some encounters and beats carry
+// an `imagePath`. So there are two first-class layouts, not one layout with
+// a hole in it —
+//
+//   with art     720px, display frame beside the narrative + choices
+//   without art  520px, single column, prose on a holo rail
+//
+// The narrow width matters: 13px prose across the full 720px runs to ~110
+// characters a line, which is a punishing measure to read. Dropping to 520
+// puts it back near 70.
+import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { C, CornerBrackets, useEscClose } from "./HudChrome.jsx";
 import { RichText } from "./RichText.jsx";
 import { useIsPhone } from "./useViewport.js";
+import EncounterOutcome from "./EncounterOutcome.jsx";
+import { describeEffects } from "./effectText.js";
+import { resolveEntity } from "./contentEditExport.js";
+import { theme } from "./data.js";
 
 // The image goes in here at a 2:3 ratio. The outer chrome is a slightly
 // raised holo bezel; the inner display is recessed (inset shadows + dark
 // fill) so the whole thing reads as a screen mounted in a device, with
-// real depth, rather than a flat rectangle.
-function ImageFrame({ imageUrl }) {
+// real depth, rather than a flat rectangle. Only rendered when there is
+// actually art to put in it.
+function ImageFrame({ imageUrl, onError }) {
   return (
     <div style={{
       position: "relative",
@@ -48,41 +64,15 @@ function ImageFrame({ imageUrl }) {
         `,
         overflow: "hidden",
       }}>
-        {imageUrl ? (
-          <img src={imageUrl} alt="" style={{
+        <img
+          src={imageUrl}
+          alt=""
+          onError={onError}
+          style={{
             position: "absolute", inset: 0, width: "100%", height: "100%",
             objectFit: "cover", filter: "brightness(0.95)",
-          }} />
-        ) : (
-          <>
-            {/* faint reference grid */}
-            <div style={{
-              position: "absolute", inset: 0,
-              backgroundImage: `linear-gradient(rgba(86,211,198,0.06) 1px, transparent 1px), linear-gradient(90deg, rgba(86,211,198,0.06) 1px, transparent 1px)`,
-              backgroundSize: "22px 22px", pointerEvents: "none",
-            }} />
-            <div className="hud-scanlines" style={{ position: "absolute", inset: 0 }} />
-            <div style={{
-              position: "absolute", inset: 0, display: "flex", flexDirection: "column",
-              alignItems: "center", justifyContent: "center", gap: 10, pointerEvents: "none",
-            }}>
-              <motion.svg
-                width="56" height="56" viewBox="0 0 24 24" fill="none"
-                stroke={C.holoHi} strokeWidth="1"
-                animate={{ opacity: [0.4, 0.7, 0.4] }}
-                transition={{ duration: 2.4, repeat: Infinity, ease: "easeInOut" }}
-              >
-                <circle cx="12" cy="12" r="10" />
-                <circle cx="12" cy="12" r="4.5" />
-                <path d="M2 12h4M18 12h4M12 2v4M12 18v4" strokeLinecap="round" />
-              </motion.svg>
-              <span style={{
-                fontFamily: C.font, fontSize: 9.5, letterSpacing: 2.8,
-                textTransform: "uppercase", color: "rgba(143,246,234,0.42)",
-              }}>No Signal</span>
-            </div>
-          </>
-        )}
+          }}
+        />
         {/* Always-on top/bottom HUD strips on the inner display */}
         <div style={{
           position: "absolute", top: 0, left: 0, right: 0, height: 16,
@@ -114,16 +104,114 @@ function ImageFrame({ imageUrl }) {
   );
 }
 
-function displayName(id) {
+// Exported so the event feed titles an encounter exactly the way the modal
+// that showed it did — the feed used to print the raw `fe_grain_silo` id.
+//
+// A quest beat's synthetic id (`quest:q_massacre:beat:qb_mas_compound`) is
+// the case this cannot prettify into anything readable — it came out as
+// "Quest:Q Massacre:Beat:Qb Mas Compound" — so it is only ever a fallback.
+// Beats carry their quest's title now (quests.js `beatAsEncounter`); this
+// keeps the id off the screen if one ever arrives without one.
+export function displayName(id) {
   if (!id) return "Encounter";
-  return id.replace(/^fe_/, "").replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase());
+  const beat = /^quest:([^:]+):beat:(.+)$/.exec(id);
+  if (beat) return prettify(beat[2].replace(/^qb_/, ""));
+  return prettify(id.replace(/^fe_/, "").replace(/^we_/, ""));
 }
 
-export default function EncounterModal({ encounter, choices, eligibleIds, redrawsLeft = 0, onRedraw, onPick }) {
+function prettify(s) {
+  return s.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase());
+}
+
+// What a choice actually does, under its label. Only ever rendered in Content
+// Edit Mode: this is the authored machinery, and a player reading "+6 scrap,
+// Goldgrass standing −2" before choosing is playing a different game.
+function Grants({ rows }) {
+  if (!rows?.length) return null;
+  const TONE = { good: theme.good, bad: theme.accent2, flat: "rgba(143,246,234,0.55)" };
+  const render = (r, depth) => (
+    <>
+      <div style={{ paddingLeft: depth * 10, color: TONE[r.tone] || TONE.flat }}>
+        {depth > 0 ? "↳ " : "• "}{r.text}
+      </div>
+      {(r.children || []).map((br, i) => (
+        <div key={i}>
+          {br.rows.length > 0 && (
+            <div style={{ paddingLeft: (depth + 1) * 10, color: "rgba(143,246,234,0.4)", fontStyle: "italic" }}>
+              {br.label}
+            </div>
+          )}
+          {br.rows.map((cr, j) => <div key={j}>{render(cr, depth + 2)}</div>)}
+        </div>
+      ))}
+    </>
+  );
+  return (
+    <div style={{
+      marginTop: 7, paddingTop: 6, borderTop: "1px dashed rgba(232,169,63,0.35)",
+      fontFamily: C.font, fontSize: 10.5, letterSpacing: 0.4, lineHeight: 1.55,
+      textTransform: "none", fontWeight: 500,
+    }}>
+      {rows.map((r, i) => <div key={i}>{render(r, 0)}</div>)}
+    </div>
+  );
+}
+
+export default function EncounterModal({
+  encounter, choices, eligibleIds, redrawsLeft = 0, onRedraw, onPick,
+  // Set once the choice has been resolved: the card turns over and shows
+  // what came of it (dice, authored outcome text, consequences) instead of
+  // vanishing. `onClose` dismisses it from there.
+  outcome = null, onClose,
+  // Content Edit Mode. `editMode` reveals what each choice actually grants
+  // under its label — the thing an author cannot check from the prose — and
+  // `onEdit` opens the editor on this exact card.
+  editMode = false, onEdit, editRev = 0,
+}) {
   // Block Escape — the encounter must be resolved.
   useEscClose(() => {});
   const isPhone = useIsPhone();
-  const title = encounter.title || displayName(encounter.id);
+
+  // In edit mode the card is drawn from the LIVE definition rather than from
+  // itself.
+  //
+  // A queued card is a snapshot: encounters.js keeps the pending queue to
+  // plain serialisable data, which means it carries no effects at all and its
+  // prose is whatever was authored at the moment it was queued. Neither is
+  // what an author wants to look at while rewriting it — they want the text
+  // they just typed, and the grants the choice will actually pay out.
+  //
+  // Only display fields are taken from the live def. Ids and eligibility stay
+  // with the props, because those were decided when the card was delivered and
+  // an edit must not silently re-open a choice the player was not offered.
+  const live = useMemo(
+    () => (editMode ? resolveEntity(encounter.id)?.live || null : null),
+    [editMode, encounter.id, editRev],
+  );
+  const liveChoice = (id) => (live?.choices || []).find((c) => c.id === id) || null;
+  const grants = useMemo(() => {
+    if (!editMode) return null;
+    const out = {};
+    for (const c of choices) out[c.id] = describeEffects(liveChoice(c.id)?.effects || c.effects);
+    return out;
+  }, [editMode, live, choices]);
+
+  const title = live?.title || encounter.title || displayName(encounter.id);
+  // A beat titled after its quest gets the quest as its eyebrow only when it
+  // has a title of its own to be distinct from — otherwise the header would
+  // print the same string twice.
+  const eyebrow = outcome ? "Outcome"
+    : (encounter.questTitle && encounter.questTitle !== title ? encounter.questTitle : "Encounter");
+
+  // A path that 404s falls back to the text-only layout rather than
+  // leaving a broken-image box in the frame: authored art gets added over
+  // time and a typo'd path shouldn't be the thing the player sees. Keyed
+  // on `src` so Recon's discard-and-redraw, which swaps the card in place
+  // without remounting, re-tries the next encounter's art.
+  const src = encounter.imagePath || encounter.imageUrl || null;
+  const [artBroken, setArtBroken] = useState(false);
+  useEffect(() => setArtBroken(false), [src]);
+  const hasArt = Boolean(src) && !artBroken;
 
   return (
     <motion.div
@@ -143,7 +231,7 @@ export default function EncounterModal({ encounter, choices, eligibleIds, redraw
         transition={{ type: "spring", stiffness: 280, damping: 24 }}
         className="hud-scratch"
         style={{
-          position: "relative", width: 720, maxWidth: "94vw", maxHeight: "92vh",
+          position: "relative", width: hasArt ? 720 : 520, maxWidth: "94vw", maxHeight: "92vh",
           background: "linear-gradient(158deg, rgba(18,31,32,0.97), rgba(9,17,18,0.98) 58%, rgba(6,11,12,0.99))",
           border: `1px solid ${C.holo}`, borderRadius: 8,
           boxShadow: `inset 0 0 34px rgba(86,211,198,0.07), 0 0 0 1px rgba(86,211,198,0.12), 0 0 36px rgba(86,211,198,0.24), 0 26px 70px rgba(0,0,0,0.72)`,
@@ -159,44 +247,82 @@ export default function EncounterModal({ encounter, choices, eligibleIds, redraw
             fontFamily: C.font, fontSize: 10, fontWeight: 600,
             letterSpacing: 3, textTransform: "uppercase",
             color: C.holoHi, opacity: 0.75,
-          }}>Encounter</div>
+          }}>{eyebrow}</div>
           <div style={{
             fontFamily: C.font, fontSize: 22, fontWeight: 700,
             letterSpacing: 1.4, textTransform: "uppercase",
             color: C.holoHi, textShadow: `0 0 12px ${C.holo}88`,
             marginTop: 3,
           }}>{title}</div>
+          {editMode && onEdit && (
+            <button
+              className="hud-int"
+              onClick={onEdit}
+              title="Rewrite this card — gate, prose, choices, grants"
+              style={{
+                position: "absolute", top: 16, right: 16,
+                fontFamily: C.font, fontSize: 10, fontWeight: 700,
+                letterSpacing: 1.6, textTransform: "uppercase",
+                padding: "5px 12px", borderRadius: 5,
+                border: `1px solid ${theme.accent}88`,
+                background: "rgba(232,169,63,0.12)",
+                color: theme.accent, cursor: "pointer",
+              }}
+            >Edit</button>
+          )}
         </div>
 
-        {/* Body — image beside the text on desktop/iPad; stacked (image on
-            top, shrunk down) on phone, where a 220px-wide image plus its
-            gap left only ~80px for text and squeezed every line of prose
-            and every choice button down to one word per line. */}
-        <div style={{ display: "flex", flexDirection: isPhone ? "column" : "row", gap: isPhone ? 12 : 18, padding: isPhone ? "14px 16px 16px" : "18px 24px 18px", flex: 1, minHeight: 0, overflowY: isPhone ? "auto" : "visible" }}>
-          <motion.div
-            initial={{ opacity: 0, scale: 0.96 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ delay: 0.1, duration: 0.32, ease: "easeOut" }}
-            style={isPhone ? { width: "38%", maxWidth: 150, alignSelf: "center", flexShrink: 0 } : { width: 220, flexShrink: 0 }}
-          >
-            <ImageFrame imageUrl={encounter.imagePath || encounter.imageUrl} />
-          </motion.div>
+        {/* Body — art beside the text on desktop/iPad; stacked (art on top,
+            shrunk down) on phone, where a 220px-wide image plus its gap left
+            only ~80px for text and squeezed every line of prose and every
+            choice button down to one word per line. With no art the column
+            is gone entirely rather than reserved, and the window narrows to
+            match so the text isn't left rattling around in a 720px shell. */}
+        <div style={{ display: "flex", flexDirection: isPhone ? "column" : "row", gap: hasArt ? (isPhone ? 12 : 18) : 0, padding: isPhone ? "14px 16px 16px" : "18px 24px 18px", flex: 1, minHeight: 0, overflowY: isPhone ? "auto" : "visible" }}>
+          {hasArt && (
+            <motion.div
+              initial={{ opacity: 0, scale: 0.96 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ delay: 0.1, duration: 0.32, ease: "easeOut" }}
+              style={isPhone ? { width: "38%", maxWidth: 150, alignSelf: "center", flexShrink: 0 } : { width: 220, flexShrink: 0 }}
+            >
+              <ImageFrame imageUrl={src} onError={() => setArtBroken(true)} />
+            </motion.div>
+          )}
 
           <div className="pc-scroll" style={{
             flex: 1, display: "flex", flexDirection: "column", gap: 14,
             overflowY: isPhone ? "visible" : "auto", minHeight: 0,
           }}>
-            {encounter.text && (
+            {(live?.text ?? encounter.text) && (
               <motion.div
                 className="pc-prose"
                 initial={{ opacity: 0, y: 4 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.14, duration: 0.28 }}
-                style={{ fontSize: 13, color: "#d0d7dd", lineHeight: 1.6, whiteSpace: "pre-wrap" }}
+                style={{
+                  fontSize: 13, color: "#d0d7dd", lineHeight: 1.6, whiteSpace: "pre-wrap",
+                  // With no art the prose is the only thing above the
+                  // choices, so it takes the display frame's job of holding
+                  // the left edge: a lit rail reads as a readout the same
+                  // way the frame's bezel did.
+                  ...(hasArt ? null : {
+                    borderLeft: `2px solid ${C.holo}55`,
+                    paddingLeft: 14,
+                    boxShadow: `-6px 0 14px -8px ${C.holo}66`,
+                  }),
+                }}
               >
-                <RichText>{encounter.text}</RichText>
+                <RichText>{live?.text ?? encounter.text}</RichText>
               </motion.div>
             )}
+            {/* The scene text stays above the aftermath rather than being
+                replaced by it: read straight down, the card is now scene →
+                what you chose → what came of it, which is the shape the
+                writing was authored in. Only the buttons are swapped out. */}
+            {outcome ? (
+              <EncounterOutcome outcome={outcome} onClose={onClose} />
+            ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               {choices.map((c, i) => {
                 const eligible = eligibleIds.includes(c.id);
@@ -227,22 +353,24 @@ export default function EncounterModal({ encounter, choices, eligibleIds, redraw
                     <div style={{
                       fontFamily: C.font, fontSize: 13.5, fontWeight: 700,
                       letterSpacing: 0.8, textTransform: "uppercase",
-                    }}><RichText>{c.label}</RichText></div>
+                    }}><RichText>{liveChoice(c.id)?.label ?? c.label}</RichText></div>
                     {!eligible && (
                       <div style={{
                         fontFamily: C.font, fontSize: 9, letterSpacing: 1.6,
                         color: "rgba(143,246,234,0.45)", marginTop: 4, textTransform: "uppercase",
                       }}>Not eligible</div>
                     )}
+                    {grants && <Grants rows={grants[c.id]} />}
                   </motion.button>
                 );
               })}
             </div>
+            )}
           </div>
         </div>
 
         {/* Footer — only the optional Recon redraw; no Cancel any more */}
-        {redrawsLeft > 0 && (
+        {redrawsLeft > 0 && !outcome && (
           <div style={{ padding: "10px 22px 14px", borderTop: "1px solid rgba(86,211,198,0.18)" }}>
             <button
               className="hud-int"

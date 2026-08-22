@@ -22,7 +22,12 @@ import { factionDef } from "./content.js";
 import {
   factionIds, powerOf, arePacted, atWar, vassalLord, mayEngage,
   getStanding, passesRepGates, formPact, vassalize, applyDeal, checkRecognitionVictory,
+  tableOffer, offersFor, warExhaustion,
+  denounce, denounceWarrant, denounceCooldown, honorOf, grievanceWeight, wouldAccept,
+  counterOffer, ultimatumsFor, answerUltimatum, aiComplies, unitsInTerritory, declareWar,
+  performDiplomacy,
   aiAcceptsVassalage, truceBetween,
+  occupationsBy, cedeBlocker, locationWorth,
 } from "./diplomacy.js";
 
 const SAFETY_CAP = 16; // hard stop if priority loop ever spins
@@ -91,6 +96,72 @@ function acceptableOdds(state, pid, atkTotal, defTotal, defenderRollsDie) {
   return winProbability(atkTotal, defTotal, defenderRollsDie) >= threshold;
 }
 
+/**
+ * How many units to commit, and which.
+ *
+ * Concentration is a presence bonus and Strength is a commitment cost, so the
+ * marginal unit is not free but the ones held back are not wasted either — a
+ * unit standing on the hex keeps giving +1 Concentration whether or not it
+ * swings. That makes "how few can I win with" a real question rather than
+ * "attack with everything".
+ *
+ * Worked, three Strength-4 units against a garrison of 10 (Concentration is
+ * +2 throughout, because three bodies are on the hex either way):
+ *
+ *     commit 1 →  4 + 2 = 6,  needs a 5 or 6      33%
+ *     commit 2 →  8 + 2 = 10, needs anything      100%
+ *     commit 3 → 12 + 2 = 14, needs anything      100%  ← two actions wasted
+ *
+ * So it commits two and the third keeps its action. What that third unit then
+ * does falls out of the ordinary turn loop rather than being decided here: it
+ * comes round again, re-plans against the Location as it now stands, and
+ * either attacks alone (if a 33% shot clears its faction's bar — a warlord's
+ * does, a diplomat's does not) or gives up on this hex and moves somewhere it
+ * matters more.
+ *
+ * The bar is `acceptableOdds`, the same one that decides whether to fight at
+ * all. That is deliberate: it is already tuned and already scaled by the
+ * faction's aggression, so a warlord commits fewer units to a given fight
+ * than a cautious minor does, without a second set of numbers to keep in step
+ * with the first.
+ *
+ * Returns `{ lead, support, chance }`, or null when even the whole stack
+ * cannot clear the bar — the caller should not pick that fight.
+ */
+export function planContest(state, pid, hex, { target = null } = {}) {
+  // Only units that can still act may be committed; each one spends its
+  // action. Strongest first, so the minimum is reached with the fewest bodies.
+  const available = ownUnits(state, pid)
+    .filter((u) => u.node === hex && !isImmobilized(state, u) && (u.actionsRemaining ?? 0) >= 1)
+    .sort((a, b) => b.strength - a.strength);
+  if (!available.length) return null;
+
+  // What the attack has to beat. A raid is resolved against the target's whole
+  // side — runContest adds its stack's Strength and Concentration the same way
+  // it adds ours — so pricing it at the target unit's bare Strength would walk
+  // the AI straight into a relief column standing behind one token defender.
+  const defence = target
+    ? { value: previewAttackerStrength(state, hex, state.units[target]?.owner).total,
+        defenderRollsDie: true }
+    : previewLocationContest(state, hex, { attacker: pid });
+  if (!defence) return null;
+
+  for (let k = 1; k <= available.length; k++) {
+    const committed = available.slice(0, k).map((u) => u.uid);
+    const atk = previewAttackerStrength(state, hex, pid, { committed });
+    if (!acceptableOdds(state, pid, atk.total, defence.value, defence.defenderRollsDie)) continue;
+    // `atk.lead` is the strongest committed unit, and the one Concentration
+    // was computed against — root the contest on it so the resolution counts
+    // exactly what this plan priced.
+    return {
+      lead: atk.lead,
+      support: committed.filter((uid) => uid !== atk.lead),
+      chance: winProbability(atk.total, defence.value, defence.defenderRollsDie),
+    };
+  }
+  return null;
+}
+
 // Casus belli — the blind combat loop only opens hostilities with a
 // reason: an existing war, contempt (Wary-or-worse standing), or a
 // warlike temperament. Pacted factions are never blind-attacked, and a
@@ -118,10 +189,20 @@ function tryOneAction(state, pid) {
     const loc = state.locations[unit.node];
     if (loc && !loc.sections.every((s) => s === pid)
       && wouldFight(state, pid, loc.controller)) {
-      const atk = previewAttackerStrength(state, unit.node, pid).total;
-      const def = previewLocationContest(state, unit.node);
-      if (def && acceptableOdds(state, pid, atk, def.value, def.defenderRollsDie)) {
-        const r = performAction(state, "contest", { unit: unit.uid });
+      // Commit the fewest units that still clear this faction's odds bar,
+      // and leave the rest their actions. The plan names the initiator, so
+      // the loop's current `unit` may not be the one that swings — it is the
+      // unit that brought us to this hex, not necessarily the strongest on it.
+      //
+      // The defender preview names the attacker so it applies the ally rule
+      // the resolution will apply: the controller's allies defend with it,
+      // minus anyone already fighting for us. An AI that estimated a bare
+      // garrison and then walked into an allied stack would misjudge exactly
+      // the fights this ruling creates.
+      const plan = planContest(state, pid, unit.node);
+      if (plan) {
+        const r = performAction(state, "contest",
+          { unit: plan.lead, coalition: plan.support });
         if (r.ok) return true;
       }
     }
@@ -134,11 +215,10 @@ function tryOneAction(state, pid) {
     );
     if (enemyHere && (!loc || !loc.sections.includes("neutral"))
       && wouldFight(state, pid, enemyHere.owner)) {
-      const atk = previewAttackerStrength(state, unit.node, pid).total;
-      const def = previewAttackerStrength(state, unit.node, enemyHere.owner).total;
-      if (acceptableOdds(state, pid, atk, def, true)) {
+      const plan = planContest(state, pid, unit.node, { target: enemyHere.uid });
+      if (plan) {
         const r = performAction(state, "contest", {
-          unit: unit.uid, target: enemyHere.uid,
+          unit: plan.lead, coalition: plan.support, target: enemyHere.uid,
         });
         if (r.ok) return true;
       }
@@ -395,7 +475,44 @@ function manageDiplomacy(state, pid) {
     }
   }
 
-  // 2) Proactive pact with a warm, compatible, engageable faction; or a gift
+  // 2) Settle with somebody you have wronged, BEFORE going shopping for new
+  //    friends. A faction that gifts a stranger while owing its neighbour
+  //    blood reads as having no memory — and the gift branch below fires
+  //    every single turn for a diplomacy-lean faction, so anything under it
+  //    was unreachable in practice. This is also the one road back for a
+  //    faction that has burned its reputation.
+  if ((me.aggression ?? 0.5) < 0.7) {
+    for (const f of others) {
+      if (atWar(state, pid, f) || !mayEngage(state, pid, f)) continue;
+      if (!grievanceWeight(state, f, pid)) continue;
+      // Ask what it would take rather than guessing: counterOffer already
+      // walks exactly this gap, and already clamps to what the payer holds.
+      // Guessing the bare weight-times-rate landed a hair under whatever the
+      // wronged party's standing bias asked for, so nobody ever settled.
+      const bare = { proposer: pid, recipient: f, give: [], get: [{ settlement: true }] };
+      const deal = wouldAccept(state, f, bare) ? bare : counterOffer(state, f, bare);
+      if (!deal) continue;
+      // The human is ASKED — taking compensation means giving up the
+      // righteous war the grievance entitles them to, which is their call
+      // to make. Between two AIs it lands on the spot; neither has an inbox.
+      if (f === human) {
+        if (offersFor(state, human).some((o) => o.from === pid)) continue;
+        tableOffer(state, pid, human, deal, { kind: "deal", note: "They want the books closed." });
+        return;
+      }
+      if (!wouldAccept(state, f, deal)) continue;
+      applyDeal(state, deal, "ai-amends");
+      return;
+    }
+  }
+
+  // 2b) Say something about the war you are in, before going shopping for
+  //     friends. See warTalk: the gift branch immediately below returns on
+  //     every turn a sociable faction takes, which made every branch under
+  //     it unreachable — including the one that ends the war.
+  if (warTalk(state, pid, me)) return;
+
+  // 3) Proactive pact with a warm, compatible, engageable faction; or a gift
   //    to warm one up (diplomacy-lean factions buy Standing toward a pact).
   if ((me.sociability ?? 0) >= 0.5) {
     for (const f of others) {
@@ -404,9 +521,22 @@ function manageDiplomacy(state, pid) {
       const sFwd = getStanding(state, pid, f), sBack = getStanding(state, f, pid);
       if (sFwd >= CONFIG.diplomacy.pactStandingReq && sBack >= CONFIG.diplomacy.pactStandingReq
         && passesRepGates(state, pid, f) && passesRepGates(state, f, pid)) {
-        formPact(state, pid, f, "ai-offer");
-        checkRecognitionVictory(state);
-        return;
+        // Between two AIs an alliance is settled on the spot — neither has an
+        // inbox to read. The human gets ASKED, because being handed an
+        // alliance you never agreed to (which is what this used to do) is
+        // not diplomacy happening to you, it is diplomacy bypassing you.
+        if (f === human) {
+          if (!offersFor(state, human).some((o) => o.from === pid && o.kind === "pact")) {
+            tableOffer(state, pid, human, {
+              give: [{ promise: { kind: "pact" } }], get: [],
+            }, { kind: "pact" });
+            return;
+          }
+        } else {
+          formPact(state, pid, f, "ai-offer");
+          checkRecognitionVictory(state);
+          return;
+        }
       }
       if (me.victoryLean === "diplomacy" && (state.players[pid].resource || 0) >= 4
         && sFwd >= tiers.neutral && sFwd < CONFIG.diplomacy.pactStandingReq && f !== human) {
@@ -415,6 +545,219 @@ function manageDiplomacy(state, pid) {
       }
     }
   }
+
+  // 3b2) Make good on your own words. An ultimatum you let lapse costs Honor
+  //      publicly, and it should: the AI checked it had the strength to mean
+  //      it before issuing, so the only reason not to follow through is that
+  //      nothing in the code ever made it. Left unfixed, every threat it
+  //      issued became a bluff it called on itself.
+  for (const u of ultimatumsFor(state, pid, { issuedBy: true })) {
+    if (!u.defied || atWar(state, pid, u.to)) continue;
+    declareWar(state, pid, u.to, "ultimatum-defied");
+    return;
+  }
+
+  // 3c) Answer anything standing over you. Silence past the deadline is
+  //     defiance, and defiance hands them a righteous war — so this is a
+  //     decision, not a formality.
+  for (const u of ultimatumsFor(state, pid)) {
+    if (u.defied) continue;
+    if (!aiComplies(state, pid, u)) continue;
+    const res = answerUltimatum(state, pid, u.id, true);
+    if (res.ok) return;
+  }
+
+  // 4) Say something about a faction that has earned it. A denouncement is
+  //    now judged on whether there are grounds, which makes it the peaceful
+  //    faction's real lever: a pacifist that cannot answer a tyrant with
+  //    armies can answer with its reputation, gain Honor for it, and pull
+  //    the board along. A warlord would rather just attack, so it doesn't
+  //    bother.
+  if ((me.aggression ?? 0.5) < 0.7 && honorOf(state, pid) > 0) {
+    for (const f of others) {
+      if (arePacted(state, pid, f) || vassalLord(state, f) === pid) continue;
+      if (!mayEngage(state, pid, f)) continue;
+      if (denounceCooldown(state, pid, f) > 0) continue;
+      if (!denounceWarrant(state, pid, f)) continue;
+      if (denounce(state, pid, f)) return;
+    }
+  }
+
+  // 5) …and if none of that fired, consider opening a conversation with the
+  //    human. The audit's blunt finding was that across thirty rounds the AI
+  //    approached the player exactly zero times: it had no way to propose,
+  //    only to act. Now it has an inbox to put things in.
+  if (human && pid !== human) {
+    if (ultimatumToHuman(state, pid, me)) return;
+    proposeToHuman(state, pid, me);
+  }
+}
+
+// What `pid` would put to `other` about the war between them, or null if it
+// has nothing to say yet. Written as terms rather than as an action so the
+// same reasoning serves both audiences: the human, who gets an offer in an
+// inbox to answer, and another AI, which has no inbox and settles on the
+// spot — exactly the split the settle branch already makes.
+export function warPeaceTerms(state, pid, other) {
+  const sue = CONFIG.diplomacy.suePeace.acceptThreshold;
+
+  // WINNING: name the price, and let it be the thing the war is actually
+  // about. The AI had no way to say this at all — it could only fight on
+  // until exhaustion turned it into a supplicant, so a war it was WINNING
+  // had no diplomatic expression whatsoever. Asking for a homeland back is
+  // the one ask that motivates itself: the occupation is already a standing
+  // grievance, and giving the place back is already the only thing that
+  // ends one.
+  if (warExhaustion(state, other, pid) >= sue * 0.5
+    && powerOf(state, pid) > powerOf(state, other)) {
+    const want = occupationsBy(state, pid, other)
+      .filter((o) => !cedeBlocker(state, other, o.at))
+      .sort((a, b) => locationWorth(state, pid, b.at) - locationWorth(state, pid, a.at))[0];
+    if (want) {
+      return {
+        give: [{ promise: { kind: "peace" } }],
+        get: [{ location: { hexId: want.at } }],
+        note: "Give it back and this ends.",
+      };
+    }
+  }
+  // LOSING: buy your way out before your army is gone. Ground first, and
+  // specifically THEIR ground — a city of theirs that this faction is
+  // squatting on is the cheapest thing it owns, because holding it is what
+  // the war is costing it. Scrap only if it has no such card to play.
+  if (warExhaustion(state, pid, other) < sue * 0.6) return null;
+  const backDown = occupationsBy(state, other, pid)
+    .filter((o) => !cedeBlocker(state, pid, o.at))
+    .sort((a, b) => locationWorth(state, other, b.at) - locationWorth(state, other, a.at))[0];
+  if (backDown) {
+    return {
+      give: [{ promise: { kind: "peace" } }, { location: { hexId: backDown.at } }],
+      get: [],
+      note: "They want this war over, and they know what it will cost.",
+    };
+  }
+  const sweetener = Math.min(state.players[pid]?.resource || 0, 6);
+  return {
+    give: [{ promise: { kind: "peace" } }, ...(sweetener > 0 ? [{ resource: { resource: "scrap", amount: sweetener } }] : [])],
+    get: [],
+    note: "They want this war over.",
+  };
+}
+
+// Everything `pid` has to say about the wars it is in. Lives above the
+// courtship branch in manageDiplomacy for a reason that took a while to
+// find: a sociable faction gifts a stranger three scrap on every turn it
+// takes, and that branch RETURNS, so a faction losing a war it could end by
+// talking never reached the part of its own turn where it would have said
+// so. The settle branch was hoisted over the same obstacle in §1. Talking to
+// the party you are actually fighting outranks courting a stranger, and the
+// courting is still there, one branch down.
+function warTalk(state, pid, me) {
+  const human = state.humanFactionId;
+  // The player's own seat never conducts diplomacy on its own account, even
+  // if something drives manageDiplomacy for it: a faction that signs away
+  // its own cities behind the player's back is not an AI, it is a bug.
+  if (pid === human) return false;
+  for (const other of factionIds(state)) {
+    if (other === pid || !atWar(state, pid, other)) continue;
+    if (!mayEngage(state, pid, other)) continue;
+    if (other === human) {
+      if (offersFor(state, human).some((o) => o.from === pid)) continue;
+      // Same gate every other approach to the player passes through, so an
+      // AI does not become chatty just because it is at war.
+      if (state.rng.next() > (CONFIG.diplomacy.offers.aiProposeChance * (0.4 + (me.sociability ?? 0.5)))) continue;
+      const terms = warPeaceTerms(state, pid, other);
+      if (!terms) continue;
+      tableOffer(state, pid, human, { give: terms.give, get: terms.get },
+        { kind: "peace", note: terms.note });
+      return true;
+    }
+    // Between two AIs there is no inbox to put anything in, so the terms
+    // land or they do not — the same road the settle branch takes. Only the
+    // LOSING side acts here: a demand for somebody's homeland is priced far
+    // past what peace is worth, so the winning branch correctly comes to
+    // nothing between two AIs, and an AI is never talked out of a city it
+    // is winning by holding.
+    const terms = warPeaceTerms(state, pid, other);
+    if (!terms || !terms.give.some((it) => it.location)) continue;
+    const deal = { proposer: pid, recipient: other, give: terms.give, get: terms.get };
+    if (!wouldAccept(state, other, deal)) continue;
+    applyDeal(state, deal, "ai-war-cession");
+    return true;
+  }
+  return false;
+}
+
+// What this faction would like from the human, if anything. One offer at a
+// time and only while it has nothing already pending with them, so the inbox
+// stays a thing that happens rather than a thing that accumulates.
+function proposeToHuman(state, pid, me) {
+  const human = state.humanFactionId;
+  if (!mayEngage(state, pid, human)) return;
+  if (offersFor(state, human).some((o) => o.from === pid)) return;
+  const cfg = CONFIG.diplomacy.offers;
+  const tiers = CONFIG.diplomacy.tiers;
+  const s = getStanding(state, pid, human);
+  const purse = state.players[pid]?.resource || 0;
+  // Deterministic in the seed like every other AI decision — the RNG is the
+  // game's, not Math.random, so a replayed game proposes identically.
+  if (state.rng.next() > (cfg.aiProposeChance * (0.4 + (me.sociability ?? 0.5)))) return;
+
+  if (atWar(state, pid, human)) return; // handled above, before the courtship
+  // Warm but not allied: buy the alliance rather than wait for the numbers.
+  if (s >= tiers.neutral && s < CONFIG.diplomacy.pactStandingReq && !arePacted(state, pid, human)
+    && passesRepGates(state, pid, human)) {
+    const sweetener = Math.min(purse, 4 + Math.round((me.sociability ?? 0.5) * 6));
+    if (sweetener <= 0) return;
+    tableOffer(state, pid, human, {
+      give: [{ resource: { resource: "scrap", amount: sweetener } }, { promise: { kind: "pact" } }],
+      get: [],
+    }, { kind: "pact", note: "They are courting you." });
+    return;
+  }
+  // Cold and cautious: a non-aggression pact is what you ask a neighbour you
+  // do not trust and do not want to fight yet.
+  if (s <= tiers.neutral && s > tiers.hostile && (me.aggression ?? 0.5) < 0.7) {
+    tableOffer(state, pid, human, {
+      give: [{ promise: { kind: "nonAggression", rounds: 6 } }],
+      get: [{ promise: { kind: "nonAggression", rounds: 6 } }],
+    }, { kind: "deal", note: "They would rather not find out." });
+    return;
+  }
+  // Strong and unfriendly: name a price for leaving you alone.
+  if ((me.aggression ?? 0.5) >= 0.6 && s < tiers.neutral
+    && powerOf(state, pid) > powerOf(state, human) * 1.2) {
+    tableOffer(state, pid, human, {
+      give: [{ promise: { kind: "nonAggression", rounds: 5 } }],
+      get: [{ flow: { resource: "scrap", amountPerTurn: 2, rounds: 5 } }],
+    }, { kind: "deal", note: "It would be a shame if anything happened." });
+  }
+}
+
+// "Stop, or else." What a faction reaches for when it is strong enough to
+// mean it and has something concrete to be angry about — the step it used to
+// have no way to take between grumbling through an envoy and simply
+// attacking.
+function ultimatumToHuman(state, pid, me) {
+  const human = state.humanFactionId;
+  if (!human || atWar(state, pid, human)) return false;
+  if (ultimatumsFor(state, human).some((u) => u.from === pid)) return false;
+  if (!mayEngage(state, pid, human)) return false;
+  // You have to be able to back it up. Threatening from weakness is how a
+  // faction ends up in the bluff branch, and the AI should not walk into it.
+  if (powerOf(state, pid) < powerOf(state, human) * 1.25) return false;
+  if ((me.aggression ?? 0.5) < 0.45) return false;
+  // Something concrete first: their army in your fields.
+  if (unitsInTerritory(state, human, pid).length) {
+    return performDiplomacy(state, pid, "issue-ultimatum",
+      { faction: human, demand: { kind: "withdraw" } }).ok;
+  }
+  // Otherwise the old-fashioned kind, with a clock on it.
+  const purse = state.players[human]?.resource || 0;
+  const ask = Math.min(CONFIG.diplomacy.ultimatum.maxScrap, Math.floor(purse * 0.3));
+  if (ask < 3) return false;
+  return performDiplomacy(state, pid, "issue-ultimatum",
+    { faction: human, demand: { kind: "tribute", amount: ask } }).ok;
 }
 
 // Stale-intel hooks: hexes where the AI last saw an enemy (ghosts). It may

@@ -15,6 +15,11 @@ export const theme = {
   textDim: "#a89d87",
   textFaint: "#776c5b",
   accent: "#e8a93f", // amber lamplight
+  // "This can still act." Deliberately NOT `accent`: amber is already the
+  // selection glow, and a unit that is selected is not the same as a unit
+  // that has an action left. Holo teal is the interface's own voice — it
+  // reads as a readout rather than as a faction or a highlight.
+  ready: "#56d3c6",
   accent2: "#c75d30", // rust
   good: "#86ad52",
   boardBg:
@@ -27,12 +32,18 @@ export const theme = {
 
 export const NEUTRAL = "#717171";
 
-// Player factions. `capital` is the location each one begins holding.
+// Player factions. `capital` is the Location each one begins holding.
+//
+// Display fallback only — the live value comes from the engine via
+// `adaptDiplomacy`'s `capital` / `youCapital`, since a Capital moves when its
+// Location is captured. Truth is `FACTIONS[].capital` in src/game/content.js;
+// keep these in step with it. (They were wrong for three of the four factions
+// once already, and the error reached the map.)
 export const FACTIONS = {
   versari: { id: "versari", name: "Versari Korad", short: "Versari", color: "#d2453f", capital: "korad" },
-  lakers: { id: "lakers", name: "Grand Lakers", short: "Lakers", color: "#3f84c4", capital: "dambar" },
-  goldgrass: { id: "goldgrass", name: "Goldgrass Coalition", short: "Goldgrass", color: "#85ab3e", capital: "chigan" },
-  plainers: { id: "plainers", name: "Free Plainers", short: "Plainers", color: "#9d70c4", capital: "erport" },
+  lakers: { id: "lakers", name: "Grand Lakers", short: "Lakers", color: "#3f84c4", capital: "droit" },
+  goldgrass: { id: "goldgrass", name: "Goldgrass Coalition", short: "Goldgrass", color: "#85ab3e", capital: "kansit" },
+  plainers: { id: "plainers", name: "Free Plainers", short: "Plainers", color: "#9d70c4", capital: "tinTown" },
   // §18.4.1 minor factions — now real on-board actors (seated near their
   // major), so the UI must resolve their name/short/colour like any faction.
   tempest: { id: "tempest", name: "Clan Tempest", short: "Tempest", color: "#4a6fa5", capital: null },
@@ -61,7 +72,19 @@ export const LOCATIONS = {
   droit: { id: "droit", name: "Droit", value: "high", vp: 3, garrison: 6, chipSlots: 3, production: 3, ability: null },
   erport: { id: "erport", name: "Erport", value: "medium", vp: 2, garrison: 4, chipSlots: 2, production: 2, ability: "Airfield — once per turn, redeploy a unit you control to any location you fully hold." },
   concordan: { id: "concordan", name: "Concordan", value: "medium", vp: 2, garrison: 5, chipSlots: 2, production: 2, ability: null },
-  tinTown: { id: "tinTown", name: "Tin Town", value: "medium", vp: 2, garrison: 4, chipSlots: 2, production: 2, ability: null },
+  tinTown: { id: "tinTown", name: "Tin Town", value: "high", vp: 3, garrison: 6, chipSlots: 3, production: 3, ability: null },
+  // 2026-08-16 content pass. Numeric fields are re-derived from the engine at
+  // load (ensureUiConstantsSynced), so these are placeholders for anything the
+  // engine does not own — the name is the part that matters here.
+  runaway: { id: "runaway", name: "Runaway", value: "high", vp: 2, garrison: 8, chipSlots: 3, production: 3, ability: null },
+  witcha: { id: "witcha", name: "Witcha", value: "high", vp: 2, garrison: 8, chipSlots: 3, production: 3, ability: null },
+  dulut: { id: "dulut", name: "Dulut", value: "high", vp: 2, garrison: 8, chipSlots: 3, production: 3, ability: null },
+  linkin: { id: "linkin", name: "Linkin", value: "high", vp: 2, garrison: 8, chipSlots: 3, production: 3, ability: null },
+  restaria: { id: "restaria", name: "Restaria", value: "medium", vp: 1, garrison: 6, chipSlots: 2, production: 2, ability: null },
+  lastgas: { id: "lastgas", name: "Lastgas", value: "medium", vp: 1, garrison: 6, chipSlots: 2, production: 2, ability: null },
+  overlook: { id: "overlook", name: "Overlook", value: "medium", vp: 1, garrison: 6, chipSlots: 2, production: 2, ability: null },
+  nosservis: { id: "nosservis", name: "Nosservis", value: "low", vp: 1, garrison: 4, chipSlots: 1, production: 1, ability: null },
+  detor: { id: "detor", name: "Detor", value: "low", vp: 1, garrison: 4, chipSlots: 1, production: 1, ability: null },
 };
 
 // Chip family tints — orange = unit upgrade, teal = location upgrade.
@@ -124,6 +147,45 @@ export const ALL_UPGRADES = { ...UNIT_UPGRADES, ...LOCATION_UPGRADES };
 export function ownerColor(ownerId) {
   if (!ownerId || ownerId === "neutral") return NEUTRAL;
   return FACTIONS[ownerId]?.color || NEUTRAL;
+}
+
+// The engine is deliberately theme-free, so every resource event carries the
+// generic key ("Resource", "Research", "VP") rather than the setting's name for
+// it. That key is an engine identifier, not player-facing copy — printing it
+// raw is how the turn feed ended up saying "+5 resource (output)" for what the
+// rest of the UI, down to the icon beside it, calls scrap. Translate here, at
+// the one seam that is allowed to know the theme.
+const RESOURCE_LABEL = {
+  Resource: "scrap",
+  Research: "research",
+  VP: "VP",
+};
+export function resourceLabel(key) {
+  return RESOURCE_LABEL[key] || String(key || "").toLowerCase();
+}
+
+// Board hologram tints. A separate palette from the UI colours above, and it
+// has to be: the tile hologram is recoloured by ADDING a flat colour over a
+// white-hot glow, and the mid-tone UI colours come out of that muddy and
+// nearly indistinguishable from each other. Same hues, pushed to emissive
+// luminance and saturation. Keep the two palettes in step when either moves —
+// a faction whose chip is red and whose territory glows orange reads as two
+// different factions.
+export const HOLO_NEUTRAL = "#9fd8ff"; // unheld ground, ~the as-generated cyan
+const HOLO = {
+  versari: "#ff5f52",
+  lakers: "#58b6ff",
+  goldgrass: "#b8e04e",
+  plainers: "#c08cff",
+  tempest: "#6f9de0",
+  croppers: "#ecd162",
+  steeltraders: "#f0796c",
+  dambarans: "#7fd88f",
+};
+
+export function holoColor(ownerId) {
+  if (!ownerId || ownerId === "neutral") return HOLO_NEUTRAL;
+  return HOLO[ownerId] || HOLO_NEUTRAL;
 }
 
 // A location is fully controlled only when one player owns all 3 sections.

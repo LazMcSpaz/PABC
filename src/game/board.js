@@ -40,7 +40,7 @@ export function bfsDistances(adjacency, start) {
   const queue = [start];
   while (queue.length) {
     const cur = queue.shift();
-    for (const nb of adjacency[cur]) {
+    for (const nb of adjacency[cur] || []) {
       if (dist[nb] === undefined) {
         dist[nb] = dist[cur] + 1;
         queue.push(nb);
@@ -109,11 +109,26 @@ export function isCover(hex) {
   return !!(hex && hex.cover);
 }
 // §16.2 roads — a per-hex MOVEMENT modifier (not its own terrain). A road
-// negates terrain movement cost: a road hex costs 1 to enter and never halts,
-// even through forest or mountain. Roads do NOT affect cover/visibility — a
-// road through a forest still conceals and a mountain still blocks sight.
+// EASES terrain cost: a road through a forest costs 1 instead of 2, and a road
+// over a mountain costs 2 and does not halt, instead of halting outright. It
+// does not make rough ground free — see CONFIG.movement for why that matters.
+// On EASY ground it is quicker still: half a hex (`isPaved` below).
+// Roads do NOT affect cover/visibility — a road through a forest still
+// conceals and a mountain still blocks sight.
 export function isRoad(hex) {
   return !!(hex && hex.road);
+}
+
+// Graded ground: a road hex or a rail hex. Both are surfaces somebody levelled
+// before the collapse, so both are quick to march down and neither halts you —
+// a cutting through a mountain is a cutting whether it carries sleepers or
+// tarmac. Entering one costs `CONFIG.movement.pavedCost` rather than 1.
+//
+// This is about the HEXES a line occupies, and is a different thing from the
+// station-to-station rail hop (`CONFIG.rail.hopCost`), which is a property of
+// the LINK and skips the ground between entirely.
+export function isPaved(hex) {
+  return !!(hex && (hex.road || hex.rail));
 }
 
 // §16.2 terrain movement — the hexes a unit can reach this turn from `start`
@@ -121,25 +136,57 @@ export function isRoad(hex) {
 //   • forest (cover): costs CONFIG.movement.forestCost (default 2 = "−1 speed")
 //   • mountain (elevation): you may step ONTO one (≥1 point) but it HALTS the
 //     move (arrive with 0) — "speed 1, no matter what"; no passing through.
-//   • road: negates the above — costs 1, never halts (fast lane / chokepoint).
+//   • road: EASES the above rather than deleting it — forest costs
+//     roadForestCost (1) and a mountain costs roadMountainCost (2) without
+//     halting. A road is a fast lane and a chokepoint; it is not a bulldozer.
 //   • everything else: 1.
 //   • `blockedThrough` (a Set of hexIds): you may ENTER such a hex but it HALTS
 //     you there (a foreign unit's blockade, or an enemy Location §16.2) — the
 //     caller computes these via diplomacy (see movement.js).
+//   • `railEdges` (Map hexId -> [hexId]): rail hops available to THIS mover,
+//     each a flat 1 MP however far apart the endpoints. Injected as extra
+//     adjacency rather than special-cased, so chaining across a hub falls out
+//     of the same search with no bespoke algorithm (rail doc §2.1).
+//   • `surprise` (a Set of hexIds ⊆ blockedThrough): halts the mover could not
+//     SEE coming. It still stops there, but keeps the movement it had left
+//     rather than losing the rest of its turn to something it had no way to
+//     know about — see below.
+//
+// Two different numbers come out of this, which used to be one:
+//
+//   best[hex]    what the search may continue with. A halting hex is 0, which
+//                is exactly how nothing paths onward through it.
+//   arrive[hex]  what a unit standing there actually has left. Identical to
+//                `best` everywhere except a SURPRISE halt, where the unit keeps
+//                its remainder. Conflating the two is what made an ambush cost
+//                a whole turn instead of an advance.
+//
 // Best-first expansion (maximise movement left = minimise cost), tracking a
 // predecessor for each hex so the exact ROUTE can be reconstructed. Returns
-// { best: {hex: remaining}, prev: {hex: cameFrom} } including `start`.
-function expandMovement(state, start, budget, blocked, ignoreTerrain, extraCost) {
+// { best, arrive, prev } including `start`.
+function expandMovement(state, start, budget, blocked, ignoreTerrain, extraCost, railEdges, surprise) {
   const adj = state.board.adjacency;
   const hexes = state.board.hexes;
   // A Landship-class mover (chip `ignoresTerrain`) treats every hex as
-  // road-grade: forest costs 1, mountains do not halt. Blockade halts and
-  // per-hex budget still apply — it drives over terrain, not through armies.
-  const halts = CONFIG.movement.mountainHalts && !ignoreTerrain;
-  const forestCost = ignoreTerrain ? 1 : CONFIG.movement.forestCost;
+  // road-grade — the same eased costs a road gives, everywhere, whether or not
+  // one was ever laid. Blockade halts and per-hex budget still apply: it
+  // drives over terrain, not through armies.
+  const mv = CONFIG.movement;
+  const forestCost = mv.forestCost;
+  const easedForest = mv.roadForestCost ?? 1;
+  const easedMountain = mv.roadMountainCost ?? 1;
   const best = { [start]: budget };
+  const arrive = { [start]: budget };
   const prev = { [start]: null };
   const queue = [start];
+  // A halt keeps its remainder only when the mover could not see it coming.
+  const kept = (nb, rem, cost) => (surprise && surprise.has(nb) ? rem - cost : 0);
+  // `best` drives expansion; `arrive` is relaxed separately, because a halting
+  // hex pins best at 0 and would otherwise never take a cheaper approach.
+  const relax = (nb, cur, enter, landed) => {
+    if (landed > (arrive[nb] ?? -1)) { arrive[nb] = landed; prev[nb] = cur; }
+    if (enter > (best[nb] ?? -1)) { best[nb] = enter; queue.push(nb); }
+  };
   while (queue.length) {
     let bi = 0;
     for (let i = 1; i < queue.length; i++) if (best[queue[i]] > best[queue[bi]]) bi = i;
@@ -147,28 +194,59 @@ function expandMovement(state, start, budget, blocked, ignoreTerrain, extraCost)
     const rem = best[cur];
     if (rem <= 0) continue; // out of movement — also how halting hexes (rem 0) stop
     for (const nb of adj[cur] || []) {
-      const road = isRoad(hexes[nb]);
-      const mountain = halts && isElevation(hexes[nb]) && !road; // road negates the halt
+      // A laid surface — road OR rail. Both are ground somebody levelled
+      // before the collapse, and a cutting through a mountain is a cutting
+      // whether it carries sleepers or tarmac.
+      const paved = isPaved(hexes[nb]);
+      // …or a mover that carries its own road-grade with it (Landship,
+      // Pathfinders). It gets the EASED terrain costs everywhere, but not the
+      // paved discount on open ground: it is not a road-layer.
+      const graded = paved || ignoreTerrain;
+      const high = isElevation(hexes[nb]);
+      // A mountain halts unless it is graded — the road switchbacks over it.
+      const mountain = mv.mountainHalts && high && !graded;
       // Toll Gate (MOVE_TAX): a per-hex surcharge layered on top of the
-      // terrain cost — roads don't waive a toll.
+      // terrain cost — a lane doesn't waive a toll.
       const toll = extraCost ? extraCost.get(nb) || 0 : 0;
-      const cost = (mountain ? 1 : (isCover(hexes[nb]) && !road ? forestCost : 1)) + toll;
+      // A halting mountain's own cost is nominal: the halt is what it costs
+      // you. Rough ground pays its terrain, eased or not — a road over a pass
+      // is still a pass. The half-hex is for EASY ground, which is where a
+      // lane is actually a lane.
+      let base;
+      if (high) base = graded ? easedMountain : 1;
+      else if (isCover(hexes[nb])) base = graded ? easedForest : forestCost;
+      else base = paved ? mv.pavedCost : 1;
+      const cost = base + toll;
       if (rem < cost) continue; // not enough movement to enter
       // A mountain (no road) or a blockaded hex halts you on entry: enter, stop.
-      const terminal = mountain || (blocked && blocked.has(nb));
-      const nrem = terminal ? 0 : rem - cost;
-      if (nrem > (best[nb] ?? -1)) { best[nb] = nrem; prev[nb] = cur; queue.push(nb); }
+      // Terrain is never a "surprise" — a mountain is a mountain whether or not
+      // you had scouted it, and §16.2's speed-1 rule is not what this is for.
+      const halted = blocked && blocked.has(nb);
+      const terminal = mountain || halted;
+      const enter = terminal ? 0 : rem - cost;
+      relax(nb, cur, enter, halted && !mountain ? kept(nb, rem, cost) : enter);
+    }
+    // Rail hops from this hex. Flat 1 MP, and a blockaded far end still halts
+    // you there — arriving by train is still arriving.
+    for (const nb of (railEdges && railEdges.get(cur)) || []) {
+      if (rem < CONFIG.rail.hopCost) continue;
+      const halted = blocked && blocked.has(nb);
+      const enter = halted ? 0 : rem - CONFIG.rail.hopCost;
+      relax(nb, cur, enter, halted ? kept(nb, rem, CONFIG.rail.hopCost) : enter);
     }
   }
-  return { best, prev };
+  return { best, arrive, prev };
 }
 
 // Reachable hexes → { hexId: movement points remaining } (start excluded; a
 // halting hex stores 0).
-export function movementField(state, start, budget, { blockedThrough, ignoreTerrain, extraCost } = {}) {
-  const { best } = expandMovement(state, start, budget, blockedThrough || null, !!ignoreTerrain, extraCost || null);
+export function movementField(state, start, budget, { blockedThrough, ignoreTerrain, extraCost, railEdges, surprise } = {}) {
+  const { arrive } = expandMovement(state, start, budget, blockedThrough || null, !!ignoreTerrain, extraCost || null, railEdges || null, surprise || null);
   const out = {};
-  for (const hex in best) if (hex !== start) out[hex] = best[hex];
+  // ARRIVAL values, not pathing values: the reachable set is identical either
+  // way (same keys), but a unit halted by an ambush must be told the movement
+  // it actually kept.
+  for (const hex in arrive) if (hex !== start) out[hex] = arrive[hex];
   return out;
 }
 
@@ -177,10 +255,10 @@ export function movementField(state, start, budget, { blockedThrough, ignoreTerr
 // Returns the ordered hex list [start, …, dest], or null if `dest` isn't
 // reachable within `budget`. Pass a large budget for a budget-agnostic route
 // (e.g. replay display).
-export function movementRoute(state, start, budget, dest, { blockedThrough, ignoreTerrain, extraCost } = {}) {
+export function movementRoute(state, start, budget, dest, { blockedThrough, ignoreTerrain, extraCost, railEdges, surprise } = {}) {
   if (dest === start) return [start];
-  const { best, prev } = expandMovement(state, start, budget, blockedThrough || null, !!ignoreTerrain, extraCost || null);
-  if (best[dest] === undefined) return null;
+  const { arrive, prev } = expandMovement(state, start, budget, blockedThrough || null, !!ignoreTerrain, extraCost || null, railEdges || null, surprise || null);
+  if (arrive[dest] === undefined) return null;
   const path = [];
   for (let c = dest; c != null; c = prev[c]) path.unshift(c);
   return path;
@@ -220,39 +298,200 @@ export function shortestPathHexes(adjacency, a, b) {
   return path;
 }
 
-// §16.2 roads — lay a deterministic road network: a minimum spanning tree
-// (Prim's, by hop distance) over the given `hubHexes` — the faction capitals —
-// with each tree edge's shortest path stamped `road`. The result is a few main
-// corridors between the powers (negating terrain movement cost along them), so
-// the wilderness off-road still matters and the roads become contested lanes.
-// Operates on the live `hexes` map (sets hexes[id].road = true).
-export function assignRoads(adjacency, hexes, hubHexes) {
-  const hubs = [...new Set(hubHexes)].filter((h) => hexes[h]);
-  if (hubs.length < 2) return;
+// §16.2 roads — roads connect SETTLEMENTS, because that is what makes them
+// mean something. A road that merely links the four capitals is a handful of
+// corridors through empty country; a road network that ties every Location to
+// its neighbours is the thing a blockade can actually cut
+// (docs/rail-road-blockade-design.md §3 funds a blockade through "an
+// uninterrupted road connection to the nearest owned settlement" — that
+// sentence only has teeth if such a connection generally exists).
+//
+// The rule:
+//   * every settlement gets a road to its NEAREST other settlement;
+//   * a settlement big enough (CONFIG.roads.linksByValue) also gets one to its
+//     SECOND nearest, which is what turns a chain into a network;
+//   * finally, if that still leaves separate clusters, the cheapest links
+//     between them are added until the network is connected — a road system
+//     with unreachable islands would silently break supply and blockade.
+//
+// Links are undirected and deduplicated, so A→B and B→A lay one road. Every
+// link stamps `road` along a hex path, so roads remain a per-hex terrain
+// property exactly as before; only which hexes get stamped changes.
+//
+// HOW each corridor is routed matters as much as which links exist, because
+// `road` is a per-hex boolean and everything downstream — the renderer, and
+// the supply walk in blockades.js — reads connectivity as "adjacent hexes that
+// both carry road". Two corridors that pass through neighbouring hexes are
+// therefore welded into a ladder: rung after rung of road connecting two lanes
+// that were never one road. It reads as a lattice rather than a network, and
+// no real road system looks like that, because a second route joins the
+// existing road rather than running one field over from it.
+//
+// So corridors are laid ONE AT A TIME over the state left by the ones before,
+// and each is routed by cost rather than by hop count:
+//
+//   * ground that already carries road is cheap (`CONFIG.roads.reuseCost`), so
+//     a later corridor merges into an existing trunk and shares it instead of
+//     laying a parallel lane beside it;
+//   * rough ground is dear (`CONFIG.roads.terrainCost`), so roads run round a
+//     ridge or a wood the way a surveyor would rather than straight over it.
+//
+// The second one is also a movement fix, not only a looks fix: a road EASES a
+// mountain's halt and a forest's toll (`expandMovement`), so every rough hex a
+// corridor crosses is a rough hex that plays softer than it looks. Routing
+// around them keeps roads as fast lanes through open country rather than as a
+// discount on the terrain they happen to cross.
+export function assignRoads(adjacency, hexes, settlementHexes, valueOfHex = () => "medium") {
+  const nodes = [...new Set(settlementHexes)].filter((h) => hexes[h]);
+  if (nodes.length < 2) return [];
   const distCache = {};
   const distFrom = (h) => (distCache[h] ||= bfsDistances(adjacency, h));
+
+  const links = new Map(); // "a|b" (sorted) -> [a, b]
+  const addLink = (a, b) => {
+    if (a === b) return;
+    const key = a < b ? `${a}|${b}` : `${b}|${a}`;
+    if (!links.has(key)) links.set(key, a < b ? [a, b] : [b, a]);
+  };
+
+  // nearest / second-nearest, ties broken by hexId so the map is deterministic
+  for (const a of nodes) {
+    const da = distFrom(a);
+    const ranked = nodes
+      .filter((b) => b !== a && da[b] !== undefined)
+      .sort((p, q) => (da[p] - da[q]) || (p < q ? -1 : 1));
+    const want = CONFIG.roads.linksByValue[valueOfHex(a)] ?? 1;
+    for (let i = 0; i < Math.min(want, ranked.length); i++) addLink(a, ranked[i]);
+  }
+
+  // union-find over the links so far, then bridge any remaining clusters
+  const parent = {};
+  const find = (x) => (parent[x] === undefined || parent[x] === x ? (parent[x] = x)
+    : (parent[x] = find(parent[x])));
+  const union = (x, y) => { parent[find(x)] = find(y); };
+  for (const [a, b] of links.values()) union(a, b);
+  for (;;) {
+    const roots = new Set(nodes.map(find));
+    if (roots.size <= 1) break;
+    let best = null;
+    for (const a of nodes) {
+      const da = distFrom(a);
+      for (const b of nodes) {
+        if (find(a) === find(b) || da[b] === undefined) continue;
+        if (!best || da[b] < best.d || (da[b] === best.d && `${a}|${b}` < `${best.a}|${best.b}`)) {
+          best = { a, b, d: da[b] };
+        }
+      }
+    }
+    if (!best) break; // genuinely unreachable on this graph — nothing to add
+    addLink(best.a, best.b);
+    union(best.a, best.b);
+  }
+
+  // Shortest links first: they lay the short local stubs that the longer
+  // cross-country routes then have something to join. (Longest-first was
+  // measured too, and leaves noticeably more parallel lanes.) Sorted by hop
+  // count then by key, so the order never depends on discovery order.
+  const ordered = [...links.values()].sort((p, q) => {
+    const dp = distFrom(p[0])[p[1]] ?? Infinity;
+    const dq = distFrom(q[0])[q[1]] ?? Infinity;
+    return (dp - dq) || (`${p[0]}|${p[1]}` < `${q[0]}|${q[1]}` ? -1 : 1);
+  });
+  for (const [a, b] of ordered) {
+    for (const hex of roadPath(adjacency, hexes, a, b)) hexes[hex].road = true;
+  }
+  return [...links.values()];
+}
+
+// The cheapest route for a road between two settlements, over the network as
+// it stands. Dijkstra rather than BFS because the whole point is that steps
+// are not all worth the same: existing road is nearly free, rough ground is
+// expensive, open country is the unit.
+//
+// Ties break on hex id, so a given board always lays the same roads — a road
+// network that reshuffled between two runs of the same seed would take the
+// board's determinism with it.
+function roadPath(adjacency, hexes, a, b) {
+  if (a === b) return [a];
+  const cfg = CONFIG.roads || {};
+  const reuse = cfg.reuseCost ?? 1;
+  const rough = cfg.terrainCost || {};
+  const stepCost = (id) => {
+    const h = hexes[id];
+    if (!h) return Infinity;
+    if (h.road) return reuse;
+    if (h.elevation) return rough.mountain ?? 1;
+    if (h.cover) return rough.forest ?? 1;
+    return 1;
+  };
+
+  const dist = { [a]: 0 };
+  const prev = { [a]: null };
+  const settled = new Set();
+  for (;;) {
+    let cur = null;
+    for (const id of Object.keys(dist)) {
+      if (settled.has(id)) continue;
+      if (cur === null || dist[id] < dist[cur] - 1e-9
+        || (Math.abs(dist[id] - dist[cur]) < 1e-9 && id < cur)) cur = id;
+    }
+    if (cur === null || cur === b) break;
+    settled.add(cur);
+    for (const nb of adjacency[cur] || []) {
+      const d = dist[cur] + stepCost(nb);
+      if (!Number.isFinite(d)) continue;
+      if (dist[nb] === undefined || d < dist[nb] - 1e-9) { dist[nb] = d; prev[nb] = cur; }
+    }
+  }
+  if (dist[b] === undefined) return [];
+  const path = [];
+  for (let c = b; c != null; c = prev[c]) path.unshift(c);
+  return path;
+}
+
+// Rail — docs/rail-road-blockade-design.md §2. NOT player-built: it is
+// pre-collapse trunk line, laid once here and never changed.
+//
+// Rail is deliberately sparse where road is dense. Roads reach every
+// settlement, so a rail network of comparable size would add nothing; instead
+// rail is a spanning tree over the MAJOR settlements — the fewest lines that
+// tie the big places into one system. Which settlements qualify is
+// `CONFIG.rail.hubTiers` (see setup.js); every capital is in that band, so the
+// trunk still ties every faction's home into the network.
+//
+// A line occupies a real sequence of hexes, so it can be cut per-hex like a
+// road (§2.1), and `hex.rail` gives the board renderer something to draw. But
+// the 1-MP hop is a property of the LINK, not of its hexes, so the endpoints
+// and the path are returned as records for `state.board.rails`.
+export function assignRails(adjacency, hexes, hubHexes) {
+  const hubs = [...new Set(hubHexes)].filter((h) => hexes[h]);
+  if (hubs.length < 2) return [];
+  const distCache = {};
+  const distFrom = (h) => (distCache[h] ||= bfsDistances(adjacency, h));
+  const links = [];
   const inTree = new Set([hubs[0]]);
   while (inTree.size < hubs.length) {
     let best = null;
     for (const a of inTree) {
       const da = distFrom(a);
       for (const b of hubs) {
-        if (inTree.has(b)) continue;
-        const d = da[b];
-        if (d === undefined) continue;
-        if (!best || d < best.d || (d === best.d && b < best.b)) best = { a, b, d };
+        if (inTree.has(b) || da[b] === undefined) continue;
+        if (!best || da[b] < best.d || (da[b] === best.d && b < best.b)) best = { a, b, d: da[b] };
       }
     }
     if (!best) break;
     inTree.add(best.b);
-    for (const hex of shortestPathHexes(adjacency, best.a, best.b)) hexes[hex].road = true;
+    const path = shortestPathHexes(adjacency, best.a, best.b);
+    for (const hex of path) hexes[hex].rail = true;
+    links.push({ a: best.a, b: best.b, path });
   }
+  return links;
 }
 
 // Constrained-random layout: place the 10 Locations, then fill the rest
 // with encounter / terrain tiles. Each faction's two affiliated Locations
 // land within 2 hexes of each other; the four start areas are spread.
-export function generateLayout(rng, grid, factions, locations) {
+export function generateLayout(rng, grid, factions, locations, { locationBudget, encounterShare } = {}) {
   const hexIds = Object.keys(grid.hexes);
   const distFrom = {};
   for (const id of hexIds) distFrom[id] = bfsDistances(grid.adjacency, id);
@@ -273,34 +512,106 @@ export function generateLayout(rng, grid, factions, locations) {
     anchors.push(best);
   }
 
+  // Which named Locations are in play at this board size.
+  //
+  // These come in FAIRNESS GROUPS, and a group is all-or-nothing. Every capital
+  // is one Location per faction; every second home is one Location per faction;
+  // the unaffiliated prizes belong to nobody. Take part of a group and the
+  // factions stop being equal — which is exactly what used to happen: the list
+  // was concatenated and truncated flat, so a budget of 8 took all 4 capitals,
+  // both prizes, and then the FIRST TWO second homes. Versari and Goldgrass got
+  // a homeland pair and Lakers and Plainers got one city each, on every seed
+  // (docs/playtest-2026-08-15-findings.md).
+  //
+  // So groups are now admitted whole or not at all, in priority order. Second
+  // homes outrank the neutral prizes because a homeland pair is what makes two
+  // factions comparable, while a prize belongs to whoever reaches it first.
+  //
+  // Budgets land as: 6 → capitals + prizes; 8 → capitals + second homes;
+  // 10 → everything. Only the 8 case changes, and it is the one that was unfair.
+  const fids = Object.keys(factions);
+  const capitals = fids.map((f) => factions[f].capital).filter(Boolean);
+  // Homes beyond the capital, banded by RANK: band 0 is every faction's second
+  // home, band 1 every faction's third, and so on. Ranking rather than
+  // hard-coding "seconds" means a faction gaining a fourth affiliated Location
+  // extends the sequence instead of silently unbalancing it.
+  const homeBands = [];
+  for (const f of fids) {
+    const rest = (factions[f].affiliatedLocations || []).filter((l) => l !== factions[f].capital);
+    rest.forEach((id, rank) => { (homeBands[rank] ||= []).push(id); });
+  }
+  const unaffiliated = Object.values(locations).filter((l) => !l.affiliation).map((l) => l.id);
+  const total = capitals.length + homeBands.flat().length + unaffiliated.length;
+  const budget = Math.max(capitals.length, Math.min(locationBudget ?? total, total));
+
+  const inPlay = new Set(capitals); // capitals are never optional
+  let room = budget - capitals.length;
+  // Each home band is ALL-OR-NOTHING: half a band means some factions get an
+  // extra city and others do not, which is exactly the unfairness this replaced.
+  for (const band of homeBands) {
+    if (band.length === 0 || band.length > room) continue;
+    for (const id of band) inPlay.add(id);
+    room -= band.length;
+  }
+  // The neutral prizes are NOT a fairness group — they belong to nobody, so a
+  // subset is perfectly fair as long as it is deterministic. Taking them
+  // all-or-nothing would mean that authoring more of them SHRINKS the big
+  // boards, which is the opposite of what more content should do.
+  for (const id of unaffiliated) {
+    if (room <= 0) break;
+    inPlay.add(id);
+    room -= 1;
+  }
+
   const placement = {}; // hexId -> locationId
   const factionStart = {}; // factionId -> hexId
   const used = new Set();
 
   rng.shuffle(Object.keys(factions)).forEach((fid, i) => {
     const anchor = anchors[i];
-    // sort the faction's pair by strategic value — the weaker is the start
-    const pair = [...factions[fid].affiliatedLocations].sort(
-      (p, q) => VALUE_RANK[locations[p].strategicValue] - VALUE_RANK[locations[q].strategicValue],
-    );
-    placement[anchor] = pair[0];
+    // The faction's declared capital is the start; the other affiliated
+    // Location is its nearby second objective. This used to be inferred by
+    // sorting the pair on strategicValue and starting on the weaker one, which
+    // made the capital a side effect of the value table — promote a Location
+    // and a faction would silently start somewhere else. It is content now
+    // (`FACTIONS[fid].capital`), with the old ordering kept as a fallback so a
+    // faction that declares no capital still gets a sensible one.
+    const affiliated = factions[fid].affiliatedLocations;
+    const declared = factions[fid].capital;
+    const start = affiliated.includes(declared)
+      ? declared
+      : [...affiliated].sort(
+          (p, q) => VALUE_RANK[locations[p].strategicValue] - VALUE_RANK[locations[q].strategicValue],
+        )[0];
+    placement[anchor] = start;
     factionStart[fid] = anchor;
     used.add(anchor);
 
-    let candidates = hexIds.filter(
-      (id) => !used.has(id) && distFrom[anchor][id] >= 1 && distFrom[anchor][id] <= 2,
-    );
-    if (candidates.length === 0) {
-      candidates = hexIds.filter((id) => !used.has(id) && distFrom[anchor][id] <= 3);
-    }
-    const partner = rng.pick(candidates);
-    placement[partner] = pair[1];
-    used.add(partner);
+    // The rest of the homeland, in rank order, each dropped near the anchor.
+    // A faction's second home sits closest; the third pushes a ring further
+    // out so a homeland spreads rather than stacking on one spot. Boards that
+    // did not budget for a band simply do not reach it — on a small map a
+    // faction holds its capital and nothing else, which is the point: fewer
+    // objectives, more ground between them.
+    const homeland = affiliated.filter((l) => l !== start && inPlay.has(l));
+    homeland.forEach((locId, rank) => {
+      const near = 1 + rank;      // 2nd home within 1-2, 3rd within 2-3, …
+      const far = 2 + rank;
+      let candidates = hexIds.filter(
+        (id) => !used.has(id) && distFrom[anchor][id] >= near && distFrom[anchor][id] <= far,
+      );
+      if (candidates.length === 0) {
+        candidates = hexIds.filter((id) => !used.has(id) && distFrom[anchor][id] <= far + 1);
+      }
+      if (candidates.length === 0) return; // board too small to seat it
+      const partner = rng.pick(candidates);
+      placement[partner] = locId;
+      used.add(partner);
+    });
   });
 
   // unaffiliated Locations — biased toward hexes far from every anchor
-  const unaffiliated = Object.values(locations).filter((l) => !l.affiliation).map((l) => l.id);
-  for (const locId of unaffiliated) {
+  for (const locId of unaffiliated.filter((id) => inPlay.has(id))) {
     const ranked = hexIds
       .filter((id) => !used.has(id))
       .map((id) => ({ id, score: Math.min(...anchors.map((a) => distFrom[a][id])) }))
@@ -314,8 +625,16 @@ export function generateLayout(rng, grid, factions, locations) {
   // everything else splits into encounter / terrain
   const type = {};
   for (const id of hexIds) if (placement[id]) type[id] = "location";
-  rng.shuffle(hexIds.filter((id) => !used.has(id))).forEach((id, i) => {
-    type[id] = i < CONFIG.hexSplit.encounter ? "encounter" : "terrain";
+  // Encounters are a SHARE of what's left, not a fixed count — a fixed count
+  // meant every hex added to a bigger board became plain terrain.
+  const spare = hexIds.filter((id) => !used.has(id));
+  // The share is settable per game (setup screen) — 0 leaves a board of pure
+  // terrain, which is a legitimate way to play even though nothing in the
+  // engine depends on encounters existing.
+  const share = encounterShare ?? CONFIG.hexSplit.encounterShare;
+  const nEncounter = Math.round(spare.length * Math.max(0, Math.min(1, share)));
+  rng.shuffle(spare).forEach((id, i) => {
+    type[id] = i < nEncounter ? "encounter" : "terrain";
   });
 
   return { type, placement, factionStart, anchors };
