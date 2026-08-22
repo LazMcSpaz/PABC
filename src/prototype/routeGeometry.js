@@ -429,14 +429,25 @@ export function buildRouteNetwork(rows, hexes, centers, opts = {}) {
     const cb = centers[b];
     const n = shared ? routeNormal(a, b) : edgeNormal(ca, cb);
     const push = shared ? (separation / 2) * SIDE[kind] : 0;
-    // Sample in the chain's direction of travel, but hash on the sorted key, so
-    // a chain walked the other way lays down the same wander.
-    const forward = a < b;
+    // Two different orderings meet here, and they must NOT be conflated.
+    //
+    // POSITION runs in the chain's direction of travel: `a` is the hex the
+    // chain is coming from and `b` the one it is going to, so the samples have
+    // to come out at rising t or the path doubles back on itself between two
+    // hexes — up the edge, back down it, then up again. (It did. A road with
+    // two samples an edge, on any edge whose chain happened to walk it from
+    // the higher hex id to the lower, drew a hairpin in open ground.)
+    //
+    // The HASH runs along the sorted edge instead, so the point one third of
+    // the way from the low hex gets the same wander whichever way a chain
+    // crosses it — which is what keeps a road and a railway sharing an edge
+    // sampling the same base line, and keeps the board stable if the walk
+    // order ever changes.
     const out = [];
     for (let i = 1; i <= p.samples; i++) {
-      const step = forward ? i : p.samples + 1 - i;
-      const t = step / (p.samples + 1);
-      const off = signed(`${key}@${step}`) * p.amp + push;
+      const t = i / (p.samples + 1);
+      const along = a < b ? i : p.samples + 1 - i;
+      const off = signed(`${key}@${along}`) * p.amp + push;
       out.push({
         x: ca.x + (cb.x - ca.x) * t + n.x * off,
         y: ca.y + (cb.y - ca.y) * t + n.y * off,
@@ -511,15 +522,33 @@ export function buildRouteNetwork(rows, hexes, centers, opts = {}) {
       // Stop outside a settlement rather than running through its middle. The
       // trim is measured from the neighbouring bend, so the route arrives on
       // the line it was already travelling.
+      //
+      // It has to WALK BACK, not just look at the one neighbouring point.
+      // Anything may leave a point inside the keep-out — and the crossing hold
+      // a shared pair uses to swap sides (edgePoints) does exactly that, since
+      // it sits four fifths along an edge, which on this grid's short edges is
+      // ~22px from the far centre and well within the ellipse. Cutting FROM a
+      // point that is already inside cuts nothing: the segment never crosses
+      // the boundary, so the route simply ends wherever that point fell —
+      // in the middle of the settlement art it was meant to stop outside of.
+      // Dropping inside points until one is outside, then cutting from there,
+      // is right whatever put them there.
+      const cutEnd = (centre, head) => {
+        while (pts.length > 1) {
+          const iEnd = head ? 0 : pts.length - 1;
+          const iPrev = head ? 1 : pts.length - 2;
+          const t = cutAtEllipse(pts[iPrev], pts[iEnd], centre, clearance);
+          if (t) { pts[iEnd] = t; return; }
+          if (head) pts.shift(); else pts.pop();
+        }
+      };
       if (!closed) {
         if (hexes[nodes[0]]?.type === "location" && pts.length > 1) {
-          const t = cutAtEllipse(pts[1], pts[0], centers[nodes[0]], clearance);
-          if (t) pts[0] = t; else pts.shift();
+          cutEnd(centers[nodes[0]], true);
         }
         const end = nodes[nodes.length - 1];
         if (pts.length > 1 && hexes[end]?.type === "location") {
-          const t = cutAtEllipse(pts[pts.length - 2], pts[pts.length - 1], centers[end], clearance);
-          if (t) pts[pts.length - 1] = t; else pts.pop();
+          cutEnd(centers[end], false);
         }
       }
       if (pts.length < 2) continue;

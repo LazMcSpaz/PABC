@@ -776,6 +776,88 @@ board in thirty, forest about once a board); §12 makes the crossings that do
 happen still cost something. Route around it, and ease rather than delete what
 you cannot route around — the same fix from two ends.
 
+## 13. The hairpin, and a shape audit (2026-08-22)
+
+Reported from a live game: a road climbing out of one hex, turning back on
+itself in the next, and running back down beside its own line. It was a real
+bug, in §10's wander rather than in §11's generation.
+
+`edgePoints` samples the two points a road bends through inside each hex edge.
+Two orderings meet there and they were conflated:
+
+- **position** has to run in the chain's direction of travel — `a` is the hex
+  the chain comes from, `b` the one it goes to — or the points come out
+  backwards;
+- **the hash index** has to run along the edge's SORTED ends, so the point one
+  third of the way from the lower hex id gets the same wander whichever way a
+  chain crosses it. That is what keeps a road and a railway sharing an edge on
+  the same base line.
+
+The flipped index was applied to BOTH. So on any edge whose chain happened to
+walk it from the higher hex id to the lower, a road emitted its samples at t =
+2/3 then t = 1/3: up two thirds of the edge, back to one third, then up again.
+A hairpin in open ground, about 1.6 times a board. Rails were immune (one
+sample an edge, at t = 1/2, which is its own mirror), and so were shared edges,
+which use the rail profile — so it only ever showed on plain road.
+
+The fix is one line: `t` from the walk, the hash index from the sorted ends.
+
+### The audit
+
+Rather than fix the one shape and hope, every road on 72 generated boards was
+walked at 3px and tested for shapes no road takes. Two of the seven classes
+were firing, both from this single bug:
+
+| | before | after |
+|---|---|---|
+| doubles back on itself | 1.61/board | 0 |
+| crosses its own line | 0.78/board | 0 |
+| wanders over ground carrying no route | 0 | 0 |
+| runs inside a settlement's keep-out | 0 | 0 |
+| curve overshoots the hex lattice | 0 | 0 |
+| a stretch drawn twice | 0 | 0 |
+| a stub too short to be a road | 0 | 0 |
+
+The generated network was audited the same way and came back clean: no
+stranded road hex, no road ending in open country (only settlements terminate
+a line), every network one connected piece, every settlement on it. Degree
+distribution over 72 boards is 245 hexes with one road neighbour (all
+settlements), 964 with two, 428 with three, 67 with four, and three with five —
+of which two are towns. A five-way crossroads in open country turns up about
+once in seventy boards, which is a landmark rather than a defect.
+
+All twelve of these now run in `scripts/check-route-geometry.mjs`
+(`npm run check:routes`, ~2s over 30 boards). Reintroducing the one-line bug
+fails two of them, which is the only evidence that a regression test is worth
+having.
+
+### A second bug, caught by the audit on the way in
+
+Merging this onto main — where the junction work of §12's sibling commit had
+landed in the meantime — the keep-out check fired on eleven routes. Not from
+the hairpin, and not from this branch.
+
+`edgePoints` now inserts a crossing point four fifths along a shared edge, so a
+pair forced to swap sides crosses once and steeply rather than braiding (that
+is the right shape). But four fifths along one of this grid's short vertical
+edges is ~22px from the far hex's centre, and the settlement keep-out ellipse
+is 49.7 × 24.2 — so the inserted point lands INSIDE it. The trim then cut from
+a point already inside, where the segment never crosses the boundary at all, so
+`cutAtEllipse` returned null, the node was dropped, and the route ended
+wherever that crossing point happened to fall rather than on the boundary.
+
+The trim now walks back, dropping points that are already inside the keep-out
+until it finds one outside and cutting from there. That is right whatever put a
+point in there, rather than being a patch for this one cause.
+
+The audit's keep-out test was a fuzzy "is any point inside", which only notices
+an intrusion deep enough to see. It is now paired with the crisp version —
+**a chain ending at a settlement must end ON the boundary**, r within 1 ± 0.02
+— which catches a broken trim the moment it breaks. The fuzzy test keeps a
+little slack, because a curve may bow a fraction of a pixel inside between two
+control points that are both exactly on the boundary, and that is not what
+either test is for.
+
 ## 8. What this does not change
 
 Worth stating plainly, because it bounds the blast radius: no engine file, no
