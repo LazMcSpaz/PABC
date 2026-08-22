@@ -296,7 +296,15 @@ export const CONFIG = {
   // turn is simply offered on a later one, because the pass re-runs every
   // turn and the gates it skipped are still true. Set `newPerTurn` to 0 for
   // no limit.
-  quests: { newPerTurn: 2 },
+  //
+  // `beatsPerTurn` is the other half: how many beats a player may actually be
+  // HANDED in a turn, counted across every delivery mode — the fan-out when a
+  // quest advances, the round-end pulse, and walking onto a discovered marker
+  // alike. A player experiences cards, not delivery modes, so a cap that only
+  // counted one kind would leave the others free to pile up. Nothing is lost
+  // to it: a held beat is offered again on the next pass and a held marker
+  // stays on its hex. 0 for no limit.
+  quests: { newPerTurn: 2, beatsPerTurn: 3 },
 
   // Capital chip bonuses (content/config.csv).
   capital: { garrisonBonus: 2, productionBonus: 2 },

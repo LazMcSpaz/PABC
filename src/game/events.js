@@ -39,6 +39,9 @@ export const EVENT_NAMES = new Set([
   // Per-choice beat routing: which successor a choice selected, and the
   // case where the named successor was not deliverable.
   "quest_routed", "quest_route_missed",
+  // A beat that was ready but would have been the player's fourth this turn.
+  // Held, not dropped — it is offered again on the next pass.
+  "quest_beat_held",
   // Authored resolution primitives (ROLL / CONTEST) and their consequences.
   "roll_resolved", "narrative_contest_resolved", "deck_peeked",
   "safe_passage_granted", "safe_passage_expired",

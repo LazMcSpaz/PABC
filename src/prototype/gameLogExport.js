@@ -217,6 +217,8 @@ function formatLine(ev, state) {
     case "quest_started": return `Quest started: ${p.questId} (mode: ${p.mode}, claimant: ${factionName(p.claimant)})`;
     case "quest_advanced": return `Quest advanced: ${p.questId} → beat ${p.beatId}`;
     case "quest_completed": return `Quest completed: ${p.questId} (claimant: ${factionName(p.claimant)})`;
+    case "quest_beat_held": return `Beat held for ${factionName(p.player)}: ${p.questId} → ${p.beatId} `
+      + `(${p.reason}, cap ${p.cap}/turn) — offered again next turn`;
     case "deferred_resolved": return `Deferred effect packet resolved: ${p.effectCount} effect(s) (queued round ${p.queuedAt}, due round ${p.dueRound})`;
     case "trigger_fired": return `Trigger fired: ${p.trigger} (strength ${p.strength}, weight ${p.weight}, score ${p.score})`;
     case "hex_explored": return `${factionName(p.faction)} explored ${p.hex}`;

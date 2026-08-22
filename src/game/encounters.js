@@ -15,6 +15,7 @@ import { resolveTargets, resolveHex } from "./targeting.js";
 import { bfsDistances } from "./board.js";
 import { emit } from "./events.js";
 import { hasTechNode } from "./tech.js";
+import { spendBeat, noteBeatHeld } from "./beatBudget.js";
 import { CHIPS } from "./content.js";
 
 // One-time normalisation — flatten {type, params} once instead of on
@@ -383,6 +384,22 @@ export function resolveMarkerOnHex(state, hex, unit, ctx = {}) {
   // open to anyone, as before.
   const idx = queue.findIndex((m) => !m.claimant || m.claimant === unit.owner);
   if (idx < 0) return null;
+
+  // A quest beat found on the map counts against the same per-turn allowance
+  // as one delivered directly (CONFIG.quests.beatsPerTurn) — the player is
+  // reading a card either way. Over the cap the marker is NOT consumed: it
+  // stays on its hex, and walking back onto it next turn picks it up. A world
+  // encounter placed by PLACE_ENCOUNTER carries no questId and is not a beat,
+  // so it is unaffected.
+  const pending = queue[idx];
+  if (pending.questId && !spendBeat(state, unit.owner)) {
+    noteBeatHeld(state, unit.owner, pending.questId, pending.beatId, "beats-per-turn");
+    // Truthy, deliberately. runMove reads a falsy result as "no marker here"
+    // and falls through to the field-encounter deck draw — which would answer
+    // "you have read enough for one turn" by dealing another card.
+    return { held: true, hex, beatId: pending.beatId };
+  }
+
   const marker = queue.splice(idx, 1)[0];
   if (!marker) return null;
   if (!queue.length) delete markers[hex];
@@ -421,6 +438,19 @@ export function resolveMarkerOnHex(state, hex, unit, ctx = {}) {
 
 // --- HexFilter resolver (content-schema §4) --------------------------
 
+// A filter's `controlledBy` / `notControlledBy` may name a faction outright
+// (`goldgrass`) or use a target token (`active`). Both spellings appear in the
+// authored corpus, and the token form used to be dropped on the floor: the
+// test was `state.players[f.notControlledBy]`, which is false for "active", so
+// the whole clause was skipped. q_signal and q_wire both open on
+// `notControlledBy: "active"` — "the settlement you're passing", the set you
+// don't recognise the traffic on — and both could therefore be placed in the
+// player's own capital, which is the one place the scene cannot happen.
+function filterPlayer(state, token, ctx) {
+  if (state.players[token]) return token;
+  return resolveTargets(state, token, ctx)[0] || null;
+}
+
 function hexMatches(state, hex, f, ctx = {}) {
   if (!f) return true;
   const h = state.board.hexes[hex];
@@ -435,14 +465,16 @@ function hexMatches(state, hex, f, ctx = {}) {
     if (!loc?.controller) return false;
   } else if (f.controlledBy === "any") {
     if (!loc) return false;
-  } else if (f.controlledBy && state.players[f.controlledBy]) {
-    if (loc?.controller !== f.controlledBy) return false;
+  } else if (f.controlledBy) {
+    const want = filterPlayer(state, f.controlledBy, ctx);
+    if (!want || loc?.controller !== want) return false;
   }
 
   if (f.notControlledBy === "any-player") {
     if (loc?.controller) return false;
-  } else if (f.notControlledBy && state.players[f.notControlledBy]) {
-    if (loc?.controller === f.notControlledBy) return false;
+  } else if (f.notControlledBy) {
+    const want = filterPlayer(state, f.notControlledBy, ctx);
+    if (want && loc?.controller === want) return false;
   }
 
   // Range filters anchor on another hex. The anchor may be a symbolic token
@@ -530,6 +562,33 @@ export function pickHexByFilter(state, filter, ctx = {}) {
   // so a congested board stacks rather than failing to place.
   const free = matching.filter((h) => !markerQueue(state, h, false).length);
   return state.rng.pick(free.length ? free : matching);
+}
+
+/**
+ * The same filter, restricted to Locations `pid` currently controls.
+ *
+ * quests.js asks this to decide whether a settlement beat is a journey or a
+ * scene: a beat set at a Goldgrass hall is a journey to everyone except the
+ * player who holds one, who is already standing in it. Returns null when
+ * nothing matches, which is the "then it stays a marker" answer.
+ *
+ * Held is `controller`, not affiliation — the filter has usually already said
+ * which faction the place BELONGS to, and this asks the different question of
+ * who holds it now.
+ */
+export function pickHeldHexByFilter(state, filter, pid, ctx = {}) {
+  if (!pid) return null;
+  if (Array.isArray(filter)) {
+    for (const f of filter) {
+      const hit = pickHeldHexByFilter(state, f, pid, ctx);
+      if (hit) return hit;
+    }
+    return null;
+  }
+  const held = Object.keys(state.board.hexes).filter((h) =>
+    state.locations[h]?.controller === pid && hexMatches(state, h, filter, ctx));
+  if (!held.length) return null;
+  return state.rng.pick(held);
 }
 
 // The discovery queue on a hex. Tolerates the pre-queue single-object shape

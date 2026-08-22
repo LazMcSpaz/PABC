@@ -7,7 +7,8 @@
 import { QUESTS } from "./content/index.js";
 import { CONFIG } from "./config.js";
 import { normalizeQuest } from "./content-loader.js";
-import { deliverEncounterDef } from "./encounters.js";
+import { deliverEncounterDef, pickHeldHexByFilter } from "./encounters.js";
+import { beatsRemaining, spendBeat, noteBeatHeld } from "./beatBudget.js";
 import { applyEffects, EFFECTS } from "./effects.js";
 import { evalCond } from "./dsl.js";
 import { resolveTargets } from "./targeting.js";
@@ -150,8 +151,53 @@ function beatAsEncounter(quest, beat) {
   };
 }
 
+// A beat that happens AT A SETTLEMENT THE CLAIMANT HOLDS is a scene, not a
+// journey. "Tam Odell comes out to meet you, hears what you want" does not
+// need the player to march a unit onto their own town first — they live
+// there. Those deliver directly, at that hex; the beat still knows where it
+// is, so `encounter-hex` and the prose agree about which town this is.
+//
+// Two ways a beat qualifies:
+//
+//   deliver: "settlement"   explicit. The authoring mode for this, and the
+//                           one to reach for when adding content.
+//
+//   deliver: "discovered"   inferred, for the corpus as it stands, and
+//   + opener + a filter     deliberately narrow — see below.
+//     naming type:location
+//
+// The inference is narrow because the content does not distinguish the two
+// things a `{type: "location"}` filter is used for. Some beats mean "at a
+// settlement" (q_claim's band, q_hire's raided villages). Others use a
+// settlement hex to mean "somewhere in that faction's country" — q_massacre's
+// compound is filtered to a Plainer location and is a raider fort welded out
+// of freight haulers, nobody's town. Delivering that one at the player's
+// capital would be nonsense.
+//
+// Restricting the inference to a quest's OPENER separates them cleanly on the
+// corpus as authored: it catches qb_clm_1 and qb_hire_1, both genuine
+// settlement scenes, and leaves every mid-quest destination — the compound,
+// Baron Juan's walled estate, the Laker capital — a journey. Mid-quest beats
+// that SHOULD be scenes (qb_mas_goldgrass, "you bring what you know to the
+// nearest Goldgrass hall") want the explicit mode rather than a looser guess.
+//
+// Either way, holding a matching settlement is required. A player who holds
+// none is making the journey, which is why the two beats filtered
+// `notControlledBy: "active"` — the unrecognised traffic keyed from "the
+// settlement you're passing" — stay journeys for everyone, by construction.
+function settlementHexFor(state, quest, beat, pid, ctx) {
+  const explicit = beat.deliver === "settlement";
+  if (!explicit) {
+    if (beat.deliver !== "discovered") return null;
+    if (openerOf(quest)?.id !== beat.id) return null;
+    const f = beat.placementFilter;
+    const names = (x) => (Array.isArray(x) ? x : [x]).some((y) => y?.type === "location");
+    if (!f || !names(f)) return null;
+  }
+  return pickHeldHexByFilter(state, beat.placementFilter, pid, ctx);
+}
+
 function deliverBeat(state, quest, beat, aq, ctx) {
-  aq.deliveredBeats.push(beat.id);
   const enc = beatAsEncounter(quest, beat);
   const beatCtx = {
     ...ctx, claimant: aq.claimant, questId: quest.id, beatId: beat.id,
@@ -166,10 +212,32 @@ function deliverBeat(state, quest, beat, aq, ctx) {
     // not themselves delivered by walking onto a marker.
     sourceHex: ctx.sourceHex ?? aq.originHex ?? null,
   };
-  if (beat.deliver === "discovered") {
+  // A marker is world state, not a card — placing one costs nothing and is
+  // paid for later, by whoever walks onto it. Everything else is handed
+  // straight to the claimant and comes out of their allowance now.
+  const home = settlementHexFor(state, quest, beat, aq.claimant, beatCtx);
+  // An explicit `settlement` beat whose holder owns no matching place falls
+  // back to being discovered, so the scene is still reachable by going there.
+  const placing = !home
+    && (beat.deliver === "discovered" || beat.deliver === "settlement");
+
+  if (!placing) {
+    if (!spendBeat(state, aq.claimant)) {
+      // Left undelivered on purpose: `deliveredBeats` is what stops a beat
+      // being offered twice, so not touching it is what makes this a retry.
+      noteBeatHeld(state, aq.claimant, quest.id, beat.id, "beats-per-turn");
+      return false; // distinct from null: "not now", not "nothing to deliver"
+    }
+  }
+
+  aq.deliveredBeats.push(beat.id);
+  if (placing) {
     return deliverEncounterDef(state, enc, { mode: "placement", hexFilter: beat.placementFilter }, beatCtx);
   }
-  return deliverEncounterDef(state, enc, { recipient: beat.recipient }, beatCtx);
+  // Delivered where it is set, so `encounter-hex` and the prose agree about
+  // which town this is.
+  return deliverEncounterDef(state, enc, { recipient: beat.recipient },
+    home ? { ...beatCtx, sourceHex: home } : beatCtx);
 }
 
 // Deliver whatever should come next for this quest.
@@ -206,8 +274,12 @@ function evaluateBeatDelivery(state, questId, pid, ctx) {
       const cond = beatCondition(beat);
       if (cond == null || evalCond(state, cond,
           { ...ctx, claimant: aq.claimant, asPlayer: aq.claimant ?? ctx.asPlayer })) {
-        deliverBeat(state, quest, beat, aq,
+        const sent = deliverBeat(state, quest, beat, aq,
           { ...ctx, asPlayer: aq.claimant ?? ctx.asPlayer ?? null });
+        // Held by the per-turn cap. The route was consumed at the top of this
+        // function so a dead route cannot loop; put it back, or the branch the
+        // player chose is quietly replaced by prereq fan-out on the next pass.
+        if (sent === false) aq.routeTo = targetId;
         return;
       }
     }
@@ -242,7 +314,10 @@ function evaluateBeatDelivery(state, questId, pid, ctx) {
     const next = readyBeats(quest, live).find(
       (b) => b.deliver !== "conditional" && gatePasses(state, b, beatCtx));
     if (!next) return;
-    deliverBeat(state, quest, next, live, beatCtx);
+    // A held beat is still ready, so re-deriving the set would pick it again
+    // and spin until the guard expires. Stop instead — the next pass, on a
+    // fresh allowance, delivers it.
+    if (deliverBeat(state, quest, next, live, beatCtx) === false) return;
   }
 }
 
@@ -267,21 +342,30 @@ export function evaluateConditionalBeats(state, ctx = {}) {
   for (const aq of Object.values(state.activeQuests)) {
     const quest = getQuest(aq.questId);
     if (!quest) continue;
+    // The pulse walks every run of every quest for every player, so a
+    // claimant whose allowance is already spent would emit a held event per
+    // ready beat. Ask once.
+    if (beatsRemaining(state, aq.claimant) <= 0) continue;
     for (const beat of readyBeats(quest, aq)) {
-      // The pulse re-checks anything still waiting on a gate — `conditional`
-      // beats by definition, and also `auto` / `discovered` beats whose gate
-      // was not yet true when their prerequisite completed. Without the
-      // second case a gated auto beat that missed its moment would never be
-      // retried, because evaluateBeatDelivery only runs on quest start and
-      // on advance.
-      const gated = beat.deliver === "conditional" || beatCondition(beat) != null;
-      if (!gated) continue;
+      // The pulse re-checks everything still ready and undelivered, whatever
+      // the reason. That is three cases, and each of them used to be missed:
+      // `conditional` beats, which the fan-out never delivers by design;
+      // `auto` / `discovered` beats whose gate was not yet true when their
+      // prerequisite completed; and — since the per-turn cap — ungated beats
+      // that were simply the player's fourth of the turn. The pulse is the
+      // only retry any of them get, because evaluateBeatDelivery runs on
+      // quest start and on advance, and a held beat advances nothing.
+      //
+      // Delivering an ungated ready beat here is safe rather than eager: the
+      // fan-out takes every one it can reach, so any that survive to the
+      // pulse were stopped by something.
+      //
       // Evaluate as the quest's claimant, not as whichever seat happens to
       // be active when the round-end pipeline runs.
       const beatCtx = { ...ctx, claimant: aq.claimant, asPlayer: aq.claimant ?? ctx.asPlayer };
       const cond = beatCondition(beat);
       if (cond != null && !evalCond(state, cond, beatCtx)) continue;
-      deliverBeat(state, quest, beat, aq, beatCtx);
+      if (deliverBeat(state, quest, beat, aq, beatCtx) === false) break;
     }
   }
 }

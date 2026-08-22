@@ -274,6 +274,15 @@ function formatEvent(ev, engineState) {
     case "quest_advanced":
     case "quest_completed":
       return { color: theme.accent, text: ev.name.replace("_", " ") };
+    // Held by the per-turn beat cap. Worth a line only for the player it
+    // happened to, and only so a marker they walked onto and got nothing from
+    // reads as pacing rather than a broken tile.
+    case "quest_beat_held":
+      if (p.player !== you) return null;
+      return {
+        color: theme.textDim,
+        text: `Enough for one turn — another lead keeps until next turn`,
+      };
     case "deferred_resolved":
       return { color: theme.textDim, text: "Deferred packet fired" };
     case "round_ended":

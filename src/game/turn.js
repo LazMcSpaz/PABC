@@ -11,6 +11,7 @@ import { activePlayerId } from "./targeting.js";
 import { sweepDeferred } from "./deferred.js";
 import { evaluateTriggers } from "./triggers.js";
 import { evaluateConditionalBeats, offerQuests } from "./quests.js";
+import { resetBeatBudget } from "./beatBudget.js";
 import {
   applyOutputAndBuilds, chargeChipUpkeep, chargeUnitUpkeep, enforceLoyaltySlotCap,
 } from "./economy.js";
@@ -292,6 +293,12 @@ export function startTurn(state) {
   // Trespass presence sweep — units still parked in foreign ZoC keep the
   // citation streak alive (warning → −1 → −2), even without moving.
   sweepTrespass(state, pid);
+
+  // A fresh beat allowance for the seat about to play (CONFIG.quests
+  // .beatsPerTurn). Reset HERE rather than at round end so the pulse that
+  // runs after everyone has played draws on the same allowance the turn did
+  // — one turn cycle, one budget, however the beats arrive.
+  resetBeatBudget(state, pid);
 
   // Offer any quest whose opening beat is available to THIS player. Runs
   // here, inside their own turn, so an opener gate reading `active` means
