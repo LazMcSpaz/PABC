@@ -667,3 +667,60 @@ hire the engine accepts actually opens the war it names.
 
 Governing numbers unmoved (8 / 45 / 4) — it is a player verb the AI does not
 compose, so the suite is the wrong instrument and correctly reads flat.
+
+### §4 — the trust→Honor merge, unblocked by moving the seam
+
+The plan's long pole was blocked on off-repo editor access: 23 authored beats
+write `ADJUST_TRACK {track:"trust"}`, `src/game/content/*.js` is generated from
+`remnant_content_consolidated_rev2.json` in the editor's store, and that file is
+not in this repository — so rewriting the beats would be blown away by the next
+`build-content.mjs` run.
+
+**It did not need the corpus.** The merge lands at the `ADJUST_TRACK` **seam**,
+the one place authored trust enters the game. The track keeps its own value for
+content that reads it; Honor moves alongside at `trustToHonor: 0.5`. One
+reader instead of 23 edits, and it survives every content rebuild.
+
+**The audit found the corpus exactly as the brief predicted** — 23 writes
+summing −16, all-negative case −31 — and then found that halving alone is not
+enough:
+
+| | Honor after | gates open |
+|---|---|---|
+| every authored write, halved, no floor | −4 | **none** |
+| every negative beat, halved, no floor | −11.5 | none (62 rounds to recover) |
+| …with `questHonorFloor: 0` | **0** | plainers |
+| …after 14 rounds of clean play | 3.5 | **goldgrass, lakers, plainers** |
+
+So a floor and a recovery, and the reason for the split is worth stating: a
+quest choice should *cost* the board's regard and must never close the
+diplomacy face outright, because **the player cannot see the arithmetic while
+they are reading a story**. A deed still can — a surprise attack is 8 Honor, a
+broken position 6 — and those are chosen with the numbers on screen. The
+harness asserts both halves of that distinction.
+
+**On the audit's literal claim.** "Never pushes Honor below any live faction's
+trustFloor" cannot pass while the feature does anything at all: the highest
+live floor is Goldgrass at 3.4 against a start of 4, so honouring it literally
+would cap quest trust at 0.6 total — i.e. not merging. The claim was written
+before the floors were measured. Block 16 now reports that plainly and asserts
+the property the claim was *for*: **no face closes permanently.**
+
+**And a finding nobody was looking for.** The merge fires in the AI-only suite
+too, through the 13 trust writes in the world and field encounter sets — so
+this is not a player-only change:
+
+| | before | after |
+|---|---|---|
+| **Ending mix** | 8 | **10** |
+| Median rounds | 45 | 54 |
+| Games unresolved | 4 | 4 |
+
+Ending mix 10 of 15 against a band of ≥11 is the closest the project has come;
+the baseline was 5.
+
+The recovery costs two unresolved games (`decayPerRound: 0` reads 10/45/**2**
+against 0.25's 10/54/**4**, consistently across 0.1/0.15/0.25/0.5). That is a
+real trade and it is bought deliberately: recovery is what makes "no face
+closes permanently" true, and the mix figure bounces 5/10/10/5 across those
+four values, so picking the cheaper one would be tuning on noise.

@@ -760,7 +760,59 @@ export const CONFIG = {
       // because you want their cities is a slander, and costs.
       denounceLoss: 3,
       denounceWarrantedGain: 1,
-      decayToward: 0, decayPerRound: 0, // no passive decay by default
+      // §4 — THE trust -> HONOR MERGE, and why it lands HERE rather than in
+      // the corpus.
+      //
+      // Twenty-three authored beats write `ADJUST_TRACK {track:"trust"}` and
+      // they sum to -16. `p.tracks.trust` is read by nothing in the rules — it
+      // is a parallel reputation the diplomacy layer cannot see — so a player
+      // can be scrupulous through a whole quest line and have the board treat
+      // them as a stranger.
+      //
+      // The obvious fix is to rewrite those 23 beats as ADJUST_HONOR. It is
+      // also the wrong one, twice over: `src/game/content/*.js` is generated
+      // (its own banner says so) from `remnant_content_consolidated_rev2.json`
+      // in the editor's store, which is not in this repository — so the edit
+      // would be blown away by the next `build-content.mjs` run — and it would
+      // be 23 edits to keep in sync instead of one seam.
+      //
+      // So the merge is a READER, in `ADJUST_TRACK`, at the one place authored
+      // trust enters the game. The track keeps its own value for any content
+      // that reads it; Honor moves alongside. Content untouched, survives
+      // every rebuild, one place to tune.
+      //
+      // THE HAZARD, and the three mitigations the audit named, all of which
+      // are here. `passesRepGates` hard-gates every pact on Honor against the
+      // per-faction `trustFloor` (live floors run 1.3 to 3.4), so -16 of
+      // authored trust merged at full magnitude into a stat that never
+      // recovers would close the diplomacy face PERMANENTLY on a normal spread
+      // of quest choices. Hence: halve the magnitude (`trustToHonor`), give
+      // Honor somewhere to recover to (`decayPerRound` toward `decayToward`),
+      // and assert it — audit-diplomacy block 16 plays the full corpus.
+      trustToHonor: 0.5, // 0 unmerges the tracks and restores the old silence
+      // …AND A FLOOR THE MERGE CANNOT PUSH YOU THROUGH. Halving was not
+      // enough on its own and the audit says so with a number: applying every
+      // authored write lands Honor at -4 with NO faction's gates open, and
+      // taking every negative beat lands at -11.5 — 62 rounds of clean play to
+      // recover, which is longer than a game.
+      //
+      // A quest choice should COST you the board's regard. It should never be
+      // able to close the diplomacy face outright, because the player cannot
+      // see the arithmetic while they are reading a story. Deeds still can —
+      // a surprise attack is 8, a broken position 6, and those are choices
+      // made on a board with the numbers on screen. Text is not.
+      //
+      // 0 lets quest trust take an honourable player from `start` down to
+      // neutral and no further. It still closes the most distrustful faction
+      // on the board (Goldgrass, trustFloor 3.4), which is correct: a faction
+      // whose whole character is suspicion SHOULD be losable by conduct.
+      questHonorFloor: 0,
+      // Recovery. Honor is the one reputation stat with no passive faucet, and
+      // a stat that only falls is a countdown, not a character. It recovers
+      // toward `start` rather than 0: a clean player is not neutral, they are
+      // where they began, and drifting an honourable faction DOWN to zero for
+      // playing quietly would be its own bug.
+      decayToward: 4, decayPerRound: 0.25,
     },
     // §18.5 Tolerance = base + standing·perStanding, ± by the faction's
     // aggression (a warlord tolerates a bloodier ally than a pacifist).

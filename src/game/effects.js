@@ -406,6 +406,23 @@ const EFFECTS = {
       emit(state, "track_changed", {
         player: pid, track: e.track, value: p.tracks[e.track], delta: e.amount,
       });
+      // §4 — THE SEAM. `trust` is a reputation the diplomacy layer could not
+      // see: 23 authored beats write it, they sum to -16, and no rule read it.
+      // Rather than rewrite those beats (the content files are generated from
+      // a corpus outside this repository and the edit would not survive the
+      // next build), the merge lives at the one place authored trust enters
+      // the game. The track keeps its own value for content that reads it.
+      const H = CONFIG.diplomacy.honor;
+      if (e.track === "trust" && H.trustToHonor && e.amount) {
+        const delta = (e.amount || 0) * H.trustToHonor;
+        const floor = H.questHonorFloor;
+        // A quest choice costs you the board's regard; it never closes the
+        // diplomacy face outright. Deeds still can — the player can see those
+        // numbers while they choose. Text is read without them.
+        const room = floor == null ? delta
+          : (delta < 0 ? Math.min(0, Math.max(delta, floor - (p.honor ?? H.start))) : delta);
+        if (room) diplo.adjustHonor(state, pid, room, "quest-trust");
+      }
     }
   },
 

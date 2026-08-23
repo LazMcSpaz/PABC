@@ -4700,6 +4700,90 @@ line("\n  [economy §8] the Nth chip past the allowance costs something");
   } finally { eco.perExtraChip = was; }
 }
 
+// §4 — THE trust -> HONOR MERGE.
+//
+// Twenty-three authored beats write `ADJUST_TRACK {track:"trust"}`, summing
+// -16, and `p.tracks.trust` was read by NOTHING in the rules — a parallel
+// reputation the diplomacy layer could not see, so a player could be
+// scrupulous through a whole quest line and have the board treat them as a
+// stranger.
+//
+// The merge lands at the ADJUST_TRACK SEAM rather than in the corpus, and that
+// is the load-bearing decision: `src/game/content/*.js` is generated from a
+// JSON outside this repository (its own banner says so), so rewriting the 23
+// beats would be blown away by the next `build-content.mjs` run — and would be
+// 23 things to keep in sync instead of one.
+line("\n  [§4] what a quest costs your name");
+{
+  const H = CONFIG.diplomacy.honor;
+  const g = createGame({ seed }); ensureDiplomacy(g);
+  const pid = "versari";
+  const ctx = { activePlayer: pid };
+  const h0 = honorOf(g, pid);
+  applyEffect(g, { type: "ADJUST_TRACK", track: "trust", amount: -2, target: "active" }, ctx);
+  check("an authored trust write now moves Honor", honorOf(g, pid) === h0 - 2 * H.trustToHonor);
+  check("…at the halved magnitude, not the authored one",
+    H.trustToHonor < 1 && honorOf(g, pid) > h0 - 2);
+  check("…and the track keeps its own value for content that reads it",
+    g.players[pid].tracks.trust === -2);
+  check("…and it says where it came from",
+    g.log.some((e) => e.name === "honor_changed" && e.payload.cause === "quest-trust"));
+
+  // THE FLOOR. Halving alone was not enough: the audit measures the corpus at
+  // Honor -4 with no faction's gates open, and every negative beat at -11.5 —
+  // 62 rounds of clean play, which is longer than a game. A quest choice
+  // should COST the board's regard and never close the diplomacy face
+  // outright, because the player cannot see the arithmetic while reading a
+  // story. Deeds still can; those are chosen with the numbers on screen.
+  for (let i = 0; i < 40; i += 1) {
+    applyEffect(g, { type: "ADJUST_TRACK", track: "trust", amount: -3, target: "active" }, ctx);
+  }
+  check("quest trust alone cannot push Honor past the floor",
+    honorOf(g, pid) === H.questHonorFloor,
+    );
+  check("…while the track itself keeps counting, so content still reads the truth",
+    g.players[pid].tracks.trust < H.questHonorFloor);
+  // …and a DEED still can. The floor is on the merge, not on Honor.
+  adjustHonor(g, pid, -H.surpriseAttackLoss, "test-deed");
+  check("…but a deed still can, which is the whole distinction",
+    honorOf(g, pid) < H.questHonorFloor);
+}
+{
+  // Recovery. Honor was the one reputation stat with no passive faucet, and a
+  // stat that only falls is a countdown rather than a character.
+  const H = CONFIG.diplomacy.honor;
+  check("Honor recovers, toward where an honourable faction started",
+    H.decayPerRound > 0 && H.decayToward === H.start);
+  const g = createGame({ seed }); ensureDiplomacy(g);
+  const pid = "versari";
+  adjustHonor(g, pid, -6, "test");
+  const low = honorOf(g, pid);
+  for (let i = 0; i < 5; i += 1) { g.round += 1; runDiplomacyRound(g); }
+  check("…and clean play actually lifts it", honorOf(g, pid) > low);
+  // It must not overshoot: drifting an honourable faction DOWN for playing
+  // quietly would be its own bug.
+  const g2 = createGame({ seed }); ensureDiplomacy(g2);
+  adjustHonor(g2, pid, 6, "test");
+  const high = honorOf(g2, pid);
+  for (let i = 0; i < 40; i += 1) { g2.round += 1; runDiplomacyRound(g2); }
+  check("…and it settles at the target rather than sliding past it",
+    honorOf(g2, pid) <= high && honorOf(g2, pid) >= H.decayToward - H.decayPerRound);
+}
+{
+  // Both halves are switchable, per the plan's rule 1.4.
+  const H = CONFIG.diplomacy.honor;
+  const was = H.trustToHonor;
+  try {
+    H.trustToHonor = 0;
+    const g = createGame({ seed }); ensureDiplomacy(g);
+    const h0 = honorOf(g, "versari");
+    applyEffect(g, { type: "ADJUST_TRACK", track: "trust", amount: -5, target: "active" },
+      { activePlayer: "versari" });
+    check("trustToHonor 0 unmerges the tracks and restores the old silence",
+      honorOf(g, "versari") === h0 && g.players.versari.tracks.trust === -5);
+  } finally { H.trustToHonor = was; }
+}
+
 // §1.2 / economy §6.3 — gifts are priced in SWAY now, not scrap. The
 // diminishing-returns window is unchanged, because which currency pays for a
 // gift has nothing to do with how quickly a faction tires of being flattered.

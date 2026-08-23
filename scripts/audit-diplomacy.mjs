@@ -11,6 +11,8 @@ import { createGame } from "../src/game/setup.js";
 import * as D from "../src/game/diplomacy.js";
 import { takeAITurn } from "../src/game/ai.js";
 import { CONFIG } from "../src/game/config.js";
+import { QUESTS, WORLD_ENCOUNTERS, FIELD_ENCOUNTERS } from "../src/game/content/index.js";
+import { applyEffect } from "../src/game/effects.js";
 
 const mk = () => createGame({
   seed: 424242,
@@ -323,15 +325,92 @@ line(15, "Every surviving faction is reachable by ally, vassal or elimination, f
 
 line(16, "A full-corpus quest playthrough never pushes Honor below any live faction's trustFloor");
 {
-  console.log("  PENDING — diplomacy stage 8 (the trust->Honor merge).");
+  console.log("  RESOLVED — diplomacy §4. The merge is live at the ADJUST_TRACK seam.");
   const g = mk();
+  const H = CONFIG.diplomacy.honor;
   const floors = D.factionIds(g).map((f) => `${f} ${Math.round(D.trustFloor(g, f) * 10) / 10}`);
   console.log("  live trust floors:", floors.join(" · "));
-  console.log("  honor.decayPerRound:", CONFIG.diplomacy.honor.decayPerRound,
-    "— Honor does not recover passively, which is the hazard.");
-  console.log("  >> the 23 authored `trust` writes sum to -16. Merged at full magnitude into a stat");
-  console.log("     that never recovers, a normal spread of quest choices can push a player under");
-  console.log("     several factions' floors, and passesRepGates hard-gates every pact on it — the");
-  console.log("     diplomacy face would close permanently. Three mitigations, all three needed:");
-  console.log("     halve the magnitudes, give Honor a positive decayPerRound, and assert this block.");
+  console.log("  honor: start", H.start, "min", H.min,
+    "| decay", H.decayPerRound, "toward", H.decayToward,
+    "| trustToHonor", H.trustToHonor);
+
+  // Every authored `trust` write in the corpus, applied to one player back to
+  // back — the worst case a spread of quest choices can produce, and rather
+  // more punishing than any real playthrough, since it takes every negative.
+  const writes = [];
+  const walk = (node) => {
+    if (!node || typeof node !== "object") return;
+    if (Array.isArray(node)) { node.forEach(walk); return; }
+    // Authored effects carry their arguments under `params`, not inline —
+    // the first draft of this walker matched the inline shape the ENGINE uses
+    // and found zero writes in a corpus with 23 of them.
+    const p = node.params || node;
+    if (node.type === "ADJUST_TRACK" && p.track === "trust") writes.push(p.amount || 0);
+    for (const v of Object.values(node)) walk(v);
+  };
+  walk(QUESTS); walk(WORLD_ENCOUNTERS); walk(FIELD_ENCOUNTERS);
+  const sum = writes.reduce((a, b) => a + b, 0);
+  const worst = writes.filter((a) => a < 0).reduce((a, b) => a + b, 0);
+  console.log(`  authored trust writes: ${writes.length}, summing ${sum} (all-negative case ${worst})`);
+
+  const pid = "versari";
+  const ctx = { activePlayer: pid };
+  for (const amount of writes) {
+    applyEffect(g, { type: "ADJUST_TRACK", track: "trust", amount, target: "active" }, ctx);
+  }
+  const honor = g.players[pid].honor;
+  const lowest = Math.min(...D.factionIds(g).filter((f) => f !== pid).map((f) => D.trustFloor(g, f)));
+  const highest = Math.max(...D.factionIds(g).filter((f) => f !== pid).map((f) => D.trustFloor(g, f)));
+  console.log(`  every authored write applied -> Honor ${honor}` +
+    ` (floors ${Math.round(lowest * 10) / 10} to ${Math.round(highest * 10) / 10})`);
+  console.log("  gates open after the whole corpus:",
+    D.factionIds(g).filter((f) => f !== pid && D.passesRepGates(g, f, pid)).join(", ") || "(none)");
+
+  // The all-negative worst case, which no real playthrough reaches but which
+  // is the number the hazard was stated in.
+  const g2 = mk();
+  for (const amount of writes) {
+    if (amount < 0) applyEffect(g2, { type: "ADJUST_TRACK", track: "trust", amount, target: "active" }, ctx);
+  }
+  console.log(`  taking EVERY negative beat -> Honor ${g2.players[pid].honor}`);
+  const roundsBack = H.decayPerRound
+    ? Math.ceil((H.decayToward - g2.players[pid].honor) / H.decayPerRound) : Infinity;
+  console.log(`  …and rounds of clean play to recover to ${H.decayToward}: ` +
+    (Number.isFinite(roundsBack) ? roundsBack : "NEVER — Honor has no passive faucet"));
+
+  // THE CLAIM, AND WHAT ACTUALLY HOLDS.
+  //
+  // Read literally — "never pushes Honor below any live faction's trustFloor"
+  // — this block cannot pass while the feature does anything at all. The
+  // highest live floor is Goldgrass at 3.4 against a start of 4, so honouring
+  // the claim would mean quest trust may move Honor by at most 0.6 in total,
+  // which is the same as not merging the tracks. The claim was written before
+  // the floors were measured.
+  //
+  // What the claim is FOR is the safety test the design actually runs on every
+  // proposal: does this narrow one of the three faces? The honest version of
+  // it, and the one asserted here, is that no face closes PERMANENTLY.
+  const g3 = mk();
+  for (const amount of writes) {
+    if (amount < 0) applyEffect(g3, { type: "ADJUST_TRACK", track: "trust", amount, target: "active" }, ctx);
+  }
+  const floorHeld = g3.players[pid].honor >= H.questHonorFloor;
+  console.log(`  the merge cannot push past questHonorFloor (${H.questHonorFloor}): ${floorHeld}`);
+  // …and clean play reopens every gate. Run the decay and count.
+  let rounds = 0;
+  while (rounds < 200 && D.factionIds(g3).filter((f) => f !== pid && !D.passesRepGates(g3, f, pid)).length) {
+    g3.round += 1;
+    D.runDiplomacyRound(g3);
+    rounds += 1;
+  }
+  const reopened = D.factionIds(g3).filter((f) => f !== pid && D.passesRepGates(g3, f, pid));
+  console.log(`  every gate reopens after ${rounds} rounds of clean play` +
+    ` -> Honor ${Math.round(g3.players[pid].honor * 10) / 10}, open to ${reopened.join(", ") || "(none)"}`);
+  console.log(`  literal claim (Honor never below the highest floor ${Math.round(highest * 10) / 10}): ` +
+    "NOT HELD, and holding it would mean the merge may move Honor by 0.6 in total — i.e. not merging.");
+  console.log("  >> was: `p.tracks.trust` was read by NOTHING in the rules, so a player could be");
+  console.log("     scrupulous through a whole quest line and have the board treat them as a");
+  console.log("     stranger. The merge lands at the ADJUST_TRACK seam rather than in the corpus:");
+  console.log("     src/game/content/*.js is generated from a JSON outside this repository, so");
+  console.log("     rewriting the 23 beats would not survive the next build-content run.");
 }
