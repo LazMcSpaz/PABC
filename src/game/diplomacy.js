@@ -1775,7 +1775,7 @@ function transferItems(state, from, to, items) {
 }
 
 // --- the verbs (§18.7) ----------------------------------------------
-export function declareWar(state, a, b, cause = "declared") {
+export function declareWar(state, a, b, cause = "declared", opts = {}) {
   if (atWar(state, a, b)) return;
   // declaring war on a pacted faction breaks the pact (Honor ding).
   if (arePacted(state, a, b)) breakPact(state, a, b, "war-on-ally");
@@ -1785,10 +1785,21 @@ export function declareWar(state, a, b, cause = "declared") {
   const justified = [];
   if (cause === "rebellion" || warJustification(state, a, b)) justified.push(a);
   if (warJustification(state, b, a)) justified.push(b);
+  // §9 — a coalition formed ON GROUNDS hands every member a justified war.
+  // That is not a courtesy: an unjustified declaration charges Menace, and
+  // with `coalition.wM` at 1 that raises the members' OWN threat scores, so
+  // the old blanket draft seeded the next coalition out of the last one.
+  for (const f of opts.justifiedFor || []) if (!justified.includes(f)) justified.push(f);
   // §6.2 — war record tracks losses for the §1.5 exhaustion model.
   state.diplomacy.wars.push({ a, b, since: state.round, justified, unitsLost: {}, locationsLost: {}, contestsWon: {} });
-  setStanding(state, a, b, D().tiers.hostile, cause);
-  setStanding(state, b, a, D().tiers.hostile, cause);
+  // A war normally slams both sides to Hostile. A DRAFT does not: signing a
+  // rising against somebody you were on decent terms with cools the room, it
+  // does not make you their enemy, and the old behaviour turned a +5 partner
+  // into a permanent one over a third party's lead.
+  const floor = opts.standingFloor;
+  const land = (x, y) => setStanding(state, x, y,
+    floor == null ? D().tiers.hostile : Math.min(getStanding(state, x, y), floor), cause);
+  land(a, b); land(b, a);
   // Voluntary coalition membership: taking up arms against a faction the
   // board has risen against makes you part of the rising (the human's only
   // road in — coalitions never conscript them).
@@ -2014,9 +2025,37 @@ function queueHumanWarnings(state) {
   if (t >= D().coalition.threshold * w.coalitionFraction
     && !coalitionAgainst(state, human) && due("coalition")) {
     warned.coalition = state.round;
-    const payload = { from: null, to: human, kind: "coalition", threat: Math.round(t * 10) / 10 };
+    const payload = {
+      from: null, to: human, kind: "coalition", threat: Math.round(t * 10) / 10,
+      // §9 — say what they would be rising ABOUT. Without grounds the murmur
+      // is "they don't like you"; with them it is "your Menace is 5", which is
+      // a thing the player can actually go and fix.
+      grounds: coalitionGrounds(state, human),
+    };
     queue.push({ id: `warn-coalition-${state.round}`, round: state.round, ...payload });
     emit(state, "diplomatic_warning", payload);
+  }
+
+  // §9 — THE MURMUR IS FOR ALL OF THEM. A rising against a rival is the
+  // single most important thing on the board for a player who is neither in
+  // it nor its target: it is their window. Before this, the human heard the
+  // board turning only when it was turning on them, so the whole coalition
+  // layer was invisible from the outside and read as the AI acting at random.
+  if (!D().coalition.murmurAll) return;
+  for (const f of factionIds(state)) {
+    if (f === human) continue;
+    const tf = threatScore(state, f);
+    if (tf < D().coalition.threshold * w.coalitionFraction) continue;
+    if (coalitionAgainst(state, f)) continue;
+    const g = coalitionGrounds(state, f);
+    if (!g) continue; // no grounds, no rising, nothing to murmur about
+    if (!due(`coalition|${f}`)) continue;
+    warned[`coalition|${f}`] = state.round;
+    // A murmur, not an audience: it is news about somebody else, so it goes
+    // to the log and not into the queue of envoys waiting at the door.
+    emit(state, "coalition_murmur", {
+      about: f, to: human, threat: Math.round(tf * 10) / 10, grounds: g,
+    });
   }
 }
 
@@ -2712,6 +2751,50 @@ export function dominionCountdown(state, pid) {
   return Math.max(0, CONFIG.victory.holdRounds - (state.round - at));
 }
 
+// §9 — WHAT GIVES A BOARD THE RIGHT TO RISE.
+//
+// Returns the stated reason, or null when there is none. This is the whole
+// answer to the "Attila" failure: leading is not a crime, and a faction that
+// has done nothing to anybody should be able to lead without the map turning
+// on it. Three things ARE grounds, and each one is something the target did
+// or became rather than something it merely is:
+//
+//   menace     it has frightened the board by its own conduct
+//   grievance  somebody is owed, concretely, and can name it
+//   fear       its lead is so far past everything else that saying so is honest
+//
+// The last is deliberately set well above the coalition threshold. It is the
+// escape hatch that stops a flawless runaway being unstoppable, not the
+// ordinary path in.
+export function coalitionGrounds(state, target) {
+  const c = D().coalition;
+  if (!c.groundsGate) return "position";
+  if (menaceOf(state, target) >= c.menaceGrounds) return "menace";
+  for (const f of factionIds(state)) {
+    if (f === target) continue;
+    if (grievanceWeight(state, f, target) > 0) return "grievance";
+  }
+  if (threatScore(state, target) >= c.fearThreshold) return "fear";
+  return null;
+}
+
+// §9 — HOW BADLY ONE FACTION WANTS IN.
+//
+// A deliberation, not a draft. The terms are the ones a faction would actually
+// weigh, and the Standing term is SIGNED: liking the target holds you back,
+// which is what makes a coalition a thing the target can talk its way out of
+// rather than a dice roll on the leaderboard.
+export function coalitionJoinScore(state, f, target) {
+  const c = D().coalition;
+  let score = c.joinFearWeight * Math.max(0, threatScore(state, target) - c.threshold);
+  score += c.joinGrievanceWeight * grievanceWeight(state, f, target);
+  score -= c.joinStandingWeight * getStanding(state, f, target);
+  // Menace is felt by everyone, but it is felt hardest by neighbours: a
+  // frightening faction six hexes away is a headline, one next door is a plan.
+  if (menaceOf(state, target) >= c.menaceGrounds && areNeighbours(state, f, target)) score += 1;
+  return score;
+}
+
 // --- coalitions (§18.8) ---------------------------------------------
 // Playtest lesson (R7 of the 2026-08-13 log): a coalition must never
 // CONSCRIPT — the old version drafted the human (declared war on their
@@ -2729,19 +2812,33 @@ function recomputeCoalitions(state) {
     const existing = coalitionAgainst(state, pid);
     const cooling = state.diplomacy.coalitionCooldown?.[pid];
     const onCooldown = cooling != null && state.round - cooling < c.reformCooldownRounds;
-    if (score >= c.threshold && !existing && !onCooldown) {
+    // §9 — grounds first. A spotless leader is not a casus belli, and the
+    // rising has to be able to say WHY in one word before it can say WHO.
+    const grounds = score >= c.threshold ? coalitionGrounds(state, pid) : null;
+    if (grounds && !existing && !onCooldown) {
       const members = factionIds(state).filter((f) =>
         f !== pid
         && f !== state.humanFactionId // never conscript the player
         && vassalLord(state, f) !== pid && !arePacted(state, f, pid)
         && !truceBetween(state, f, pid) // a faction under truce keeps its word
         && !coalitionAgainst(state, f) // a hunted faction can't be drafted
-        && mayEngage(state, f, pid));
+        && mayEngage(state, f, pid)
+        // …and now each one decides for itself.
+        && coalitionJoinScore(state, f, pid) >= c.joinScoreMin);
       if (members.length >= 2) {
-        state.diplomacy.coalitions.push({ target: pid, members, since: state.round });
+        state.diplomacy.coalitions.push({ target: pid, members, since: state.round, grounds });
         for (const m of members) {
-          adjustStanding(state, m, pid, -c.standingHit, "coalition");
-          declareWar(state, m, pid, "coalition");
+          // ONE rule for what a draft costs, not two. The old pair — a flat
+          // -standingHit and then a war that slammed to Hostile — stacked, so
+          // a member who already disliked the target ended up well past the
+          // floor the floor exists to stop them passing. A draft cools you TO
+          // the floor and no further, and never lifts somebody who was already
+          // colder than it: `min(before, floor)`.
+          const before = getStanding(state, m, pid);
+          declareWar(state, m, pid, "coalition", {
+            standingFloor: Math.min(before, c.draftStandingFloor),
+            justifiedFor: [m],
+          });
           // members bury their quarrels for the duration — no pacts minted
           for (const n of members) {
             if (n === m) continue;
@@ -2749,7 +2846,7 @@ function recomputeCoalitions(state) {
             adjustStanding(state, m, n, 1, "common-cause");
           }
         }
-        emit(state, "coalition_formed", { target: pid, members });
+        emit(state, "coalition_formed", { target: pid, members, grounds });
       }
     } else if (existing && score <= c.dissolve
       && state.round - (existing.since ?? state.round) >= c.minRounds) {
@@ -3643,6 +3740,8 @@ registerSwayReaders({
 });
 registerPostureReaders({
   factionIds, atWar, arePacted, vassalLord, coalitionAgainst, mayCourt,
+  // §9 — why a board may rise, and how badly one faction wants in.
+  coalitionGrounds, coalitionJoinScore,
   getStanding, adjustStanding, passesRepGates, grievanceWeight,
   tradingPactBetween, unitsInTerritory,
 });

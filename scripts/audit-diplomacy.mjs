@@ -194,33 +194,67 @@ line(11, "A faction never acts on a posture it has not stated at least a round e
 
 line(12, "No coalition forms against a spotless target below fearThreshold");
 {
-  console.log("  PENDING — diplomacy stage 6. The grounds gate does not exist yet.");
+  console.log("  RESOLVED — diplomacy §9. The grounds gate ships live (coalition.groundsGate: 1).");
+  // Spotless means spotless: a lead earned on VP, with nobody's homeland
+  // under occupation. (The first draft of this block seized every Location
+  // for versari, which manufactured three `occupation` grievances and then
+  // reported the grounds gate as broken for honouring them.)
+  // The band that matters is OVER coalition.threshold but UNDER fearThreshold:
+  // frightening enough that the old rule would have risen, clean enough that
+  // the new one should not. Walk VP up to land in it, and read threat BEFORE
+  // the round — runDiplomacyRound recomputes VP from the board.
+  const CC = CONFIG.diplomacy.coalition;
   const g = mk();
   g.players.versari.menace = 0;
-  g.players.versari.vp = 11;
-  for (const loc of Object.values(g.locations)) if (loc.controller) loc.controller = "versari";
+  let t = 0;
+  for (let vp = 1; vp <= 40; vp++) {
+    g.players.versari.vp = vp;
+    t = D.threatScore(g, "versari");
+    if (t >= CC.threshold && t < CC.fearThreshold) break;
+  }
+  const grounds = D.coalitionGrounds(g, "versari");
   D.runDiplomacyRound(g);
   const c = g.diplomacy.coalitions.find((x) => x.target === "versari");
-  console.log("  a clean runaway, Menace 0, threat", Math.round(D.threatScore(g, "versari") * 10) / 10,
-    "-> coalition:", !!c);
-  console.log("  >> today a spotless leader is coalitioned on POSITION alone, which is exactly the\n" +
+  console.log("  a clean runaway, Menace 0, threat", Math.round(t * 10) / 10,
+    `(threshold ${CC.threshold}, fear ${CC.fearThreshold})`,
+    "-> grounds:", grounds, "| coalition:", !!c);
+  console.log("  >> was: a spotless leader was coalitioned on POSITION alone, which is exactly the\n" +
     "     Attila failure the research names. The 2026-08-15 log has the pure case: Goldgrass's\n" +
     "     Menace never moved once all game and it had two wars declared on it in R7 for leading.");
+  console.log("  the escape hatch is still there — fear alone IS grounds past",
+    CONFIG.diplomacy.coalition.fearThreshold, "so a flawless runaway is not unstoppable:");
+  const gf = mk(); gf.players.versari.menace = 0; gf.players.versari.vp = 60;
+  console.log("    at threat", Math.round(D.threatScore(gf, "versari") * 10) / 10,
+    "-> grounds:", D.coalitionGrounds(gf, "versari"));
+  console.log("  …and conduct is grounds at any position — Menace",
+    CONFIG.diplomacy.coalition.menaceGrounds + ":");
+  const g2 = mk(); g2.players.versari.menace = CONFIG.diplomacy.coalition.menaceGrounds;
+  console.log("    grounds:", D.coalitionGrounds(g2, "versari"));
 }
 
 line(13, "A conscripted member's Standing never drops below draftStandingFloor");
 {
-  console.log("  PENDING — diplomacy stage 6.");
+  console.log("  RESOLVED — diplomacy §9. Drafts floor at coalition.draftStandingFloor and count as justified.");
   const g = mk();
   D.adjustStanding(g, "lakers", "versari", 5, "test");
-  g.players.versari.menace = 0; g.players.versari.vp = 11;
-  for (const loc of Object.values(g.locations)) if (loc.controller) loc.controller = "versari";
+  // Grounds, so there is a rising to be drafted into at all.
+  g.players.versari.menace = 6; g.players.versari.vp = 14;
+  const m0 = {};
+  for (const f of D.factionIds(g)) m0[f] = g.players[f]?.menace ?? 0;
   D.runDiplomacyRound(g);
-  const inCoal = (g.diplomacy.coalitions.find((c) => c.target === "versari")?.members || []).includes("lakers");
-  console.log("  lakers stood at +5, drafted:", inCoal, "-> standing now", D.getStanding(g, "lakers", "versari"));
-  console.log("  >> a draft should cool a partner, not make them an enemy: +5 should land at Wary (-3),\n" +
-    "     not at hostile. And a coalition declaration should not charge declareUnjustified — with\n" +
-    "     wM 1 that raises the members' OWN threat scores and seeds the next coalition.");
+  const coal = g.diplomacy.coalitions.find((c) => c.target === "versari");
+  const inCoal = (coal?.members || []).includes("lakers");
+  const floor = CONFIG.diplomacy.coalition.draftStandingFloor;
+  console.log("  grounds:", coal?.grounds, "| members:", (coal?.members || []).join(", ") || "(none)");
+  console.log("  lakers stood at +5, drafted:", inCoal, "-> standing now", D.getStanding(g, "lakers", "versari"),
+    "(floor", floor + ")");
+  const belowFloor = (coal?.members || []).filter((m) => D.getStanding(g, m, "versari") < floor);
+  console.log("  members below the draft floor:", belowFloor.length ? belowFloor.join(", ") : "(none)");
+  const charged = (coal?.members || []).filter((m) => (g.players[m]?.menace ?? 0) > m0[m]);
+  console.log("  members charged Menace for joining:", charged.length ? charged.join(", ") : "(none)");
+  console.log("  >> was: a draft made a partner an enemy — +5 landed at hostile — and the declaration\n" +
+    "     charged declareUnjustified, which with wM 1 raised the members' OWN threat scores and\n" +
+    "     seeded the next coalition out of the last one.");
 }
 
 line(14, "A player position broken is cited by name within 3 rounds");

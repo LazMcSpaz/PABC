@@ -337,3 +337,43 @@ about — this is a rule that only works once the AI can price a courtship
 against a conquest. `--set diplomacy.attackPrice.enabled=0` reproduces the
 pre-stage numbers to the round (mix 6 / median 48 / unresolved 3), so the
 "before" stays reachable and the switch-on in phase 5 is a config change.
+
+### §9, coalitions — grounds, deliberation, and a draft that cools instead of conscripting
+
+Three changes, all live:
+
+1. **Grounds.** `coalitionGrounds` returns the stated reason or null. Leading is
+   not a crime. A rising needs *menace* it earned, a *grievance* somebody can
+   name, or a lead so far past the board that *fear* alone is honest
+   (`fearThreshold: 26`, well above `threshold: 16` — the escape hatch that
+   keeps a flawless runaway stoppable, not the ordinary path in).
+2. **Deliberation.** `coalitionJoinScore` replaces the blanket draft. The
+   Standing term is *signed*, so liking the target holds you back — which is
+   what makes a coalition something the target can talk its way out of.
+3. **The draft costs one thing, not two.** The old pair — a flat `standingHit`
+   and then a war that slammed to Hostile — stacked, so a +5 partner became a
+   permanent enemy over a third party's position. A draft now lands at
+   `min(before, draftStandingFloor)`: it cools you to Wary and never lifts
+   somebody already colder. And a rising *on grounds* is justified for every
+   member, so joining charges no Menace — the old charge, at `wM: 1`, raised
+   the members' own threat scores and seeded the next coalition out of the last.
+
+Audit blocks 12 and 13 flip from PENDING to RESOLVED. Both had to be rewritten
+first: block 12 seized every Location for the "spotless" target, which
+manufactured three `occupation` grievances and then reported the grounds gate
+as broken for honouring them.
+
+| | before §9 | after §9 |
+|---|---|---|
+| Ending mix | 6 | **6** |
+| Median rounds | 48 | **51.5** |
+| Games unresolved | 3 | **3** |
+| Wars per game | 54.3 | **51.7** |
+| Coalitions per game | 3.33 | **3.13** |
+
+**One thing recorded, not tuned.** The diplomacy-ending count went 2 → 0, with
+conquest 4 → 6. It is one seed at n=15 and it is *not* the grounds gate —
+`--set diplomacy.coalition.groundsGate=0` reads the same 0/6. The door metrics
+did not move with it (`minorsEverCourted` 3.6, `minorsAlliedAtEnd` 1.6), so the
+diplomacy face is open and the lottery landed elsewhere. Re-read it in phase 5
+rather than tuning a coalition constant on two games.

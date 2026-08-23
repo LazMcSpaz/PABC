@@ -82,6 +82,7 @@ export const EVENT_NAMES = new Set([
   "denounced", "mediated", "recognition_changed",
   // diplomacy-spec.md §6.4 — verbs, AI eval, war tracking, open borders.
   "surprise_attack_honor_lost",
+  "coalition_murmur",
   "trading_pact_formed", "trading_pact_suspended", "trading_pact_resumed", "trading_pact_dissolved",
   "vassal_freed",
   "pact_call_requested", "pact_call_honored", "pact_call_declined",

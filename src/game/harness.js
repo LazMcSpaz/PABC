@@ -43,6 +43,8 @@ import {
   locationWorth, cedeBlocker, cedeableLocations, cedeLocation, resolveProposal,
   // §8 what a fight costs your name
   diplomaticPrice, attackIsWorthIt,
+  // §9 grounds for a rising, and one faction's appetite for it
+  coalitionGrounds, coalitionJoinScore, coalitionAgainst,
 } from "./diplomacy.js";
 import { holderOf, controlLevel, holdsLocation, syncControlHistory } from "./control.js";
 import { recomputeVp, settlementVp, locationVp } from "./victory.js";
@@ -4058,6 +4060,91 @@ line("\n  [§8] a fight costs your name, and the AI can price it");
   } finally {
     AP.enabled = was;
   }
+}
+
+// §9 — a coalition needs GROUNDS, and each member decides for itself.
+//
+// The two failures this fixture pins are both in the 2026-08-15 log. A
+// spotless Goldgrass had two wars declared on it in R7 for the crime of
+// leading, and the blanket draft slammed every member's Standing to Hostile,
+// so a partner became an enemy over a third party's position.
+line("\n  [§9] a rising needs grounds, and members who want to be in it");
+{
+  const CC = CONFIG.diplomacy.coalition;
+  const g = createGame({ seed }); ensureDiplomacy(g);
+  const lead = "versari";
+  g.players[lead].menace = 0;
+  // Park the lead in the band that matters: frightening enough that the old
+  // rule would have risen, clean enough that the new one must not.
+  let t = 0;
+  for (let vp = 1; vp <= 60; vp++) {
+    g.players[lead].vp = vp;
+    t = threatScore(g, lead);
+    if (t >= CC.threshold && t < CC.fearThreshold) break;
+  }
+  check("a lead past the coalition threshold is reachable in the fixture",
+    t >= CC.threshold && t < CC.fearThreshold);
+  check("…and leading, alone, is not grounds to rise", coalitionGrounds(g, lead) === null);
+  runDiplomacyRound(g);
+  check("…so no coalition forms against a spotless leader", !coalitionAgainst(g, lead));
+
+  // Conduct is grounds at any position.
+  const g2 = createGame({ seed }); ensureDiplomacy(g2);
+  g2.players[lead].menace = CC.menaceGrounds;
+  check("Menace it earned itself IS grounds", coalitionGrounds(g2, lead) === "menace");
+
+  // …and so is a lead far enough past everything else that saying so is honest.
+  const g3 = createGame({ seed }); ensureDiplomacy(g3);
+  g3.players[lead].menace = 0; g3.players[lead].vp = 200;
+  check("a lead past fearThreshold is grounds on its own",
+    coalitionGrounds(g3, lead) === "fear");
+
+  // Switchable, per the plan's rule 1.4.
+  const wasGate = CC.groundsGate;
+  try {
+    CC.groundsGate = 0;
+    check("groundsGate 0 restores the old position-alone behaviour",
+      coalitionGrounds(g, lead) === "position");
+  } finally { CC.groundsGate = wasGate; }
+}
+{
+  // The draft floor, and the Menace it must NOT charge.
+  const CC = CONFIG.diplomacy.coalition;
+  const g = createGame({ seed }); ensureDiplomacy(g);
+  const lead = "versari";
+  adjustStanding(g, "lakers", lead, 5, "test");
+  g.players[lead].menace = CC.menaceGrounds + 2;
+  g.players[lead].vp = 14;
+  const menaceBefore = {};
+  for (const f of factionIds(g)) menaceBefore[f] = g.players[f]?.menace ?? 0;
+  runDiplomacyRound(g);
+  const coal = coalitionAgainst(g, lead);
+  check("with grounds, a coalition does form", !!coal && coal.members.length >= 2);
+  check("…and it says what it rose about", coal?.grounds === "menace");
+  if (coal) {
+    check("no drafted member is pushed below the draft floor",
+      coal.members.every((m) => getStanding(g, m, lead) >= CC.draftStandingFloor));
+    check("…a partner at +5 is cooled to the floor, not made an enemy",
+      !coal.members.includes("lakers") || getStanding(g, "lakers", lead) === CC.draftStandingFloor);
+    // The seeding loop: an unjustified declaration charges Menace, wM is 1, so
+    // the members' own threat scores rise and the next coalition forms out of
+    // this one. A rising on grounds is justified for everyone in it.
+    check("…and joining a justified rising charges the members no Menace",
+      coal.members.every((m) => (g.players[m]?.menace ?? 0) <= menaceBefore[m]));
+  }
+}
+{
+  // Deliberation: the Standing term is signed, so liking the target holds you
+  // back. This is what makes a coalition something the target can talk its way
+  // out of rather than a dice roll on the leaderboard.
+  const g = createGame({ seed }); ensureDiplomacy(g);
+  const lead = "versari";
+  g.players[lead].menace = CONFIG.diplomacy.coalition.menaceGrounds + 2;
+  g.players[lead].vp = 14;
+  setStanding(g, "lakers", lead, 10);
+  setStanding(g, "goldgrass", lead, -8);
+  check("a faction that likes the target wants in less than one that doesn't",
+    coalitionJoinScore(g, "lakers", lead) < coalitionJoinScore(g, "goldgrass", lead));
 }
 
 // §1.2 / economy §6.3 — gifts are priced in SWAY now, not scrap. The

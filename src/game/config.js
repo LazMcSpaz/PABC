@@ -662,6 +662,36 @@ export const CONFIG = {
       wM: 1, wP: 2, threshold: 16, dissolve: 11,
       vpWeight: 1.5, territoryWeight: 1, standingHit: 4,
       minRounds: 4, reformCooldownRounds: 5,
+
+      // §9 — GROUNDS, AND A DELIBERATION INSTEAD OF A DRAFT.
+      //
+      // The old rule was: threat crosses a line, everybody who legally can is
+      // conscripted. Two failures follow from that and the 2026-08-15 log has
+      // the pure case of both. Goldgrass's Menace never moved once all game
+      // and it had two wars declared on it in R7 for the crime of leading —
+      // a spotless faction coalitioned on POSITION alone, which is the
+      // "Attila" failure the genre research names. And the draft slammed
+      // every member's Standing to Hostile, so a partner at +5 became an
+      // enemy over somebody else's lead.
+      //
+      // GROUNDS. Position is not a casus belli. A coalition needs one of:
+      // earned Menace, a live grievance somebody holds, or a lead so far past
+      // everything else that fear alone is honest.
+      groundsGate: 1,      // 0 restores the old position-alone behaviour
+      menaceGrounds: 4,    // Menace at or above this IS grounds by itself
+      fearThreshold: 26,   // …and so is a lead this far past the board
+      // DELIBERATION. Each faction decides for itself, and the terms are the
+      // ones a faction would actually weigh: how frightening the target is,
+      // what it has done to ME, and whether I like it.
+      joinScoreMin: 1,       // how convinced a faction must be to sign on
+      joinGrievanceWeight: 2, // per point of grievance weight I hold
+      joinStandingWeight: 0.4, // per point of Standing — positive HOLDS ME BACK
+      joinFearWeight: 0.5,   // per point of threat past the threshold
+      // A draft cools a partner; it does not mint an enemy. Wars opened by a
+      // coalition floor here instead of at Hostile.
+      draftStandingFloor: -3,
+      // The board hears a rising against anyone, not only against itself.
+      murmurAll: 1,
     },
 
     // No `recognition` block. It was a weighted second victory condition
