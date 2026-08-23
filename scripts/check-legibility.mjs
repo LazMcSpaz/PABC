@@ -18,7 +18,7 @@ import { assignTechNode } from "../src/game/stats.js";
 import { performAction } from "../src/game/actions.js";
 import {
   performDiplomacy, adjustStanding, standingReceipts, trespassPreview, ensureDiplomacy,
-  tableOffer, positionBlocker,
+  tableOffer, positionBlocker, declareWar, formPact, atWar as atWarEngine,
 } from "../src/game/diplomacy.js";
 import { emit } from "../src/game/events.js";
 
@@ -366,7 +366,52 @@ const mk = () => createGame({
   }
 }
 
+// --- 12. Economy §9 — HIRE reaches the deal composer -----------------------
+//
+// "Fight X with me" has been a real deal item since §6.10 — priced by
+// `wantsDead`, enacted by declaring the war on acceptance, refused when the
+// target is their ally — and the composer could not say it, so paying somebody
+// to join your war was engine-only.
+{
+  const g = mk();
+  startTurn(g);
+  ensureDiplomacy(g);
+  declareWar(g, "versari", "lakers", "test");
+  const a = adaptState(g, "versari").diplomacy;
+  const gg = a.factions.find((x) => x.id === "goldgrass");
+  check("47. a third party you could hire against your enemy is offered",
+    (gg?.couldHireAgainst || []).some((t) => t.id === "lakers"),
+    JSON.stringify(gg?.couldHireAgainst));
+  check("48. …and the mirror — a war of theirs you could join — is offered too", (() => {
+    const g2 = mk(); startTurn(g2); ensureDiplomacy(g2);
+    declareWar(g2, "goldgrass", "plainers", "test");
+    const a2 = adaptState(g2, "versari").diplomacy;
+    const f2 = a2.factions.find((x) => x.id === "goldgrass");
+    return (f2?.couldFightFor || []).some((t) => t.id === "plainers");
+  })());
+  // …and it is never offered against their own ally, because the engine will
+  // refuse it — an offer the drawer makes that the engine rejects is worse
+  // than no offer at all.
+  const g3 = mk(); startTurn(g3); ensureDiplomacy(g3);
+  declareWar(g3, "versari", "lakers", "test");
+  formPact(g3, "goldgrass", "lakers", "test");
+  const a3 = adaptState(g3, "versari").diplomacy;
+  const gg3 = a3.factions.find((x) => x.id === "goldgrass");
+  check("49. …and never against somebody they are allied to",
+    !(gg3?.couldHireAgainst || []).some((t) => t.id === "lakers"));
+  // The term the composer emits is the one the engine enacts.
+  const res = performDiplomacy(g, "versari", "propose-deal", {
+    faction: "goldgrass",
+    give: [{ resource: { resource: "scrap", amount: 40 } }],
+    get: [{ promise: { kind: "joinWar", target: "lakers" } }],
+  });
+  check("50. …and a hire the engine accepts opens the war it names",
+    !res.accepted || atWarEngine(g, "goldgrass", "lakers"),
+    `accepted ${res.accepted}, at war ${atWarEngine(g, "goldgrass", "lakers")}`);
+}
+
 console.log(`\n${fail ? `${fail} FAILED` : "all checks passed"}`);
+
 
 
 process.exit(fail ? 1 : 0);

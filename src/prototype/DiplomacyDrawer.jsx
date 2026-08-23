@@ -2130,6 +2130,11 @@ function DealPane({ f, dip, kind = "custom", onBack, onSubmit }) {
   const [wantPact, setWantPact] = useState(false);
   const [wantBorders, setWantBorders] = useState(false);
   const [settle, setSettle] = useState(false);
+  // ECONOMY §9 — hire. Who you are paying them to fight, and who you are
+  // offering to fight for. Stored as a faction id or null, not a set: a deal
+  // that opens three wars at once is not a hire, it is a suicide note.
+  const [hireAgainst, setHireAgainst] = useState(null);
+  const [fightFor, setFightFor] = useState(null);
   // §3.2 — cities on the table, by hexId. The map is what the war is about,
   // and until now the only thing this pane could move was scrap.
   const [cedeGive, setCedeGive] = useState(() => new Set());
@@ -2173,12 +2178,18 @@ function DealPane({ f, dip, kind = "custom", onBack, onSubmit }) {
     // Asked for, not given: the party holding the grievances is the one being
     // asked to give something up, and they price it accordingly.
     if (settle) get.push({ settlement: true });
+    // ECONOMY §9 — "fight X with me", and its mirror. The engine has enacted
+    // this promise since §6.10 by declaring the war on acceptance; the
+    // composer simply could not say it.
+    if (hireAgainst) get.push({ promise: { kind: "joinWar", target: hireAgainst } });
+    if (fightFor) give.push({ promise: { kind: "joinWar", target: fightFor } });
     for (const hex of cedeGive) give.push({ location: { hexId: hex } });
     for (const hex of cedeGet) get.push({ location: { hexId: hex } });
     if (isPeace) give.push({ promise: { kind: "peace" } });
     return { proposer: dip.youId, recipient: f.id, give, get };
   }, [scrapGive, scrapGet, flowGive, flowGet, pactOffer, openBorders, nonAggression,
-      wantPact, wantBorders, settle, cedeGive, cedeGet, term, dip.youId, f.id, isPeace, isTribute]);
+      wantPact, wantBorders, settle, cedeGive, cedeGet, term, dip.youId, f.id, isPeace, isTribute,
+      hireAgainst, fightFor]);
 
   const title = isGift ? "Send a gift" : isPeace ? "Sue for peace" : isTribute ? "Demand tribute" : "Custom deal";
   const subtitle = isGift
@@ -2266,6 +2277,68 @@ function DealPane({ f, dip, kind = "custom", onBack, onSubmit }) {
         {/* Term — only shown once something on the table actually runs for
             one. A stream priced without a term is how the old builder let a
             player buy four scrap a turn forever for twelve scrap. */}
+        {/* ECONOMY §9 — HIRE. The engine has enacted "fight X with me" since
+            §6.10 and this pane could not say it, so paying somebody to join
+            your war was engine-only. Both directions, because a war you are
+            OFFERED a hand in is worth as much as one you buy help for. */}
+        {!isGift && !isTribute && ((f.couldHireAgainst || []).length > 0 || (f.couldFightFor || []).length > 0) && (
+          <Card>
+            <SectionLabel>Swords</SectionLabel>
+            {(f.couldHireAgainst || []).length > 0 && (
+              <>
+                <div className="pc-prose" style={{ fontSize: 11.5, lineHeight: 1.5, marginBottom: 5 }}>
+                  Ask them into one of your wars. They will want paying for it —
+                  and they will not turn on their own allies at any price.
+                </div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginBottom: 8 }}>
+                  {(f.couldHireAgainst || []).map((t) => (
+                    <button
+                      key={t.id}
+                      className="hud-int"
+                      onClick={() => setHireAgainst(hireAgainst === t.id ? null : t.id)}
+                      style={{
+                        fontFamily: C.font, fontSize: 9.5, fontWeight: 700, letterSpacing: 0.8,
+                        textTransform: "uppercase", padding: "4px 8px", borderRadius: 3,
+                        color: hireAgainst === t.id ? "#08100f" : "#f4efe2",
+                        border: `1px solid ${hireAgainst === t.id ? "#d2453f" : "rgba(210,69,63,0.35)"}`,
+                        background: hireAgainst === t.id
+                          ? "linear-gradient(180deg,#e8756f,#c03b36)" : "rgba(210,69,63,0.07)",
+                        cursor: "pointer",
+                      }}
+                    >{`vs ${t.name}`}</button>
+                  ))}
+                </div>
+              </>
+            )}
+            {(f.couldFightFor || []).length > 0 && (
+              <>
+                <div className="pc-prose" style={{ fontSize: 11.5, lineHeight: 1.5, marginBottom: 5 }}>
+                  Or offer your own. Accepting opens the war the moment the deal
+                  is struck — this is a war you are choosing, not one you are promising.
+                </div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
+                  {(f.couldFightFor || []).map((t) => (
+                    <button
+                      key={t.id}
+                      className="hud-int"
+                      onClick={() => setFightFor(fightFor === t.id ? null : t.id)}
+                      style={{
+                        fontFamily: C.font, fontSize: 9.5, fontWeight: 700, letterSpacing: 0.8,
+                        textTransform: "uppercase", padding: "4px 8px", borderRadius: 3,
+                        color: fightFor === t.id ? "#08100f" : "#f4efe2",
+                        border: `1px solid ${fightFor === t.id ? "#c9b24e" : "rgba(201,178,78,0.35)"}`,
+                        background: fightFor === t.id
+                          ? "linear-gradient(180deg,#e6cf7a,#b99f3c)" : "rgba(201,178,78,0.07)",
+                        cursor: "pointer",
+                      }}
+                    >{`join vs ${t.name}`}</button>
+                  ))}
+                </div>
+              </>
+            )}
+          </Card>
+        )}
+
         {termMatters && (
           <Card>
             <SectionLabel>Term</SectionLabel>

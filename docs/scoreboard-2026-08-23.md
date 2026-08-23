@@ -643,3 +643,27 @@ ending mix from 7 to 8.
 `audit-economy.mjs` block 9 flips PENDING → LIVE, which makes it **10 of 10
 blocks live, 47 assertions, 0 pending** — the economy audit no longer has a
 single claim waiting on a stage.
+
+### Economy §9 — scrap between factions: subsidy, payment in kind, hire
+
+Two of the three were already built and the third was engine-only.
+
+- **Subsidy** — `{flow: {resource:"scrap", amountPerTurn, rounds}}` is a real
+  deal item, priced by term (`flowRounds`), paid on the round tick, and the
+  composer already offers it in both directions. No change needed.
+- **Payment in kind** — the composer already puts Locations, settlements and
+  standing promises on either side of a deal. No change needed.
+- **Hire** — `{promise: {kind:"joinWar", target}}` has been a real item since
+  §6.10: priced by `wantsDead`, enacted by declaring the war on acceptance,
+  hard-refused when the target is their ally. **The composer could not say
+  it**, so paying somebody to join your war was engine-only.
+
+The Swords card closes that, in both directions — hire them into one of your
+wars, or offer your own sword to one of theirs. The adapter builds both lists
+by the same rules the engine enforces (never against a faction they are allied
+to), because an offer the drawer makes that the engine rejects is worse than no
+offer at all. Legibility checks 47–50 assert exactly that, including that a
+hire the engine accepts actually opens the war it names.
+
+Governing numbers unmoved (8 / 45 / 4) — it is a player verb the AI does not
+compose, so the suite is the wrong instrument and correctly reads flat.

@@ -887,6 +887,20 @@ function adaptDiplomacy(state, viewer) {
       yourStanding: sFrom,
       pacted: arePacted(state, f, viewer),
       atWar: atWar(state, f, viewer),
+      // ECONOMY §9 — HIRE. "Fight X with me" has been a real deal item since
+      // §6.10 (`promise.joinWar`, enacted by declaring the war on acceptance,
+      // priced by `wantsDead`) and the composer could not offer it, so paying
+      // somebody to join your war was engine-only. These are the two lists the
+      // pane needs: who you could hire them against, and who they could hire
+      // YOU against — the same term, read from both seats.
+      couldHireAgainst: factionIds(state)
+        .filter((x) => x !== viewer && x !== f && state.players[x]
+          && atWar(state, viewer, x) && !arePacted(state, f, x))
+        .map((x) => ({ id: x, name: factionDef(x)?.name || x })),
+      couldFightFor: factionIds(state)
+        .filter((x) => x !== viewer && x !== f && state.players[x]
+          && atWar(state, f, x) && !arePacted(state, viewer, x))
+        .map((x) => ({ id: x, name: factionDef(x)?.name || x })),
       vassalOfYou: vof === viewer,
       lordOfYou: vassalLord(state, viewer) === f,
       inCoalition: (coalitionAgainst(state, viewer)?.members || []).includes(f),
