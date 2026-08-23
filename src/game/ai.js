@@ -22,7 +22,7 @@ import { factionDef } from "./content.js";
 import {
   factionIds, powerOf, arePacted, atWar, vassalLord, mayEngage, mayCourt,
   speakPosture, postureOf, postureStated, isCourting, eitherCourting, courtRounds,
-  postureCitation, interestsOf, courtshipScore, swayIncome, swayOf,
+  postureCitation, interestsOf, courtshipScore, swayIncome, swayOf, canSustainCourtship,
   getStanding, passesRepGates, formPact, vassalize, applyDeal, checkDominion,
   tableOffer, offersFor, warExhaustion,
   denounce, denounceWarrant, denounceCooldown, honorOf, grievanceWeight, wouldAccept,
@@ -496,16 +496,10 @@ function courtSomebody(state, pid, others) {
   // bankrupt, having `chargeSwayUpkeep` call every courtship off, and
   // re-opening the same one next round forever.
   //
-  // It budgets against INCOME, with the pool counted as a partial buffer. The
-  // pool is what lets a faction reach past its means for a few rounds; income
-  // is what it can hold indefinitely.
-  const cfg = CONFIG.sway;
-  if (cfg) {
-    const income = swayIncome(state, pid).total;
-    const committed = running * cfg.courtUpkeep;
-    const buffer = Math.max(0, swayOf(state, pid) - committed) * 0.5;
-    if (committed + cfg.courtUpkeep > income + buffer) return false;
-  }
+  // …through the SHARED affordability rule, which the human's Court button and
+  // `performDiplomacy("court")` also read. Two implementations of "can you
+  // afford this" is how the asymmetric bar got in the first time.
+  if (!canSustainCourtship(state, pid)) return false;
 
   let best = null, bestScore = 0;
   for (const f of others) {

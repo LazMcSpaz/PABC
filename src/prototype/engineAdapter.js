@@ -40,7 +40,7 @@ import {
   hasRailAccess,
   // §5/§6 — posture and political capacity.
   postureOf, conditionText, isCourting, mayBeginCourtship, courtingList,
-  swayIncome, swayOf, swayLedger,
+  swayIncome, swayOf, swayLedger, canSustainCourtship,
 } from "../game/diplomacy.js";
 import { hasTechNode } from "../game/tech.js";
 import { holderOf } from "../game/control.js";
@@ -1536,10 +1536,18 @@ function availableVerbsAgainst(state, viewer, fid) {
           ? "Their reputation is in your way."
           : "They are beyond your reach.",
       });
-    } else if (sway < SW.courtUpkeep) {
+    } else if (!canSustainCourtship(state, viewer)) {
+      // The SHARED rule, not a UI approximation of it. A courtship is a
+      // running cost, so the bar is "can you keep paying" — and the human and
+      // the AI have to answer to the same one, or the bar is asymmetric.
+      const running = courtingList(state, viewer).length;
       out.push({
         verb: "court", state: "disabled",
-        reason: `Not enough Sway — ${SW.courtUpkeep} a round, you hold ${sway}.`,
+        reason: running
+          ? `You are already spending ${running * SW.courtUpkeep} Sway a round on courtships, ` +
+            `against an income of ${swayIncome(state, viewer).total}. Call one off, or widen your reach.`
+          : `Not enough Sway to keep one running — ${SW.courtUpkeep} a round, ` +
+            `against an income of ${swayIncome(state, viewer).total}.`,
       });
     } else {
       out.push({

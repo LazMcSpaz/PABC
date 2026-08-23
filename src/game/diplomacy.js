@@ -16,7 +16,8 @@ import { bfsDistances, reinforcementRoute } from "./board.js";
 import { holdsLocation, syncControlHistory } from "./control.js";
 import { registerInterestReaders, interestsOf, interestToward, interestMultiplier } from "./interests.js";
 import {
-  registerSwayReaders, tickSway, swayIncome, swayOf, spendSway, canAffordSway, swayLedger,
+  registerSwayReaders, tickSway, seedSway, swayIncome, swayOf, spendSway, canAffordSway,
+  canSustainCourtship, swayLedger,
 } from "./sway.js";
 import {
   registerPostureReaders, recomputePostures, postureOf, setPosture, postureStated,
@@ -2938,6 +2939,19 @@ export function performDiplomacy(state, pid, action, params = {}) {
       if (!passesRepGates(state, pid, f)) {
         return { ok: false, reason: "your own reputation is in the way" };
       }
+      // §6.3 — a courtship is a RUNNING cost, so the bar is "can you keep
+      // paying", not "can you pay once". Enforced here rather than only in the
+      // UI so the human and the AI answer to the same test: the first cut had
+      // the AI budget against income while the button gated on the pool, which
+      // on round one let the AI court and told the human it was broke.
+      if (!canSustainCourtship(state, pid)) {
+        return {
+          ok: false,
+          reason: `you cannot keep paying for another courtship — ${CONFIG.sway.courtUpkeep} a round, ` +
+            `and you are already spending ${courtingList(state, pid).length * CONFIG.sway.courtUpkeep} ` +
+            `against an income of ${swayIncome(state, pid).total}`,
+        };
+      }
       if (!beginCourtship(state, pid, f)) return { ok: false, reason: "there is nothing to open" };
       const p = postureOf(state, pid, f);
       return r({
@@ -3401,7 +3415,10 @@ registerInterestReaders({
   factionIds, occupationsBy, worstGrievance, grievanceWeight, atWar, warExhaustion,
   mayCourt, tradingPactBetween, tradeRouteOpen, unitsInTerritory, threatScore,
 });
-registerSwayReaders({ factionIds, agreementCount, chargeSwayUpkeep });
+registerSwayReaders({
+  factionIds, agreementCount, chargeSwayUpkeep,
+  courtingCount: (state, pid) => courtingList(state, pid).length,
+});
 registerPostureReaders({
   factionIds, atWar, arePacted, vassalLord, coalitionAgainst, mayCourt,
   getStanding, adjustStanding, passesRepGates, grievanceWeight,
@@ -3416,5 +3433,5 @@ export {
   speakPosture, postureCitation, conditionText,
   beginCourtship, mayBeginCourtship, courtshipScore,
   // Sway, re-exported through the one political door.
-  swayIncome, swayOf, spendSway, canAffordSway, swayLedger,
+  swayIncome, swayOf, spendSway, canAffordSway, canSustainCourtship, seedSway, swayLedger,
 };

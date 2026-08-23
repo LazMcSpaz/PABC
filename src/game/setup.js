@@ -8,7 +8,7 @@ import { createIdGen } from "./ids.js";
 import { buildHexGrid, generateLayout, assignTerrainFeatures, assignRoads, assignRails, bfsDistances } from "./board.js";
 import { recomputeInfluence } from "./influence.js";
 import { recomputeVisibility } from "./visibility.js";
-import { ensureDiplomacy, seedStanding } from "./diplomacy.js";
+import { ensureDiplomacy, seedStanding, seedSway } from "./diplomacy.js";
 import { recomputeVp } from "./victory.js";
 
 // The name a faction's `seq`-th unit musters under. Walks the faction's
@@ -461,6 +461,18 @@ export function createGame({
   // so the main contest stream is untouched; human rows start neutral.
   ensureDiplomacy(state);
   seedStanding(state, makeRng((seed ^ 0x517cc1b7) >>> 0));
+  // Economy §6 — and the opening political capacity, computed with the same
+  // income rule the round tick uses. Without this the game begins with every
+  // faction on zero and EVERY political verb disabled for its whole first
+  // turn, because income is only paid at round end: the first Sway anyone
+  // holds would arrive on round 2. A dead first turn across a whole layer
+  // reads as broken rather than as a rule, and it is not one — the game starts
+  // at the beginning of round 1, so a faction opens it holding a round's worth
+  // of capacity, exactly as it opens holding its starting scrap.
+  //
+  // After `recomputeInfluence` above, because the territorial term reads the
+  // ZoC map.
+  seedSway(state);
   // VP is held, not banked (victory.js) — so every faction opens with whatever
   // its starting homeland is worth, rather than at zero. Quietly: nobody has
   // "gained" anything yet.

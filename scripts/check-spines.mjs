@@ -244,26 +244,95 @@ const mk = (opts = {}) => createGame({
   check("33. …capacity does", D.performDiplomacy(g3, "versari", "gift", { faction: "goldgrass", standing: 3 }).ok);
   check("34. …at the published rate", g3.players.versari.sway === 0);
 
-  // Courtship is a RUNNING cost, and a faction that cannot pay drops it.
+  // Courtship is a RUNNING cost, and a faction that cannot pay drops one.
+  //
+  // The floor guarantees exactly ONE courtship to everybody, so a bankrupt
+  // faction is not stripped of its politics — it is stripped of its SECOND
+  // relationship. That is the sink biting where it should: reach past your
+  // means and you lose the reach, not the floor.
   const g4 = mk();
   startTurn(g4); D.ensureDiplomacy(g4);
+  g4.players.versari.sway = SW.cap;
   setStanding(g4, "versari", "goldgrass", 4, "test");
-  D.performDiplomacy(g4, "versari", "court", { faction: "goldgrass" });
-  g4.players.versari.sway = 0;
-  // Strip the income to nothing except the floor, which is below courtUpkeep.
+  setStanding(g4, "versari", "lakers", 4, "test");
+  const openedA = D.performDiplomacy(g4, "versari", "court", { faction: "goldgrass" }).ok;
+  const openedB = D.performDiplomacy(g4, "versari", "court", { faction: "lakers" }).ok;
+  check("35. a faction with reach can work two relationships at once",
+    openedA && openedB, `goldgrass ${openedA}, lakers ${openedB}`);
+  // Now take the ground away: income falls to the floor, which covers one.
   for (const l of Object.values(g4.locations)) {
     if (l.controller === "versari") { l.controller = null; l.sections = l.sections.map(() => null); }
   }
-  // The territorial term reads the ZoC map, so the field has to be told the
-  // holdings are gone — otherwise the faction is bankrupt on paper and still
-  // collecting rent on hexes it no longer owns.
   recomputeInfluence(g4);
+  g4.players.versari.sway = 0;
   g4.round += 1; D.runDiplomacyRound(g4);
-  check("35. a courtship nobody can pay for is called off",
-    !D.isCourting(g4, "versari", "goldgrass"),
-    "a bankrupt faction is still courting — the sink does not bite");
-  check("36. …and the board is told why",
+  const stillCourting = ["goldgrass", "lakers"].filter((f) => D.isCourting(g4, "versari", f));
+  check("36. …and reaching past your means costs you the reach, not the floor",
+    stillCourting.length === 1,
+    `${stillCourting.length} courtships survived on an income of ${swayIncome(g4, "versari").total}`);
+  check("37. …the older one, because that is the relationship you have invested in",
+    stillCourting[0] === "goldgrass", stillCourting.join(","));
+  check("38. …and the board is told why",
     g4.log.some((e) => e.name === "courtship_lapsed"));
+}
+
+// --- 6b. The opening position: round 1 is playable, and symmetric ---------
+//
+// Income is paid at ROUND END, so without a seeded pool the game began with
+// every faction on zero and every political verb disabled for its whole first
+// turn — the first Sway anyone held arrived on round 2. Worse, the AI courted
+// anyway, because its check budgeted against INCOME while the human's button
+// gated on the POOL. An asymmetric bar is exactly what the brief rejects.
+{
+  const g = mk({ minors: ["croppers"] });
+  startTurn(g);
+  for (const pid of Object.keys(g.players)) {
+    check(`${pid} opens the game holding political capacity`,
+      swayOf(g, pid) > 0, `${pid} starts on ${swayOf(g, pid)} — a dead first turn`);
+  }
+  check("the opening pool is a round's income, not a separate constant",
+    swayOf(g, "versari") === Math.min(SW.cap, swayIncome(g, "versari").total));
+
+  // The floor buys exactly one courtship, for everybody, always. That is the
+  // rule rather than a coincidence of two guesses — and at courtUpkeep 10
+  // against floor 6 it was neither: a faction on the floor churned open ->
+  // cannot pay -> lapse -> save up -> open, nine posture flips in 25 rounds,
+  // and every flip reset the posture's statedRound so the pair never stayed
+  // on the record long enough to be acted on.
+  check("the floor is exactly one courtship", SW.floor === SW.courtUpkeep,
+    `floor ${SW.floor} vs courtUpkeep ${SW.courtUpkeep}`);
+  const broke = mk();
+  startTurn(broke);
+  for (const l of Object.values(broke.locations)) {
+    if (l.controller === "versari") { l.controller = null; l.sections = l.sections.map(() => null); }
+  }
+  recomputeInfluence(broke);
+  check("…so even a landless faction can sustain one",
+    D.canSustainCourtship(broke, "versari"),
+    `income ${swayIncome(broke, "versari").total}, upkeep ${SW.courtUpkeep}`);
+
+  // ONE RULE FOR BOTH SIDES. Not "the same answer today" — the same function.
+  const g2 = mk();
+  startTurn(g2);
+  check("the human can act on the political layer on round 1",
+    D.performDiplomacy(g2, "versari", "court", { faction: "goldgrass" }).ok);
+  const view = adaptState(g2).diplomacy.factions.find((f) => f.id === "lakers");
+  const courtVerb = (view.verbs || []).find((v) => v.verb === "court");
+  check("…and the button agrees with the engine",
+    !!courtVerb && (courtVerb.state === "enabled") === D.canSustainCourtship(g2, "versari"),
+    `button ${courtVerb?.state}, engine ${D.canSustainCourtship(g2, "versari")}`);
+
+  // A courtship that churns is worse than one refused: every reopen resets the
+  // posture clock, so the pair never becomes actionable.
+  const g3 = mk();
+  startTurn(g3);
+  D.ensureDiplomacy(g3);
+  for (let i = 0; i < 12; i += 1) { g3.round += 1; D.runDiplomacyRound(g3); }
+  const flips = g3.log.filter((e) => e.name === "posture_changed").length;
+  const lapses = g3.log.filter((e) => e.name === "courtship_lapsed").length;
+  console.log(`        · 12 idle rounds: ${flips} posture changes, ${lapses} courtships lapsed`);
+  check("an idle board does not churn courtships open and shut", lapses === 0,
+    `${lapses} lapses with nobody spending anything`);
 }
 
 // --- 7. It all reaches the screen -----------------------------------------
@@ -276,15 +345,15 @@ const mk = (opts = {}) => createGame({
   D.speakPosture(g, "goldgrass");
   const view = adaptState(g).diplomacy;
   const row = view.factions.find((f) => f.id === "goldgrass");
-  check("37. the drawer is told where they stand", row?.posture?.kind === "Courting");
-  check("38. …and what they want, in words", typeof row.posture.condition === "string");
-  check("39. …and whether that condition pays anything", row.posture.costly != null);
-  check("40. the player's own capacity is itemised", view.sway && view.sway.parts.floor === SW.floor);
-  check("41. …with the prices published", view.sway.costs.courtUpkeep === SW.courtUpkeep);
-  check("42. …and a ledger of where it went", Array.isArray(view.sway.ledger));
+  check("39. the drawer is told where they stand", row?.posture?.kind === "Courting");
+  check("40. …and what they want, in words", typeof row.posture.condition === "string");
+  check("41. …and whether that condition pays anything", row.posture.costly != null);
+  check("42. the player's own capacity is itemised", view.sway && view.sway.parts.floor === SW.floor);
+  check("43. …with the prices published", view.sway.costs.courtUpkeep === SW.courtUpkeep);
+  check("44. …and a ledger of where it went", Array.isArray(view.sway.ledger));
   // Court has to be reachable, or a human cannot form a pact at all.
   const verbs = (row.verbs || []).map((v) => v.verb);
-  check("43. Court is on the verb list", verbs.includes("court") || verbs.includes("end-courtship"),
+  check("45. Court is on the verb list", verbs.includes("court") || verbs.includes("end-courtship"),
     verbs.join(","));
 }
 

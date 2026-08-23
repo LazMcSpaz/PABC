@@ -131,6 +131,63 @@ export function canAffordSway(state, pid, amount) {
   return (state.players[pid]?.sway || 0) >= amount;
 }
 
+/**
+ * Could `pid` keep paying for `additional` more courtships?
+ *
+ * ONE RULE FOR BOTH SIDES, and that is the point of it being here rather than
+ * in the AI and in the adapter separately. The first cut had the AI budgeting
+ * against INCOME and the human's button gating on the POOL, which is a
+ * different test wearing the same name: on round one the AI opened a courtship
+ * while the human's Court button read "not enough Sway", because income had
+ * not been paid yet. An asymmetric bar is exactly what the diplomacy brief
+ * rejects, and the fact that this one arrived by accident rather than by
+ * design is not a defence.
+ *
+ * A courtship is a RUNNING cost, so the question is not "can I pay once" but
+ * "can I keep paying". Income is what a faction sustains indefinitely; the
+ * pool is a buffer that lets it reach a little past its means for a while.
+ * Half the FREE pool is that reach, and it is deliberately less than all of
+ * it — a faction that spends its whole buffer on a second courtship drops both
+ * the moment its income dips, which is a wasted act and a broken promise.
+ */
+export function canSustainCourtship(state, pid, additional = 1) {
+  const cfg = S();
+  if (!cfg || !R) return true;
+  const running = R.courtingCount(state, pid);
+  const committed = running * cfg.courtUpkeep;
+  const need = committed + additional * cfg.courtUpkeep;
+  const buffer = Math.max(0, swayOf(state, pid) - committed) * 0.5;
+  return need <= swayIncome(state, pid).total + buffer;
+}
+
+/**
+ * Seed the opening pool, at setup.
+ *
+ * Without this the game begins with every faction on zero and EVERY political
+ * verb disabled for its whole first turn — income is paid at round end, so the
+ * first Sway a player holds arrives on round 2. A dead first turn across a
+ * whole layer reads as broken rather than as a rule, and it is not one: the
+ * game starts at the beginning of round 1, so a faction should open it holding
+ * a round's worth of political capacity, exactly as it holds its opening
+ * scrap.
+ *
+ * Deliberately the same computation the round tick uses rather than a separate
+ * starting constant, so the opening position cannot drift away from the income
+ * rule the rest of the game runs on.
+ */
+export function seedSway(state) {
+  const cfg = S();
+  if (!cfg || !R) return;
+  for (const pid of R.factionIds(state)) {
+    const p = state.players[pid];
+    if (!p) continue;
+    const inc = swayIncome(state, pid);
+    p.swayIncome = inc.total;
+    p.sway = Math.min(cfg.cap, inc.total);
+    recordSway(state, pid, p.sway, "opening position");
+  }
+}
+
 // The ledger. Causes always visible, the way §11 asks — bounded like `repLog`.
 const SWAY_LOG_MAX = 14;
 function recordSway(state, pid, delta, cause) {

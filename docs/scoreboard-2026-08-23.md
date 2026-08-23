@@ -206,12 +206,49 @@ No face has collapsed; the spread is three-way for the first time.
 Re-read it as "no single face collapses" until §8 and §9 land, then apply it
 literally, because that is when it becomes the check it was written to be.
 
+### Post-review fix (same day): the opening position
+
+Review found round 1 was dead and asymmetric, and pulling that thread found a
+functional bug behind one of the tuning findings below.
+
+- **Sway is seeded at setup**, using the same income rule the round tick uses.
+  Income is paid at round END, so the game began with every faction on zero and
+  every political verb disabled for its whole first turn; the first Sway anyone
+  held arrived on round 2.
+- **The affordability test is one shared function.** The AI budgeted against
+  INCOME while the human's Court button gated on the POOL — two tests wearing
+  one name, so on round one the AI courted while the human was told it was
+  broke. `canSustainCourtship` is now read by the AI, by
+  `performDiplomacy("court")` and by the adapter's verb gate.
+- **`courtUpkeep` is now equal to `floor` (both 6).** At 10 against a floor of
+  6, a faction on the floor could not sustain a courtship at all — and the
+  result was not merely harsh, it was a **churn loop**: open, fail to pay,
+  lapse, save up, re-open. Nine posture flips in 25 rounds on seed 248, and
+  because every flip resets the posture's `statedRound`, the pair never stayed
+  on the record long enough to be acted on. That starved the approach-the-human
+  path entirely and broke audit finding 7's regression guard. The floor now
+  buys exactly one courtship, for everybody, always — which is a rule rather
+  than a coincidence of two guesses.
+
+| | baseline | phase 3 | after the fix |
+|---|---|---|---|
+| Ending mix (submission + mixed) | 5 | 5 | **7** |
+| Median rounds to Dominion | 62 | 41.5 | **49** |
+| Games unresolved | 6 | 3 | **4** |
+| Courtships lapsed per game | — | 3.07 | **0.8** |
+| Coalitions per game | 4.33 | 4.67 | **3.33** |
+| Mixed endings (allies *and* vassals) | 1 | 0 | **2** |
+
+Unresolved ticked 3 → 4, which is inside the noise of a 15-seed suite and
+against a previous reading taken from a state where courtships were churning.
+The mixed ending — the interesting case, allies and vassals together — is back.
+
 ### Three findings the suite produced, recorded rather than tuned
 
 Per the plan's "ship them at their proposed values, measure, then tune once —
 not per-stage".
 
-1. **Sway is over-funded.** Factions sit at the ceiling 29% of rounds against a
+1. **Sway is over-funded.** Factions sit at the ceiling 33% of rounds against a
    target under 15%. Expected at this stage: only one of the four sinks is live
    (courtship upkeep). Occupation lands in phase 4 and espionage ops in phase 6.
    Re-measure then, and tune `cap` / `courtUpkeep` once, at the end.
@@ -220,13 +257,9 @@ not per-stage".
    inert, which is harmless but means the bounded-advantage argument is
    currently carried by the floor alone. The leader-to-minor ratio is 2.17:1
    anyway, comfortably inside the ≤3:1 target.
-3. **`courtUpkeep: 10` against `floor: 6` means a landless faction cannot
-   sustain a courtship at all.** The brief's worked example assumes a minor on
-   four hexes with a pact (income 13); measured minors run 6–10. Courtships
-   lapse for want of capacity 3.07 times a game, which is the sink biting —
-   but it bites hardest on exactly the factions the floor exists to protect.
-   The candidate fix is `courtUpkeep: 8` or `floor: 8`, deferred to the single
-   tuning pass.
+3. ~~**`courtUpkeep: 10` against `floor: 6`**~~ — **acted on, not deferred.**
+   It turned out to be a churn loop rather than a balance question; see the
+   post-review fix above. `courtUpkeep` is now 6.
 
 ### Two bugs the checks caught
 

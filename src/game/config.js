@@ -378,6 +378,12 @@ export const CONFIG = {
     // income gave the Croppers ONE SWAY ACROSS A WHOLE GAME, which makes
     // killing minors mandatory under a win condition that counts them.
     //
+    // THE FLOOR IS EXACTLY ONE COURTSHIP. It and `courtUpkeep` are the same
+    // number on purpose, and that is the rule rather than a coincidence of two
+    // guesses: every faction, however reduced, can always work exactly one
+    // relationship, and everything past that has to be earned from ground or
+    // from agreements.
+    //
     // It is also a free lunch that rewards nothing, and the brief flags it as
     // a decision worth revisiting: scaling it by surviving rivals so it shrinks
     // as the board consolidates is more elegant and harder to reason about.
@@ -415,7 +421,21 @@ export const CONFIG = {
     // the diplomacy brief explicitly rejects; if the AI pays and cannot
     // afford it, no AI ever reaches Courting, aiAcceptsPact returns false
     // forever, and the human can never form a pact BY ANY ROUTE.
-    courtUpkeep: 10,
+    //
+    // EQUAL TO `floor`, and measured into that shape rather than guessed. The
+    // brief proposed 10 against a floor of 6 on the strength of a worked
+    // example where a minor holds four hexes and a pact (income 13). Measured,
+    // minors run 6-10 — so a faction on the floor alone could not sustain a
+    // courtship at all, and the result was not merely harsh, it was a CHURN
+    // LOOP: open, fail to pay, lapse, save up, re-open. Nine posture flips in
+    // twenty-five rounds on seed 248, and because every flip resets the
+    // posture's `statedRound`, the pair never stayed on the record long enough
+    // to be acted on. That starved the approach-the-human path entirely and
+    // broke audit finding 7's regression guard.
+    //
+    // At 6 the floor buys exactly one courtship, always, for everybody. A
+    // second one has to be paid for out of ground or agreements.
+    courtUpkeep: 6,
     // Per +1 Standing from a gift. Replaces the scrap gift outright.
     perStanding: 8,
     // Expose / Forge / Fabricate (diplomacy §12.3). The intrigue branch
