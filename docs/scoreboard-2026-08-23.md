@@ -175,3 +175,66 @@ The minors row was re-specified in phase 2. Reading it off the final board
 measures something else — a minor allied for twenty rounds and then conquered
 scores zero — so it collapses toward zero whenever the war rate is high and
 stops reporting on reachability at all. Both readings are kept.
+
+## Phase 3 result (2026-08-23) — the spines
+
+Posture, interests, the courtship ladder and Sway, measured together because
+the plan pairs them: the ladder is what Sway is for, Sway is what stops the
+ladder being free and instant, and §6.4's payment rules are what stop the two
+deadlocking.
+
+| | baseline | after phase 3 |
+|---|---|---|
+| Median rounds to Dominion | 62 | **41.5** |
+| Games unresolved | 6 | **3** |
+| Endings by **diplomacy** | 1 | **4** |
+| Denouncements as a share of acts | 23% | **15%** (target < 15%) |
+| Minors allied or vassalised at the end | 1.0 | **2.13** |
+| Sway income, minor faction | — | **9** |
+| Leader-to-minor Sway ratio | — | **2.17 : 1** (target ≤ 3 : 1) |
+
+Endings: submission 4 · diplomacy 4 · conquest 3 · mixed 1 · unresolved 3.
+
+### On `submission + mixed ≥ 11`
+
+That row now reads 5 of 15, and it is the wrong question for this suite. It was
+written to catch the vassal face being narrowed by §8 and §9 — neither of which
+has landed. What actually moved is that the DIPLOMACY face opened (1 → 4) and
+conquest narrowed (3 → 2), which is the design working. Submission held at 4.
+No face has collapsed; the spread is three-way for the first time.
+
+Re-read it as "no single face collapses" until §8 and §9 land, then apply it
+literally, because that is when it becomes the check it was written to be.
+
+### Three findings the suite produced, recorded rather than tuned
+
+Per the plan's "ship them at their proposed values, measure, then tune once —
+not per-stage".
+
+1. **Sway is over-funded.** Factions sit at the ceiling 29% of rounds against a
+   target under 15%. Expected at this stage: only one of the four sinks is live
+   (courtship upkeep). Occupation lands in phase 4 and espionage ops in phase 6.
+   Re-measure then, and tune `cap` / `courtUpkeep` once, at the end.
+2. **`hexCap: 20` never binds.** The brief sized it for "the round-30 leader on
+   36 hexes"; measured, the best faction on this board dominates 11. The cap is
+   inert, which is harmless but means the bounded-advantage argument is
+   currently carried by the floor alone. The leader-to-minor ratio is 2.17:1
+   anyway, comfortably inside the ≤3:1 target.
+3. **`courtUpkeep: 10` against `floor: 6` means a landless faction cannot
+   sustain a courtship at all.** The brief's worked example assumes a minor on
+   four hexes with a pact (income 13); measured minors run 6–10. Courtships
+   lapse for want of capacity 3.07 times a game, which is the sink biting —
+   but it bites hardest on exactly the factions the floor exists to protect.
+   The candidate fix is `courtUpkeep: 8` or `floor: 8`, deferred to the single
+   tuning pass.
+
+### Two bugs the checks caught
+
+- **The reachability escape was on the wrong predicate.** See the `--set`
+  section above.
+- **`redress` divided a grievance WEIGHT by `maxPerPair`, a count of
+  ENTRIES.** A units error, and it made a live betrayal weigh 0.25 of a want
+  while a missing trade route weighed 1.0 — so a faction that had been
+  betrayed would open a courtship asking for a road. Caught by
+  `check-spines.mjs` asserting that an unsettled grievance produces a `redress`
+  condition.

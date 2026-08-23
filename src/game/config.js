@@ -355,6 +355,83 @@ export const CONFIG = {
     rushScrapPerPoint: 2,
   },
 
+  // Sway — POLITICAL CAPACITY (economy brief §6). The third currency, with a
+  // hard wall against the other two.
+  //
+  //   Scrap buys what a faction HAS. Sway buys what a faction THINKS.
+  //
+  // Nothing converts between them, at any rate, in either direction. That wall
+  // is the whole design, and it has to hold at the FAUCET, not only at the
+  // sinks: an earlier draft proposed a third slider channel turning Output
+  // into Sway, which is a player-set scrap-to-Sway exchange rate per city per
+  // round — exactly the thing the finding forbids, dressed as a UI feature.
+  //
+  // Why this and not a bigger scrap economy: the diplomacy brief has closed
+  // the scrap->Standing pump, which leaves courtship unpriced. Leave it free
+  // and every faction courts everyone at once, so the ladder is decorative;
+  // price it in scrap and the hole reopens. Three currencies with hard walls
+  // is a SMALLER design than two where one buys the other.
+  sway: {
+    // Every faction, every round, unconditionally. This is the single term
+    // that keeps the diplomacy face open for minors and for the losing player,
+    // and it is not negotiable: the first draft's territory-proportional
+    // income gave the Croppers ONE SWAY ACROSS A WHOLE GAME, which makes
+    // killing minors mandatory under a win condition that counts them.
+    //
+    // It is also a free lunch that rewards nothing, and the brief flags it as
+    // a decision worth revisiting: scaling it by surviving rivals so it shrinks
+    // as the board consolidates is more elegant and harder to reason about.
+    floor: 6,
+    // What the Influence field pays. This is the line from the field to
+    // political capacity, and therefore the reason ZoC matters at all.
+    perHex: 1,
+    // …counted up to here. Bounded advantage, not a compounding dividend: a
+    // rank-based income is worse than a rank-based tax because it compounds
+    // and is invisible.
+    //
+    // THE NUMBER MOST LIKELY TO BE WRONG, and the brief says so: the dominance
+    // threshold is a step function, so hex counts move in jumps of 1 -> 7 ->
+    // 19 rather than smoothly. Watch the ending mix, not the income curve.
+    hexCap: 20,
+    // Per live pact, trading pact or vassal. Diplomacy funds diplomacy, which
+    // is the comeback path and the anti-snowball — a faction with three pacts
+    // and little ground can still court. It also gives trading pacts a second
+    // reason to exist beyond scrapPerUpkeep.
+    perAgreement: 3,
+    // A FLOW ceiling, not a war chest. Sway with nowhere to go is Sway you
+    // should have spent; a pool that banks forever recreates exactly the
+    // problem scrap has.
+    cap: 60,
+
+    // --- the sinks. Four, and no more. -------------------------------
+    // Per round, per faction you are Courting. This is "one diplomatic
+    // mission in flight" expressed as a BUDGET rather than a hard cap — you
+    // can court two rivals at once if you are rich and one if you are not,
+    // and the sequencing is the decision.
+    //
+    // Paid by the INITIATOR; either side's Courting unlocks the pact (§6.4).
+    // Those two rules together are what stop the design deadlocking: if
+    // courtship costs Sway and only the human pays, that is the asymmetric bar
+    // the diplomacy brief explicitly rejects; if the AI pays and cannot
+    // afford it, no AI ever reaches Courting, aiAcceptsPact returns false
+    // forever, and the human can never form a pact BY ANY ROUTE.
+    courtUpkeep: 10,
+    // Per +1 Standing from a gift. Replaces the scrap gift outright.
+    perStanding: 8,
+    // Expose / Forge / Fabricate (diplomacy §12.3). The intrigue branch
+    // finally has an economy.
+    opCost: 20,
+    // Per round, per SURVIVING faction's homeland you hold and did not start
+    // with. The keystone: conquest and courtship compete for the same pool,
+    // under a win condition that needs every faction dealt with.
+    occupation: 6,
+    // Unpayable occupation converts to Standing loss with the aggrieved
+    // faction at this rate. A conqueror who never intends to do politics does
+    // not get occupation for free; they pay in the reputation the rest of the
+    // board reads.
+    arrearsStandingPer: 6,
+  },
+
   // §19 Exploration, Vision & Fog of War. Per-faction sight; LoS over
   // elevation/cover; concealment + ambush. All TBD-in-spec; demo defaults
   // here. Built for a larger map — nothing keys off the 30-hex field.
@@ -729,6 +806,43 @@ export const CONFIG = {
       // anything — which is the same reason denouncing has a cooldown.
       cooldownRounds: 8,
     },
+
+    // Posture (diplomacy brief §5) — where a faction stands toward every
+    // other, said out loud BEFORE it is acted on.
+    //
+    // The diagnosis this answers: PABC's diplomacy is not shallow, it is MUTE.
+    // Every complaint in the 2026-08-23 playtest — offers arrive unearned,
+    // wars come out of nowhere, the AI moves too fast, nothing has a motive —
+    // is a symptom of one absence: a faction that will tell you where it
+    // stands before it acts on it.
+    posture: {
+      courtRounds: 2,          // rounds Courting before a pact may be offered
+      courtStandingGain: 2,    // per round a COSTLY stated condition holds.
+                               // A passive one pays NOTHING — a condition you
+                               // satisfy by doing nothing would otherwise mint
+                               // Standing every round for changing nothing,
+                               // and the ladder becomes a faucet (§7.3).
+      courtDriftExempt: true,  // §7.3 — a pair somebody is actively working is
+                               // not "unreinforced", which is the whole meaning
+                               // of the drift rule. Without this,
+                               // courtStandingGain 2 nets +1/round against
+                               // drift's -1 and 0 -> 6 takes six rounds, not
+                               // three. Measured, not assumed: Standing set to
+                               // 6 decays 6 -> 5 -> 4 -> 3 -> 2 over four rounds.
+      conditionGraceRounds: 1, // grace before a broken condition transitions
+      initiativesPerRound: 1,  // AI-initiated acts per faction per round.
+                               // A SELECTION, not a scan — see §5's cadence.
+      watchingCadence: 3,      // min rounds between initiatives while Watching
+      warningCadence: 2,       //  …while Warning
+      statedBeforeActedRounds: 1, // a posture must be on the record this long
+                               // before it is acted on. 0 switches the whole
+                               // telegraph off without touching code.
+    },
+    // How much a live interest bends a price (§6 payoff 3, audit tier-3 item
+    // 11). Modest on purpose: personality in the price should tilt a
+    // negotiation, not let a warlord be talked into anything with the word
+    // "war" in it. 0 switches it off.
+    interests: { priceMultiplier: 0.6 },
 
     // Reach — who a faction can talk to at all (diplomacy brief §15).
     //

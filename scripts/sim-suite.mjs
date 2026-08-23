@@ -208,9 +208,17 @@ function summarise(g, { aiTurns, snapshot, seed }) {
     const p = g.players[pid];
     sway[pid] = { income: p.swayIncome || 0, pool: p.sway || 0 };
   }
+  // Only SURVIVING minors. A game where every minor is dead has no minor
+  // income to report, and folding a 0 in there measures the war rate rather
+  // than the income curve — the same confound the courted-ever row fixes.
   const minorIncomes = minorIds.filter((m) => sway[m]).map((m) => sway[m].income);
   const majorIncomes = Object.keys(sway)
     .filter((p) => factionDef(p)?.tier !== "minor").map((p) => sway[p].income);
+  // Rounds spent pinned at the ceiling, as a share. The brief's target is
+  // under 15%: a pool that sits at the cap is a currency that prices nothing,
+  // and it is the first thing to look at when a sink does not bite.
+  const capEvents = evName(g, "sway_capped").length;
+  const factionRounds = Math.max(1, g.round * Object.keys(g.players).length);
 
   return {
     seed,
@@ -236,9 +244,10 @@ function summarise(g, { aiTurns, snapshot, seed }) {
     pressureEvents: evName(g, "influence_pressure").length,
     occupationCharges: evName(g, "occupation_charged").length,
     sway: {
-      minMinor: minorIncomes.length ? Math.min(...minorIncomes) : 0,
-      maxMajor: majorIncomes.length ? Math.max(...majorIncomes) : 0,
-      atCapRounds: 0, // filled once the pool has a ceiling to sit at
+      minMinor: minorIncomes.length ? Math.min(...minorIncomes) : null,
+      maxMajor: majorIncomes.length ? Math.max(...majorIncomes) : null,
+      atCapShare: capEvents / factionRounds,
+      lapsedCourtships: evName(g, "courtship_lapsed").length,
     },
   };
 }
@@ -313,12 +322,17 @@ const report = {
     purchasesRefusedUnsupplied: ok.reduce((n, g) => n + g.supplyRefusals, 0),
     influencePressureEvents: ok.reduce((n, g) => n + g.pressureEvents, 0),
     occupationCharges: ok.reduce((n, g) => n + g.occupationCharges, 0),
-    swayMinorIncomeMin: Math.min(...ok.map((g) => g.sway.minMinor), Infinity),
+    swayMinorIncomeMin: (() => {
+      const xs = ok.map((g) => g.sway.minMinor).filter((v) => v != null);
+      return xs.length ? Math.min(...xs) : null;
+    })(),
     swayLeaderToMinorRatio: (() => {
-      const lo = mean(ok.map((g) => g.sway.minMinor));
-      const hi = mean(ok.map((g) => g.sway.maxMajor));
+      const lo = mean(ok.map((g) => g.sway.minMinor).filter((v) => v != null));
+      const hi = mean(ok.map((g) => g.sway.maxMajor).filter((v) => v != null));
       return lo > 0 ? r2(hi / lo) : null;
     })(),
+    swayRoundsAtCapShare: r2(mean(ok.map((g) => g.sway.atCapShare))),
+    courtshipsLapsedPerGame: r2(mean(ok.map((g) => g.sway.lapsedCourtships))),
   },
   games,
 };

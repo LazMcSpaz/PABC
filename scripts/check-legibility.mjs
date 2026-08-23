@@ -47,8 +47,9 @@ const mk = () => createGame({
 {
   const g = mk();
   startTurn(g);
-  g.players.versari.resource = 40;
-  performDiplomacy(g, "versari", "gift", { faction: "goldgrass", amount: 6 });
+  // Economy §6.3 — a gift is bought with political capacity, not scrap.
+  g.players.versari.sway = 100;
+  performDiplomacy(g, "versari", "gift", { faction: "goldgrass", standing: 3 });
   const rows = standingReceipts(g, "goldgrass", "versari");
   check("1. a gift leaves a receipt on the pair it warmed", rows.length > 0,
     "standingLog is empty after a gift");
@@ -76,8 +77,9 @@ const mk = () => createGame({
 {
   const g = mk();
   startTurn(g);
-  g.players.versari.resource = 40;
-  performDiplomacy(g, "versari", "gift", { faction: "goldgrass", amount: 6 });
+  // Economy §6.3 — a gift is bought with political capacity, not scrap.
+  g.players.versari.sway = 100;
+  performDiplomacy(g, "versari", "gift", { faction: "goldgrass", standing: 3 });
 
   const plain = adaptState(g, "versari").diplomacy.factions.find((f) => f.id === "goldgrass");
   check("5. the drawer is handed the causes", (plain.standingReceipt || []).length > 0);

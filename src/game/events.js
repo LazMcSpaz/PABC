@@ -94,6 +94,14 @@ export const EVENT_NAMES = new Set([
   "standing_baseline_changed", "recognition_summit",
   // Precursor warnings — AI telegraphs trouble to the human before acting.
   "diplomatic_warning",
+  // §5 posture — where a faction stands, and the moment it says so out loud.
+  // `posture_changed` is the computed transition; `posture_stated` is the
+  // faction actually announcing it, which is the one that gates acting on it.
+  "posture_changed", "posture_stated", "posture_condition_broken",
+  // §6 Sway — political capacity. `sway_capped` fires when income is wasted
+  // against the ceiling, which is the signal that a faction should be
+  // spending; `courtship_lapsed` is a courtship dropped for want of capacity.
+  "sway_changed", "sway_spent", "sway_capped", "courtship_lapsed",
   // Truces — peace is binding for a window; breaking it is treachery.
   "truce_broken",
   // Deal flows run for a term and then lapse, honorably.

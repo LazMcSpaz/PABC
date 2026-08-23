@@ -26,7 +26,8 @@
     "audit:economy": "node scripts/audit-economy.mjs",
     "sim:suite": "node scripts/sim-suite.mjs",
     "harness": "node src/game/harness.js",
-    "check:legibility": "node scripts/check-legibility.mjs"
+    "check:legibility": "node scripts/check-legibility.mjs",
+    "check:spines": "node scripts/check-spines.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.30.1",

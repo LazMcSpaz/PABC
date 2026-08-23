@@ -38,6 +38,9 @@ import {
   openBordersStanding,
   railAccessStanding,
   hasRailAccess,
+  // §5/§6 — posture and political capacity.
+  postureOf, conditionText, isCourting, mayBeginCourtship, courtingList,
+  swayIncome, swayOf, swayLedger,
 } from "../game/diplomacy.js";
 import { hasTechNode } from "../game/tech.js";
 import { holderOf } from "../game/control.js";
@@ -912,6 +915,37 @@ function adaptDiplomacy(state, viewer) {
       // so the relationship panel can summarise active toggles.
       openBordersFromYou: hasOpenBorders(state, f, viewer), // they may transit your land
       openBordersFromThem: hasOpenBorders(state, viewer, f), // you may transit theirs
+      // §5 — WHERE THEY STAND, and what they want from you. This is the one
+      // line that fixes the legibility complaint: "Courting — wants you clear
+      // of Omara" tells a player everything the old tier word did not.
+      //
+      // The posture and its condition are PUBLIC (§12.2). How close you are to
+      // the threshold behind it is not — that is Spy Ring product, and the
+      // discipline is legible rule, purchasable magnitude.
+      posture: (() => {
+        const p = postureOf(state, f, viewer);         // theirs toward you
+        const mine = postureOf(state, viewer, f);      // yours toward them
+        return {
+          kind: p.kind,
+          condition: conditionText(state, f, viewer, p.condition),
+          conditionKind: p.condition?.kind || null,
+          // A condition you satisfy by doing nothing pays no Standing (§7.3).
+          // Saying which is which is the difference between a player planning
+          // around the ladder and guessing at it.
+          costly: p.condition?.costly ?? null,
+          since: p.since,
+          statedRound: p.statedRound,
+          // Whether they have said it out loud yet. An unstated posture cannot
+          // be acted on, so it is also not yet something you have been told.
+          stated: p.statedRound != null,
+          courtingYou: p.kind === "Courting",
+          courtRounds: p.kind === "Courting" ? state.round - p.since : 0,
+          // …and your side of it.
+          yours: mine.kind,
+          youAreCourting: mine.kind === "Courting",
+          yourCourtRounds: mine.kind === "Courting" ? state.round - mine.since : 0,
+        };
+      })(),
       // §12.1 — WHY they stand where they do. Causes only, ordered, unsigned:
       // Standing is the one value the win condition reads and §12.2 says its
       // magnitude is purchasable rather than readable, so a signed running
@@ -926,6 +960,51 @@ function adaptDiplomacy(state, viewer) {
     menace: me?.menace || 0,
     honor: me?.honor ?? CONFIG.diplomacy.honor.start,
     threat: Math.round(threatScore(state, viewer) * 10) / 10,
+    // §6/§11 — political capacity, itemised, with a ledger. Scrap buys what a
+    // faction HAS; Sway buys what a faction THINKS, and nothing converts. A
+    // political income the player cannot break down is a number they cannot
+    // plan around — and the territorial term especially, because the dominance
+    // cliff means an extra point of Loyalty is worth 0 hexes or 12 and nothing
+    // in between.
+    sway: (() => {
+      const inc = swayIncome(state, viewer);
+      const cfg = CONFIG.sway;
+      const courting = courtingList(state, viewer);
+      const committed = courting.length * cfg.courtUpkeep;
+      return {
+        pool: swayOf(state, viewer),
+        cap: cfg.cap,
+        income: inc.total,
+        parts: {
+          floor: inc.floor,
+          territory: inc.hexTerm,
+          hexes: inc.hexes,
+          hexesCounted: inc.hexesCounted,
+          hexCap: cfg.hexCap,
+          agreements: inc.agreementTerm,
+          agreementCount: inc.agreements,
+          chips: inc.chips,
+        },
+        // What is already spoken for every round, and what is left.
+        committed,
+        net: inc.total - committed,
+        courting: courting.map((fid) => ({
+          id: fid, name: factionDef(fid)?.name || fid,
+          rounds: state.round - postureOf(state, viewer, fid).since,
+        })),
+        // Prices, published. A currency whose costs are hidden is a currency
+        // the player cannot budget.
+        costs: {
+          courtUpkeep: cfg.courtUpkeep,
+          perStanding: cfg.perStanding,
+          opCost: cfg.opCost,
+          occupation: cfg.occupation,
+        },
+        ledger: swayLedger(state, viewer).map((e) => ({
+          delta: e.delta, cause: e.cause, round: e.round, value: e.value,
+        })),
+      };
+    })(),
     // The win condition: every surviving faction eliminated, your ally, or
     // your vassal — held for `holdRounds`. It used to be a weighted score
     // against a threshold of 6, which never once decided a game.
@@ -1431,14 +1510,64 @@ function availableVerbsAgainst(state, viewer, fid) {
   const myHonor = me?.honor ?? D.honor?.start ?? 5;
   const floor = trustFloor(state, fid);
 
-  // 1) Gift (always available, just gates affordability + clean rep).
+  const SW = CONFIG.sway;
+  const sway = swayOf(state, viewer);
+  const courtingThem = isCourting(state, viewer, fid);
+
+  // 0) COURT. §5's overture — the middle the layer was missing, and now the
+  // only road to an alliance for anybody. It has to be the first verb on the
+  // list, because a player who cannot find it cannot form a pact at all.
+  if (!myLord && !myVassal && !pacted) {
+    if (courtingThem) {
+      out.push({
+        verb: "end-courtship", state: "enabled",
+        outcome: `You are courting them (round ${state.round - postureOf(state, viewer, fid).since}). ` +
+          `Calling it off frees ${SW.courtUpkeep} Sway a round.`,
+      });
+    } else if (war) {
+      out.push({ verb: "court", state: "disabled", reason: "You are at war." });
+    } else if (!mayBeginCourtship(state, viewer, fid)) {
+      const stand = getStanding(state, viewer, fid);
+      out.push({
+        verb: "court", state: "disabled",
+        reason: stand < (D.tiers?.neutral ?? -1)
+          ? `You think too little of them (${stand >= 0 ? "+" : ""}${stand}) to be seen courting them.`
+          : !passesRepGates(state, viewer, fid)
+          ? "Their reputation is in your way."
+          : "They are beyond your reach.",
+      });
+    } else if (sway < SW.courtUpkeep) {
+      out.push({
+        verb: "court", state: "disabled",
+        reason: `Not enough Sway — ${SW.courtUpkeep} a round, you hold ${sway}.`,
+      });
+    } else {
+      out.push({
+        verb: "court", state: "enabled",
+        outcome: `Costs ${SW.courtUpkeep} Sway every round it runs. States your condition and ` +
+          `earns Standing while they keep it — a pact needs ${CONFIG.diplomacy.posture.courtRounds} ` +
+          `rounds of courtship behind it, from either side.`,
+      });
+    }
+  }
+
+  // 1) Gift — priced in SWAY (economy §6.3). Scrap buys what a faction has;
+  // Sway buys what a faction thinks, and the wall between them is the design.
   if (myLord) {
     // Hidden — gift to your own lord doesn't make sense (you owe them, this verb is for outsiders).
   } else if (myVassal) {
     // Hidden — vassal already pays into your bank.
+  } else if (sway < SW.perStanding) {
+    out.push({
+      verb: "gift", state: "disabled",
+      reason: `Not enough Sway — ${SW.perStanding} per point of regard, you hold ${sway}.`,
+    });
   } else {
-    if (scrap < 5) out.push({ verb: "gift", state: "disabled", reason: "Not enough scrap (need 5)." });
-    else out.push({ verb: "gift", state: "enabled", outcome: "Costs you 5 scrap; raises their Standing toward you." });
+    out.push({
+      verb: "gift", state: "enabled",
+      outcome: `${SW.perStanding} Sway per point of their regard, with diminishing returns ` +
+        `if you lean on them too often. Costs no scrap.`,
+    });
   }
 
   // 2) Propose Pact
@@ -1454,8 +1583,21 @@ function availableVerbsAgainst(state, viewer, fid) {
       // Name the NUMBER, not the tier. A pact needs 6 while the Friendly tier
       // starts at 5, so "needs Friendly+ (currently Friendly)" is a sentence
       // that reads as a bug — the player can see they are Friendly.
+      const need = CONFIG.diplomacy.posture.courtRounds;
+      const worked = Math.max(
+        isCourting(state, fid, viewer) ? state.round - postureOf(state, fid, viewer).since : 0,
+        courtingThem ? state.round - postureOf(state, viewer, fid).since : 0,
+      );
       if (stand < req) {
         reason = `Their regard for you is ${stand >= 0 ? "+" : ""}${stand} (${tier}); a pact needs +${req}.`;
+      }
+      // §7.2/§7.3 — Standing was never the whole bar, and saying so is the
+      // point. An alliance out of a clear sky is unearned; the same alliance
+      // after rounds of somebody publicly working the relationship is not.
+      else if (!courtingThem && !isCourting(state, fid, viewer)) {
+        reason = "Nobody is courting anybody. Open a courtship first — an alliance is not a thing you ask for cold.";
+      } else if (worked < need) {
+        reason = `The courtship is ${worked} round${worked === 1 ? "" : "s"} old; an alliance wants ${need}.`;
       }
       else if (!passesRepGates(state, fid, viewer)) {
         if (myMenace > tol) reason = "Your Menace is past their Tolerance.";

@@ -33,6 +33,8 @@ import { recomputeInfluence, pressureSource } from "../src/game/influence.js";
 import { recomputeResearch } from "../src/game/stats.js";
 import * as DIP from "../src/game/diplomacy.js";
 import { reinforcementRoute } from "../src/game/board.js";
+import { swayIncome, swayOf, dominatedHexes } from "../src/game/sway.js";
+import { runDiplomacyRound } from "../src/game/diplomacy.js";
 
 const verbose = process.argv.includes("--verbose");
 
@@ -83,17 +85,54 @@ const mk = (opts = {}) => createGame({
 
 // --------------------------------------------------------------------
 block(1, "Sway income is the published formula, is capped, and is never zero",
-  "economy 4", false, (check, note) => {
-    const g = mk();
+  "economy 4", true, (check, note) => {
+    const g = mk({ minors: ["croppers"] });
     startTurn(g);
     const cfg = CONFIG.sway;
-    note(`CONFIG.sway is ${cfg ? "present" : "absent — the currency does not exist yet"}`);
-    check("every surviving faction has a non-zero Sway income",
-      !!cfg && Object.keys(g.players).every((p) => (g.players[p].swayIncome || 0) > 0),
-      "no faction has any Sway income; CONFIG.sway is not defined");
-    check("income never exceeds sway.cap",
-      !!cfg && Object.keys(g.players).every((p) => (g.players[p].sway || 0) <= cfg.cap),
-      "nothing to cap");
+    runDiplomacyRound(g); // income lands on the round tick
+
+    // The formula, term by term, against the engine's own itemisation.
+    for (const pid of Object.keys(g.players)) {
+      const inc = swayIncome(g, pid);
+      const expect = cfg.floor
+        + Math.min(dominatedHexes(g, pid), cfg.hexCap) * cfg.perHex
+        + inc.agreements * cfg.perAgreement
+        + inc.chips;
+      note(`${pid}: ${inc.total} = floor ${inc.floor} + hexes ${inc.hexTerm}` +
+           ` (${inc.hexes} dominated) + agreements ${inc.agreementTerm} + chips ${inc.chips}`);
+      check(`${pid}'s income is floor + min(hexes, hexCap)*perHex + perAgreement*N + chips`,
+        inc.total === expect, `got ${inc.total}, formula says ${expect}`);
+    }
+
+    // NEVER ZERO for any surviving faction. This is the term that keeps minors
+    // and losing players in the diplomacy game at all, and the first draft's
+    // territory-proportional income gave the Croppers ONE SWAY ACROSS A WHOLE
+    // GAME — which makes killing minors mandatory under a win condition that
+    // counts them.
+    const alive = Object.keys(g.players).filter((p) => !g.players[p].eliminated);
+    check("no surviving faction has a zero Sway income",
+      alive.every((p) => swayIncome(g, p).total > 0),
+      alive.filter((p) => swayIncome(g, p).total <= 0).join(", "));
+    check("…including a landless one — the floor is unconditional", (() => {
+      const bare = mk();
+      for (const l of Object.values(bare.locations)) { l.controller = null; l.sections = l.sections.map(() => null); }
+      startTurn(bare);
+      return swayIncome(bare, "versari").total >= cfg.floor;
+    })());
+
+    // The pool is a FLOW ceiling, not a war chest.
+    for (let i = 0; i < 30; i += 1) { g.round += 1; runDiplomacyRound(g); }
+    check("the pool never exceeds sway.cap, however long it banks",
+      Object.keys(g.players).every((p) => (g.players[p].sway || 0) <= cfg.cap),
+      Object.keys(g.players).map((p) => `${p} ${g.players[p].sway}`).join(" "));
+
+    // And the wall: nothing converts.
+    const before = swayOf(g, "versari");
+    g.players.versari.resource += 500;
+    runDiplomacyRound(g);
+    check("a mountain of scrap buys no Sway at any rate",
+      swayOf(g, "versari") <= Math.max(before, cfg.cap),
+      "scrap moved the political pool");
   });
 
 // --------------------------------------------------------------------
@@ -164,20 +203,38 @@ block(3, "An off-supply purchase is DELAYED by route.dist, and refused only when
 // formTradingPact's +2/+2 — so the wider claim would fail the day it is
 // written, which is the trap the brief calls out by name.
 block(4, "No GIFT path moves Standing",
-  "economy 5", false, (check, note) => {
+  "economy 5", true, (check, note) => {
     const g = mk();
     const before = giftPathsMovingStanding(g);
     note(`gift paths that still move Standing: ${before.join(", ") || "(none)"}`);
     check("a scrap gift buys no Standing", before.length === 0, before.join(", "));
   });
 
+// Flipped live with economy stage 5. Deliberately "no GIFT path", not "no
+// scrap path" — §6.3 names three bounded material-for-goodwill exchanges the
+// design KEEPS (applyDeal's value-proportional Standing, completeUltimatum's
+// complyStandingGain, formTradingPact's +2/+2), and the wider claim would fail
+// the day it was written.
+
 function giftPathsMovingStanding(g) {
   const out = [];
   const s0 = DIP.getStanding(g, "goldgrass", "versari");
-  g.players.versari.resource = 40;
-  DIP.performDiplomacy(g, "versari", "gift", { faction: "goldgrass", amount: 8 });
+  // A full purse and no political capacity.
+  g.players.versari.resource = 400;
+  g.players.versari.sway = 0;
+  DIP.performDiplomacy(g, "versari", "gift", { faction: "goldgrass", amount: 8, standing: 4 });
   const s1 = DIP.getStanding(g, "goldgrass", "versari");
-  if (s1 !== s0) out.push(`performDiplomacy('gift') moved Standing ${s0} -> ${s1}`);
+  if (s1 !== s0) out.push(`performDiplomacy('gift') moved Standing ${s0} -> ${s1} on scrap alone`);
+  // …and a one-way deal, which is what handing somebody resources now is: it
+  // may warm them as GENEROSITY (that is the deal rule, bounded and capped),
+  // but it must not be a Standing purchase at a published per-scrap rate.
+  const s2 = DIP.getStanding(g, "goldgrass", "versari");
+  DIP.performDiplomacy(g, "versari", "propose-deal", {
+    faction: "goldgrass",
+    give: [{ resource: { resource: "scrap", amount: 1 } }], get: [],
+  });
+  const s3 = DIP.getStanding(g, "goldgrass", "versari");
+  if (s3 > s2) out.push(`a token one-way deal still bought Standing ${s2} -> ${s3}`);
   return out;
 }
 

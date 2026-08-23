@@ -100,7 +100,12 @@ const TIER_COLOR = {
 // Verbs the drawer renders. Order = how they appear in the actions
 // menu. Each carries label / description / destructive flag.
 const VERB_META = {
-  "gift":                  { label: "Gift", body: "Send scrap. Raises their Standing toward you.", isPane: "gift" },
+  // §5 — the overture. First in the list because it is now the only road to
+  // an alliance for anybody, and a player who cannot find it cannot form a
+  // pact at all.
+  "court":                 { label: "Open a Courtship", body: "State what you want of them and work the relationship in the open. Costs political capacity every round it runs — and an alliance needs a courtship behind it." },
+  "end-courtship":         { label: "Call It Off", body: "Stop courting them and free the capacity for somebody else.", destructive: true },
+  "gift":                  { label: "Gift", body: "Spend political capacity to raise their regard for you. Diminishing returns if you lean on them too often.", isPane: "gift" },
   "propose-deal":          { label: "Custom Deal", body: "Scrap, streams, alliances, borders, non-aggression — build it and see what they say.", isPane: "deal" },
   "demand-tribute":        { label: "Demand Tribute", body: "Take, don't ask. Stains Honor if refused.", isPane: "tribute", destructive: true },
   "sue-for-peace":         { label: "Sue for Peace", body: "Offer terms alongside the peace promise.", isPane: "peace" },
@@ -127,6 +132,7 @@ const DESTRUCTIVE_PROMPT = {
   "denounce":               "Denounce publicly? The board judges the accusation, not the accused: with grounds it earns you Honor and allies, without them it marks you as the liar.",
   "vassalize":              "Take them under your banner? The cornered submit; a friendly minor may welcome a protector.",
   "free-vassal":            "Release this vassal? Your Honor rises, their tribute stops.",
+  "end-courtship":          "Call off the courtship? The Standing you have been earning stops accruing, and drift starts pulling the relationship back toward its baseline.",
   "demand-tribute":         "Demand tribute? Refusal will damage your Honor and could trigger war.",
   "dissolve-trading-pact":  "Close the trading pact? The per-round scrap flow stops; the permanent Research floor stays.",
 };
@@ -401,6 +407,101 @@ function Receipts({ receipts }) {
   );
 }
 
+// §6/§11 — political capacity, itemised, with a ledger.
+//
+// Scrap buys what a faction HAS; Sway buys what a faction THINKS, and nothing
+// converts between them at any rate. That wall is the design: letting one
+// fungible currency buy both production and political outcomes is the genre's
+// most reliable way to make diplomacy feel bought, and it is the complaint
+// Civ V's gold-for-city-states and Civ VI's Diplomatic Favor both earned.
+//
+// Itemised because the territorial term is otherwise invisible: dominance is a
+// step function, so an extra point of Loyalty is worth zero hexes or twelve
+// and nothing in between, and a player who cannot see the breakdown reads that
+// as the game ignoring their investment.
+function SwayCard({ sway }) {
+  const [open, setOpen] = useState(false);
+  if (!sway) return null;
+  const p = sway.parts;
+  const atCap = sway.pool >= sway.cap;
+  const overspent = sway.net < 0;
+  const row = (label, value, note) => (
+    <div style={{ display: "flex", alignItems: "baseline", gap: 8, fontSize: 11.5, lineHeight: 1.6 }}>
+      <span style={{ color: "rgba(143,246,234,0.6)", minWidth: 96 }}>{label}</span>
+      <span style={{ fontFamily: C.font, fontWeight: 700, color: C.holoHi, minWidth: 28, textAlign: "right" }}>
+        {value >= 0 ? "+" : ""}{value}
+      </span>
+      {note && <span style={{ color: "rgba(207,214,220,0.6)", fontSize: 10.5 }}>{note}</span>}
+    </div>
+  );
+  return (
+    <Card accent={overspent ? "#d2453f" : atCap ? "#c9b24e" : C.holo}>
+      <SectionLabel color={overspent ? "#ffb4ae" : C.holo}>Political Capacity</SectionLabel>
+      <div style={{ display: "flex", alignItems: "flex-end", gap: 14, marginTop: 4 }}>
+        <div>
+          <div style={{
+            fontFamily: C.font, fontSize: 26, fontWeight: 700, lineHeight: 1,
+            color: atCap ? "#c9b24e" : C.holoHi,
+            textShadow: `0 0 10px ${atCap ? "#c9b24e" : C.holo}66`,
+          }}>{sway.pool}<span style={{ fontSize: 13, color: C.textFaint }}>/{sway.cap}</span></div>
+          <div style={{ fontFamily: C.font, fontSize: 8.5, letterSpacing: 1.4, textTransform: "uppercase", color: C.textFaint }}>
+            Sway held
+          </div>
+        </div>
+        <div>
+          <div style={{ fontFamily: C.font, fontSize: 17, fontWeight: 700, lineHeight: 1, color: overspent ? "#d2453f" : "#5fc27a" }}>
+            {sway.net >= 0 ? "+" : ""}{sway.net}
+          </div>
+          <div style={{ fontFamily: C.font, fontSize: 8.5, letterSpacing: 1.2, textTransform: "uppercase", color: C.textFaint }}>
+            net / round
+          </div>
+        </div>
+      </div>
+      {atCap && (
+        <div style={{ fontFamily: C.font, fontSize: 9.5, letterSpacing: 0.5, color: "#c9b24e", marginTop: 6 }}>
+          At the ceiling — income above this is being wasted. Sway is a flow, not a war chest.
+        </div>
+      )}
+      {sway.courting.length > 0 && (
+        <div className="pc-prose" style={{ fontSize: 11.5, lineHeight: 1.5, marginTop: 7, color: "rgba(207,214,220,0.85)" }}>
+          Courting <b style={{ color: C.holoHi }}>{sway.courting.map((c) => c.name).join(", ")}</b>
+          {" "}— {sway.committed} Sway a round, every round it runs.
+        </div>
+      )}
+      <button
+        className="hud-int"
+        onClick={() => setOpen((v) => !v)}
+        style={{
+          marginTop: 7, width: "100%", textAlign: "left", background: "none", border: "none",
+          padding: 0, cursor: "pointer", color: C.holoHi,
+          fontFamily: C.font, fontSize: 9, fontWeight: 700,
+          letterSpacing: 1.6, textTransform: "uppercase",
+        }}
+      >{open ? "▾" : "▸"} Where it comes from</button>
+      {open && (
+        <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 2 }}>
+          {row("Floor", p.floor, "every faction, every round — so nobody is locked out of politics")}
+          {row("Territory", p.territory,
+            `${p.hexes} hex${p.hexes === 1 ? "" : "es"} dominated${p.hexes > p.hexCap ? `, counted to ${p.hexCap}` : ""}`)}
+          {row("Agreements", p.agreements,
+            `${p.agreementCount} pact${p.agreementCount === 1 ? "" : "s"}, trade route${p.agreementCount === 1 ? "" : "s"} and vassal${p.agreementCount === 1 ? "" : "s"} — diplomacy funds diplomacy`)}
+          {p.chips > 0 && row("Buildings", p.chips, null)}
+          <div style={{ height: 1, background: "rgba(86,211,198,0.18)", margin: "4px 0" }} />
+          {row("Income", sway.income, null)}
+          {row("Courtships", -sway.committed, `${sway.costs.courtUpkeep} each, per round`)}
+          <div style={{
+            fontFamily: C.font, fontSize: 9.5, letterSpacing: 0.4, lineHeight: 1.5,
+            color: "rgba(143,246,234,0.55)", marginTop: 6,
+          }}>
+            Scrap buys what a faction has. Sway buys what a faction thinks.
+            Nothing converts between them — not at any rate, in either direction.
+          </div>
+        </div>
+      )}
+    </Card>
+  );
+}
+
 // §12.1 — the Standing receipt. Standing is the ONE number the win condition
 // reads, and it was the only reputation measure with no receipt at all: a
 // player could watch a faction cool on them with no way to tell which of their
@@ -411,6 +512,78 @@ function Receipts({ receipts }) {
 // and Honor would hand the player a derivable running total for the value the
 // Spy Ring is supposed to sell. Which WAY it moved is free — a player must be
 // able to tell a grievance from a courtesy without buying espionage.
+// §6.3 — a gift, priced in political capacity. The old pane was the deal
+// builder set to "scrap, one way", which is what a gift USED to be: scrap
+// moving and Standing following. Scrap still moves goods — that is a deal with
+// nothing asked in return — but it no longer moves opinions, so this pane asks
+// the only question left: how much warmth, at the published rate.
+function GiftPane({ f, dip, onBack, onSubmit }) {
+  const sway = dip.sway || { pool: 0, costs: { perStanding: 8 } };
+  const rate = sway.costs.perStanding;
+  const affordable = Math.max(0, Math.floor(sway.pool / rate));
+  const [want, setWant] = useState(() => Math.min(2, Math.max(1, affordable)));
+  const cost = want * rate;
+  const canSend = affordable >= 1 && cost <= sway.pool;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <SectionLabel>Send Word to {f.name}</SectionLabel>
+      <div className="pc-prose" style={{ fontSize: 12, lineHeight: 1.5, color: C.textDim }}>
+        Envoys, favours, a hearing at the right table. Costs{" "}
+        <b style={{ color: C.holoHi }}>{rate} Sway</b> per point of their regard —
+        political capacity, not scrap. Lean on them too often and each gift
+        buys less than the last.
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <button className="hud-int" onClick={() => setWant((v) => Math.max(1, v - 1))}
+          style={{ ...paneBtn, opacity: want > 1 ? 1 : 0.4 }}>−</button>
+        <div style={{ minWidth: 120, textAlign: "center" }}>
+          <div style={{ fontFamily: C.font, fontSize: 22, fontWeight: 700, color: C.holoHi, lineHeight: 1 }}>
+            +{want}
+          </div>
+          <div style={{ fontFamily: C.font, fontSize: 9, letterSpacing: 1.2, textTransform: "uppercase", color: C.textFaint }}>
+            regard
+          </div>
+        </div>
+        <button className="hud-int" onClick={() => setWant((v) => Math.min(Math.max(1, affordable), v + 1))}
+          style={{ ...paneBtn, opacity: want < affordable ? 1 : 0.4 }}>+</button>
+        <div style={{ flex: 1, textAlign: "right" }}>
+          <div style={{ fontFamily: C.font, fontSize: 13, fontWeight: 700, color: cost > sway.pool ? "#d2453f" : C.holoHi }}>
+            {cost} Sway
+          </div>
+          <div style={{ fontFamily: C.font, fontSize: 9, letterSpacing: 0.8, color: C.textFaint }}>
+            of {sway.pool} held
+          </div>
+        </div>
+      </div>
+      <div style={{ display: "flex", gap: 8 }}>
+        <button className="hud-int" onClick={onBack} style={{ ...paneBtn, flex: 1 }}>Back</button>
+        <button className="hud-int" disabled={!canSend}
+          onClick={canSend ? () => onSubmit(want) : undefined}
+          style={{
+            ...paneBtn, flex: 2,
+            color: "#08100f",
+            background: `linear-gradient(180deg, ${C.holoHi}, ${C.holo})`,
+            opacity: canSend ? 1 : 0.4,
+            cursor: canSend ? "pointer" : "not-allowed",
+          }}>Send</button>
+      </div>
+      {!canSend && (
+        <div style={{ fontFamily: C.font, fontSize: 9.5, letterSpacing: 0.5, color: "#d2913c" }}>
+          Not enough Sway. It comes from the floor every faction gets, the ground
+          you dominate, and the agreements you already hold — not from your purse.
+        </div>
+      )}
+    </div>
+  );
+}
+
+const paneBtn = {
+  fontFamily: C.font, fontSize: 11, fontWeight: 700, letterSpacing: 1.2,
+  textTransform: "uppercase", padding: "7px 14px", borderRadius: 5,
+  border: `1px solid ${C.holo}88`, background: "rgba(6,14,15,0.85)",
+  color: C.holoHi, cursor: "pointer",
+};
+
 function StandingReceipt({ rows, name }) {
   const [open, setOpen] = useState(false);
   if (!rows || !rows.length) return null;
@@ -631,6 +804,8 @@ function LandingView({ dip, onSelectFaction, onAction, onClose }) {
             />
           </div>
         </Card>
+
+        <SwayCard sway={dip.sway} />
 
         <Receipts receipts={dip.receipts} />
 
@@ -918,6 +1093,37 @@ function FactionRow({ f, onClick }) {
           }}>{rel}</span>
         )}
       </div>
+      {/* §13.4 — POSTURE AND CONDITION, next to the tier word. This one line
+          is the legibility fix the whole brief turns on: "Courting — wants you
+          clear of Omara" tells a player what the tier word never could, and it
+          is the difference between an AI whose behaviour you can reconstruct
+          and one that reads as arbitrary. The posture and the condition are
+          public; how close you are to the threshold behind them is not. */}
+      {!f.eliminated && f.posture && f.posture.kind !== "Watching" && f.posture.kind !== "Indifferent" && (
+        <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginTop: 5, flexWrap: "wrap" }}>
+          <span style={{
+            fontFamily: C.font, fontSize: 9.5, fontWeight: 800, letterSpacing: 1.4,
+            textTransform: "uppercase", color: POSTURE_COLOR[f.posture.kind] || C.holoHi,
+          }}>{f.posture.kind}</span>
+          {f.posture.condition && (
+            <span className="pc-prose" style={{
+              fontSize: 11.5, lineHeight: 1.4, color: "rgba(207,214,220,0.9)", fontStyle: "italic",
+            }}>“{f.posture.condition}”</span>
+          )}
+          {!f.posture.stated && (
+            <span title="They have not said this out loud yet — and a faction does not act on a posture it has not stated."
+              style={{ fontFamily: C.font, fontSize: 8.5, letterSpacing: 1, color: C.textFaint }}>
+              UNSPOKEN
+            </span>
+          )}
+        </div>
+      )}
+      {!f.eliminated && f.posture?.youAreCourting && (
+        <div style={{
+          fontFamily: C.font, fontSize: 9, letterSpacing: 1.1, textTransform: "uppercase",
+          color: "#5fc27a", marginTop: 3,
+        }}>You are courting them · round {f.posture.yourCourtRounds}</div>
+      )}
       <div className="pc-prose" style={{
         fontSize: 11.5, color: "rgba(207,214,220,0.86)", marginTop: 5, lineHeight: 1.4,
       }}>{f.eliminated ? "Driven from the board. Nothing left to deal with."
@@ -925,6 +1131,16 @@ function FactionRow({ f, onClick }) {
     </button>
   );
 }
+
+// Posture reads as a stance, so it takes the temperature of one: a courtship
+// is warm, a warning is not, and a commitment is simply a fact.
+const POSTURE_COLOR = {
+  Courting: "#5fc27a",
+  Warning: "#d2913c",
+  Committed: "#8fd8ce",
+  Watching: "#a89d87",
+  Indifferent: "#6b6355",
+};
 
 // =======================================================================
 // Faction Detail view — §3.3
@@ -1216,6 +1432,8 @@ function IntelBrief({ f, tierColor }) {
 // wall of buttons.
 const VERB_CATEGORY = {
   // Diplomacy — overtures, custom deals, mediation.
+  "court":                 "diplomacy",
+  "end-courtship":         "diplomacy",
   "gift":                  "diplomacy",
   "propose-deal":          "diplomacy",
   "propose-pact":          "diplomacy",
@@ -2352,14 +2570,12 @@ export default function DiplomacyDrawer({
                 />
               )}
               {pane === "gift" && (
-                <DealPane
-                  kind="gift"
+                <GiftPane
                   f={selectedFaction}
                   dip={dip}
                   onBack={() => setPane(null)}
-                  onSubmit={(deal) => runFromPane("gift", {
-                    faction: selectedFaction.id,
-                    amount: deal.give.find((g) => g.resource)?.resource.amount || 0,
+                  onSubmit={(standing) => runFromPane("gift", {
+                    faction: selectedFaction.id, standing,
                   })}
                 />
               )}

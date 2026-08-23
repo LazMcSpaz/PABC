@@ -14,6 +14,15 @@ import { emit, registerEventHook } from "./events.js";
 import { getStanding, adjustStanding, setStanding, standingTier, standingReceipts } from "./standing.js";
 import { bfsDistances, reinforcementRoute } from "./board.js";
 import { holdsLocation, syncControlHistory } from "./control.js";
+import { registerInterestReaders, interestsOf, interestToward, interestMultiplier } from "./interests.js";
+import {
+  registerSwayReaders, tickSway, swayIncome, swayOf, spendSway, canAffordSway, swayLedger,
+} from "./sway.js";
+import {
+  registerPostureReaders, recomputePostures, postureOf, setPosture, postureStated,
+  isCourting, eitherCourting, courtRounds, speakPosture, postureCitation, conditionText,
+  beginCourtship, mayBeginCourtship, courtshipScore,
+} from "./posture.js";
 import {
   revealRegion, applySharedVision, recomputeVisibilityFor, isUnitVisibleTo, isHexVisible,
 } from "./visibility.js";
@@ -46,8 +55,13 @@ export function ensureDiplomacy(state) {
       // §15 — the last round each unordered pair was within reach of each
       // other. Absent means never. Feeds `engagementReach`.
       contact: {},
+      // §5 — where every faction stands toward every other:
+      // posture[observer][subject] = { kind, condition, since, statedRound }.
+      // Derived per round, never authored.
+      posture: {},
     };
   }
+  if (!state.diplomacy.posture) state.diplomacy.posture = {};
   if (!state.diplomacy.contact) state.diplomacy.contact = {};
   if (!state.diplomacy.standingLog) state.diplomacy.standingLog = {};
   if (!state.diplomacy.giftCounter) state.diplomacy.giftCounter = {};
@@ -2665,6 +2679,16 @@ function driftStanding(state) {
       if (a === b) continue;
       if (vassalLord(state, a) === b) continue; // vassal standing locked
       if (arePacted(state, a, b) || atWar(state, a, b)) continue; // active relations don't fade
+      // §7.3 — a pair somebody is actively COURTING is not unreinforced, which
+      // is the whole meaning of the drift rule. This is not a nicety: the
+      // first draft of the brief missed it and the arithmetic does not work
+      // without it. Drift moves at max(1, ...), i.e. always at least 1 per
+      // round, and the human's baseline is 0 because `seedStanding` skips them
+      // — probed, Standing set to 6 decays 6 -> 5 -> 4 -> 3 -> 2 over four
+      // rounds. So `courtStandingGain: 2` would net +1/round and 0 -> 6 would
+      // take six rounds rather than three, and the ladder would cost the
+      // diplomacy face reachability it cannot afford.
+      if (D().posture?.courtDriftExempt && eitherCourting(state, a, b)) continue;
       const cur = getStanding(state, a, b);
       const target = getBaseline(state, a, b);
       if (cur === target) continue;
@@ -2812,6 +2836,15 @@ export function runDiplomacyRound(state) {
   // per round rather than derived per acceptance gate: `areNeighbours` is a
   // BFS per Location pair and only moves when somebody's holdings do.
   sweepContact(state);
+  // §5 — where everybody stands, recomputed BEFORE the acts. Transitions and
+  // condition outcomes land here; SPEAKING them is `speakPosture`, hoisted to
+  // the top of the AI's turn, so a faction says where it stands before it acts
+  // rather than after its violence.
+  recomputePostures(state);
+  // §6 — political income, then the standing political bills. After postures
+  // so a courtship opened this round is billed for it, and before the acts so
+  // a faction that just went bankrupt is not still courting when it chooses.
+  tickSway(state);
   expireOffers(state); // §6.10 — an unanswered offer lapses; silence is not a no
   resolveUltimatums(state); // §6.11 — deadlines fall due, and bluffs get called
   pactTenureBaselines(state); // warm long-alliance baselines before the fade
@@ -2887,11 +2920,75 @@ export function performDiplomacy(state, pid, action, params = {}) {
       makePeace(state, pid, f, "player-peace");
       return r({ accepted: true });
     }
+    // §5/§7.3 — open a courtship. An OVERTURE, not an offer: it states the
+    // condition and puts no pact on the table. This is the middle the layer
+    // was missing. Both the AI's selection pass and the player's drawer reach
+    // the ladder through this one verb, because §7.2's "one bar for everyone"
+    // has to mean one ROAD as well as one number.
+    case "court": {
+      const f = params.faction;
+      if (!f || f === pid) return { ok: false, reason: "there is nobody to court" };
+      if (arePacted(state, pid, f)) return { ok: false, reason: "you are already allied" };
+      if (atWar(state, pid, f)) return { ok: false, reason: "you are at war with them" };
+      if (isCourting(state, pid, f)) return { ok: false, reason: "you are already courting them" };
+      if (!mayCourt(state, pid, f)) return { ok: false, reason: "they are beyond your reach" };
+      if (getStanding(state, pid, f) < D().tiers.neutral) {
+        return { ok: false, reason: "you think too little of them to be seen courting them" };
+      }
+      if (!passesRepGates(state, pid, f)) {
+        return { ok: false, reason: "your own reputation is in the way" };
+      }
+      if (!beginCourtship(state, pid, f)) return { ok: false, reason: "there is nothing to open" };
+      const p = postureOf(state, pid, f);
+      return r({
+        courting: f,
+        condition: conditionText(state, pid, f, p.condition),
+      });
+    }
+
+    // Stop. A courtship is a running cost (economy §6.3), so calling one off
+    // has to be a thing a faction can decide to do.
+    case "end-courtship": {
+      const f = params.faction;
+      if (!isCourting(state, pid, f)) return { ok: false, reason: "you are not courting them" };
+      setPosture(state, pid, f, "Watching", null);
+      return r({ ended: f });
+    }
+
+    // §6.3 — a gift that MOVES STANDING is priced in Sway, not scrap. This is
+    // the sink that replaces the scrap gift outright, and it is the second
+    // half of the same wall the diplomacy brief built when it closed the deal
+    // pump: letting one fungible currency buy both production and political
+    // outcomes is the genre's most reliable way to make diplomacy feel bought.
+    //
+    // `params.standing` is how many points of warmth to buy. The scrap form is
+    // still reachable and still moves goods — it is now a `propose-deal` with
+    // nothing asked in return, which is what handing somebody resources
+    // actually is, and it is priced as generosity by the deal rules rather
+    // than as a Standing purchase.
     case "gift": {
-      const amount = Math.min(params.amount || 0, state.players[pid]?.resource || 0);
-      if (amount <= 0) return { ok: false, reason: "no scrap to gift" };
-      applyDeal(state, { proposer: pid, recipient: f, give: [{ resource: { resource: "scrap", amount } }], get: [] }, "gift");
-      return r({ amount });
+      const cfg = CONFIG.sway;
+      const want = Math.max(1, Math.round(params.standing || 1));
+      if (!f || f === pid) return { ok: false, reason: "there is nobody to send to" };
+      if (!mayCourt(state, pid, f)) return { ok: false, reason: "they are beyond your reach" };
+      const cost = want * cfg.perStanding;
+      if (!canAffordSway(state, pid, cost)) {
+        return { ok: false, reason: `not enough Sway — ${cost} needed, you hold ${swayOf(state, pid)}` };
+      }
+      // Diminishing returns still apply. A gift is a campaign, not a bribe,
+      // and the window that made scrap gifts fade has nothing to do with which
+      // currency pays for them.
+      const n = state.diplomacy.giftCounter[pid]?.[f] || 0;
+      const actual = Math.floor(want / (n + 1));
+      if (actual <= 0) {
+        return { ok: false, reason: "you have leaned on them too often lately for this to land" };
+      }
+      spendSway(state, pid, cost, `courting ${factionDef(f)?.name || f}`);
+      adjustStanding(state, f, pid, actual, "gift");
+      if (actual >= 2) adjustBaseline(state, f, pid, D().gift.baselineWarmth, "gift");
+      state.diplomacy.giftCounter[pid] = state.diplomacy.giftCounter[pid] || {};
+      state.diplomacy.giftCounter[pid][f] = n + 1;
+      return r({ standing: actual, sway: cost });
     }
     case "denounce":
       denounce(state, pid, f);
@@ -3171,6 +3268,27 @@ export function performDiplomacy(state, pid, action, params = {}) {
 export function aiAcceptsPact(state, f, proposer) {
   if (f === proposer || arePacted(state, f, proposer)) return false;
   if (!mayCourt(state, f, proposer)) return false; // §15 — the ally door, not the war one
+  // §7.2 — ONE BAR MEANS BOTH ROADS. There are two roads to a pact and the
+  // brief-input doc only named one: the AI offering the human
+  // (`proposeToHuman`, which gated at tiers.neutral = -1) and the player
+  // asking (this function, which gated at pactStandingReq = 6). Gating only
+  // the first left two roads, not one.
+  //
+  // A faction does not enter an alliance with anyone it is not Courting.
+  // EITHER side's Courting unlocks it (economy §6.4 rule 2): if the human
+  // courts an AI the human pays and the AI may accept; if the AI courts the
+  // human the AI pays. Nobody is gated on a budget they do not control — the
+  // failure that would take the diplomacy face from 1-in-15 to zero.
+  if (!eitherCourting(state, f, proposer)) return false;
+  // …and a courtship is a process, not a switch. `courtRounds` is what turns
+  // "6 Standing out of a clear sky" into "6 Standing after three rounds of a
+  // faction publicly courting you, naming a condition, and watching you keep
+  // it." The bar was never the problem; the absence of a middle was.
+  const need = D().posture?.courtRounds ?? 0;
+  if (need > 0) {
+    const worked = Math.max(courtRounds(state, f, proposer), courtRounds(state, proposer, f));
+    if (worked < need) return false;
+  }
   // Reach-adjusted: a faction you can only speak to because the silence ran
   // long enough is a stranger, and wants more before it signs anything.
   if (reachAdjustedStanding(state, f, proposer) < D().pactStandingReq) return false;
@@ -3210,4 +3328,93 @@ export function aiAcceptsVassalage(state, f, lord) {
   return factionIds(state).every((o) => o === f || o === lord || getStanding(state, f, o) <= s);
 }
 
-export { standingTier, getStanding, adjustStanding, standingReceipts };
+// --- Sway: what political capacity is spent on (economy §6.3) ---------
+//
+// FOUR SINKS, and no more. Courtship upkeep, gifts that move Standing,
+// espionage operations, and occupation. Two from the first draft are
+// deliberately cut: LOBBYING A COALITION contradicts §9.2's closed,
+// normalised, published join score twice over — a hidden purchased term in it
+// would be both illegible and a literal instance of "diplomacy feels bought" —
+// and BACKING AN ULTIMATUM narrows the vassal face, because ultimatum ->
+// defiance -> righteous war -> cornered is a live road to a submission the
+// design already paid to protect once.
+//
+// MATERIAL COMPENSATION STAYS SCRAP. Reparations, settlements, tribute and
+// cessions are THINGS. Scrap buys what a faction has; Sway buys what a faction
+// thinks.
+
+// How many live agreements `pid` holds — the income's third term.
+function agreementCount(state, pid) {
+  let n = 0;
+  for (const p of state.diplomacy?.pacts || []) if (p.a === pid || p.b === pid) n += 1;
+  for (const [vassal, lord] of Object.entries(state.diplomacy?.vassals || {})) {
+    if (lord === pid && !state.players[vassal]?.eliminated) n += 1;
+  }
+  for (const agr of state.diplomacy?.agreements || []) {
+    if (agr.type === "trading-pact" && (agr.a === pid || agr.b === pid)) n += 1;
+  }
+  return n;
+}
+
+// Who `pid` is currently Courting.
+export function courtingList(state, pid) {
+  const row = state.diplomacy?.posture?.[pid] || {};
+  return Object.keys(row).filter((f) => row[f]?.kind === "Courting"
+    && !state.players[f]?.eliminated);
+}
+
+// The per-round bill, charged inside `tickSway` after income lands.
+//
+// WHEN A FACTION CANNOT PAY, the courtship is simply CALLED OFF — the cheapest
+// ones first, so a faction under pressure keeps the relationship it has
+// invested most in. That is the honest failure: a courtship is attention, and
+// attention you cannot spare is attention you are not spending. It is
+// deliberately NOT a Standing penalty; that is occupation's arrears rule
+// (§6.5), where the whole point is that a conqueror who never does politics
+// still pays in reputation.
+function chargeSwayUpkeep(state, pid) {
+  const cfg = CONFIG.sway;
+  const p = state.players[pid];
+  if (!cfg || !p) return 0;
+  let spent = 0;
+  const courting = courtingList(state, pid);
+  // Longest-running first: an established courtship is the one worth keeping.
+  courting.sort((a, b) => (postureOf(state, pid, a).since) - (postureOf(state, pid, b).since));
+  for (const f of courting) {
+    if (spendSway(state, pid, cfg.courtUpkeep, `courting ${factionDef(f)?.name || f}`)) {
+      spent += cfg.courtUpkeep;
+      continue;
+    }
+    setPosture(state, pid, f, "Watching", null);
+    emit(state, "courtship_lapsed", { observer: pid, subject: f, reason: "no capacity" });
+  }
+  return spent;
+}
+
+// --- injected readers ------------------------------------------------
+//
+// `interests.js` and `posture.js` are LEAVES so this module can use them
+// without a cycle — both need several of diplomacy's own queries, and
+// diplomacy already sits above victory, standing, control, board and
+// influence. Registered once at load; every reader here is a pure query.
+registerInterestReaders({
+  factionIds, occupationsBy, worstGrievance, grievanceWeight, atWar, warExhaustion,
+  mayCourt, tradingPactBetween, tradeRouteOpen, unitsInTerritory, threatScore,
+});
+registerSwayReaders({ factionIds, agreementCount, chargeSwayUpkeep });
+registerPostureReaders({
+  factionIds, atWar, arePacted, vassalLord, coalitionAgainst, mayCourt,
+  getStanding, adjustStanding, passesRepGates, grievanceWeight,
+  tradingPactBetween, unitsInTerritory,
+});
+
+export {
+  standingTier, getStanding, adjustStanding, standingReceipts,
+  // §5/§6 — re-exported so callers reach the political layer through one door.
+  interestsOf, interestToward, interestMultiplier,
+  postureOf, setPosture, postureStated, isCourting, eitherCourting, courtRounds,
+  speakPosture, postureCitation, conditionText,
+  beginCourtship, mayBeginCourtship, courtshipScore,
+  // Sway, re-exported through the one political door.
+  swayIncome, swayOf, spendSway, canAffordSway, swayLedger,
+};

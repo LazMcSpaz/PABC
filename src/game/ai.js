@@ -21,6 +21,8 @@ import { standingTier } from "./standing.js";
 import { factionDef } from "./content.js";
 import {
   factionIds, powerOf, arePacted, atWar, vassalLord, mayEngage, mayCourt,
+  speakPosture, postureOf, postureStated, isCourting, eitherCourting, courtRounds,
+  postureCitation, interestsOf, courtshipScore, swayIncome, swayOf,
   getStanding, passesRepGates, formPact, vassalize, applyDeal, checkDominion,
   tableOffer, offersFor, warExhaustion,
   denounce, denounceWarrant, denounceCooldown, honorOf, grievanceWeight, wouldAccept,
@@ -45,6 +47,19 @@ function hasActionBudget(state, pid) {
 export function takeAITurn(state) {
   if (state.winnerId) return;
   const pid = activePlayerId(state);
+  // §5 — SAY WHERE YOU STAND BEFORE YOU ACT ON IT. This hoist is the whole
+  // telegraph argument; without it the argument is cosmetic.
+  //
+  // As the code stood, `takeAITurn` ran its action loop first, then
+  // `manageEconomy`, then `manageDiplomacy` — and posture transitions computed
+  // in `runDiplomacyRound` landed at ROUND END. So a faction attacked you and
+  // only afterwards got to say anything about it. Every "wars come out of
+  // nowhere" complaint in the playtest has that ordering underneath it.
+  //
+  // Speaking is cheap: it stamps `statedRound` and emits. What it buys is that
+  // `postureStated` becomes true a round later, and the acts that matter are
+  // gated on it (`statedBeforeActedRounds`).
+  speakPosture(state, pid);
   // Spend any free Ability Point before acting, so the new node's effect is
   // live this turn.
   maybeAssignTech(state, pid);
@@ -450,6 +465,57 @@ function nearOwnTerritory(state, pid, hex) {
   return false;
 }
 
+// Pick the single best faction to open a courtship with, and open it.
+// Returns true when it spent the faction's initiative doing so.
+//
+// Bounded by `initiativesPerRound` on purpose. The measured pathology was
+// never the act COUNT — `manageDiplomacy` already returns after one act, and
+// the measured rate is 0.75/turn — it was that there is no reason to skip a
+// turn, no rotation, and `runAIPolitics` runs outside the budget entirely.
+// A courtship you are already running is not re-opened, so a faction working
+// two relationships is spending two slots' worth of attention on them.
+function courtSomebody(state, pid, others) {
+  // `initiativesPerRound` caps ACTS per round, which is what it says: a
+  // faction opens at most one conversation a turn. It is deliberately NOT a
+  // cap on how many courtships run concurrently — that number is the BUDGET's
+  // to decide, and conflating the two was measured and wrong. With one
+  // concurrent courtship allowed, every faction spent at most 10 Sway against
+  // an income of 6-23, nobody ever lapsed for want of capacity, and every
+  // faction sat pinned at the ceiling wasting income. A currency nothing can
+  // exhaust prices nothing.
+  //
+  // "One diplomatic mission in flight" as a BUDGET rather than a hard cap is
+  // the whole point of §6.3: you can court two rivals at once if you are rich
+  // and one if you are not, and the sequencing is the decision.
+  if ((CONFIG.diplomacy.posture?.initiativesPerRound ?? 1) <= 0) return false;
+  const running = others.filter((f) => isCourting(state, pid, f)).length;
+
+  // §6.4 rule 3 — THE AI GETS AN EXPLICIT SWAY POLICY, not an implicit one.
+  // An AI that cannot see its own political income cannot play this game, and
+  // the failure is not subtle: courting on appetite alone means going
+  // bankrupt, having `chargeSwayUpkeep` call every courtship off, and
+  // re-opening the same one next round forever.
+  //
+  // It budgets against INCOME, with the pool counted as a partial buffer. The
+  // pool is what lets a faction reach past its means for a few rounds; income
+  // is what it can hold indefinitely.
+  const cfg = CONFIG.sway;
+  if (cfg) {
+    const income = swayIncome(state, pid).total;
+    const committed = running * cfg.courtUpkeep;
+    const buffer = Math.max(0, swayOf(state, pid) - committed) * 0.5;
+    if (committed + cfg.courtUpkeep > income + buffer) return false;
+  }
+
+  let best = null, bestScore = 0;
+  for (const f of others) {
+    const sc = courtshipScore(state, pid, f);
+    if (sc > bestScore) { bestScore = sc; best = f; }
+  }
+  if (!best) return false;
+  return performDiplomacy(state, pid, "court", { faction: best }).ok === true;
+}
+
 // §18.8 — the AI works the political layer once per turn (free of Actions):
 // vassalize a cornered weakling, form a pact with a warm compatible
 // neighbour, or gift to warm a promising relationship. Bounded: one move.
@@ -458,6 +524,24 @@ function manageDiplomacy(state, pid) {
   const human = state.humanFactionId;
   const others = factionIds(state).filter((f) => f !== pid);
   const tiers = CONFIG.diplomacy.tiers;
+
+  // 0) OPEN A COURTSHIP. §5's cadence fix, in the one place it belongs.
+  //
+  // A courtship is an ACT, not a mood that settles over the board: it is
+  // chosen, one per faction per round, and from economy stage 5 it is paid for
+  // every round it runs. Entering it as a per-round roll inside
+  // `recomputePostures` was tried and measured — roughly every eligible pair
+  // was Courting inside four rounds, which makes the posture meaningless and,
+  // through `courtDriftExempt`, switches Standing drift off across the whole
+  // board.
+  //
+  // This is a SELECTION rather than a scan: score every candidate and take the
+  // argmax. The existing branch loop below is a fixed-order priority list where
+  // the same faction is always served first and the HUMAN IS SERVED LAST, in
+  // branch 8 — so adding cadence gates alone would make the AI approach the
+  // player LESS, which is the one regression audit finding 7 explicitly warns
+  // against. Argmax has no ordering to be starved by.
+  if (courtSomebody(state, pid, others)) return;
 
   // 1) Vassalize a much-weaker, cornered, engageable faction (the vassal
   //    runs through converting weak factions, §18.9). Lords only.

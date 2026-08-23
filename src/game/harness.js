@@ -16,6 +16,7 @@ import {
   formPact, declareWar, vassalize, runDiplomacyRound,
   wouldAccept, dealValue, performDiplomacy,
   getStanding, atWar, arePacted, vassalLord, mayEngage, mayCourt, areNeighbours,
+  isCourting, postureOf, postureStated, courtRounds, interestsOf, speakPosture,
   tolerance, passesRepGates, factionIds,
   // diplomacy-spec.md additions
   findWar, warExhaustion, aiAcceptsPeace, evaluatePactCall,
@@ -3893,10 +3894,15 @@ line("\n§18 DIPLOMACY CAPSTONE");
   {
     const g = createGame({ seed, humanFactionId: "versari" });
     const s0 = getStanding(g, "goldgrass", "versari");
+    // Economy §6.3 — a gift buys WARMTH, and warmth is bought with political
+    // capacity. Scrap still moves goods; it no longer moves opinions.
     g.players.versari.resource = 10;
-    const gift = performDiplomacy(g, "versari", "gift", { faction: "goldgrass", amount: 5 });
-    check("performDiplomacy gift transfers scrap + warms Standing",
-      gift.ok && getStanding(g, "goldgrass", "versari") > s0 && g.players.versari.resource === 5);
+    g.players.versari.sway = 40;
+    const gift = performDiplomacy(g, "versari", "gift", { faction: "goldgrass", standing: 2 });
+    check("performDiplomacy gift warms Standing, and spends Sway to do it",
+      gift.ok && getStanding(g, "goldgrass", "versari") > s0
+      && g.players.versari.sway < 40 && g.players.versari.resource === 10,
+      JSON.stringify(gift));
     const war = performDiplomacy(g, "versari", "declare-war", { faction: "lakers" });
     check("performDiplomacy declare-war sets the war-state", war.ok && atWar(g, "versari", "lakers"));
     // a pact offer is refused when Standing is too cold, accepted when warm
@@ -3905,7 +3911,18 @@ line("\n§18 DIPLOMACY CAPSTONE");
       performDiplomacy(g, "versari", "propose-pact", { faction: "plainers" }).accepted === false);
     setStanding(g, "plainers", "versari", 8, "test"); setStanding(g, "versari", "plainers", 8, "test");
     g.players.versari.menace = 0; g.players.versari.honor = 6;
-    check("a pact offer is accepted when Standing + rep gates pass",
+    // §7.2/§7.3 — Standing alone is no longer the whole bar. A faction does
+    // not enter an alliance with anyone it is not Courting, and a courtship is
+    // a process rather than a switch: it takes `courtRounds` of somebody
+    // publicly working the relationship. The bar was never the problem; the
+    // absence of a middle was.
+    check("…and Standing alone is not enough without a courtship behind it",
+      performDiplomacy(g, "versari", "propose-pact", { faction: "plainers" }).accepted === false);
+    check("…so the player opens one", performDiplomacy(g, "versari", "court", { faction: "plainers" }).ok);
+    check("…and it is not instant",
+      performDiplomacy(g, "versari", "propose-pact", { faction: "plainers" }).accepted === false);
+    g.round += CONFIG.diplomacy.posture.courtRounds;
+    check("a pact offer is accepted when Standing + rep gates pass, after the courtship",
       performDiplomacy(g, "versari", "propose-pact", { faction: "plainers" }).accepted === true);
   }
 }
@@ -3948,31 +3965,48 @@ line("\n  [§1.1] surprise-attack Honor");
     honorOf(g, a) === h0 - DH.honor.breakLoss);
 }
 
-// §1.2 — gift diminishing returns
-line("\n  [§1.2] gift diminishing returns");
+// §1.2 / economy §6.3 — gifts are priced in SWAY now, not scrap. The
+// diminishing-returns window is unchanged, because which currency pays for a
+// gift has nothing to do with how quickly a faction tires of being flattered.
+line("\n  [§1.2] gifts buy Standing with political capacity, not scrap");
 {
   const g = createGame({ seed }); ensureDiplomacy(g);
   const from = "versari", to = "lakers";
+  const SW = CONFIG.sway;
   g.players[from].resource = 200;
+  g.players[from].sway = 400;
   setStanding(g, to, from, -12); setStanding(g, from, to, -2); // room below cap; no pact
+
+  // The wall: scrap alone buys nothing a faction thinks.
+  g.players[from].sway = 0;
+  const broke = performDiplomacy(g, from, "gift", { faction: to, standing: 4 });
+  check("a purse full of scrap and no Sway buys no goodwill at all",
+    !broke.ok && /Sway/.test(broke.reason || ""));
+  // -12 clamps to standingMin; read the board rather than the number we asked
+  // for, which is what a refusal not moving anything actually means.
+  check("…and moved nothing", getStanding(g, to, from) === CONFIG.diplomacy.standingMin);
+
+  g.players[from].sway = 400;
   const gains = [];
   for (let i = 0; i < 4; i++) {
     const before = getStanding(g, to, from);
-    performDiplomacy(g, from, "gift", { faction: to, amount: 8 }); // baseGain 4
+    performDiplomacy(g, from, "gift", { faction: to, standing: 4 });
     gains.push(getStanding(g, to, from) - before);
   }
-  check("gift gains diminish floor(baseGain/(n+1)) → 4,2,1,1",
-    JSON.stringify(gains) === JSON.stringify([4, 2, 1, 1]));
+  check("gift gains still diminish floor(want/(n+1)) → 4,2,1,1",
+    JSON.stringify(gains) === JSON.stringify([4, 2, 1, 1]), JSON.stringify(gains));
+  check("…and each landed gift cost Sway", g.players[from].sway < 400);
 }
 {
   const g = createGame({ seed }); ensureDiplomacy(g);
   const from = "versari", to = "lakers";
-  g.players[from].resource = 200;
+  g.players[from].sway = 400;
   setStanding(g, to, from, -12); setStanding(g, from, to, -2);
-  performDiplomacy(g, from, "gift", { faction: to, amount: 8 }); // counter → 1
+  performDiplomacy(g, from, "gift", { faction: to, standing: 4 }); // counter → 1
   runDiplomacyRound(g); // decay → 0
+  g.players[from].sway = 400;
   const before = getStanding(g, to, from);
-  performDiplomacy(g, from, "gift", { faction: to, amount: 8 });
+  performDiplomacy(g, from, "gift", { faction: to, standing: 4 });
   check("an idle round decays the gift counter, refreshing the gain rate (full 4)",
     getStanding(g, to, from) - before === 4);
 }
@@ -5740,13 +5774,24 @@ line("\n  [Phase 11] text-token resolver");
   check("after the cooldown, a cornered rebel can be re-subjugated",
     aiAcceptsVassalage(g4, "tempest", "lakers"));
 
-  // --- gift ladder: capped counting + durable baseline warmth ---
+  // --- gift ladder: the price is Sway, and a landed gift still lasts ---
+  //
+  // The old cap (`gift.maxScrapPerGift`) existed to stop one giant bribe
+  // buying a pact. It is no longer the mechanism that does that job: warmth is
+  // bought a point at a time out of a political income with a ceiling, so the
+  // ceiling IS the cap and one enormous gift is arithmetically impossible.
   const g5 = createGame({ seed: 205, humanFactionId: "versari" });
   ensureDiplomacy(g5);
+  const SW5 = CONFIG.sway;
   g5.players.versari.resource = 30;
-  const r20 = performDiplomacy(g5, "versari", "gift", { faction: "goldgrass", amount: 20 });
-  check("gift scrap counted is capped (a 20-scrap bribe buys the 8-scrap rate)",
-    r20.ok && getStanding(g5, "goldgrass", "versari") === 4);
+  g5.players.versari.sway = SW5.cap;
+  const r4 = performDiplomacy(g5, "versari", "gift", { faction: "goldgrass", standing: 4 });
+  check("a gift buys the warmth it paid for", r4.ok && getStanding(g5, "goldgrass", "versari") === 4);
+  check("…out of the political pool, at the published rate",
+    g5.players.versari.sway === SW5.cap - 4 * SW5.perStanding);
+  check("…and a full pool cannot buy past the pact bar in one go",
+    Math.floor(SW5.cap / SW5.perStanding) < CONFIG.diplomacy.pactStandingReq
+    || CONFIG.diplomacy.posture.courtRounds > 0);
   check("a landed gift warms the baseline — drift can't erase generosity",
     getBaseline(g5, "goldgrass", "versari") === CONFIG.diplomacy.gift.baselineWarmth);
 
@@ -6052,6 +6097,12 @@ line("\n  [Phase 11] text-token resolver");
     const g = createGame({ seed: 234, humanFactionId: "versari" });
     ensureDiplomacy(g);
     adjustStanding(g, "goldgrass", "versari", 12, "test");
+    adjustStanding(g, "versari", "goldgrass", 12, "test");
+    // §7.2 — a pact inside a deal answers to the same bar as a pact asked for
+    // directly, courtship included. One bar for everyone has to mean every
+    // road, or the deal builder becomes the road round the ladder.
+    performDiplomacy(g, "versari", "court", { faction: "goldgrass" });
+    g.round += CONFIG.diplomacy.posture.courtRounds;
     check("the drawer's old shorthand is worth nothing (it is not the schema)",
       valueOfItem(g, "goldgrass", { pact: true }) === 0);
     check("an alliance is worth something to a faction that would take one",
@@ -6241,7 +6292,22 @@ line("\n  [Phase 11] text-token resolver");
     takeAITurn(g);
     check("an AI no longer imposes an alliance on the human",
       !arePacted(g, "goldgrass", "versari"));
-    check("…it asks", offersFor(g, "versari").some((o) => o.from === "goldgrass" && o.kind === "pact"));
+    // §5 — and it does not ask on the first turn either. Its one initiative
+    // goes on OPENING the courtship, which is the middle the layer was
+    // missing: an alliance out of a clear sky is unearned, the same alliance
+    // after rounds of a faction publicly courting you is not.
+    check("…it opens a courtship first", isCourting(g, "goldgrass", "versari"));
+    check("…and says so where the player can read it",
+      g.log.some((e) => e.name === "posture_changed" && e.payload.to === "Courting"));
+    // Run the ladder out. The AI keeps its cadence, so give it turns.
+    for (let i = 0; i < CONFIG.diplomacy.posture.courtRounds + 2; i += 1) {
+      g.round += 1;
+      runDiplomacyRound(g);
+      g.activeIndex = g.turnOrder.indexOf("goldgrass");
+      takeAITurn(g);
+      if (offersFor(g, "versari").some((o) => o.from === "goldgrass" && o.kind === "pact")) break;
+    }
+    check("…then it asks", offersFor(g, "versari").some((o) => o.from === "goldgrass" && o.kind === "pact"));
     const offer = offersFor(g, "versari").find((o) => o.from === "goldgrass");
     answerOffer(g, "versari", offer.id, true);
     check("and accepting the offer forms the pact", arePacted(g, "goldgrass", "versari"));
