@@ -10,7 +10,7 @@ after the rules do turns every later decision into an argument.
 
 | | what it does | verdict |
 |---|---|---|
-| `node src/game/harness.js` | 708 live-engine checks | was the *only* trustworthy check |
+| `node src/game/harness.js` | 720 live-engine checks | was the *only* trustworthy check |
 | `node scripts/audit-diplomacy.mjs` | 10 named diplomacy behaviours, reproduced against a live engine | prints, never asserts |
 | **`node scripts/audit-economy.mjs`** | **new** — the economy's 10 blocks from economy §17 | **asserts; exits non-zero** |
 | **`node scripts/sim-suite.mjs`** | **new** — 15 seeded AI-only games, the governing numbers and both briefs' metric tables | writes `docs/sim-baseline.json` |
@@ -85,7 +85,8 @@ Endings: submission 4 · conquest 3 · mixed 1 · diplomacy 1 · **unresolved 6*
 | Wars per game | 52.7 |
 | Wars opened by an undeclared attack | 25.1 |
 | Coalitions per game | 4.3 |
-| **Minors allied or vassalised, per game** | **0.33** |
+| Minors allied or vassalised at the final board | 1.0 |
+| **Minors ever allied or vassalised** | **3.27 of 4** |
 | **Minors killed, per game** | **3.47 of 4** |
 
 ### Economy brief §17
@@ -106,7 +107,8 @@ Endings: submission 4 · conquest 3 · mixed 1 · diplomacy 1 · **unresolved 6*
 Four of the briefs' central claims stop being arguments:
 
 1. **The minor-faction hole is the biggest single problem on the board.** 3.47
-   of 4 minors die per game and 0.33 are allied or vassalised. Diplomacy §15's
+   of 4 minors die per game, and 34 of the 56 ordered pairs on the opening
+   board have no ally-or-vassal door at all. Diplomacy §15's
    diagnosis — a `scope: "local"` minor outside `ai.localityRadius: 3` can be
    neither allied nor vassalised, only killed, while `dominionStanding` counts
    it anyway — predicts exactly this, and predicts the second number too:
@@ -124,7 +126,7 @@ Four of the briefs' central claims stop being arguments:
 ## Running it
 
 ```
-node src/game/harness.js                       # 708/708
+node src/game/harness.js                       # 720/720
 node scripts/audit-diplomacy.mjs               # prints; read it
 node scripts/audit-economy.mjs                 # asserts; exit code gates the PR
 node scripts/sim-suite.mjs                     # ~30s for 15 games
