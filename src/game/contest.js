@@ -13,7 +13,7 @@ import { recomputeInfluence } from "./influence.js";
 import { recomputeVisibility, recomputeVisibilityFor, isUnitVisibleTo } from "./visibility.js";
 import { onLocationCaptured, onRaidWon } from "./standing.js";
 import { hexIsFull } from "./movement.js";
-import { onAttack, checkDominion, arePacted } from "./diplomacy.js";
+import { onAttack, checkDominion, arePacted, breakPositionsOnTaking } from "./diplomacy.js";
 import { makeUnit, nextMusterIndex } from "./setup.js";
 import { TECH_NODES, hasTechNode } from "./tech.js";
 import { destroyPost } from "./posts.js";
@@ -465,6 +465,10 @@ function captureLocation(state, loc, victor) {
   for (const c of [...loc.chips])
     if (state.chips[c]?.chipId === "capital") destroyLocationChip(state, loc, c);
 
+  // §13 — a `handsOff` position breaks on GROUND TAKEN, and taking means
+  // taking: a city handed over in a deal is given, not seized, and
+  // `cedeLocation` deliberately does not call this.
+  breakPositionsOnTaking(state, victor, loc.hexId);
   loc.controller = victor;
   loc.loyaltyOwner = victor;
   // §18.2 — Loyalty initialises low on capture; §17.5 Military B2 (Citadel):

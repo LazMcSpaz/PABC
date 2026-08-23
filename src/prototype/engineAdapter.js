@@ -40,6 +40,7 @@ import {
   hasRailAccess,
   // §5/§6 — posture and political capacity.
   postureOf, conditionText, isCourting, mayBeginCourtship, courtingList,
+  positionsOf, positionText, positionKinds, citablePositions, positionBlocker,
   swayIncome, swayOf, swayLedger, canSustainCourtship,
 } from "../game/diplomacy.js";
 import { hasTechNode } from "../game/tech.js";
@@ -957,6 +958,9 @@ function adaptDiplomacy(state, viewer) {
   return {
     youId: viewer,
     youCapital: capitalLocOf(state, viewer),
+    // The purse, so the haggle stepper can stop where the money does rather
+    // than letting the player table a counter the engine will refuse.
+    scrap: me?.resource || 0,
     menace: me?.menace || 0,
     honor: me?.honor ?? CONFIG.diplomacy.honor.start,
     threat: Math.round(threatScore(state, viewer) * 10) / 10,
@@ -1090,6 +1094,8 @@ function adaptDiplomacy(state, viewer) {
         const viewerProposes = o.deal.proposer === viewer;
         const mine = viewerProposes ? o.deal.give : o.deal.get;
         const theirs = viewerProposes ? o.deal.get : o.deal.give;
+        const scrapIn = (items) => (items || []).reduce(
+          (n, it) => n + (it.resource?.resource === "scrap" ? (it.resource.amount || 0) : 0), 0);
         return {
           youGet: (theirs || []).map((it) => describeDealItem(it, state)),
           youGive: (mine || []).map((it) => describeDealItem(it, state)),
@@ -1097,9 +1103,64 @@ function adaptDiplomacy(state, viewer) {
             (it) => it.resource?.resource !== "scrap"
               || (me?.resource || 0) >= (it.resource.amount || 0),
           ),
+          // §13 — the haggle. `netScrap` is signed FROM THE PLAYER'S SEAT, the
+          // same convention `counterTheOffer` reads, so the stepper's number
+          // and the engine's parameter are the same number and nothing has to
+          // be flipped between the two.
+          netScrap: scrapIn(mine) - scrapIn(theirs),
+          // A counter can only move scrap, so an offer with no scrap in it and
+          // nothing the player can pay with is not hagglable.
+          canCounter: (me?.resource || 0) > 0 || scrapIn(theirs) > 0 || scrapIn(mine) > 0,
         };
       })(),
     })),
+    // §13 — what you stand for, in public, at nobody's request. A promise is
+    // bilateral and priced; a position is unilateral and free to keep. It is
+    // the only political act in the game that is not a transaction, which is
+    // why it is the only one that can build a reputation rather than spend one.
+    positions: (() => {
+      const cfg = CONFIG.diplomacy.positions;
+      if (!cfg?.enabled) return null;
+      const held = positionsOf(state, viewer).map((p) => ({
+        id: p.id, kind: p.kind, target: p.target,
+        targetName: p.target ? (factionDef(p.target)?.name || p.target) : null,
+        text: positionText(state, p),
+        since: p.since,
+        heldRounds: state.round - p.since,
+        // A position cannot be dropped the moment it becomes inconvenient.
+        canWithdraw: state.round - p.since >= cfg.minRounds,
+        withdrawIn: Math.max(0, cfg.minRounds - (state.round - p.since)),
+      }));
+      // What you could still stand on. Built by ASKING THE ENGINE rather than
+      // by re-deriving the rules here, so the drawer can never offer a
+      // position `declarePosition` would refuse.
+      const options = [];
+      for (const kind of positionKinds()) {
+        const targets = kind === "noVassals"
+          ? [null]
+          : factionIds(state).filter((f) => f !== viewer);
+        for (const t of targets) {
+          const why = positionBlocker(state, viewer, kind, t);
+          options.push({
+            kind, target: t,
+            targetName: t ? (factionDef(t)?.name || t) : null,
+            text: positionText(state, { kind, target: t }),
+            available: !why, why,
+          });
+        }
+      }
+      return {
+        held, options,
+        max: cfg.max, room: Math.max(0, cfg.max - held.length),
+        breakHonorLoss: cfg.breakHonorLoss,
+        breakMenace: cfg.breakMenace,
+        withdrawHonorLoss: cfg.withdrawHonorLoss,
+        // Ones you have already broken and are still being named for.
+        cited: citablePositions(state, viewer).map((p) => ({
+          id: p.id, text: positionText(state, p), broken: p.broken,
+        })),
+      };
+    })(),
     // §6.11 — threats standing over you, and the ones you have made. An
     // ultimatum binds the issuer too, so both directions are the player's
     // business: the second list is a clock they are running against

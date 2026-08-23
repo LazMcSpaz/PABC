@@ -681,9 +681,126 @@ function UltimatumCard({ u, dip, onAction }) {
 // buttons. The interesting part is that it EXISTS — before this, a proposal
 // resolved the instant it was made and there was no state in which anything
 // was pending.
+// §13 — WHAT YOU STAND FOR.
+//
+// Every other political act in this drawer is a transaction: pay Sway, trade
+// terms, take ground and lose Standing. A POSITION is the only thing here you
+// can simply say, at nobody's request, and be held to — which makes it the
+// only one that builds a reputation instead of spending one.
+//
+// So the card leads with the cost of breaking one, not with the button. The
+// whole value of the feature is that the number is real before you press it.
+function PositionsCard({ positions, onAction }) {
+  const [picking, setPicking] = useState(false);
+  if (!positions) return null;
+  const { held, options, room, max } = positions;
+  const open = (options || []).filter((o) => o.available);
+  const dim = { fontFamily: C.font, fontSize: 8.5, letterSpacing: 0.4, color: "rgba(143,246,234,0.5)" };
+  return (
+    <Card accent="#c9b24e">
+      <SectionLabel color="#c9b24e">What you stand for</SectionLabel>
+      {held.length === 0 && !picking && (
+        <div className="pc-prose" style={{ fontSize: 12, lineHeight: 1.5, opacity: 0.75 }}>
+          You have said nothing to the board that anyone can hold you to.
+        </div>
+      )}
+      {held.map((p) => (
+        <div key={p.id} style={{
+          display: "flex", alignItems: "baseline", gap: 8,
+          padding: "5px 0", borderBottom: "1px solid rgba(201,178,78,0.15)",
+        }}>
+          <div className="pc-prose" style={{ flex: 1, fontSize: 12, lineHeight: 1.45 }}>
+            You <b style={{ color: "#e6cf7a" }}>{p.text}</b>.
+            <span style={{ ...dim, marginLeft: 6 }}>
+              {p.heldRounds === 0 ? "SAID THIS ROUND" : `HELD ${p.heldRounds} ROUND${p.heldRounds === 1 ? "" : "S"}`}
+            </span>
+          </div>
+          <button
+            className="hud-int"
+            disabled={!p.canWithdraw}
+            onClick={() => onAction("withdraw-position", { positionId: p.id })}
+            title={p.canWithdraw
+              ? `Stand down honestly: −${positions.withdrawHonorLoss} Honor, against −${positions.breakHonorLoss} for being caught breaking it.`
+              : `Not yet — ${p.withdrawIn} more round${p.withdrawIn === 1 ? "" : "s"}. A position you can drop the round before you break it is not one.`}
+            style={{
+              fontFamily: C.font, fontSize: 8.5, fontWeight: 700, letterSpacing: 0.8,
+              textTransform: "uppercase", color: "#f4efe2", padding: "3px 7px",
+              borderRadius: 3, border: "1px solid rgba(201,178,78,0.35)",
+              background: "rgba(201,178,78,0.07)",
+              cursor: p.canWithdraw ? "pointer" : "not-allowed", opacity: p.canWithdraw ? 1 : 0.4,
+            }}
+          >Stand down</button>
+        </div>
+      ))}
+      {(positions.cited || []).length > 0 && (
+        <div className="pc-prose" style={{ fontSize: 11.5, lineHeight: 1.45, marginTop: 6, color: "#ffb4ae" }}>
+          They are still naming you for it: {positions.cited.map((c) => `"${c.text}"`).join(", ")}.
+        </div>
+      )}
+      {!picking && room > 0 && open.length > 0 && (
+        <button
+          className="hud-int"
+          onClick={() => setPicking(true)}
+          style={{
+            width: "100%", marginTop: 8, fontFamily: C.font, fontSize: 10, fontWeight: 700,
+            letterSpacing: 1, textTransform: "uppercase", color: "#f4efe2",
+            padding: "6px 8px", borderRadius: 4, border: "1px solid rgba(201,178,78,0.4)",
+            background: "rgba(201,178,78,0.08)", cursor: "pointer",
+          }}
+        >Take a position ({room} of {max} left)</button>
+      )}
+      {picking && (
+        <div style={{ marginTop: 8 }}>
+          <div style={{ ...dim, marginBottom: 6, color: "#ffb4ae" }}>
+            {`BREAKING ONE COSTS ${positions.breakHonorLoss} HONOR AND ${positions.breakMenace} MENACE, AND THE BOARD WILL NAME IT.`}
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            {open.map((o) => (
+              <button
+                key={`${o.kind}|${o.target || "any"}`}
+                className="hud-int"
+                onClick={() => { setPicking(false); onAction("declare-position", { kind: o.kind, target: o.target }); }}
+                style={{
+                  textAlign: "left", fontFamily: C.body || "inherit", fontSize: 12,
+                  color: "#f4efe2", padding: "5px 8px", borderRadius: 3,
+                  border: "1px solid rgba(201,178,78,0.28)",
+                  background: "rgba(201,178,78,0.05)", cursor: "pointer",
+                }}
+              >You {o.text}.</button>
+            ))}
+          </div>
+          <button
+            className="hud-int"
+            onClick={() => setPicking(false)}
+            style={{
+              width: "100%", marginTop: 6, fontFamily: C.font, fontSize: 9, fontWeight: 700,
+              letterSpacing: 1, textTransform: "uppercase", color: "#f4efe2",
+              padding: "5px 8px", borderRadius: 3, border: "1px solid rgba(86,211,198,0.28)",
+              background: "rgba(86,211,198,0.05)", cursor: "pointer",
+            }}
+          >Say nothing</button>
+        </div>
+      )}
+    </Card>
+  );
+}
+
 function OfferCard({ offer: o, dip, onAction }) {
   const f = dip.factions.find((x) => x.id === o.from);
   const accent = o.isCounter ? "#c9b24e" : (f?.color || C.holoHi);
+  // §13 — the haggle, signed from YOUR seat: positive is scrap you pay,
+  // negative is scrap you want paid. Seeded from the terms as tabled, so the
+  // stepper starts where the offer stands and every press is a visible move
+  // off it rather than a number invented from nothing.
+  const [scrap, setScrap] = useState(o.netScrap ?? 0);
+  const [haggling, setHaggling] = useState(false);
+  // A counter is an ASK, and past `freeAsks` a refusal starts costing
+  // Standing. Say so before the press, not after.
+  const asked = (dip.asks || {})[o.from] || 0;
+  const willPester = asked >= (dip.freeAsks ?? 2);
+  const purse = dip.scrap ?? 0;
+  const overPurse = scrap > purse;
+  const unmoved = scrap === (o.netScrap ?? 0);
   const Terms = ({ label, items, empty }) => (
     <div style={{ flex: 1, minWidth: 0 }}>
       <SectionLabel>{label}</SectionLabel>
@@ -691,6 +808,26 @@ function OfferCard({ offer: o, dip, onAction }) {
         {items.length ? items.join(" · ") : <span style={{ opacity: 0.55 }}>{empty}</span>}
       </div>
     </div>
+  );
+  const btn = (label, onClick, opts = {}) => (
+    <button
+      className="hud-int"
+      disabled={opts.disabled}
+      onClick={onClick}
+      title={opts.title}
+      style={{
+        flex: opts.flex ?? 1, fontFamily: C.font, fontSize: 10, fontWeight: 700,
+        letterSpacing: 1, textTransform: "uppercase",
+        color: opts.primary ? "#08100f" : "#f4efe2",
+        padding: "6px 8px", borderRadius: 4,
+        border: `1px solid ${opts.primary ? "#5fc27a" : "rgba(86,211,198,0.35)"}`,
+        background: opts.primary
+          ? "linear-gradient(180deg, #7bd496, #4faf6e)"
+          : "rgba(86,211,198,0.06)",
+        cursor: opts.disabled ? "not-allowed" : "pointer",
+        opacity: opts.disabled ? 0.45 : 1,
+      }}
+    >{label}</button>
   );
   return (
     <Card accent={accent}>
@@ -706,30 +843,49 @@ function OfferCard({ offer: o, dip, onAction }) {
         <Terms label="You get" items={o.youGet} empty="nothing" />
         <Terms label="You give" items={o.youGive} empty="nothing" />
       </div>
-      <div style={{ display: "flex", gap: 8 }}>
-        <button
-          className="hud-int"
-          disabled={!o.affordable}
-          onClick={() => onAction("answer-offer", { offerId: o.id, accept: true })}
-          style={{
-            flex: 1, fontFamily: C.font, fontSize: 10, fontWeight: 700,
-            letterSpacing: 1, textTransform: "uppercase", color: "#08100f",
-            padding: "6px 8px", borderRadius: 4, border: "1px solid #5fc27a",
-            background: "linear-gradient(180deg, #7bd496, #4faf6e)",
-            cursor: o.affordable ? "pointer" : "not-allowed", opacity: o.affordable ? 1 : 0.45,
-          }}
-        >{o.affordable ? "Accept" : "Can't afford"}</button>
-        <button
-          className="hud-int"
-          onClick={() => onAction("answer-offer", { offerId: o.id, accept: false })}
-          style={{
-            flex: 1, fontFamily: C.font, fontSize: 10, fontWeight: 700,
-            letterSpacing: 1, textTransform: "uppercase", color: "#f4efe2",
-            padding: "6px 8px", borderRadius: 4, border: "1px solid rgba(86,211,198,0.35)",
-            background: "rgba(86,211,198,0.06)", cursor: "pointer",
-          }}
-        >Decline</button>
-      </div>
+      {!haggling && (
+        <div style={{ display: "flex", gap: 8 }}>
+          {btn(o.affordable ? "Accept" : "Can't afford",
+            () => onAction("answer-offer", { offerId: o.id, accept: true }),
+            { primary: true, disabled: !o.affordable })}
+          {o.canCounter !== false && btn("Counter", () => { setScrap(o.netScrap ?? 0); setHaggling(true); },
+            { title: "Move the scrap and put it back to them. A counter is an ask." })}
+          {btn("Decline", () => onAction("answer-offer", { offerId: o.id, accept: false }))}
+        </div>
+      )}
+      {haggling && (
+        <div>
+          {/* Only the scrap moves. Rewriting the other terms would make it a
+              different deal, which is what Propose Deal is for — and the AI's
+              own counters hold to the same line. */}
+          <SectionLabel>Your counter</SectionLabel>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
+            {btn("−5", () => setScrap((v) => v - 5), { flex: 0 })}
+            {btn("−1", () => setScrap((v) => v - 1), { flex: 0 })}
+            <div className="pc-prose" style={{ flex: 1, textAlign: "center", fontSize: 12, lineHeight: 1.4 }}>
+              {scrap > 0
+                ? <>you pay <b style={{ color: overPurse ? "#ffb4ae" : C.holoHi }}>{scrap}</b> scrap</>
+                : scrap < 0
+                  ? <>they pay <b style={{ color: C.holoHi }}>{-scrap}</b> scrap</>
+                  : <span style={{ opacity: 0.6 }}>no scrap either way</span>}
+            </div>
+            {btn("+1", () => setScrap((v) => v + 1), { flex: 0 })}
+            {btn("+5", () => setScrap((v) => v + 5), { flex: 0 })}
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            {btn(overPurse ? `You hold ${purse}` : "Put it to them",
+              () => { setHaggling(false); onAction("counter-offer", { offerId: o.id, scrap }); },
+              { primary: true, disabled: overPurse || unmoved,
+                title: unmoved ? "Move the terms first — that is what they already offered." : undefined })}
+            {btn("Back", () => setHaggling(false))}
+          </div>
+          <div style={{ fontFamily: C.font, fontSize: 8.5, letterSpacing: 0.4, color: "rgba(143,246,234,0.5)", marginTop: 6 }}>
+            {willPester
+              ? "THEY HAVE HEARD ENOUGH OF YOU THIS ROUND — A REFUSAL WILL COST STANDING."
+              : "A COUNTER TAKES THE OFFER OFF THE TABLE. THEY ANSWER IT AT ONCE."}
+          </div>
+        </div>
+      )}
       <div style={{ fontFamily: C.font, fontSize: 8.5, letterSpacing: 0.4, color: "rgba(143,246,234,0.5)", marginTop: 6 }}>
         {o.roundsLeft > 0
           ? `Lapses in ${o.roundsLeft} round${o.roundsLeft === 1 ? "" : "s"} — letting it lapse costs nothing.`
@@ -806,6 +962,8 @@ function LandingView({ dip, onSelectFaction, onAction, onClose }) {
         </Card>
 
         <SwayCard sway={dip.sway} />
+
+        <PositionsCard positions={dip.positions} onAction={onAction} />
 
         <Receipts receipts={dip.receipts} />
 

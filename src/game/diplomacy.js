@@ -467,6 +467,18 @@ export function denounceWarrant(state, denouncer, target) {
 // so the UI can say "for the strike on Tin Town at round 7" instead of
 // "you have grounds".
 export function denounceGrounds(state, denouncer, target) {
+  // §13 — a position broken outranks the ledger for the purpose of SAYING so.
+  // It is fresher, it is public, and it names itself; a denouncement that
+  // reached past it for a two-round-old trespass would be the AI failing to
+  // notice the loudest thing on the board.
+  const pos = citablePositions(state, target, denouncer)[0];
+  if (pos) {
+    return {
+      kind: "position-broken", entry: pos, position: pos,
+      text: positionText(state, pos),
+      weight: grievanceWeight(state, denouncer, target),
+    };
+  }
   const worst = worstGrievance(state, denouncer, target);
   if (worst) return { kind: worst.kind, entry: worst, weight: grievanceWeight(state, denouncer, target) };
   const kind = denounceWarrant(state, denouncer, target);
@@ -1434,6 +1446,49 @@ export function answerOffer(state, fid, offerId, accept) {
   return { ok: true, accepted: true };
 }
 
+// §13 — THE PLAYER'S OWN COUNTER.
+//
+// The AI has been able to counter the player's terms since §6.10; the player
+// could only take an offer or leave it. That asymmetry is the whole reason the
+// inbox read as a vending machine — an offer arrives, you press one of two
+// buttons, nothing you think enters the conversation.
+//
+// A counter is a HAGGLE, not a redraft: the player moves the scrap and nothing
+// else. Rewriting the non-scrap terms would make it a different deal, which is
+// what `propose-deal` is for, and the AI's own `counterOffer` holds to exactly
+// the same discipline for exactly the same reason.
+//
+// `scrap` is signed and read from the PLAYER's seat: positive is what they pay,
+// negative is what they want paid. The deal underneath stays in the proposer's
+// frame, because that is the frame `applyDeal` and `wouldAccept` read.
+export function counterTheOffer(state, fid, offerId, scrap = 0) {
+  ensureDiplomacy(state);
+  const i = (state.diplomacy.offers || []).findIndex((o) => o.id === offerId && o.to === fid);
+  if (i < 0) return { ok: false, reason: "that offer is no longer on the table" };
+  const offer = state.diplomacy.offers[i];
+  const other = offer.from;
+  const pay = Math.max(0, Math.round(scrap));
+  if (pay > (state.players[fid]?.resource || 0)) {
+    return { ok: false, reason: "you do not have that much scrap" };
+  }
+  const want = Math.max(0, -Math.round(scrap));
+  // Proposer-space. When the other side wrote the offer, what the player pays
+  // is what the PROPOSER asks; when these are counter-terms against something
+  // the player wrote, the player is still the proposer and it is what they give.
+  const viewerProposes = offer.deal.proposer === fid;
+  const deal = viewerProposes
+    ? withScrapTerms(offer.deal, pay, want)
+    : withScrapTerms(offer.deal, want, pay);
+  if (isEmptyDeal(deal)) return { ok: false, reason: "there would be nothing left to agree to" };
+  // Off the table before it is answered: a counter replaces the offer, and
+  // leaving the original sitting there would let the player take the old terms
+  // after being refused the new ones.
+  state.diplomacy.offers.splice(i, 1);
+  emit(state, "offer_countered", { offer: offer.id, by: fid, to: other, scrap: Math.round(scrap) });
+  const res = resolveProposal(state, fid, other, deal, "counter-offer", offer.kind);
+  return { ok: true, ...res };
+}
+
 // Offers nobody answered lapse quietly. Letting one lapse is not a refusal
 // and costs nothing — silence has never been an answer in this game
 // (expirePactCalls has always worked the same way).
@@ -1812,6 +1867,10 @@ export function declareWar(state, a, b, cause = "declared", opts = {}) {
   if (!justified.includes(a) && D().menace.declareUnjustified) {
     adjustMenace(state, a, D().menace.declareUnjustified, `declare:${b}`);
   }
+  // §13 — a position said to the whole board is broken by the deed, not by
+  // the declaration's wording, so this sits after the war record exists.
+  breakPositionsOnWar(state, a, b);
+  breakPositionsOnWar(state, b, a);
   emit(state, "war_declared", { a, b, cause, justified });
 }
 
@@ -1991,6 +2050,11 @@ function queueHumanPactCalls(state) {
 // Why this faction is unhappy — the concrete, checkable grievance behind
 // the warning, so the envoy can name it instead of grumbling vaguely.
 function warningReason(state, f, human) {
+  // §13 — a position broken is the most concrete thing an envoy can put in
+  // front of you: it is a sentence you said, in public, and then contradicted.
+  // It goes FIRST, because the whole cost of breaking one is being named for
+  // it, and an envoy that grumbles about Menace instead has swallowed the bill.
+  if (citablePositions(state, human, f).length) return "position";
   if (menaceOf(state, human) > tolerance(state, f, human)) return "menace";
   if (honorOf(state, human) < trustFloor(state, f)) return "honor";
   const rec = state.diplomacy.trespassRecord?.[`${human}|${f}`];
@@ -2583,6 +2647,7 @@ export function vassalize(state, lord, vassal, cause = "vassalized") {
   // tribute flow and vassal-pact standing, and the vassal paid both. Release
   // the old bond properly before forming the new one.
   if (previous) releaseVassal(state, vassal, "vassal-taken");
+  breakPositionsOnVassalage(state, lord); // §13
   // a vassal cannot keep a pact with the lord's enemies
   state.diplomacy.vassals[vassal] = lord;
   state.diplomacy.resentment[vassal] = 0;
@@ -2670,6 +2735,7 @@ export function onAttack(state, attackerPid, targetFid, hex = null) {
     adjustBaseline(state, targetFid, attackerPid, -D().baseline.surpriseAttackLoss, "surprise-attack");
     recordGrievance(state, targetFid, attackerPid, "surprise-attack", { at: hex });
   }
+  breakPositionsOnWar(state, attackerPid, targetFid); // §13 — the strike IS the deed
   if (arePacted(state, attackerPid, targetFid)) breakPact(state, attackerPid, targetFid, "attacked-ally");
   breakPromiseIfAny(state, attackerPid, targetFid, ["nonAggression", "peace"]);
   if (!atWar(state, attackerPid, targetFid)) declareWar(state, attackerPid, targetFid, "attack");
@@ -2793,6 +2859,173 @@ export function coalitionJoinScore(state, f, target) {
   // frightening faction six hexes away is a headline, one next door is a plan.
   if (menaceOf(state, target) >= c.menaceGrounds && areNeighbours(state, f, target)) score += 1;
   return score;
+}
+
+// --- §13 player positions --------------------------------------------
+//
+// A PROMISE is bilateral, priced, and asked for. A POSITION is unilateral and
+// public: "I will not make war on the Croppers", said to the whole board, at
+// nobody's request. Every other political act in this game is a transaction —
+// the player can pay for goodwill, trade for it, or take ground and lose it,
+// but until now they could not simply STAND for something and be held to it.
+//
+// Three kinds, and the list is short on purpose: each one has to be something
+// the engine can CHECK, or a position is a mood.
+//
+//   noWarOn <faction>   broken by declaring war on them, or striking them
+//   handsOff <faction>  broken by taking ground their name is on
+//   noVassals           broken by making any faction your vassal
+//
+// Keeping one costs nothing and pays nothing directly. A position you are paid
+// to hold is a contract; what this buys is the right to be believed, and what
+// it risks is being named for it.
+const POSITION_KINDS = {
+  noWarOn: { needsTarget: true, text: (n) => `will make no war on ${n}` },
+  handsOff: { needsTarget: true, text: (n) => `will take no ground of ${n}` },
+  noVassals: { needsTarget: false, text: () => "will take no vassals" },
+};
+export const positionKinds = () => Object.keys(POSITION_KINDS);
+
+const P = () => D().positions;
+
+function ensurePositions(state) {
+  ensureDiplomacy(state);
+  if (!state.diplomacy.positions) state.diplomacy.positions = [];
+  return state.diplomacy.positions;
+}
+
+export function positionsOf(state, pid) {
+  return ensurePositions(state).filter((p) => p.by === pid && !p.broken && !p.withdrawn);
+}
+
+// Is `pid` standing on this right now? Returns the position or null, so the
+// caller can cite it rather than merely know it exists.
+export function positionHeld(state, pid, kind, target = null) {
+  return positionsOf(state, pid).find(
+    (p) => p.kind === kind && (!POSITION_KINDS[kind]?.needsTarget || p.target === target),
+  ) || null;
+}
+
+export function positionText(state, p) {
+  const def = POSITION_KINDS[p.kind];
+  if (!def) return p.kind;
+  return def.text(p.target ? (factionDef(p.target)?.name || p.target) : null);
+}
+
+// Why `pid` may NOT stand on this, or null. Split out from `declarePosition`
+// because the drawer has to offer the list, and a UI that re-derives the rules
+// to grey out a button is a second copy of them that will drift. One reader,
+// asked twice.
+export function positionBlocker(state, pid, kind, target = null) {
+  if (!P()?.enabled) return "positions are not in play";
+  const def = POSITION_KINDS[kind];
+  if (!def) return "no such position";
+  if (def.needsTarget && (!target || target === pid)) return "that position has to be about somebody";
+  if (!def.needsTarget && target) target = null;
+  ensurePositions(state);
+  if (positionHeld(state, pid, kind, target)) return "you already stand on that";
+  // You cannot take a position you are already in breach of — declaring "no
+  // war on the Lakers" mid-war is not a position, it is a press release.
+  if (kind === "noWarOn" && atWar(state, pid, target)) return "you are at war with them now";
+  if (kind === "handsOff" && heldAffiliatedGround(state, pid, target)) {
+    return "you hold ground of theirs already";
+  }
+  if (kind === "noVassals" && Object.values(state.diplomacy.vassals || {}).includes(pid)) {
+    return "you hold a vassal already";
+  }
+  if (positionsOf(state, pid).length >= P().max) return `you can stand on ${P().max} things at once`;
+  return null;
+}
+
+function heldAffiliatedGround(state, pid, aff) {
+  for (const loc of Object.values(state.locations || {})) {
+    if (loc.controller !== pid) continue;
+    if (LOCATIONS[loc.locationId]?.affiliation === aff) return true;
+  }
+  return false;
+}
+
+export function declarePosition(state, pid, kind, target = null) {
+  const blocker = positionBlocker(state, pid, kind, target);
+  if (blocker) return { ok: false, reason: blocker };
+  if (!POSITION_KINDS[kind].needsTarget) target = null;
+  const p = {
+    id: `pos-${pid}-${kind}-${target || "any"}-${state.round}`,
+    by: pid, kind, target: target || null, since: state.round,
+    broken: null, withdrawn: null,
+  };
+  state.diplomacy.positions.push(p);
+  emit(state, "position_declared", { by: pid, kind, target: target || null, id: p.id });
+  return { ok: true, position: p };
+}
+
+// Standing down honestly. Cheaper than being caught, and deliberately not
+// free: a position you can drop the round before you break it is not one.
+export function withdrawPosition(state, pid, positionId) {
+  const p = ensurePositions(state).find((x) => x.id === positionId && x.by === pid && !x.broken && !x.withdrawn);
+  if (!p) return { ok: false, reason: "you are not standing on that" };
+  if (state.round - p.since < P().minRounds) {
+    return { ok: false, reason: `you have stood on that for ${state.round - p.since} of ${P().minRounds} rounds` };
+  }
+  p.withdrawn = state.round;
+  if (state.players[pid]) adjustHonor(state, pid, -P().withdrawHonorLoss, "position-withdrawn");
+  emit(state, "position_withdrawn", { by: pid, id: p.id, kind: p.kind, target: p.target });
+  return { ok: true };
+}
+
+// Break one. The cost is bigger than a bilateral promise's because a position
+// was said to EVERYBODY — and the point of the whole feature is the citation,
+// so this records who is entitled to name it and when.
+function breakPosition(state, p, cause) {
+  if (p.broken) return;
+  p.broken = state.round;
+  p.brokenCause = cause;
+  const pid = p.by;
+  if (state.players[pid]) adjustHonor(state, pid, -P().breakHonorLoss, "position-broken");
+  adjustMenace(state, pid, P().breakMenace, "position-broken");
+  // The wronged party is the one the position was ABOUT; a position with no
+  // target was made to the room, so the room holds it.
+  const wronged = p.target ? [p.target] : factionIds(state).filter((f) => f !== pid);
+  for (const w of wronged) {
+    if (!state.players[w]) continue;
+    recordGrievance(state, w, pid, "position-broken");
+    adjustBaseline(state, w, pid, -D().baseline.pactBrokenLoss, "position-broken");
+  }
+  emit(state, "position_broken", {
+    by: pid, id: p.id, kind: p.kind, target: p.target, cause,
+    text: positionText(state, p),
+  });
+}
+
+// Every hook into the rest of the engine, in one place, so a new position kind
+// has exactly one file to be wired into.
+export function breakPositionsOnWar(state, a, b) {
+  for (const p of positionsOf(state, a)) {
+    if (p.kind === "noWarOn" && p.target === b) breakPosition(state, p, "war");
+  }
+}
+export function breakPositionsOnVassalage(state, lord) {
+  for (const p of positionsOf(state, lord)) {
+    if (p.kind === "noVassals") breakPosition(state, p, "vassalage");
+  }
+}
+export function breakPositionsOnTaking(state, pid, hexId) {
+  const aff = LOCATIONS[state.locations?.[hexId]?.locationId]?.affiliation;
+  if (!aff || aff === pid) return;
+  for (const p of positionsOf(state, pid)) {
+    if (p.kind === "handsOff" && p.target === aff) breakPosition(state, p, "ground");
+  }
+}
+
+// Positions broken recently enough that naming one is still news. THIS is the
+// audit's claim: a position broken has to be cited BY NAME within
+// `citeWithinRounds`, or the whole cost of breaking it is invisible and the
+// feature is a line in a save file.
+export function citablePositions(state, pid, against = null) {
+  return ensurePositions(state).filter((p) =>
+    p.by === pid && p.broken != null
+    && state.round - p.broken <= P().citeWithinRounds
+    && (against == null || p.target == null || p.target === against));
 }
 
 // --- coalitions (§18.8) ---------------------------------------------
@@ -3460,6 +3693,25 @@ export function performDiplomacy(state, pid, action, params = {}) {
     // ask, so it never counts toward pestering.
     case "answer-offer":
       return r(answerOffer(state, pid, params.offerId, params.accept !== false));
+
+    // §13 — haggle rather than take-it-or-leave-it. Answering is not an ask;
+    // countering IS one, and `resolveProposal` charges it like any other.
+    case "counter-offer": {
+      const res = counterTheOffer(state, pid, params.offerId, params.scrap ?? 0);
+      return res.ok ? r(res) : res;
+    }
+
+    // §13 — stand for something in public, or stand down from it.
+    // Neither is an ask: nobody is being petitioned, so neither costs the
+    // pestering budget and neither can be refused by a faction.
+    case "declare-position": {
+      const res = declarePosition(state, pid, params.kind, params.target || null);
+      return res.ok ? r(res) : res;
+    }
+    case "withdraw-position": {
+      const res = withdrawPosition(state, pid, params.positionId);
+      return res.ok ? r(res) : res;
+    }
 
     // §6.11 — "stop, or else", with a deadline and your name on it.
     case "issue-ultimatum": {

@@ -18,6 +18,7 @@ import { assignTechNode } from "../src/game/stats.js";
 import { performAction } from "../src/game/actions.js";
 import {
   performDiplomacy, adjustStanding, standingReceipts, trespassPreview, ensureDiplomacy,
+  tableOffer, positionBlocker,
 } from "../src/game/diplomacy.js";
 
 let fail = 0;
@@ -263,5 +264,72 @@ const mk = () => createGame({
   check("26. …once per round", !twice.ok, "sabotage ran twice in one round");
 }
 
+// --- 10. §13 — the haggle and the position are both on the SCREEN ----------
+//
+// Both of these are engine features whose entire point is that the player can
+// reach them. A counter the drawer cannot table, or a position the drawer
+// cannot say, is a function nobody will ever call — which is exactly what the
+// influence field was before phase 1.
+{
+  const g = mk();
+  startTurn(g);
+  ensureDiplomacy(g);
+  g.players.versari.resource = 60;
+  const them = "lakers";
+  tableOffer(g, them, "versari", {
+    proposer: them, recipient: "versari",
+    give: [{ promise: { kind: "nonAggression", rounds: 5 } }],
+    get: [{ resource: { resource: "scrap", amount: 12 } }],
+  }, { kind: "deal" });
+  const a = adaptState(g, "versari").diplomacy;
+  const o = (a.offers || [])[0];
+  check("27. an offer on the table reaches the drawer", !!o, "no offer adapted");
+  if (o) {
+    // Signed FROM THE PLAYER'S SEAT — the same convention counterTheOffer
+    // reads, so the stepper's number and the engine's parameter are one number.
+    check("28. …carrying the scrap as a signed number the player can move",
+      o.netScrap === 12, `netScrap was ${o.netScrap}`);
+    check("29. …and it says the haggle is available", o.canCounter === true);
+    const purse = g.players.versari.resource;
+    const res = performDiplomacy(g, "versari", "counter-offer", { offerId: o.id, scrap: 5 });
+    check("30. …and the verb the button calls actually runs", res.ok, res.reason);
+    check("31. …and it never charges more than the player asked to pay",
+      g.players.versari.resource >= purse - 5,
+      `purse ${purse} -> ${g.players.versari.resource}`);
+  }
+  check("32. the purse the stepper stops at is on the adapted state",
+    typeof a.scrap === "number");
+}
+{
+  const g = mk();
+  startTurn(g);
+  ensureDiplomacy(g);
+  const a0 = adaptState(g, "versari").diplomacy;
+  const P = a0.positions;
+  check("33. what you stand for reaches the drawer", !!P, "positions block missing");
+  if (P) {
+    check("34. …with something to say and room to say it",
+      P.room > 0 && P.options.some((o) => o.available));
+    check("35. …and it prices being caught before the button is pressed",
+      P.breakHonorLoss > 0 && P.breakMenace > 0);
+    // The offered list must be exactly what the engine will take. A UI that
+    // re-derives the rules to grey out a button is a second copy of them.
+    // Asked through the engine's own reader, not a re-derivation and not a
+    // clone — `state` holds the seeded RNG closure and is not cloneable.
+    const bad = P.options.filter((o) => o.available
+      && positionBlocker(g, "versari", o.kind, o.target));
+    check("36. …and every position it offers is one the engine accepts",
+      bad.length === 0, `offered but refused: ${bad.map((o) => o.kind).join(", ")}`);
+    const shown = P.options.find((o) => o.available);
+    performDiplomacy(g, "versari", "declare-position", { kind: shown.kind, target: shown.target });
+    const a1 = adaptState(g, "versari").diplomacy;
+    check("37. …and once said, it reads back in words", 
+      a1.positions.held.length === 1 && /\w/.test(a1.positions.held[0].text));
+    check("38. …and it cannot be dropped the same round it was said",
+      a1.positions.held[0].canWithdraw === false);
+  }
+}
+
 console.log(`\n${fail ? `${fail} FAILED` : "all checks passed"}`);
+
 process.exit(fail ? 1 : 0);

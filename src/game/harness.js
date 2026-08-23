@@ -36,7 +36,9 @@ import {
   witnessesOf, witnessShare, reputationLog, adjustHonor, adjustMenace, settleableWeight,
   ultimatumsFor, ultimatumCooldown,
   // §6.10 the round trip — offers, counters, patience
-  counterOffer, tableOffer, offersFor, answerOffer, asksThisRound,
+  counterOffer, tableOffer, offersFor, answerOffer, asksThisRound, counterTheOffer,
+  // §13 player positions
+  declarePosition, withdrawPosition, positionsOf, positionHeld, citablePositions, positionText, menaceOf,
   // the one win condition
   dominionStanding, dominionMet, checkDominion, dominionCountdown, releaseVassal, aiAcceptsPact,
   // §3.2 Locations as deal items — ceding ground
@@ -4145,6 +4147,178 @@ line("\n  [§9] a rising needs grounds, and members who want to be in it");
   setStanding(g, "goldgrass", lead, -8);
   check("a faction that likes the target wants in less than one that doesn't",
     coalitionJoinScore(g, "lakers", lead) < coalitionJoinScore(g, "goldgrass", lead));
+}
+
+// §13 — the player can haggle, not only take it or leave it.
+//
+// The AI has been able to counter the player's terms since §6.10; the player
+// could only Accept or Decline, which is what made the inbox read as a vending
+// machine. A counter moves the SCRAP and nothing else — rewriting the other
+// terms would be a different deal, and the AI's own counters hold the same line.
+line("\n  [§13] a counter is a haggle: the scrap moves, the terms do not");
+{
+  const g = createGame({ seed }); ensureDiplomacy(g);
+  const me = "versari", them = "lakers";
+  g.players[me].resource = 60;
+  // They offer non-aggression and want 20 scrap for it.
+  const deal = {
+    proposer: them, recipient: me,
+    give: [{ promise: { kind: "nonAggression", rounds: 5 } }],
+    get: [{ resource: { resource: "scrap", amount: 20 } }],
+  };
+  const offer = tableOffer(g, them, me, deal, { kind: "deal" });
+  const purse = g.players[me].resource;
+
+  const tooRich = performDiplomacy(g, me, "counter-offer", { offerId: offer.id, scrap: 999 });
+  check("you cannot counter with scrap you do not hold", !tooRich.ok);
+  check("…and the offer is still on the table to answer properly",
+    offersFor(g, me).some((o) => o.id === offer.id));
+  check("…and nothing was paid", g.players[me].resource === purse);
+
+  // Haggle them down to 5.
+  const res = performDiplomacy(g, me, "counter-offer", { offerId: offer.id, scrap: 5 });
+  check("the counter is put to them", res.ok);
+  check("…and it takes the original off the table either way",
+    !offersFor(g, me).some((o) => o.id === offer.id));
+  check("…the promise is untouched by the haggle — only scrap moved",
+    g.log.some((e) => e.name === "offer_countered" && e.payload.offer === offer.id));
+}
+{
+  // A counter they take applies at the COUNTERED price, not the tabled one.
+  const g = createGame({ seed }); ensureDiplomacy(g);
+  const me = "versari", them = "lakers";
+  g.players[me].resource = 80;
+  const deal = {
+    proposer: them, recipient: me,
+    give: [{ promise: { kind: "nonAggression", rounds: 5 } }],
+    get: [{ resource: { resource: "scrap", amount: 12 } }],
+  };
+  const offer = tableOffer(g, them, me, deal, { kind: "deal" });
+  const before = g.players[me].resource;
+  // Overpay: they will not refuse more money than they asked for.
+  const res = performDiplomacy(g, me, "counter-offer", { offerId: offer.id, scrap: 14 });
+  check("a counter that pays over the asking price is taken", res.ok && res.accepted);
+  check("…and it charges the countered price, not the tabled one",
+    g.players[me].resource === before - 14);
+}
+{
+  // The direction rule. On counter-terms the player is still the PROPOSER, so
+  // a positive number is still scrap they pay — the frame flip that turned
+  // every counter inside out the first time offers shipped.
+  const g = createGame({ seed }); ensureDiplomacy(g);
+  const me = "versari", them = "lakers";
+  g.players[me].resource = 50;
+  const deal = {
+    proposer: me, recipient: them,
+    give: [{ resource: { resource: "scrap", amount: 4 } }],
+    get: [{ promise: { kind: "nonAggression", rounds: 5 } }],
+  };
+  const offer = tableOffer(g, them, me, deal, { kind: "deal", isCounter: true });
+  const before = g.players[me].resource;
+  const res = performDiplomacy(g, me, "counter-offer", { offerId: offer.id, scrap: 9 });
+  check("countering counter-terms still reads positive as SCRAP YOU PAY",
+    !res.accepted || g.players[me].resource === before - 9);
+}
+
+// §13 — a POSITION: unilateral, public, and cited by name when broken.
+//
+// The audit's claim is specifically about the citation. A cost nobody names is
+// not a cost — it is a number in a save file — and the entire reason to stand
+// on something in public is that the board can hold you to it out loud.
+line("\n  [§13] you can stand for something, and be named when you don't");
+{
+  const g = createGame({ seed }); ensureDiplomacy(g);
+  const me = "versari", them = "lakers";
+  const PC = CONFIG.diplomacy.positions;
+
+  const bad = performDiplomacy(g, me, "declare-position", { kind: "noWarOn" });
+  check("a position about nobody in particular is refused", !bad.ok);
+  const ok = performDiplomacy(g, me, "declare-position", { kind: "noWarOn", target: them });
+  check("you can stand on making no war on somebody", ok.ok);
+  check("…and it reads back", !!positionHeld(g, me, "noWarOn", them));
+  check("…in words", /Lakers|lakers/.test(positionText(g, positionHeld(g, me, "noWarOn", them))));
+  const dup = performDiplomacy(g, me, "declare-position", { kind: "noWarOn", target: them });
+  check("…and you cannot stand on it twice", !dup.ok);
+
+  // The press-release guard.
+  const g2 = createGame({ seed }); ensureDiplomacy(g2);
+  declareWar(g2, me, them, "test");
+  check("you cannot take a position you are already in breach of",
+    !performDiplomacy(g2, me, "declare-position", { kind: "noWarOn", target: them }).ok);
+
+  // Standing down honestly, and not the round before you break it.
+  const early = performDiplomacy(g, me, "withdraw-position",
+    { positionId: positionHeld(g, me, "noWarOn", them).id });
+  check("a position cannot be dropped the moment it becomes inconvenient", !early.ok);
+  g.round += PC.minRounds;
+  const h0 = honorOf(g, me);
+  const late = performDiplomacy(g, me, "withdraw-position",
+    { positionId: positionHeld(g, me, "noWarOn", them).id });
+  check("…but it can be stood down from, once it has been stood on", late.ok);
+  check("…and standing down costs less than being caught",
+    honorOf(g, me) === h0 - PC.withdrawHonorLoss && PC.withdrawHonorLoss < PC.breakHonorLoss);
+  check("…and it is no longer held", !positionHeld(g, me, "noWarOn", them));
+}
+{
+  // Breaking one: the cost, and the citation the whole feature exists for.
+  const g = createGame({ seed }); ensureDiplomacy(g);
+  const me = "versari", them = "lakers", other = "goldgrass";
+  const PC = CONFIG.diplomacy.positions;
+  performDiplomacy(g, me, "declare-position", { kind: "noWarOn", target: them });
+  const h0 = honorOf(g, me), m0 = menaceOf(g, me);
+  declareWar(g, me, them, "player");
+  check("declaring the war breaks the position", !positionHeld(g, me, "noWarOn", them));
+  check("…and it costs more Honor than a bilateral promise does",
+    honorOf(g, me) === h0 - PC.breakHonorLoss && PC.breakHonorLoss > CONFIG.diplomacy.honor.breakLoss);
+  // Not `=== m0 + breakMenace`: the declaration ALSO charges declareUnjustified,
+  // and asserting the total would be asserting the sum of two unrelated rules.
+  check("…and the board marks you for it, by that name",
+    g.log.some((e) => e.name === "menace_changed"
+      && e.payload.cause === "position-broken" && e.payload.delta === PC.breakMenace)
+    && menaceOf(g, me) >= m0 + PC.breakMenace);
+  check("…the wronged party holds a grievance naming it",
+    grievancesAgainst(g, them, me).some((x) => x.kind === "position-broken"));
+  // THE CLAIM: cited by name, within the window.
+  const cites = citablePositions(g, me, them);
+  check("it is citable, by name, this round", cites.length === 1);
+  check("…and the citation carries the words you used",
+    /Lakers|lakers/.test(positionText(g, cites[0])));
+  check("…and a denouncement reaches for it first",
+    denounceGrounds(g, them, me)?.kind === "position-broken");
+  g.round += PC.citeWithinRounds + 1;
+  check(`…and it stops being news after ${PC.citeWithinRounds} rounds`,
+    citablePositions(g, me, them).length === 0);
+  check("a faction it was not about cannot cite a targeted position",
+    citablePositions(g, me, other).length === 0);
+}
+{
+  // A position made to the ROOM is held by the room.
+  const g = createGame({ seed }); ensureDiplomacy(g);
+  const me = "versari";
+  performDiplomacy(g, me, "declare-position", { kind: "noVassals" });
+  check("you can stand on taking no vassals", !!positionHeld(g, me, "noVassals"));
+  vassalize(g, me, "lakers", "test");
+  check("…and taking one breaks it", !positionHeld(g, me, "noVassals"));
+  const wronged = factionIds(g).filter((f) => f !== me
+    && grievancesAgainst(g, f, me).some((x) => x.kind === "position-broken"));
+  check("…and everybody holds it against you, not just the vassal",
+    wronged.length >= 2);
+  check("…so anyone may cite it", citablePositions(g, me, "goldgrass").length === 1);
+}
+{
+  // The cap, so a player cannot paper the board with positions they mean to keep.
+  const g = createGame({ seed }); ensureDiplomacy(g);
+  const me = "versari";
+  const PC = CONFIG.diplomacy.positions;
+  const others = factionIds(g).filter((f) => f !== me);
+  let taken = 0;
+  for (const f of others) {
+    if (performDiplomacy(g, me, "declare-position", { kind: "noWarOn", target: f }).ok) taken += 1;
+  }
+  if (others.length > PC.max) {
+    check(`you can stand on at most ${PC.max} things at once`, taken === PC.max);
+    check("…and the cap counts what you HOLD", positionsOf(g, me).length === PC.max);
+  }
 }
 
 // §1.2 / economy §6.3 — gifts are priced in SWAY now, not scrap. The

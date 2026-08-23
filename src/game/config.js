@@ -703,6 +703,29 @@ export const CONFIG = {
     // zero content cost, because no authored beat ever gated on it. The one
     // condition is Dominion (`checkDominion`, CONFIG.victory).
 
+    // §13 — PLAYER POSITIONS. A promise is bilateral and priced; a POSITION
+    // is unilateral and public — "I will not make war on the Croppers", said
+    // to the whole board, asked for by nobody.
+    //
+    // Why it exists: every other political act in this game is a transaction.
+    // The player can pay for goodwill, trade for it, or take ground and lose
+    // it, but they cannot simply STAND for something and be held to it. That
+    // is the one thing a reputation is made of, and its absence is why Honor
+    // read as a resource rather than a character.
+    //
+    // Keeping one costs nothing and pays nothing directly — a position you are
+    // paid to hold is a contract, not a position. What it buys is the right to
+    // be believed, and what it risks is being cited by name when you break it.
+    positions: {
+      max: 3,              // how many a faction may stand on at once
+      minRounds: 3,        // …and how long before one may be withdrawn
+      breakHonorLoss: 6,   // breaking one costs more than a bilateral promise (5)
+      breakMenace: 2,      // …and the board marks you for it
+      withdrawHonorLoss: 2, // standing down honestly is cheaper than being caught
+      citeWithinRounds: 3, // the board must name it this soon or the cost is invisible
+      enabled: 1,          // 0 hides the whole feature; nothing else reads it
+    },
+
     // §18.9 Vassalage.
     vassal: {
       tributeScrap: 2, // tribute flow per round to the lord
@@ -904,6 +927,7 @@ export const CONFIG = {
         "promise-broken": 2, // walked away from a term
         occupation: 2, // holds a place you call yours (a condition, not an event)
         defiance: 3, // ignored an ultimatum you put your name to
+        "position-broken": 3, // said it to the whole board, then did it anyway
       },
       defaultSeverity: 2,
       maxPerPair: 8, // the ledger keeps this many; older entries fall off

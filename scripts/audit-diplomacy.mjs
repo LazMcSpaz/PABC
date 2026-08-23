@@ -259,12 +259,34 @@ line(13, "A conscripted member's Standing never drops below draftStandingFloor")
 
 line(14, "A player position broken is cited by name within 3 rounds");
 {
-  console.log("  PENDING — diplomacy stage 7. state.diplomacy.positions does not exist yet.");
+  console.log("  RESOLVED — diplomacy §13. state.diplomacy.positions exists and the citation is live.");
   const g = mk();
-  console.log("  today: positions is", g.diplomacy.positions === undefined ? "undefined" : "present");
-  console.log("  the half that DOES exist: promises are recorded and broken ones cost —");
-  console.log("    ENACTED/standing promise kinds are read by breakPromiseIfAny, and dontAllyPledge");
-  console.log("    already blocks formPact. What is missing is the player VOLUNTEERING one.");
+  const PC = CONFIG.diplomacy.positions;
+  const me = "versari", them = "lakers";
+  const decl = D.performDiplomacy(g, me, "declare-position", { kind: "noWarOn", target: them });
+  console.log("  versari stands on:", decl.ok ? D.positionText(g, decl.position) : `(refused: ${decl.reason})`);
+  const h0 = g.players[me].honor, m0 = g.players[me].menace;
+  D.declareWar(g, me, them, "player");
+  console.log("  …then declares war. Honor", h0, "->", g.players[me].honor,
+    "| Menace", m0, "->", g.players[me].menace);
+  const cites = D.citablePositions(g, me, them);
+  console.log("  citable by the wronged party, this round:", cites.length,
+    cites.length ? `-> "${D.positionText(g, cites[0])}"` : "");
+  const grounds = D.denounceGrounds(g, them, me);
+  console.log("  what lakers would denounce them FOR:", grounds?.kind,
+    grounds?.text ? `-> "${grounds.text}"` : "");
+  let stillCitable = 0;
+  for (let i = 1; i <= PC.citeWithinRounds + 1; i++) {
+    g.round += 1;
+    if (D.citablePositions(g, me, them).length) stillCitable = i;
+  }
+  console.log(`  stays news for ${stillCitable} round(s) after the break (window ${PC.citeWithinRounds})`);
+  console.log("  >> was: positions did not exist. The half that DID was bilateral — ENACTED/standing");
+  console.log("     promise kinds read by breakPromiseIfAny, and dontAllyPledge blocking formPact.");
+  console.log("     What was missing was the player VOLUNTEERING one, unasked and in public, and");
+  console.log("     the board naming it back. Breaking one now costs", PC.breakHonorLoss, "Honor (a");
+  console.log("     bilateral promise costs", CONFIG.diplomacy.honor.breakLoss + "),", PC.breakMenace,
+    "Menace, and a severity-" + CONFIG.diplomacy.grievance.severity["position-broken"], "grievance.");
 }
 
 line(15, "Every surviving faction is reachable by ally, vassal or elimination, from turn 1");

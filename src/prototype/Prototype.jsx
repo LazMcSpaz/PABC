@@ -1201,6 +1201,28 @@ export default function Prototype({ config, onNewGame }) {
       bumpTick();
       return;
     }
+    // §13 — a counter is your terms, put back to them, and answered at once.
+    // The generic lines below would report it as a deal ("Lakers agrees") and
+    // lose the fact that it was YOUR number they took.
+    if (action === "counter-offer") {
+      msg = !r.ok ? (r.reason || "that offer is gone")
+        : r.accepted ? "They take your terms."
+        : r.countered ? "They come back with terms of their own."
+        : `They will not have it — ${r.reason || "no reason given"}.`;
+      setDiploResult({ ...r, msg });
+      bumpTick();
+      return;
+    }
+    // …and a position is said to the room, not to a faction, so the generic
+    // "Done — undefined" would be exactly wrong.
+    if (action === "declare-position" || action === "withdraw-position") {
+      msg = !r.ok ? (r.reason || "no effect")
+        : action === "declare-position" ? "You say it, and the board hears it."
+        : "You stand down from it, in the open.";
+      setDiploResult({ ...r, msg });
+      bumpTick();
+      return;
+    }
     if (!r.ok) msg = r.reason || "no effect";
     // A counter is not a refusal — it is their price, and it is waiting to be
     // answered. Say where it went, because it lands in the inbox rather than

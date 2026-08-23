@@ -377,3 +377,46 @@ conquest 4 → 6. It is one seed at n=15 and it is *not* the grounds gate —
 did not move with it (`minorsEverCourted` 3.6, `minorsAlliedAtEnd` 1.6), so the
 diplomacy face is open and the lottery landed elsewhere. Re-read it in phase 5
 rather than tuning a coalition constant on two games.
+
+### §13 — the counter button, and something to stand for
+
+**The haggle.** The AI has been able to counter the player's terms since §6.10;
+the player could only Accept or Decline, which is what made the offer inbox
+read as a vending machine. `counterTheOffer` moves the *scrap* and nothing else
+— rewriting the other terms would be a different deal, which is what Propose
+Deal is for, and the AI's own `counterOffer` holds the same line. The counter
+takes the original off the table, goes through `resolveProposal` like any
+proposal, and costs the ask budget like any ask. The signed convention is the
+same in the engine, the adapter (`netScrap`) and the stepper: **positive is
+scrap you pay**, which is the frame flip that turned every counter inside out
+the first time offers shipped.
+
+**Positions.** `state.diplomacy.positions` now exists — the last piece of the
+audit's block 14. A promise is bilateral, priced, and asked for; a position is
+unilateral and public, said to the whole board at nobody's request. Three kinds,
+short on purpose because each has to be something the engine can *check*:
+
+| kind | broken by |
+|---|---|
+| `noWarOn <faction>` | declaring war on them, or striking them |
+| `handsOff <faction>` | taking ground their name is on (conquest — a city handed over in a deal is given, not seized) |
+| `noVassals` | making any faction your vassal |
+
+Keeping one costs nothing and pays nothing directly: a position you are *paid*
+to hold is a contract. Breaking one costs 6 Honor (a bilateral promise costs 5),
+2 Menace, and a severity-3 grievance — and the point of the whole feature is the
+last part, so `citablePositions` gives the AI a three-round window in which
+`warningReason` and `denounceGrounds` both reach for it *first*. A cost nobody
+names is not a cost.
+
+Two guards worth naming: you cannot declare a position you are already in
+breach of (that is a press release, not a position), and you cannot withdraw
+one inside `minRounds` (one you can drop the round before you break it is not
+one either). Standing down honestly costs 2 Honor against 6 for being caught.
+
+Governing numbers unmoved: mix 6, median 51.5, unresolved 3. Both are player-
+facing verbs the AI does not use, so the suite — which plays all four majors on
+AI policy — is the wrong instrument and correctly reads flat. What covers them
+instead: 23 new harness fixtures, audit block 14 flipped to RESOLVED, and
+legibility checks 27–38, which assert the adapter actually carries them to the
+drawer and that every position the drawer offers is one the engine accepts.
