@@ -204,7 +204,10 @@ export const CHIPS = {
   works: { id: "works", name: "Works", kind: "location", slots: 1, techLevel: 1, cost: 4, buildRate: 1, buildCost: 4, loyaltyReq: 0, desc: "+1 build progress each turn toward this location's active build" },
   // --- location chips: research ---
   labs: { id: "labs", name: "Labs", kind: "location", slots: 1, techLevel: 1, cost: 3, research: 1, buildCost: 3, loyaltyReq: 0, upgradesTo: "advanced-lab", desc: "+1 Research while controlled" },
-  "advanced-lab": { id: "advanced-lab", name: "Advanced Lab", kind: "location", slots: 1, techLevel: 2, cost: 6, research: 2, buildCost: 6, loyaltyReq: 3, upkeep: 1, desc: "+2 Research while controlled (upkeep 1)" },
+  // techLevelReq overrides the tier gate (which would ask for L3): the
+  // Advanced Lab is what produces research, so locking it behind the level it
+  // helps you reach is a bootstrap nobody can pay.
+  "advanced-lab": { id: "advanced-lab", name: "Advanced Lab", kind: "location", slots: 1, techLevel: 2, techLevelReq: 2, cost: 6, research: 2, buildCost: 6, loyaltyReq: 3, upkeep: 1, desc: "+2 Research while controlled (upkeep 1)" },
   // --- location chips: defense ---
   "defense-turrets": { id: "defense-turrets", name: "Defense Turrets", kind: "location", slots: 1, techLevel: 1, cost: 4, garrison: 2, buildCost: 4, loyaltyReq: 0, upgradesTo: "stronghold", desc: "+2 garrison Strength" },
   stronghold: { id: "stronghold", name: "Stronghold", kind: "location", slots: 1, techLevel: 2, cost: 7, garrison: 4, buildCost: 7, loyaltyReq: 3, upkeep: 1, desc: "+4 garrison Strength (upkeep 1)" },

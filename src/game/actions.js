@@ -23,7 +23,7 @@ import {
 } from "./blockades.js";
 import {
   meetsTech, meetsLoyalty, slotCapacity, slotsUsed, stationedUnitWithBay,
-  techLevelReqFor, upgradeOption, completeBuildIfDone, bankBuildSurplus, effectiveBuildCost,
+  techReqFor, upgradeOption, completeBuildIfDone, bankBuildSurplus, effectiveBuildCost,
   canRebuildCapital,
 } from "./economy.js";
 
@@ -324,7 +324,7 @@ function validateBuild(state, { pid, player, params }) {
   }
   if (def.faction && def.faction !== pid) return fail("that chip is another faction's signature");
   if (def.reward) return fail("that chip cannot be built — it is found, not made");
-  if (!meetsTech(player, def)) return fail(`needs Tech Level ${techLevelReqFor(def.techLevel || 1)}`);
+  if (!meetsTech(player, def)) return fail(`needs Tech Level ${techReqFor(def)}`);
   if (!meetsLoyalty(loc, def)) return fail(`needs Loyalty ${def.loyaltyReq}`);
   if (def.kind === "unit") {
     if (!stationedUnitWithBay(state, loc, def.slots || 1, def.statType))
@@ -499,12 +499,22 @@ function runSetPoolTarget(state, { params }) {
 // actions may burn one of the player's wildcards instead.
 const payLoc = (key) => (state, { params }) => ({ locations: [params[key]] });
 
+// Topping a unit up costs the CITY that supplies it and the UNIT that
+// receives it. The unit's own action is the half that was missing: without it
+// a formation could be brought back to full Strength and still attack in the
+// same turn, so reinforcing was free tempo for anyone holding a city — the
+// unit paid nothing for being made whole.
+//
+// The city still pays as well. If reinforcement should be the unit's cost
+// ALONE, drop the `locations` half here; nothing else reads it.
 function reinforcePayer(state, { pid, params }) {
   const unit = state.units[params.unit];
   if (!unit) return null;
-  if ((params.mode || "instant") === "instant") return { locations: [unit.node] };
+  if ((params.mode || "instant") === "instant") {
+    return { units: [unit.uid], locations: [unit.node] };
+  }
   const route = reinforcementRoute(state, pid, unit.node);
-  return route ? { locations: [route.originHex] } : null;
+  return route ? { units: [unit.uid], locations: [route.originHex] } : null;
 }
 
 // Whoever's Strength is counted, pays.
@@ -680,7 +690,7 @@ function validateUpgradeBlockade(state, { pid, player, params }) {
   if (b.build) return fail("that blockade is already building something");
   const def = CHIPS[params.chipId];
   if (!def || def.kind !== "blockade") return fail("not a blockade chip");
-  if (!meetsTech(player, def)) return fail(`needs Tech L${techLevelReqFor(def.techLevel || 1)}`);
+  if (!meetsTech(player, def)) return fail(`needs Tech L${techReqFor(def)}`);
   if (blockadeSlotsUsed(state, b) + (def.slots || 1) > CONFIG.blockades.chipSlots)
     return fail("no free slot on that blockade");
   if (b.chips.some((c) => state.chips[c]?.chipId === params.chipId))

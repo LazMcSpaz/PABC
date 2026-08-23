@@ -782,8 +782,13 @@ function RepStat({ label, value, sub, color }) {
 }
 
 function FactionRow({ f, onClick }) {
-  const tierColor = TIER_COLOR[f.standingTier] || "#f4efe2";
-  const rel = f.lordOfYou ? "YOUR LORD"
+  // A destroyed faction keeps its row — what passed between you is still
+  // worth reading — but every live reading on it is stale. Its last Standing
+  // rendered as "NEUTRAL · tolerates you with caution", which invited the
+  // player to court a faction that no longer has a unit or a town.
+  const tierColor = f.eliminated ? C.textFaint : (TIER_COLOR[f.standingTier] || "#f4efe2");
+  const rel = f.eliminated ? "DESTROYED"
+    : f.lordOfYou ? "YOUR LORD"
     : f.vassalOfYou ? "YOUR VASSAL"
     : f.pacted ? "PACTED"
     : f.atWar ? "AT WAR"
@@ -846,17 +851,21 @@ function FactionRow({ f, onClick }) {
         fontFamily: C.font, fontSize: 10, letterSpacing: 1.2,
         textTransform: "uppercase",
       }}>
-        <span style={{ color: tierColor, fontWeight: 700 }}>{TIER_LABEL[f.standingTier] || f.standingTier}</span>
+        <span style={{ color: tierColor, fontWeight: 700 }}>
+          {f.eliminated ? "GONE" : (TIER_LABEL[f.standingTier] || f.standingTier)}
+        </span>
         {rel && (
           <span style={{
-            color: f.atWar || f.inCoalition ? "#d2453f" : "#5fc27a",
+            color: f.eliminated ? C.textFaint
+              : f.atWar || f.inCoalition ? "#d2453f" : "#5fc27a",
             fontWeight: 800, letterSpacing: 1.4,
           }}>{rel}</span>
         )}
       </div>
       <div className="pc-prose" style={{
         fontSize: 11.5, color: "rgba(207,214,220,0.86)", marginTop: 5, lineHeight: 1.4,
-      }}>{f.sentenceShort}</div>
+      }}>{f.eliminated ? "Driven from the board. Nothing left to deal with."
+          : f.sentenceShort}</div>
     </button>
   );
 }

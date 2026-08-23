@@ -26,8 +26,22 @@ export function techLevelReqFor(chipTechLevel) {
   return CONFIG.economy.buildTechGate[chipTechLevel] || 1;
 }
 
+/**
+ * What Tech Level this specific chip demands.
+ *
+ * The tier mapping is the default, but a chip may name its own requirement
+ * with `techLevelReq` — needed because the tiers are coarse and one chip can
+ * sit badly inside its band. The Advanced Lab is the case: it is a tier-2
+ * chip, so the mapping asked for Tech L3, and it is also the building that
+ * PRODUCES the research you climb with. Gating the research building behind
+ * the level it helps you reach is a bootstrap you cannot pay for.
+ */
+export function techReqFor(def) {
+  return def?.techLevelReq ?? techLevelReqFor(def?.techLevel || 1);
+}
+
 export function meetsTech(player, def) {
-  return (player.techLevel || 1) >= techLevelReqFor(def.techLevel || 1);
+  return (player.techLevel || 1) >= techReqFor(def);
 }
 
 // §20.6 — does this city's current Loyalty clear the chip's rung? A Capital
@@ -155,7 +169,7 @@ export function upgradeOption(state, loc, chipUid) {
   const techOk = player ? meetsTech(player, next) : false;
   const loyOk = meetsLoyalty(loc, next);
   const reasons = [];
-  if (!techOk) reasons.push(`needs Tech L${techLevelReqFor(next.techLevel || 1)}`);
+  if (!techOk) reasons.push(`needs Tech L${techReqFor(next)}`);
   if (!loyOk) reasons.push(`needs Loyalty ${next.loyaltyReq}`);
   return {
     chipId: nextId,

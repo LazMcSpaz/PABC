@@ -759,6 +759,12 @@ function adaptDiplomacy(state, viewer) {
     return {
       id: f,
       name: def.name || f,
+      // Destroyed factions stay on this list — their history with you is
+      // still worth reading — but they must not be rendered as a live power.
+      // Left unflagged, a faction with no units and no ground showed as
+      // "NEUTRAL · tolerates you with caution", inviting the player to court
+      // somebody who no longer exists.
+      eliminated: !!state.players[f]?.eliminated,
       // Public scoreboard — VP is common knowledge (the race is visible
       // even when the map is not). Null for factions with no player seat.
       vp: state.players[f]?.vp ?? null,
@@ -1136,18 +1142,27 @@ function describeDealItem(it, state) {
 //
 // Coarse `status`/`hint` are common knowledge; `detail` (exact Standing and
 // gate numbers) rides only with the Spy Ring.
+//
+// The eliminated filter is the "EXACTLY" above, and it was missing. Without it
+// this listed a row per faction that ever played while the count above it
+// (`dominionStanding`) counted only the living — so a game with one faction
+// destroyed showed five rows, three of them reading DEALT WITH, under a header
+// saying "2 of 4". Both numbers were right about different populations, which
+// is the worst way for a screen to be right.
+//
+// A destroyed faction is not a task, so it leaves the list with the count. The
+// victory rule is about who is STILL STANDING; the dead are not a box to tick.
 function recognitionBacking(state, viewer, spyRing) {
   const tiers = CONFIG.diplomacy.tiers;
   const me = state.players[viewer];
   const coal = coalitionAgainst(state, viewer);
-  return factionIds(state).filter((f) => f !== viewer).map((f) => {
+  return factionIds(state)
+    .filter((f) => f !== viewer && !state.players[f]?.eliminated)
+    .map((f) => {
     const def = factionDef(f) || {};
     const s = getStanding(state, f, viewer);
     let status, hint;
-    if (state.players[f]?.eliminated) {
-      status = "backs";
-      hint = "Gone from the board — dealt with.";
-    } else if (vassalLord(state, f) === viewer) {
+    if (vassalLord(state, f) === viewer) {
       status = "backs";
       hint = "Your vassal — dealt with.";
     } else if (arePacted(state, f, viewer)) {
