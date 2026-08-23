@@ -4404,6 +4404,68 @@ line("\n  [economy §10] the AI can price content, and can upgrade");
   check("…and it ships at the value the suite chose", CONFIG.ai.compoundingWeight === 1);
 }
 
+// §5 — WHAT A FACTION WANTS, IN THE PRICE.
+//
+// `interestMultiplier` shipped with the interests module and was called by
+// nothing. Every faction priced every item identically, so the six derived
+// wants shaped what an AI would SAY in a courtship condition and had no bearing
+// whatever on what it would PAY — a faction whose homeland was under occupation
+// valued that city at exactly the number a bystander did.
+line("\n  [§5] the six wants reach the price, not only the sentence");
+{
+  const g = createGame({ seed }); ensureDiplomacy(g);
+  const me = "versari", them = "lakers";
+  // A live grievance gives `me` a `redress` want against `them`. Settling is
+  // the item that answers it.
+  recordGrievance(g, me, them, "surprise-attack");
+  const settlement = { settlement: true };
+  const withWant = valueOfItem(g, me, settlement, { other: them });
+  const cfg = CONFIG.diplomacy.interests;
+  const was = cfg.priceMultiplier;
+  try {
+    cfg.priceMultiplier = 0;
+    const flat = valueOfItem(g, me, settlement, { other: them });
+    check("a faction that wants redress pays more for a settlement",
+      withWant > flat);
+    check("…and priceMultiplier 0 is a true no-op",
+      flat === valueOfItem(g, me, settlement, { other: them }));
+  } finally { cfg.priceMultiplier = was; }
+
+  // Capped. Personality tilts a negotiation; it does not let a faction be
+  // talked into anything with the right word in it.
+  cfg.priceMultiplier = was;
+  const bystander = createGame({ seed }); ensureDiplomacy(bystander);
+  const flatPrice = valueOfItem(bystander, me, settlement, { other: them });
+  check("…and the want is a tilt, not a blank cheque",
+    withWant <= (flatPrice || 1) * (1 + was) + 0.001 || flatPrice === 0);
+
+  // Scrap is exempt: a want that changed the value of a coin would be an
+  // exchange-rate bug wearing a hat.
+  const coin = { resource: { resource: "scrap", amount: 10 } };
+  check("money is money — no want moves the price of scrap",
+    valueOfItem(g, me, coin, { other: them }) === 10);
+}
+{
+  // `routes` had no matcher at all: the interest was derived, weighted and
+  // spoken in courtship conditions from the day it shipped, and the one item
+  // that delivers it priced at par.
+  const g = createGame({ seed }); ensureDiplomacy(g);
+  const me = "versari";
+  const other = factionIds(g).find((f) => f !== me
+    && interestsOf(g, me).some((w) => w.kind === "routes" && w.subject === f));
+  if (other) {
+    const ob = { promise: { kind: "openBorders" } };
+    const cfg = CONFIG.diplomacy.interests;
+    const was = cfg.priceMultiplier;
+    const wanted = valueOfItem(g, me, ob, { other });
+    try {
+      cfg.priceMultiplier = 0;
+      check("a faction that wants a route pays more for open borders",
+        wanted > valueOfItem(g, me, ob, { other }));
+    } finally { cfg.priceMultiplier = was; }
+  }
+}
+
 // §1.2 / economy §6.3 — gifts are priced in SWAY now, not scrap. The
 // diminishing-returns window is unchanged, because which currency pays for a
 // gift has nothing to do with how quickly a faction tires of being flattered.

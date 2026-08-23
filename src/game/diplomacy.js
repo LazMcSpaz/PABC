@@ -1016,12 +1016,26 @@ export function cedeLocation(state, from, to, hexId, cause = "cession") {
 
 export function valueOfItem(state, fid, item, ctx = {}) {
   if (!item) return 0;
+  // §5 — WHAT THIS FACTION ACTUALLY WANTS, applied to the price.
+  //
+  // `interestMultiplier` has existed since the interests module landed and was
+  // called by nothing: every faction priced every item identically, so the six
+  // derived wants shaped what an AI would SAY in a courtship and had no bearing
+  // whatever on what it would PAY. A faction whose homeland is under occupation
+  // valued that city at exactly the same number as a bystander.
+  //
+  // It multiplies the base price rather than replacing it, and the multiplier
+  // is capped at `1 + priceMultiplier` (1.6 today), so personality tilts a
+  // negotiation without letting a warlord be talked into anything with the word
+  // "war" in it. Scrap is deliberately exempt: money is money, and a want that
+  // changed the value of a coin would be an exchange-rate bug wearing a hat.
+  const want = item.resource ? 1 : interestMultiplier(state, fid, item, ctx.other);
   if (item.resource) return item.resource.amount || 0;
   // A stream is worth its rate times its TERM. This used to be a flat "×3"
   // against a flow that never expired, so 4 scrap a turn forever priced at
   // 12 — buy it once, collect it for the rest of the game.
-  if (item.flow) return (item.flow.amountPerTurn || 0) * flowRounds(item.flow);
-  if (item.research) return (item.research.amount || 0) * 2;
+  if (item.flow) return (item.flow.amountPerTurn || 0) * flowRounds(item.flow) * want;
+  if (item.research) return (item.research.amount || 0) * 2 * want;
   // "Let us call it settled." Priced from `fid`'s own side of the ledger:
   // to the party that HOLDS the grievances this is something being asked of
   // them — they give up a righteous war and the moral standing that comes
@@ -1031,35 +1045,38 @@ export function valueOfItem(state, fid, item, ctx = {}) {
   if (item.settlement) {
     const owedToMe = settleableWeight(state, fid, ctx.other);
     const owedByMe = settleableWeight(state, ctx.other, fid);
-    return (owedToMe + owedByMe) * D().grievance.settlementPerWeight;
+    return (owedToMe + owedByMe) * D().grievance.settlementPerWeight * want;
   }
   // A city on the table. Priced from `fid`'s own side — their claim on it,
   // their output from it — and, when they are the one giving it up, scaled
   // by what it costs to be the party that lets go of ground.
   if (item.location) {
     const worth = locationWorth(state, fid, item.location.hexId);
-    return ctx.side === "give" ? worth * cedeReluctance(fid) : worth;
+    // Reclaiming a homeland is worth more to GET; the reluctance to hand ground
+    // over is already `cedeReluctance` and does not want a second multiplier
+    // on top, or a faction would refuse to trade away the very city it wants.
+    return ctx.side === "give" ? worth * cedeReluctance(fid) : worth * want;
   }
   if (item.chip) return 4; // generic gear value
-  if (item.intel) return item.intel.kind === "mapData" ? 3 : 2;
+  if (item.intel) return (item.intel.kind === "mapData" ? 3 : 2) * want;
   if (item.promise) {
     const def = factionDef(fid) || {};
     // A promise with a term is worth more the longer it binds, but not
     // linearly — the far end of a long promise is worth less than the near
     // end, because anything can happen by then. `termScale` is 1.0 at the
     // default term and grows/shrinks with the square root of the ratio.
-    const termScale = promiseTermScale(item.promise);
+    const termScale = promiseTermScale(item.promise) * want;
     switch (item.promise.kind) {
       // Enacted on the spot rather than promised, so no term applies.
-      case "pact": return pactAppetite(state, fid, ctx.other);
-      case "peace": return atWar(state, fid, ctx.other) ? 6 : 1;
-      case "openBorders": return 1 + (def.sociability || 0.5) * 2;
-      case "joinWar": return wantsDead(state, fid, item.promise.target) ? 5 : 0;
+      case "pact": return pactAppetite(state, fid, ctx.other) * want;
+      case "peace": return (atWar(state, fid, ctx.other) ? 6 : 1) * want;
+      case "openBorders": return (1 + (def.sociability || 0.5) * 2) * want;
+      case "joinWar": return (wantsDead(state, fid, item.promise.target) ? 5 : 0) * want;
       // Standing promises — these bind for a term and are enforced.
       case "nonAggression": return (2 + (1 - (def.aggression || 0.5)) * 3) * termScale;
       case "dontAlly": return 1 * termScale;
       case "tribute": return 4 * termScale; // receiving tribute is good
-      default: return 1;
+      default: return want;
     }
   }
   return 0;

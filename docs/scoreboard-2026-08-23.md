@@ -480,3 +480,36 @@ spent a sweep chasing a regression I had introduced in the off switch. It is
 now `chest + rushAbove` with `rushAbove: 14` — the original number — and
 `--set ai.valueTable=0,ai.upgrades=0,ai.warChestUnits=0` reproduces
 6 / 51.5 / 3 exactly. **A no-op you have to squint at is not one.**
+
+### §5 — the six wants reach the price
+
+`interestMultiplier` shipped with the interests module in phase 3 and **was
+called by nothing**. Every faction priced every item identically, so the six
+derived wants shaped what an AI would *say* in a courtship condition and had no
+bearing whatever on what it would *pay* — a faction whose homeland was under
+occupation valued that city at exactly the number a bystander did.
+
+`valueOfItem` now applies it, and `routes` gained the matcher it never had
+(open borders is the item that delivers a trade route; it had been priced at
+par by a faction that specifically wanted one).
+
+Two exemptions, both deliberate: **scrap** is never multiplied — a want that
+changed the value of a coin would be an exchange-rate bug wearing a hat — and
+a Location on the **give** side keeps `cedeReluctance` alone, because a second
+multiplier there would make a faction refuse to trade away the very city it
+wants back.
+
+| | before | after |
+|---|---|---|
+| Ending mix | 9 | **9** |
+| Median rounds | 45 | **68.5** |
+| **Games unresolved** | 4 | **1** |
+
+Unresolved 4 → 1 is the best reading the project has had; the band is 0 and
+this is one game away from it. The median moved from 17 rounds *below* the
+58–66 band to 2.5 *above* it — closer than it has been since phase 0.
+
+Swept `priceMultiplier` at 0 / 0.4 / 0.5 / 0.6 / 0.7 / 0.8 → unresolved
+4 / 2 / 3 / **1** / 4 / 5 and mix 9 / 9 / 8 / **9** / 7 / 6. The shipped 0.6 is
+the best point on both, so this stage tunes nothing: the value it was given in
+phase 3 was already right, and wiring it up is the whole change.

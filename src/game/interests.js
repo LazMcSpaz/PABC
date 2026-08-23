@@ -232,8 +232,16 @@ export function interestMultiplier(state, fid, item, other) {
   if (item.promise?.kind === "nonAggression" || item.promise?.kind === "openBorders") {
     consider("quiet", (w) => w.subject === other);
   }
+  // …and open borders is ALSO the road, which is what `routes` wants. The
+  // interest was derived, weighted and spoken in courtship conditions from the
+  // day it shipped, and then had no matcher here at all — so a faction that
+  // wanted a trade route priced the one item that delivers it at par.
+  if (item.promise?.kind === "openBorders" || item.flow) {
+    consider("routes", (w) => w.subject === other);
+  }
 
   const cfg = D().interests || {};
+  if (cfg.priceMultiplier === 0) return 1; // the stage's no-op
   const scale = cfg.priceMultiplier ?? 0.6;
   return 1 + best * scale;
 }
