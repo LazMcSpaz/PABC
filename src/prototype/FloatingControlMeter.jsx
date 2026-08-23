@@ -100,6 +100,7 @@ export default function FloatingControlMeter({ x, y, name, control, locationId, 
           sections={control.sections}
           loyalty={control.loyalty}
           danger={control.loyaltyDanger}
+          pressureBy={control.pressureBy}
           size={METER}
         />
         <div style={{ pointerEvents: "auto" }}>

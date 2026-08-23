@@ -7,7 +7,7 @@ import { CONFIG } from "../game/config.js";
 import { motion, useDragControls } from "framer-motion";
 import ControlMeter from "./ControlMeter.jsx";
 import { useIsPhone, useViewportSize } from "./useViewport.js";
-import { ownerColor } from "./data.js";
+import { ownerColor, FACTIONS } from "./data.js";
 
 // Close the active modal on Escape.
 export function useEscClose(onClose) {
@@ -889,7 +889,7 @@ export function EconomyLedger({ report, onOpenHex, onOpenUnit }) {
   );
 }
 
-export function LocationWindow({ view, onClose, onActivate, onContest, onRecruit, onBuild, onUpgrade, onRush, onSetSlider, onSetPoolTarget, onSetBuildPriority }) {
+export function LocationWindow({ view, onClose, onActivate, onContest, onRecruit, onSabotage, onBuild, onUpgrade, onRush, onSetSlider, onSetPoolTarget, onSetBuildPriority }) {
   const v = view;
   // On desktop a city is a panel you consult while still working the map, not a
   // modal that takes the screen hostage. On a phone it fills the screen either
@@ -949,11 +949,37 @@ export function LocationWindow({ view, onClose, onActivate, onContest, onRecruit
           </div>
           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3 }}>
             <div style={{ filter: `drop-shadow(0 0 8px ${C.holo}55)` }}>
-              <ControlMeter sections={v.sections} loyalty={v.loyalty} danger={v.loyaltyDanger} size={56} />
+              <ControlMeter sections={v.sections} loyalty={v.loyalty} danger={v.loyaltyDanger} pressureBy={v.pressureBy} size={56} />
             </div>
             <SectionLabel color={C.textDim}>Control</SectionLabel>
           </div>
         </div>
+
+        {/* §11 — influence pressure, named. A rival out-projecting you on your
+            own city's hex bleeds a point of Loyalty every Upkeep; it costs
+            them Standing and Menace, so it is a soft siege you can answer
+            politically as well as militarily. Its only previous signal was one
+            line of feed text, for the best mechanic in the layer. */}
+        {v.pressureBy && (
+          <div style={{
+            display: "flex", alignItems: "center", gap: 8,
+            padding: "7px 10px", marginTop: 8, borderRadius: 5,
+            background: "rgba(0,0,0,0.28)",
+            border: `1px solid ${ownerColor(v.pressureBy)}66`,
+          }}>
+            <span style={{
+              width: 8, height: 8, borderRadius: "50%", flexShrink: 0,
+              background: ownerColor(v.pressureBy),
+              boxShadow: `0 0 7px ${ownerColor(v.pressureBy)}`,
+            }} />
+            <span style={{ fontSize: 11.5, lineHeight: 1.45, color: "#dbe8e3" }}>
+              <b style={{ color: ownerColor(v.pressureBy) }}>{(FACTIONS[v.pressureBy]?.name || v.pressureBy)}</b>
+              {" "}out-projects you here. Loyalty bleeds every Upkeep until you
+              out-influence them, or they stop — and it is costing them Standing
+              with you and Menace with the board.
+            </span>
+          </div>
+        )}
 
         <div style={{ display: "flex", gap: 18, padding: "10px 0", borderTop: hair, borderBottom: hair }}>
           <Stat icon={ICON.shield} value={v.garrison} label="Garrison" />
@@ -998,6 +1024,31 @@ export function LocationWindow({ view, onClose, onActivate, onContest, onRecruit
               <button className="hud-int" onClick={v.recruit.canAfford ? () => onRecruit?.(v.hexId) : undefined} disabled={!v.recruit.canAfford}
                 style={{ flexShrink: 0, ...holoBtn, cursor: v.recruit.canAfford ? "pointer" : "not-allowed", opacity: v.recruit.canAfford ? 1 : 0.5 }}>
                 Recruit
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* §12.3 — Saboteurs. The verb has existed since the Intelligence
+            branch shipped and the AI has used it every round it could; the
+            player had no button anywhere in src/prototype/. Shown only when
+            int-b2 is on your wheel and the place is somebody else's, so it
+            never appears as a mystery control. */}
+        {v.sabotage && (
+          <div>
+            <SectionLabel color="#d2913c">Saboteurs</SectionLabel>
+            <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 6 }}>
+              <p className="pc-prose" style={{ margin: 0, fontSize: 12.5, lineHeight: 1.5, color: C.textDim, flex: 1 }}>
+                Work against {v.sabotage.targetName} from the inside — {v.sabotage.effect}.
+                Costs no Action and no scrap; your saboteurs can only be in one
+                place a round.
+                {v.sabotage.reason && (
+                  <span style={{ color: "#d2913c" }}> {v.sabotage.reason}.</span>
+                )}
+              </p>
+              <button className="hud-int" onClick={v.sabotage.can ? () => onSabotage?.(v.hexId) : undefined} disabled={!v.sabotage.can}
+                style={{ flexShrink: 0, ...holoBtn, cursor: v.sabotage.can ? "pointer" : "not-allowed", opacity: v.sabotage.can ? 1 : 0.5 }}>
+                Sabotage
               </button>
             </div>
           </div>

@@ -192,6 +192,13 @@ function snapshotHex(state, fid, hex) {
   vis.memory[hex] = {
     round: state.round,
     terrain: { type: h.type, elevation: isElevation(h), cover: isCover(h) },
+    // Whose territory this was when you last looked (economy brief §11).
+    // Borders are the political map, and a political map that exists only
+    // where you happen to be standing is not a map. Frozen like the ghosts:
+    // never updated until the hex is re-sighted, and rendered with the same
+    // staleness treatment, so a remembered border is never mistaken for a
+    // live one.
+    zocOwner: state.world?.zoc?.[hex] || null,
     location: loc
       ? {
           locationId: loc.locationId,
@@ -216,6 +223,9 @@ function rememberStatic(state, fid, hex) {
     round: state.round,
     terrain: { type: h.type, elevation: isElevation(h), cover: isCover(h) },
     location: loc ? { locationId: loc.locationId, controller: null, loyalty: null, garrison: null, sections: null } : null,
+    // First discovery IS a sighting, so the border you can see right now is
+    // the one that goes into memory.
+    zocOwner: state.world?.zoc?.[hex] || null,
     ghosts: [],
   };
 }

@@ -21,11 +21,11 @@ import {
 import { recruitCapBonus } from "../game/actions.js";
 import { blockadeAt, blockadesOn, supplyStatus, blockadeSlotsUsed, blockadeIncome } from "../game/blockades.js";
 import { supplyCutter } from "../game/movement.js";
-import { postAt } from "../game/posts.js";
+import { postAt, isPostVisibleTo } from "../game/posts.js";
 import { isUnitVisibleTo } from "../game/visibility.js";
 import { factionDef } from "../game/content.js";
 import {
-  threatScore, tolerance, trustFloor, standingTier, getStanding,
+  threatScore, tolerance, trustFloor, standingTier, getStanding, standingReceipts,
   arePacted, atWar, vassalLord, coalitionAgainst, factionIds,
   aiAcceptsPact, aiAcceptsVassalage, aiAcceptsPeace, wouldAccept, passesRepGates,
   denounceCooldown, denounceWarrant, denounceGrounds, grievanceWeight, grievancesAgainst,
@@ -41,6 +41,7 @@ import {
 } from "../game/diplomacy.js";
 import { hasTechNode } from "../game/tech.js";
 import { holderOf } from "../game/control.js";
+import { pressureSource } from "../game/influence.js";
 import {
   LOCATIONS as UI_LOCATIONS,
   UNIT_UPGRADES,
@@ -361,6 +362,20 @@ export function adaptState(state) {
   }
 
   const zoc = state.world?.zoc || {};
+  // §11 — the viewer's OWN raw Influence field. It has been computed nine
+  // times a round and threaded to this file since the layer shipped, and
+  // consumed by nothing: grep every .jsx and there was no heatmap, no readout,
+  // no tooltip. Surfacing the number per hex is what makes the §4 dominance
+  // cliff legible instead of mysterious — source under 6 dominates 1 hex, 6 to
+  // just under 12 dominates 7, 12 or more dominates 19, and a player who
+  // cannot see the field cannot see why 11 scrap of influence chips bought
+  // them nothing.
+  //
+  // Own field only. A rival's projection is what the ZoC ring already shows,
+  // at the resolution the design intends: you learn WHOSE ground it is, not
+  // how much slack they have on it.
+  const ownField = (viewer && state.world?.influence?.[viewer]) || {};
+  const domThreshold = CONFIG.influence.dominanceThreshold;
   const hexes = {};
   for (const h of Object.values(state.board.hexes)) {
     const fog = fogOf(h.id);
@@ -389,14 +404,32 @@ export function adaptState(state) {
       road: fog === "unexplored" ? false : !!h.road,
       // Rail runs over the same hexes; the board draws it as its own network.
       rail: fog === "unexplored" ? false : !!h.rail,
-      // §18.3 ZoC — only where the viewer has live sight (it's live info).
+      // §18.3 ZoC. Live where the viewer can see; REMEMBERED where they have
+      // explored (economy brief §11). This used to be live-only, so the
+      // political map existed only where you happened to be looking — you
+      // could not read whose ground you were about to walk into, which is the
+      // one thing a border is for. A remembered border carries `zocStale` and
+      // renders with the fog-memory treatment, so it is never mistaken for a
+      // live reading.
+      //
       // `zocForeign` marks another faction's ground; `zocTrespassing` means
       // one of the VIEWER's units is standing on it right now (the border
-      // renders hotter as the "you are trespassing" cue).
-      zocOwner: live ? zoc[h.id] || null : null,
-      zocForeign: live && !!zoc[h.id] && zoc[h.id] !== viewer,
+      // renders hotter as the "you are trespassing" cue) — and that one stays
+      // live-only, because it is a fact about right now.
+      zocOwner: live ? (zoc[h.id] || null) : (mem?.zocOwner || null),
+      zocStale: !live && !!mem?.zocOwner,
+      zocForeign: live
+        ? (!!zoc[h.id] && zoc[h.id] !== viewer)
+        : (!!mem?.zocOwner && mem.zocOwner !== viewer),
       zocTrespassing: live && !!zoc[h.id] && zoc[h.id] !== viewer
         && (unitIdsAt[h.id] || []).some((uid) => state.units[uid]?.owner === viewer),
+      // Your own Influence here, and whether it clears the dominance bar.
+      // Your projection is a fact about YOU, so it is not fog-gated the way a
+      // rival's ZoC is — but it is still hidden on ground you have never seen,
+      // because a heatmap over black is just a map.
+      influence: fog === "unexplored" ? null
+        : Math.round((ownField[h.id] || 0) * 10) / 10,
+      influenceDominant: fog !== "unexplored" && (ownField[h.id] || 0) >= domThreshold,
     };
     // Live unit tokens only on visible hexes.
     if (live && unitAt[h.id]) hex.unitId = unitAt[h.id];
@@ -416,6 +449,24 @@ export function adaptState(state) {
     // A hex holds one blockade per road out of it, so this is a list. `blockade`
     // stays as the first of them for the panels that only ask whether the tile
     // is held; the board draws them all, one per road.
+    // §11 / §17.7 — the listening post. It has a full concealment and reveal
+    // model, an upkeep, a Strength and a destruction path, and NO board icon:
+    // a player could not see their own. Concealment is the rule that decides
+    // who is told, not fog — a revealed post stays revealed permanently, and
+    // your own is always yours to see, so this is deliberately not live-gated
+    // the way a blockade is.
+    const post = postAt(state, h.id);
+    if (post && viewer && isPostVisibleTo(state, viewer, post) && fog !== "unexplored") {
+      hex.post = {
+        owner: post.owner,
+        mine: post.owner === viewer,
+        // Unpaid posts go DORMANT: they see nothing until they are paid
+        // again. That is a thing the owner has to be able to notice.
+        dormant: post.paid === false,
+        strength: post.strength,
+      };
+    }
+
     const bls = live ? blockadesOn(state, h.id) : [];
     if (bls.length) {
       hex.blockades = bls.map((bl) => ({
@@ -443,6 +494,12 @@ export function adaptState(state) {
           loyalty: loc.loyalty,
           loyaltyMax: CONFIG.loyalty.ceiling,
           loyaltyDanger: loc.loyalty != null && loc.loyalty <= CONFIG.loyalty.dangerThreshold,
+          // §11 — WHO is squeezing this city, if anyone. Influence pressure is
+          // the best mechanic in the layer — a soft siege that bleeds Loyalty
+          // and is diplomatically priced, connecting three systems — and its
+          // only signal was one line of feed text. A city being hollowed out
+          // should say so on the city.
+          pressureBy: pressureSource(state, loc, loc.controller || holderOf(loc)) || null,
           chips: adaptChips(state, loc.chips),
           chipUids: [...loc.chips],
           chipSlots: loc.chipSlots,
@@ -580,6 +637,9 @@ export function adaptState(state) {
       ? Object.fromEntries(Object.entries(zoc).filter(([h]) => vis.visible.has(h)))
       : { ...zoc },
     influence: viewer ? { [viewer]: state.world?.influence?.[viewer] || {} } : (state.world?.influence || {}),
+    // The dominance bar, so the overlay's legend can name the number rather
+    // than the UI hard-coding a copy of a tunable.
+    influenceThreshold: CONFIG.influence.dominanceThreshold,
     // §19 — the viewer's fog summary, for HUD legends / minimap.
     fog: vis
       ? { explored: [...vis.explored], visible: [...vis.visible] }
@@ -852,6 +912,12 @@ function adaptDiplomacy(state, viewer) {
       // so the relationship panel can summarise active toggles.
       openBordersFromYou: hasOpenBorders(state, f, viewer), // they may transit your land
       openBordersFromThem: hasOpenBorders(state, viewer, f), // you may transit theirs
+      // §12.1 — WHY they stand where they do. Causes only, ordered, unsigned:
+      // Standing is the one value the win condition reads and §12.2 says its
+      // magnitude is purchasable rather than readable, so a signed running
+      // total would hand the player the exact number the Spy Ring sells. The
+      // reasons are never hidden; the numbers ride with int-b1.
+      standingReceipt: standingReceiptsFor(state, f, viewer, spyRing),
     };
   });
   return {
@@ -1036,6 +1102,62 @@ function repCauseText(state, cause) {
   return key.replace(/-/g, " ");
 }
 
+// Why a faction stands where it does toward you — the Standing receipt
+// (diplomacy brief §12.1). Deliberately NOT shaped like `repReceipts`: that
+// one renders a signed delta per line, and doing the same here would let a
+// player add up the exact Standing the Spy Ring is supposed to sell. Causes
+// are ungated; magnitudes appear only with int-b1.
+//
+// The direction word carries the whole meaning without a number. "They have
+// not forgotten Tin Town" is the sentence the brief asks for.
+const STANDING_CAUSE_TEXT = {
+  gift: "your gifts",
+  "trading-pact": "the trade between you",
+  "pact-honored": "you answered their call",
+  "pact-declined": "you left their call unanswered",
+  "promise-broken": "you broke your word to them",
+  "location-captured": "you took ground they call theirs",
+  "location-ceded": "ground of theirs changed hands",
+  "raid-won": "your raiders",
+  trespass: "your columns on their ground",
+  "influence-pressure": "you are squeezing their city",
+  pestered: "you asked once too often",
+  denounce: "you named them in public",
+  "denounce-friend": "you named their friend in public",
+  "denounce-enemy": "you named an enemy of theirs in public",
+  "denounce-baseless": "an accusation you could not support",
+  mediator: "you brokered their peace",
+  "ultimatum-met": "you gave in to their demand",
+  "tribute-refused": "you refused their demand",
+  defied: "you told their envoy where to put it",
+  coalition: "the coalition put you on opposite sides",
+  "common-cause": "you march in the same bloc",
+  "freed-clemency": "you released a vassal they wanted kept",
+  "toggle-vision": "the vision arrangement between you",
+  "toggle-borders": "the borders arrangement between you",
+  "guest-house": "the hospitality of the Guest House",
+  truce: "the truce between you",
+  freed: "you let them go",
+  encounter: "something that happened out in the waste",
+  deal: "the deals you have struck",
+};
+function standingReceiptsFor(state, from, to, spyRing) {
+  return standingReceipts(state, from, to).map((e) => {
+    const text = STANDING_CAUSE_TEXT[e.cause] || String(e.cause).replace(/-/g, " ");
+    return {
+      cause: e.cause,
+      round: e.round,
+      // The one thing that IS free: which way it moved. A player must be able
+      // to tell a grievance from a courtesy without buying espionage.
+      direction: e.delta > 0 ? "warmed" : "cooled",
+      text,
+      // Espionage product. Null without the Spy Ring.
+      delta: spyRing ? e.delta : null,
+      value: spyRing ? e.value : null,
+    };
+  });
+}
+
 // The receipts behind a number. This is the difference between a stat and a
 // story: "Menace 9" told the player nothing about which of their own acts
 // they were being judged for.
@@ -1152,7 +1274,6 @@ function describeDealItem(it, state) {
 // A destroyed faction is not a task, so it leaves the list with the count. The
 // victory rule is about who is STILL STANDING; the dead are not a box to tick.
 function dominionBacking(state, viewer, spyRing) {
-  const tiers = CONFIG.diplomacy.tiers;
   const me = state.players[viewer];
   const coal = coalitionAgainst(state, viewer);
   return factionIds(state)
@@ -1179,7 +1300,11 @@ function dominionBacking(state, viewer, spyRing) {
     }
     const detail = spyRing ? {
       standing: s,
-      needStanding: tiers.allied,
+      // §12.2 — the ONE number this screen shows, and it showed the wrong
+      // bar. A pact needs `pactStandingReq` (6); this read `tiers.allied`
+      // (8), so the single place the threshold is displayed asked for two
+      // more Standing than the engine does.
+      needStanding: CONFIG.diplomacy.pactStandingReq,
       yourMenace: me?.menace || 0,
       theirTolerance: Math.round(tolerance(state, f, viewer) * 10) / 10,
       yourHonor: me?.honor ?? CONFIG.diplomacy.honor.start,

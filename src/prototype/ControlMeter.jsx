@@ -19,6 +19,11 @@ export default function ControlMeter({
   sections,
   loyalty,
   danger = false,
+  // §11 — who is out-projecting the holder on this city's own hex. Influence
+  // pressure bleeds a point of Loyalty every Upkeep and costs the presser
+  // Standing and Menace: a soft siege, and until now visible only as one line
+  // of feed text that scrolled away. A city being hollowed out says so.
+  pressureBy = null,
   size = 44,
 }) {
   const cx = size / 2;
@@ -63,6 +68,23 @@ export default function ControlMeter({
         strokeWidth={ctrl || danger ? 1.8 : 1}
         style={ctrl || danger ? { filter: `drop-shadow(0 0 ${glow}px ${danger ? "#d2453f" : ownerColor(ctrl)})` } : undefined}
       />
+      {/* The pressure arrow, biting into the ring from the presser's side, in
+          the presser's colour. Drawn over the sections and under the pie, so
+          it reads as something pushing IN on the city rather than as part of
+          the city's own state. Pulses, because it is happening now. */}
+      {pressureBy && size >= 24 && (
+        <g style={{ pointerEvents: "none" }} className="hud-breathe">
+          <path
+            d={`M ${cx - r * 0.92} ${cy} l ${r * 0.34} ${-r * 0.24} l 0 ${r * 0.14}
+                l ${r * 0.3} 0 l 0 ${r * 0.2} l ${-r * 0.3} 0 l 0 ${r * 0.14} Z`}
+            fill={ownerColor(pressureBy)}
+            fillOpacity={0.95}
+            stroke="rgba(5,12,13,0.9)"
+            strokeWidth={0.6}
+            style={{ filter: `drop-shadow(0 0 ${glow}px ${ownerColor(pressureBy)})` }}
+          />
+        </g>
+      )}
       {showPie ? (
         <LoyaltyPie
           value={loyalty}

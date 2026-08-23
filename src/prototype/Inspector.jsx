@@ -112,6 +112,7 @@ function locationModel(state, hex, actions) {
               sections={control.sections}
               loyalty={control.loyalty}
               danger={control.loyaltyDanger}
+              pressureBy={control.pressureBy}
               size={96}
             />
             <div style={{ display: "flex", flexDirection: "column", gap: 7, flex: 1 }}>

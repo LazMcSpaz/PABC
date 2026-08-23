@@ -32,6 +32,8 @@ import FloatingControlMeter from "./FloatingControlMeter.jsx";
 import RouteNetwork, { useRouteNetwork } from "./RouteNetwork.jsx";
 import BlockadeSprites from "./BlockadeSprites.jsx";
 import BoardTokens from "./BoardTokens.jsx";
+import InfluenceOverlay from "./InfluenceOverlay.jsx";
+import PostMark from "./PostMark.jsx";
 import { LOD_FLAT, useBoardLod } from "./boardLod.js";
 import { buildHexGeometry, eastRimHexes, paintOrder, topFacePolygon } from "./hexProjection.js";
 
@@ -47,6 +49,8 @@ export default function HexBoard3D({
   dimmedUnitUid,
   highlightedFactionId,
   reachable,
+  showInfluence,
+  influenceThreshold,
   onSelect,
   onUnitClick,
 }) {
@@ -104,6 +108,20 @@ export default function HexBoard3D({
         })
       )}
 
+      {/* §11 — the influence heatmap, under the routes so a road still reads
+          over it, over the tiles so the field is legible on art. Off by
+          default: it answers a question the player asks deliberately. */}
+      {showInfluence && (
+        <InfluenceOverlay
+          order={order}
+          hexes={state.hexes}
+          centers={geom.centers}
+          width={geom.width}
+          height={geom.height}
+          threshold={influenceThreshold}
+        />
+      )}
+
       <RouteNetwork
         net={routeNet}
         rows={state.rows}
@@ -120,6 +138,23 @@ export default function HexBoard3D({
         centers={geom.centers}
         nodes={routeNet.road.nodes}
       />
+
+      {/* §17.7 — listening posts. Their own layer, between the blockades and
+          the unit tokens: a post is a structure a unit can stand next to, and
+          it should not be buried under one. Concealment already decided which
+          of these reach the adapter at all. */}
+      <div style={{ position: "absolute", inset: 0, zIndex: 8900, pointerEvents: "none" }}>
+        {order.map((hexId) => {
+          const hex = state.hexes[hexId];
+          const c = geom.centers[hexId];
+          if (!hex?.post || !c) return null;
+          return (
+            <div key={hexId} style={{ position: "absolute", left: c.x - 10, top: c.y - 26 }}>
+              <PostMark post={hex.post} size={20} />
+            </div>
+          );
+        })}
+      </div>
 
       <BoardTokens
         order={order}

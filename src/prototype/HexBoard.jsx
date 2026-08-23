@@ -20,6 +20,8 @@ export default function HexBoard({
   dimmedUnitUid,
   highlightedFactionId,
   reachable,
+  showInfluence,
+  influenceThreshold,
   onSelect,
   onUnitClick,
 }) {
@@ -69,6 +71,8 @@ export default function HexBoard({
                 selectedUnitId={selectedUnitId}
                 dimmedUnitUid={dimmedUnitUid}
                 factionHighlight={highlightedFactionId && isHeldBy(hex, highlightedFactionId)}
+                showInfluence={showInfluence}
+                influenceThreshold={influenceThreshold}
                 onClick={() => onSelect(hexId)}
                 onUnitClick={onUnitClick}
               />

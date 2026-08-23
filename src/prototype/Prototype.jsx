@@ -8,6 +8,7 @@ import { FACTIONS as UI_FACTIONS, LOCATIONS as UI_LOCATIONS, valueOf, fullContro
 import { Btn } from "./kit.jsx";
 import HexBoard from "./HexBoard.jsx";
 import HexBoard3D from "./HexBoard3D.jsx";
+import { InfluenceLegend } from "./InfluenceOverlay.jsx";
 import BoardViewport from "./BoardViewport.jsx";
 import UnitCard from "./UnitCard.jsx";
 import ControlMeter from "./ControlMeter.jsx";
@@ -38,7 +39,8 @@ import { evalCond } from "../game/dsl.js";
 import { adaptState, reinforcePreview, engineChipIdToUi, previewLocationContest, previewAttackerStrength, blockadeView, blockadeBuildOffer, postAction, upkeepSummary, economyReport, homeHexFor } from "./engineAdapter.js";
 import { resolveSalvage } from "../game/contest.js";
 import { assignTechNode } from "../game/stats.js";
-import { performDiplomacy } from "../game/diplomacy.js";
+import { hasTechNode } from "../game/tech.js";
+import { performDiplomacy, trespassPreview } from "../game/diplomacy.js";
 import { isUnitVisibleTo } from "../game/visibility.js";
 import DiplomacyDrawer from "./DiplomacyDrawer.jsx";
 import EncounterModal from "./EncounterModal.jsx";
@@ -253,6 +255,9 @@ function buildLocView(state, hex, isYourTurn) {
     loyalty: control.loyalty,
     loyaltyMax: control.loyaltyMax,
     loyaltyDanger: control.loyaltyDanger,
+    // §11 — who is squeezing the place. The window is where a player decides
+    // what to do about it, so it is where the arrow has to be nameable.
+    pressureBy: control.pressureBy || null,
     garrison: hex.garrison,
     production: hex.production,
     chipSlots: control.chipSlots,
@@ -273,8 +278,38 @@ function buildLocView(state, hex, isYourTurn) {
       youControlHere && hasTrainingGrounds
         ? { cost: CONFIG.unitRecruitCost, canAfford: isYourTurn && you.scrap >= CONFIG.unitRecruitCost }
         : null,
+    // §12.3 — Saboteurs. The engine action has existed and worked since the
+    // Intelligence branch shipped, the AI uses it every round it can, and the
+    // player had NO BUTTON ANYWHERE. An engine verb the human cannot reach is
+    // not a verb; it is an asymmetry. It ships in the legibility phase rather
+    // than with the espionage economy for exactly that reason — otherwise
+    // economy stage 5 would put a price on something only the AI can buy.
+    sabotage: sabotageOffer(state, hex, isYourTurn),
     economy,
     contest,
+  };
+}
+
+// Can the viewer run Saboteurs against this Location right now, and if not,
+// why not? Mirrors `validateSabotage` rather than re-deriving it, so the
+// button never offers something the engine will refuse — and the reason it
+// gives is the engine's own.
+function sabotageOffer(state, hex, isYourTurn) {
+  const g = state.engineState;
+  const youId = state.youId;
+  if (!hasTechNode(g, youId, "int-b2")) return null; // not on your wheel: no button at all
+  const ctrl = hex.controller || fullController(hex.control?.sections);
+  if (!ctrl || ctrl === youId) return null;          // nothing to sabotage
+  const usedThisRound = g.players[youId]?.sabotageUsedRound === g.round;
+  return {
+    targetName: UI_LOCATIONS[hex.locationId]?.name || hex.locationId,
+    can: isYourTurn && !usedThisRound,
+    reason: !isYourTurn ? "Not your turn"
+      : usedThisRound ? "Your saboteurs have already moved this round"
+      : null,
+    // Sabotage costs no Action and no scrap — the cost is the once-per-round
+    // limit, and the Loyalty it takes off a place is the point.
+    effect: "Loyalty −1",
   };
 }
 
@@ -390,6 +425,10 @@ export default function Prototype({ config, onNewGame }) {
     [],
   );
 
+  // §11 — the influence heatmap toggle. Off by default: it answers a question
+  // the player asks deliberately, and a permanent wash over the board would
+  // compete with the ZoC ring for the same reading.
+  const [showInfluence, setShowInfluence] = useState(false);
   const [selectedHexId, setSelectedHexId] = useState(null);
   const [selectedUnitId, setSelectedUnitId] = useState(null);
   const [toast, setToast] = useState(null); // { kind: "error"|"info", text }
@@ -982,6 +1021,12 @@ export default function Prototype({ config, onNewGame }) {
   function onRecruit(hexId) {
     return runAction("recruit", { at: hexId }, null, "Unit recruited.");
   }
+  // §12.3 — Saboteurs. The engine action shipped with the Intelligence
+  // branch and the AI has used it every round since; this is the first time
+  // the human has been able to.
+  function onSabotage(hexId) {
+    return runAction("sabotage", { at: hexId }, null, "Saboteurs went to work.");
+  }
   function onReinforce(unitUid, mode) {
     const msg = mode === "instant" ? "Unit reinforced." : "Reinforcements dispatched.";
     return runAction("reinforce", { unit: unitUid, mode }, null, msg);
@@ -1285,6 +1330,8 @@ export default function Prototype({ config, onNewGame }) {
               dimmedUnitUid={pendingMove?.unitUid}
               highlightedFactionId={highlightedFactionId}
               reachable={reachable}
+              showInfluence={showInfluence}
+              influenceThreshold={state.influenceThreshold}
               onSelect={onHexClick}
               onUnitClick={onUnitClick}
             />
@@ -1319,6 +1366,33 @@ export default function Prototype({ config, onNewGame }) {
             onClose={() => setSelectedUnitId(null)}
           />
         )}
+        {/* §11 — the influence toggle and its legend. Bottom-left, clear of
+            the zoom cluster (bottom-right) and the feed (top-right). The
+            legend only appears with the overlay: without it the ramp is
+            decoration, because the amber ring IS the dominance threshold and
+            that is not derivable from a gradient. */}
+        <div style={{
+          position: "absolute", left: 18, bottom: 18, zIndex: 28,
+          display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 8,
+        }}>
+          {showInfluence && <InfluenceLegend threshold={state.influenceThreshold} />}
+          <button
+            className="hud-int"
+            onClick={() => setShowInfluence((v) => !v)}
+            title="Show the Influence you project — and where it clears the dominance threshold"
+            style={{
+              fontFamily: "inherit", fontSize: 10, fontWeight: 700,
+              letterSpacing: 1.6, textTransform: "uppercase",
+              padding: "7px 14px", borderRadius: 6, cursor: "pointer",
+              border: `1px solid ${showInfluence ? "#56d3c6" : "rgba(86,211,198,0.45)"}`,
+              background: showInfluence
+                ? "linear-gradient(180deg, #8ff6ea, #56d3c6)"
+                : "rgba(6,14,15,0.9)",
+              color: showInfluence ? "#08100f" : "#8ff6ea",
+              boxShadow: showInfluence ? "0 0 14px rgba(86,211,198,0.5)" : "none",
+            }}
+          >Influence</button>
+        </div>
         <EventFeed engineState={gameRef.current} tick={tick} topOffset={hudOffset + 10} />
       </div>
 
@@ -1334,6 +1408,7 @@ export default function Prototype({ config, onNewGame }) {
             onClose={() => setSelectedHexId(null)}
             onActivate={(h) => onActivate(h)}
             onRecruit={(h) => onRecruit(h)}
+            onSabotage={(h) => onSabotage(h)}
             onBuild={onBuild}
             onUpgrade={onUpgrade}
             onRush={onRush}
@@ -1598,6 +1673,14 @@ export default function Prototype({ config, onNewGame }) {
             destHexId={pendingMove.dest}
             pathHexIds={unitMovePath(gameRef.current, gameRef.current.units[pendingMove.unitUid], pendingMove.dest)}
             ownerColor={UI_FACTIONS[state.units[pendingMove.unitUid]?.owner]?.color}
+            // §11 — what walking in there costs, BEFORE committing. The
+            // trespass ladder is [0,1,2] by consecutive round, which is a rule
+            // a player can only plan around if they can read it in advance.
+            trespass={trespassPreview(
+              gameRef.current,
+              gameRef.current.units[pendingMove.unitUid],
+              pendingMove.dest,
+            )}
             onConfirm={() => {
               const m = pendingMove;
               setPendingMove(null);

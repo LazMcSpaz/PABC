@@ -11,7 +11,7 @@
 import { CONFIG } from "./config.js";
 import { FACTIONS, MINOR_FACTIONS, factionDef, LOCATIONS, CHIPS } from "./content.js";
 import { emit, registerEventHook } from "./events.js";
-import { getStanding, adjustStanding, setStanding, standingTier } from "./standing.js";
+import { getStanding, adjustStanding, setStanding, standingTier, standingReceipts } from "./standing.js";
 import { bfsDistances, reinforcementRoute } from "./board.js";
 import { holdsLocation } from "./control.js";
 import {
@@ -38,8 +38,14 @@ export function ensureDiplomacy(state) {
       ultimatums: [], // demands with a deadline and a consequence (§6.11)
       asks: {}, // pester bookkeeping: { round, byPair: { "a|b": n } }
       standingBaselines: {}, // earned drift targets: { a: { b: -cap..+cap } }
+      // §12.1 — why a pair stands where it does, per ORDERED pair. Standing
+      // is the number the win condition reads and was the only reputation
+      // measure with no receipt at all. Written by `recordStandingCause` in
+      // standing.js; read by `standingReceipts`.
+      standingLog: {},
     };
   }
+  if (!state.diplomacy.standingLog) state.diplomacy.standingLog = {};
   if (!state.diplomacy.giftCounter) state.diplomacy.giftCounter = {};
   if (!state.diplomacy.pendingCalls) state.diplomacy.pendingCalls = [];
   if (!state.diplomacy.standingBaselines) state.diplomacy.standingBaselines = {};
@@ -150,6 +156,49 @@ function citeTrespass(state, mover, owner, hex) {
   emit(state, "territory_trespassed", {
     mover, owner, hex, standingHit, repHit, streak, warning: standingHit === 0 && repHit === 0,
   });
+}
+
+// What entering `hex` would cost this unit, before it commits — the thing
+// `vp-and-actions-design.md` §7 listed as "possible polish later" and the
+// diplomacy brief §11 asks for outright. The ladder is `[0,1,2]` by
+// consecutive round, which a player can only plan around if they can read it
+// BEFORE the move. Penalising the player for a rule they could not see is
+// §2.16's "I had no chance to stop it", and it is the one complaint that
+// sticks to a territory system however well tuned it is.
+//
+// Pure: computes what `citeTrespass` WOULD do without writing the record or
+// emitting anything. It deliberately shares `unitTrespasses` rather than
+// re-deriving the conditions, so concealment, open borders, safe conduct, war
+// and holding-the-place all keep exactly the meaning they have on the real
+// path. Returns null when the move is free.
+export function trespassPreview(state, unit, hex) {
+  if (!state.diplomacy || !unit) return null;
+  const owner = state.world?.zoc?.[hex] || null;
+  if (!unitTrespasses(state, unit, owner, hex)) return null;
+  const key = `${unit.owner}|${owner}`;
+  const r = state.diplomacy.trespassRecord?.[key];
+  // Already cited this round: the move is free because the citation has
+  // already been paid, not because the ground is open. Say so — "no further
+  // cost this round" is a different sentence from "they do not mind".
+  if (r && r.lastRound === state.round) {
+    return { owner, standingHit: 0, menaceHit: 0, streak: r.streak, alreadyCited: true, distrustful: false };
+  }
+  const streak = r && r.lastRound === state.round - 1 ? r.streak + 1 : 1;
+  const tr = D().trespass;
+  const distrustful = getStanding(state, owner, unit.owner) < D().tiers.neutral;
+  if (distrustful) {
+    return { owner, standingHit: tr.standingPenalty, menaceHit: tr.reputationPenalty,
+             streak, alreadyCited: false, distrustful: true };
+  }
+  const ladder = tr.escalation;
+  return {
+    owner,
+    standingHit: ladder[Math.min(streak - 1, ladder.length - 1)],
+    menaceHit: 0,
+    streak,
+    alreadyCited: false,
+    distrustful: false,
+  };
 }
 
 function onTrespass(state, payload) {
@@ -2989,4 +3038,4 @@ export function aiAcceptsVassalage(state, f, lord) {
   return factionIds(state).every((o) => o === f || o === lord || getStanding(state, f, o) <= s);
 }
 
-export { standingTier, getStanding, adjustStanding };
+export { standingTier, getStanding, adjustStanding, standingReceipts };

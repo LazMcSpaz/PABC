@@ -401,6 +401,62 @@ function Receipts({ receipts }) {
   );
 }
 
+// §12.1 — the Standing receipt. Standing is the ONE number the win condition
+// reads, and it was the only reputation measure with no receipt at all: a
+// player could watch a faction cool on them with no way to tell which of their
+// own acts did it.
+//
+// Causes only, ordered, unsigned. The magnitudes are deliberately withheld
+// (§12.2): rendering signed deltas the way "How you got here" does for Menace
+// and Honor would hand the player a derivable running total for the value the
+// Spy Ring is supposed to sell. Which WAY it moved is free — a player must be
+// able to tell a grievance from a courtesy without buying espionage.
+function StandingReceipt({ rows, name }) {
+  const [open, setOpen] = useState(false);
+  if (!rows || !rows.length) return null;
+  const hasNumbers = rows.some((r) => r.delta != null);
+  return (
+    <div style={{ marginTop: 8 }}>
+      <button
+        className="hud-int"
+        onClick={() => setOpen((v) => !v)}
+        style={{
+          width: "100%", textAlign: "left", background: "none", border: "none",
+          padding: 0, cursor: "pointer", color: C.holoHi,
+          fontFamily: C.font, fontSize: 9, fontWeight: 700,
+          letterSpacing: 1.6, textTransform: "uppercase",
+        }}
+      >{open ? "▾" : "▸"} Why they stand there · {rows.length}</button>
+      {open && (
+        <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 3 }}>
+          {rows.map((r, i) => (
+            <div key={i} className="pc-prose" style={{ fontSize: 11.5, lineHeight: 1.45 }}>
+              <span style={{
+                fontFamily: C.font, fontWeight: 700, fontSize: 9, letterSpacing: 0.8,
+                marginRight: 6, color: r.direction === "warmed" ? "#5fc27a" : "#d2913c",
+              }}>{r.direction === "warmed" ? "WARMED" : "COOLED"}</span>
+              <span style={{ color: "rgba(207,214,220,0.85)" }}>
+                {r.text} · round {r.round}
+              </span>
+              {r.delta != null && (
+                <span style={{ color: "#8fd8ce", marginLeft: 6, fontFamily: C.font, fontSize: 10 }}>
+                  {r.delta > 0 ? "+" : ""}{r.delta} → {r.value}
+                </span>
+              )}
+            </div>
+          ))}
+          {!hasNumbers && (
+            <div style={{
+              fontFamily: C.font, fontSize: 8.5, letterSpacing: 0.8, textTransform: "uppercase",
+              color: "rgba(210,145,60,0.8)", marginTop: 4,
+            }}>By how much: Espionage required · Intelligence B1 Spy Ring</div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // A demand with a deadline. Complying costs you the thing; defying costs you
 // nothing yet, and hands them the right to take it.
 function UltimatumCard({ u, dip, onAction }) {
@@ -553,6 +609,11 @@ function LandingView({ dip, onSelectFaction, onAction, onClose }) {
         flex: 1, overflowY: "auto", padding: "14px 16px",
         display: "flex", flexDirection: "column", gap: 12,
       }}>
+        {/* §13.4 — the win condition is the most-read thing on this screen,
+            so it is the first card. It used to sit third, under two blocks of
+            reputation numbers that decide nothing on their own. */}
+        <PathToDominionCard dom={dom} />
+
         {/* Reputation block — your aggregate scores. */}
         <Card>
           <SectionLabel>Your Standing on the Continent</SectionLabel>
@@ -572,11 +633,6 @@ function LandingView({ dip, onSelectFaction, onAction, onClose }) {
         </Card>
 
         <Receipts receipts={dip.receipts} />
-
-        {/* Path to Dominion — the per-faction backing checklist. Coarse
-            status is common knowledge; exact numbers ride with the Spy Ring. */}
-        <PathToDominionCard dom={dom} />
-
 
         {dip.coalitionAgainstYou && (
           <Card accent="#d2453f">
@@ -1150,6 +1206,7 @@ function IntelBrief({ f, tierColor }) {
             </>
           )}
         </div>
+        <StandingReceipt rows={f.standingReceipt} name={f.name} />
       </div>
     </div>
   );

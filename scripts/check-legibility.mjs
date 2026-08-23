@@ -1,0 +1,265 @@
+// Phase 1 of the 2026-08-23 briefs — the legibility pass, checked against a
+// live engine and the real adapter.
+//
+//   node scripts/check-legibility.mjs
+//
+// Every case in the territory research where a system was called confusing,
+// arbitrary or broken was a system players could not see. This script asserts
+// that the six things the briefs say are invisible are now readable, and that
+// none of them leaks a number the design says must be bought.
+import { createGame } from "../src/game/setup.js";
+import { startTurn } from "../src/game/turn.js";
+import { CONFIG } from "../src/game/config.js";
+import { adaptState } from "../src/prototype/engineAdapter.js";
+import { recomputeInfluence } from "../src/game/influence.js";
+import { recomputeVisibility } from "../src/game/visibility.js";
+import { buildPost } from "../src/game/posts.js";
+import { assignTechNode } from "../src/game/stats.js";
+import { performAction } from "../src/game/actions.js";
+import {
+  performDiplomacy, adjustStanding, standingReceipts, trespassPreview, ensureDiplomacy,
+} from "../src/game/diplomacy.js";
+
+let fail = 0;
+const check = (n, ok, d) => { if (!ok) fail++; console.log(`${ok ? "PASS" : "FAIL"}  ${n}${ok ? "" : "\n        " + (d ?? "")}`); };
+
+// Assigning a wheel node needs the Ability Points a Tech Level grants. The
+// tests here are about what the SCREEN shows once a node is held, not about
+// earning it, so they buy the level outright.
+function grantNode(g, pid, ...nodes) {
+  const p = g.players[pid];
+  p.techLevel = Math.max(p.techLevel || 1, nodes.length + 1);
+  for (const n of nodes) {
+    const r = assignTechNode(g, pid, n);
+    if (!r.ok) throw new Error(`could not assign ${n}: ${r.reason}`);
+  }
+}
+
+const mk = () => createGame({
+  seed: 424242,
+  factionIds: ["versari", "goldgrass", "lakers", "plainers"],
+  humanFactionId: "versari",
+  minors: [],
+  mapSize: "medium",
+});
+
+// --- 1. Standing has a receipt at all --------------------------------------
+{
+  const g = mk();
+  startTurn(g);
+  g.players.versari.resource = 40;
+  performDiplomacy(g, "versari", "gift", { faction: "goldgrass", amount: 6 });
+  const rows = standingReceipts(g, "goldgrass", "versari");
+  check("1. a gift leaves a receipt on the pair it warmed", rows.length > 0,
+    "standingLog is empty after a gift");
+  check("2. …naming the cause", rows[0]?.cause === "gift", `cause was ${rows[0]?.cause}`);
+
+  // Drift and seeding are arithmetic, not acts: a receipt that logged them
+  // every round would bury the acts that actually happened.
+  adjustStanding(g, "goldgrass", "versari", -1, "drift");
+  check("3. …and drift is NOT recorded as a cause",
+    standingReceipts(g, "goldgrass", "versari").every((r) => r.cause !== "drift"),
+    "drift is polluting the receipt");
+
+  // A pair already pinned at the ceiling must not accrue a receipt for an
+  // adjustment that moved nothing.
+  const { standingMax } = CONFIG.diplomacy;
+  adjustStanding(g, "goldgrass", "versari", 99, "test-cap");
+  const n = standingReceipts(g, "goldgrass", "versari").length;
+  adjustStanding(g, "goldgrass", "versari", 5, "no-op-at-cap");
+  check("4. an adjustment clamped to no movement leaves no receipt",
+    standingReceipts(g, "goldgrass", "versari").length === n,
+    "a no-op wrote a receipt");
+}
+
+// --- 2. Causes are ungated; magnitudes are espionage product ---------------
+{
+  const g = mk();
+  startTurn(g);
+  g.players.versari.resource = 40;
+  performDiplomacy(g, "versari", "gift", { faction: "goldgrass", amount: 6 });
+
+  const plain = adaptState(g, "versari").diplomacy.factions.find((f) => f.id === "goldgrass");
+  check("5. the drawer is handed the causes", (plain.standingReceipt || []).length > 0);
+  check("6. …with the direction, which is free",
+    plain.standingReceipt.every((r) => r.direction === "warmed" || r.direction === "cooled"));
+  check("7. …and NO magnitude without the Spy Ring",
+    plain.standingReceipt.every((r) => r.delta == null && r.value == null),
+    "a signed delta leaked: the player can now derive the exact Standing");
+
+  grantNode(g, "versari", "int-entry", "int-b1");
+  const spied = adaptState(g, "versari").diplomacy.factions.find((f) => f.id === "goldgrass");
+  const gotNumbers = (spied.standingReceipt || []).some((r) => r.delta != null);
+  check("8. …which the Spy Ring buys", gotNumbers,
+    `int-b1 held: ${(g.players.versari.techWheel || []).join(",")}`);
+}
+
+// --- 3. The one displayed threshold is the right one -----------------------
+{
+  const g = mk();
+  startTurn(g);
+  grantNode(g, "versari", "int-entry", "int-b1");
+  const dom = adaptState(g, "versari").diplomacy.dominion;
+  const row = dom.backing.find((b) => b.detail);
+  check("9. the pact bar shown is pactStandingReq, not tiers.allied",
+    row && row.detail.needStanding === CONFIG.diplomacy.pactStandingReq,
+    `showed ${row?.detail?.needStanding}, engine asks ${CONFIG.diplomacy.pactStandingReq}`);
+  check("10. …and those differ, so this was a real bug",
+    CONFIG.diplomacy.pactStandingReq !== CONFIG.diplomacy.tiers.allied);
+}
+
+// --- 4. The influence field reaches the screen -----------------------------
+{
+  const g = mk();
+  startTurn(g);
+  recomputeInfluence(g);
+  const view = adaptState(g, "versari");
+  const withField = Object.values(view.hexes).filter((h) => (h.influence || 0) > 0);
+  check("11. the viewer's own Influence is on the hexes", withField.length > 0,
+    "no hex reports any influence");
+  check("12. …and the dominance bar is published with it",
+    view.influenceThreshold === CONFIG.influence.dominanceThreshold);
+  const dominant = withField.filter((h) => h.influenceDominant);
+  check("13. …and the dominant set is exactly those clearing it",
+    dominant.every((h) => h.influence >= view.influenceThreshold) &&
+    withField.filter((h) => h.influence >= view.influenceThreshold).length === dominant.length,
+    `${dominant.length} marked dominant of ${withField.length} with any field`);
+  // The cliff the overlay exists to show: dominance is a step function, so the
+  // dominated count should be a small plateau rather than tracking the field
+  // smoothly. Recorded rather than asserted — it is a property of the board.
+  console.log(`        · ${withField.length} hexes reached, ${dominant.length} dominated` +
+    ` (threshold ${view.influenceThreshold})`);
+}
+
+// --- 5. Territory is remembered, not only seen -----------------------------
+{
+  const g = mk();
+  startTurn(g);
+  recomputeInfluence(g);
+  recomputeVisibility(g, "versari", { emitEvents: false });
+
+  // Find somewhere the viewer can currently see, put a rival's border on it,
+  // then take the viewer's sight away. Forcing the ZoC rather than waiting for
+  // the board to produce a foreign border inside your opening sight radius is
+  // deliberate: the claim under test is that the SNAPSHOT carries the border,
+  // and the seed should not decide whether the test runs.
+  const vis = g.visibility.versari;
+  const seen = [...vis.visible].find((h) => !g.locations[h]);
+  g.world.zoc[seen] = "lakers";
+
+  // Leave. Every viewer unit and Location goes dark, which walks `seen` out of
+  // the visible set through the real transition path — the one that snapshots.
+  for (const u of Object.values(g.units)) if (u.owner === "versari") delete g.units[u.uid];
+  for (const l of Object.values(g.locations)) {
+    if (l.controller === "versari") { l.controller = null; l.sections = l.sections.map(() => null); }
+  }
+  recomputeVisibility(g, "versari", { emitEvents: false });
+
+  const cell = adaptState(g).hexes[seen];
+  check("14. explored-but-unseen ground still reports whose territory it was",
+    cell?.fog === "explored" && cell?.zocOwner === "lakers",
+    `fog ${cell?.fog}, zocOwner ${cell?.zocOwner} — the political map exists only where you are looking`);
+  check("15. …flagged stale, so it is never read as live", cell?.zocStale === true,
+    "a remembered border is being reported as a live one");
+}
+
+// --- 6. Influence pressure is visible on the city --------------------------
+{
+  const g = mk();
+  g.humanFactionId = "goldgrass"; // the adapter serves exactly one viewer
+  startTurn(g);
+  const victim = Object.values(g.locations).find((l) => l.controller === "goldgrass");
+  const rival = Object.values(g.locations).find((l) => l.controller && l.controller !== "goldgrass");
+  recomputeInfluence(g);
+  recomputeVisibility(g, "goldgrass", { emitEvents: false });
+  // Out-project the holder on their own city's hex. `pressureSource` reads the
+  // raw field, not the ZoC map — a Location anchors its own hex so its garrison
+  // is never a trespasser at home, but a rival projecting more there is still
+  // hollowing the place out.
+  g.world.influence[rival.controller] = g.world.influence[rival.controller] || {};
+  g.world.influence[rival.controller][victim.hexId] = 99;
+  const cell = adaptState(g).hexes[victim.hexId];
+  check("16. a squeezed city names who is squeezing it",
+    cell?.control?.pressureBy === rival.controller,
+    `pressureBy was ${cell?.control?.pressureBy}, expected ${rival.controller}`);
+}
+
+// --- 7. Listening posts are on the board -----------------------------------
+{
+  const g = mk();
+  startTurn(g);
+  const hex = Object.values(g.board.hexes).find((h) => h.type !== "location");
+  buildPost(g, "versari", hex.id);
+  recomputeVisibility(g, "versari", { emitEvents: false });
+  const mine = adaptState(g).hexes[hex.id];
+  check("17. you can see your own listening post", !!mine?.post && mine.post.mine === true,
+    "a structure you paid for and pay upkeep on had no board presence at all");
+
+  // Concealment, not fog, decides who else is told. The adapter serves one
+  // viewer, so the rival's read means switching the viewer.
+  g.humanFactionId = "lakers";
+  recomputeVisibility(g, "lakers", { emitEvents: false });
+  const theirs = adaptState(g).hexes[hex.id];
+  check("18. …and a rival does not, until it is revealed", !theirs?.post,
+    "a concealed post is leaking to a faction it was never revealed to");
+}
+
+// --- 8. The trespass cost is readable BEFORE the move ----------------------
+{
+  const g = mk();
+  startTurn(g);
+  ensureDiplomacy(g);
+  recomputeInfluence(g);
+  const zoc = g.world.zoc;
+  const foreign = Object.keys(zoc).find((h) => zoc[h] && zoc[h] !== "versari" && !g.locations[h]);
+  const unit = Object.values(g.units).find((u) => u.owner === "versari");
+  if (!foreign) {
+    console.log("        · no foreign ZoC hex on this board; skipping");
+  } else {
+    unit.node = foreign;
+    // Make sure they can actually see the intruder — concealment is part of
+    // the real rule and the preview must honour it.
+    const owner = zoc[foreign];
+    recomputeVisibility(g, owner, { emitEvents: false });
+    g.visibility[owner].visible.add(foreign);
+    const p = trespassPreview(g, unit, foreign);
+    check("19. entering a rival's ground previews what it costs", !!p,
+      "trespassPreview returned null on foreign ZoC the owner can see");
+    if (p) {
+      check("20. …starting at the ladder's first rung, which is a warning",
+        p.streak === 1 && (p.distrustful || p.standingHit === CONFIG.diplomacy.trespass.escalation[0]),
+        JSON.stringify(p));
+      check("21. …and it is a PREVIEW: nothing was written or charged",
+        !g.diplomacy.trespassRecord?.[`versari|${owner}`],
+        "the preview wrote the citation record");
+    }
+  }
+  // Your own ground is free, and the preview says so by returning null.
+  const home = Object.keys(zoc).find((h) => zoc[h] === "versari");
+  if (home) {
+    unit.node = home;
+    check("22. …and standing on your own ground previews nothing",
+      trespassPreview(g, unit, home) === null);
+  }
+}
+
+// --- 9. The Saboteurs verb is reachable by a human -------------------------
+{
+  const g = mk();
+  startTurn(g);
+  const target = Object.values(g.locations).find((l) => l.controller && l.controller !== "versari");
+  const before = performAction(g, "sabotage", { at: target.hexId });
+  check("23. sabotage is gated on Intelligence B2", !before.ok && /int|B2|Saboteurs/i.test(before.reason || ""),
+    `refused with: ${before.reason}`);
+  grantNode(g, "versari", "int-entry", "int-b1", "int-b2");
+  const loy0 = target.loyalty;
+  const after = performAction(g, "sabotage", { at: target.hexId });
+  check("24. …and with it on the wheel, a human can run it", after.ok, after.reason);
+  check("25. …and it does what it says", target.loyalty === Math.max(0, loy0 - 1),
+    `loyalty ${loy0} -> ${target.loyalty}`);
+  const twice = performAction(g, "sabotage", { at: target.hexId });
+  check("26. …once per round", !twice.ok, "sabotage ran twice in one round");
+}
+
+console.log(`\n${fail ? `${fail} FAILED` : "all checks passed"}`);
+process.exit(fail ? 1 : 0);
