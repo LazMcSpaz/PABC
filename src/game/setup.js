@@ -237,6 +237,13 @@ export function createGame({
       // full Loyalty; neutral Locations have no Loyalty until captured.
       loyalty: controller ? CONFIG.loyalty.ceiling : null,
       chipSlots,
+      // Economy §6.5 — WHO STARTED HERE. `occupationsBy` compares a Location's
+      // authored `affiliation` against its current controller, which cannot
+      // tell "I conquered this from them" from "the setup dealt it to me" —
+      // and the setup does deal it: the Croppers open holding `omara`, whose
+      // affiliation is `goldgrass`. Without this stamp the occupation charge
+      // would bill a faction from round one for a city it never took.
+      startingController: controller || null,
       chips: locChips,
       garrison,
       production,

@@ -102,6 +102,10 @@ export const EVENT_NAMES = new Set([
   // against the ceiling, which is the signal that a faction should be
   // spending; `courtship_lapsed` is a courtship dropped for want of capacity.
   "sway_changed", "sway_spent", "sway_capped", "courtship_lapsed",
+  // §6.5 — the occupation bill, and the Standing it costs when unpayable.
+  "occupation_charged",
+  // §7.1 — a purchase paid for off-supply, and what became of it.
+  "purchase_delayed", "purchase_arrived", "purchase_lost",
   // Truces — peace is binding for a window; breaking it is treachery.
   "truce_broken",
   // Deal flows run for a term and then lapse, honorably.

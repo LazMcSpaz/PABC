@@ -327,6 +327,31 @@ export const CONFIG = {
     // ends it. Over-exertion is soft hostility: each bleeding Upkeep
     // costs the presser Standing with the owner and raises their Menace.
     pressure: { bleed: 1, standingHit: 1, menaceHit: 1 },
+    // §10.2 — extra movement to ENTER a hex dominated by a faction you do not
+    // pass freely with. The most standard ZoC verb in the genre, and it was
+    // missing: `movement.js`'s blocker scan never read `state.world.zoc` at
+    // all, so the field that defines "territory" for trespass, the withdraw
+    // ultimatum and `unitsInTerritory` had no effect on walking through it.
+    //
+    // Waived by `log-a2` Forward Supply, which already waives the supply wall
+    // — one node, one meaning. 0 switches the rule off without touching code.
+    //
+    // Deliberately movement and NOT contest maths: §18.3 deferred the latter
+    // correctly, because a border combat bonus makes the leader's border
+    // stronger with no counterplay.
+    //
+    // HALF A HEX, not the brief's 1, and measured into that shape. Against
+    // `baseMovement: 2` a full-hex toll means entering a rival's ground costs
+    // HALF YOUR TURN — invasions ran at half speed, wars ground on, and
+    // unresolved games went from 4 of 15 to 6 with the median up 51 -> 54. At
+    // 0.5 (the same granularity `pavedCost` already uses) a border crossing
+    // costs most of a hex without stopping an army, and unresolved dropped to
+    // 2 of 15 — the best reading the suite has produced.
+    zocMoveCost: 0.5,
+    // §10.1 — what a UNIT projects. Contributes to `pressureSource` ONLY, never
+    // to `deriveZoC`. See influence.js for the measurement behind that scoping.
+    unitInfluence: 1,
+    unitRange: 1,
     // A Location held by a MAJORITY (2 of 3 sections) but not outright
     // still projects — at reduced strength. Before this, one flipped
     // section silenced a city's influence entirely, handing its own hex
@@ -353,6 +378,35 @@ export const CONFIG = {
     // carries a real premium over organic building, so it's an emergency
     // lever, not a strictly-dominant default (docs/chip-economy-handoff.md).
     rushScrapPerPoint: 2,
+
+    // Economy brief §7.1 — SCRAP GETS A PLACE, as DELAY rather than refusal.
+    //
+    // The diagnosis: `validateRush` and `validateRecruit` check control, cost
+    // and caps, and NEITHER CHECKS SUPPLY. A city cut off from your entire
+    // empire still rushes a Bombard at full rate. That is "gold is a time
+    // machine and a teleportation device" in its purest form, and it is why
+    // blockades, rail, ZoC and supply lines — all built, all real — have
+    // almost no economic consequence.
+    //
+    // The first draft REFUSED off-supply purchases. Measured, that is either
+    // inert or catastrophic with nothing in between: the literal reading fires
+    // in 0 of 1,256 location-rounds, and the "other holdings" reading fires in
+    // 26.7% and bites hardest on the faction reduced to its last city — an
+    // elimination ratchet dressed as a supply rule.
+    //
+    // So the engine's own graduated model instead: `runReinforce` in "field"
+    // mode charges up front and `sweepReinforcements` walks the packet one hex
+    // per round. Rush and Recruit are PAID FOR IMMEDIATELY AND ARRIVE LATER.
+    // A blockade then produces exactly the visible number the research asks
+    // for — an ETA on every purchase in the cut region — rather than a red X.
+    supplyDelaysSpending: true,
+    // Hops that cost nothing, because they are what a connected empire looks
+    // like. MEASURED, not guessed: across 891 location-rounds, 42% were a
+    // faction's last city (the rule does not apply), 50% sat 1-2 hops from the
+    // nearest other holding, ~5% were 3-9 hops and 0.2% were cut off entirely.
+    // At 2 the ordinary interior is free and the delay fires exactly where the
+    // brief wants it — a region strung out or severed.
+    supplyFreeHops: 2,
   },
 
   // Sway — POLITICAL CAPACITY (economy brief §6). The third currency, with a
@@ -504,6 +558,14 @@ export const CONFIG = {
     // it is paid again. Never destroyed by arrears; the garrison drifts off
     // and comes back. Same contract as a listening post (§17.7).
     upkeep: 1,
+    // §7.3 — what a completed, paid enemy blockade takes off the Output of a
+    // Location on whose hex or ring it stands. Replaces the flat stipend the
+    // Toll Booth used to pay its OWNER: strangulation with a number the victim
+    // watches fall, rather than a quiet dividend nobody sees. A fitted Toll
+    // Booth adds its own `output` on top, so the chip still means "this
+    // barricade is worse for you", just from the other side of the wire.
+    // 0 switches the drain off.
+    drainOutput: 1,
     // §3.2 upgrade slots. Deliberately fewer than a settlement's: a blockade is
     // a chokepoint, not a second city. Palisade / Signal Mast / Toll Booth are
     // in content.js as kind "blockade"; their bonuses are read off the chip def
@@ -892,6 +954,21 @@ export const CONFIG = {
       // both `aiAcceptsPact` and `aiAcceptsVassalage` read, so reaching past
       // your neighbourhood costs something without being impossible.
       distantStandingPenalty: 2,
+      // §15 — THE SECOND VASSALAGE DOOR. A `Warning` posture held this long
+      // against a faction at or below `ai.vassalPowerRatio` counts as
+      // "cornered" for `aiAcceptsVassalage`, without a declared war.
+      //
+      // Why it is not optional: `aiAcceptsVassalage` gives a MAJOR exactly one
+      // door — `cornered = atWar || standing <= wary`. No war, no hostility,
+      // no submission. So anything that reduces the number of wars on the
+      // board reduces the number of vassals, and §8 (pricing attacks) and §9
+      // (coalitions that deliberate) both do. The vassal face is 6 of 15
+      // endings on its own; this is what replaces exactly what they remove.
+      //
+      // Coercion without bloodshed — thematically the right answer for a
+      // diplomacy-forward game, and it runs on the posture machinery rather
+      // than on a special case. 0 switches the door shut again.
+      submissionRounds: 3,
     },
 
     // Deals and the Standing they move (diplomacy brief §7.1). This is the

@@ -97,6 +97,63 @@ export function reinforcementRoute(state, pid, targetNode) {
   return { dist: dist[targetNode], originHex: origin[targetNode] };
 }
 
+// Economy brief §7.1 — how far the supply for a purchase at `hexId` has to
+// come, measured from the rest of `pid`'s empire.
+//
+// WHY IT EXCLUDES THE TARGET, when `reinforcementRoute` does not.
+// `reinforcementRoute` seeds its BFS from EVERY Location you control including
+// the one you are asking about, so for anywhere you hold it answers 0 — which
+// is correct for a convoy walking TO a unit, and useless as a supply test for a
+// city. Probed: the literal reading fires in 0 of 1,256 location-rounds. This
+// asks the different question the purchase rule needs — "if this place were
+// not already yours, how far would the goods have to travel?"
+//
+// Returns:
+//   { dist: 0, sole: true }   this is your last city. Explicitly unaffected —
+//                             the first draft's version refused here, which is
+//                             an elimination ratchet dressed as a supply rule:
+//                             a faction reduced to one city could no longer
+//                             recruit its way back.
+//   { dist: n }               n hops from your nearest other holding.
+//   { cut: true }             no route at all, and you DO hold somewhere else.
+//                             The only case a purchase is refused outright.
+//
+// Same walls as `reinforcementRoute`, deliberately: an enemy-held Location and
+// an enemy ZoC hex both stop a convoy, `log-a2` Forward Supply waives the ZoC
+// wall, and a blockade shows up through the ZoC it projects. One concept, so a
+// player learns it once.
+export function supplyDistanceFrom(state, pid, hexId) {
+  const sources = Object.values(state.locations)
+    .filter((l) => l.controller === pid && l.hexId !== hexId)
+    .map((l) => l.hexId);
+  if (!sources.length) return { dist: 0, sole: true };
+
+  const zoc = state.world?.zoc;
+  const forwardSupply = hasTechNode(state, pid, "log-a2");
+  const isWall = (hex) => {
+    const loc = state.locations[hex];
+    if (loc && loc.controller && loc.controller !== pid) return true;
+    if (forwardSupply) return false;
+    const owner = zoc?.[hex];
+    return !!(owner && owner !== pid);
+  };
+
+  const dist = {};
+  const queue = [];
+  for (const s of sources) { dist[s] = 0; queue.push(s); }
+  while (queue.length) {
+    const cur = queue.shift();
+    if (cur === hexId) return { dist: dist[cur] };
+    for (const nb of state.board.adjacency[cur] || []) {
+      if (dist[nb] !== undefined) continue;
+      if (isWall(nb) && nb !== hexId) continue;
+      dist[nb] = dist[cur] + 1;
+      queue.push(nb);
+    }
+  }
+  return dist[hexId] !== undefined ? { dist: dist[hexId] } : { cut: true };
+}
+
 // §19.4 terrain LoS predicates. Two new roles beyond the §16.6 combat +1:
 // `elevation` extends a source's sight and BLOCKS line of sight to hexes
 // behind it (ridgelines = sight-walls); `cover` raises the sight cost to

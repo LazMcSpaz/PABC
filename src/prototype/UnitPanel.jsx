@@ -243,6 +243,38 @@ function BlockadeOffer({ offer, canAct, onBuild }) {
           ? offer.reason
           : `Pins this unit ~${offer.turns} turns, then holds the road alone · −${offer.upkeep} scrap/turn.`}
       </div>
+      {/* §7.2 — WHAT IT WOULD CUT, before you pay for it. The research is
+          blunt: economic strangulation needs an immediate visible number, and
+          the canonical failure is a blockade that is mechanically real and
+          emotionally dead because the impact is not visually obvious. The
+          engine already knew the answer; nobody was asking it. */}
+      {offer.preview?.strangles?.length > 0 && (
+        <div style={{
+          marginTop: 2, padding: "5px 7px", borderRadius: 4,
+          background: "rgba(210,69,63,0.10)",
+          border: "1px solid rgba(210,69,63,0.45)",
+        }}>
+          <div style={{
+            fontSize: 8.5, letterSpacing: 1.2, textTransform: "uppercase",
+            color: "#ffb4ae", fontWeight: 700, marginBottom: 3,
+          }}>It would strangle</div>
+          {offer.preview.strangles.map((t) => (
+            <div key={t.hexId} style={{ fontSize: 10, lineHeight: 1.5, color: "#f0dcda" }}>
+              <b>{t.name}</b> <span style={{ color: C.textFaint }}>({t.ownerName})</span>
+              {" — output "}
+              <b style={{ color: "#f4efe2" }}>{t.output}</b>
+              <span style={{ color: C.textFaint }}> → </span>
+              <b style={{ color: "#ffb4ae" }}>{t.after}</b>
+              <span style={{ color: C.textFaint }}> every turn it stands</span>
+            </div>
+          ))}
+        </div>
+      )}
+      {offer.preview?.routesThrough?.length > 0 && (
+        <div style={{ fontSize: 9.5, color: "#e8b467", lineHeight: 1.4 }}>
+          Cuts the road for {offer.preview.routesThrough.map((r) => r.name).join(", ")}.
+        </div>
+      )}
     </div>
   );
 }

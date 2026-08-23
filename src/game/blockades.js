@@ -161,13 +161,47 @@ export function blockadeVision(state, b) {
 
 // §3.2 Toll Booth — a mature blockade's own scrap income, independent of the
 // settlement that raised it. Summed per faction at Upkeep.
-export function blockadeIncome(state, pid) {
-  let n = 0;
-  for (const b of ownedBlockades(state, pid)) {
-    if (!b.done || b.paid === false) continue; // a dormant booth collects nothing
-    n += chipSum(state, b, "output");
+// Economy brief §7.3 — A BLOCKADE DRAINS, IT DOES NOT TIP.
+//
+// The Toll Booth used to pay its owner a flat stipend. The first draft
+// proposed turning that into a tariff on passing trade, and that does not
+// work: overland routes go through `reinforcementRoute`, which treats a third
+// party's ZoC hex as a WALL — if you dominate the hex the route does not exist
+// to be taxed, it is severed. There is nothing passing to tax.
+//
+// The military version is better anyway, and it is what the research asks for:
+// economic strangulation needs an IMMEDIATE VISIBLE NUMBER, and the canonical
+// failure (Distant Worlds, EU4) is blockades that are mechanically real and
+// emotionally dead because "the impact isn't visually obvious, creating the
+// false impression that blockades don't work at all." So a completed, paid
+// blockade REDUCES THE BESIEGED LOCATION'S OUTPUT while it stands — a number
+// the victim watches fall — and the one "tax what passes" mechanic in the game
+// becomes an act of war rather than a stipend.
+//
+// Scoped to the Location's own hex and its ring: a barricade on your doorstep.
+// Local, legible, and already drawn on the board.
+export function blockadeDrainOn(state, loc) {
+  const cfg = CONFIG.blockades;
+  const holder = loc.controller;
+  if (!holder || !cfg?.drainOutput) return 0;
+  const ring = new Set([loc.hexId, ...(state.board.adjacency[loc.hexId] || [])]);
+  let drain = 0;
+  for (const b of Object.values(state.world?.blockades || {})) {
+    if (!b.done || b.paid === false) continue;   // a dormant barricade strangles nobody
+    if (b.owner === holder) continue;            // your own line does not choke you
+    if (!ring.has(b.hex)) continue;
+    // The base bite, plus whatever the barricade has been fitted with. A Toll
+    // Booth used to earn its owner scrap; it now costs its victim more.
+    drain += cfg.drainOutput + chipSum(state, b, "output");
   }
-  return n;
+  return drain;
+}
+
+// Retired: the flat stipend a Toll Booth used to pay its owner. Kept as a
+// zero-returning shim only long enough for the ledger to stop asking; the
+// mechanic is `blockadeDrainOn` above.
+export function blockadeIncome() {
+  return 0;
 }
 
 // §3.1 — 1 scrap per finished blockade each Upkeep. Unaffordable → DORMANT

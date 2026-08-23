@@ -53,7 +53,7 @@ import { readRivalIntel } from "./intel.js";
 import { postAt, isPostVisibleTo, chargePostUpkeep } from "./posts.js";
 import {
   blockadeAt, activeBlockadeAt, creditCap, roadSupplyPath,
-  blockadeDefense, blockadeVision, blockadeIncome, destroyBlockade,
+  blockadeDefense, blockadeVision, blockadeIncome, blockadeDrainOn, destroyBlockade,
   chargeBlockadeUpkeep,
 } from "./blockades.js";
 import { loadFieldEncounters, findUnsupportedTypes, choiceIsRunnable, WORLD_ENCOUNTERS } from "./content-loader.js";
@@ -551,6 +551,20 @@ const check = (label, cond) => {
 };
 const setStrOn = (g, u, n) => { u.baseStrength = n; recomputeStats(g); };
 
+// Economy §10.2 — entering a rival's ZoC now costs extra movement, which is a
+// SECOND surcharge stacking on terrain, roads and Toll Gates. Fixtures that
+// measure one of those in isolation have to say so, or they are measuring two
+// rules and attributing the total to one. Clears every hex `pid` does not
+// dominate, so the staged rule is the only thing being charged for.
+//
+// The ZoC surcharge has its own fixture (search "§10.2"); this is not a way of
+// not testing it.
+const isolateTerrain = (g, pid) => {
+  for (const hex of Object.keys(g.world?.zoc || {})) {
+    if (g.world.zoc[hex] !== pid) delete g.world.zoc[hex];
+  }
+};
+
 // Fixtures below stage clean 1v1 (or 1v2) contests on "the terrain hex"
 // (the first hex of type "terrain"), assuming it starts empty. Procedural
 // map generation can coincidentally place a faction's starting unit on
@@ -611,6 +625,7 @@ line("\n  [Phase 1] movement budget");
       }
     }
   }
+  isolateTerrain(g, me);
   const m2 = b ? performAction(g, "move", { unit: u.uid, to: b }) : { ok: false };
   check("two moves consume the budget", m1.ok && m2.ok && u.moveRemaining === 0);
   check("moves cost no Actions", g.players[me].actions.remaining === actionsBefore);
@@ -2664,16 +2679,20 @@ line("\n  [Rail doc §3] Blockade structures");
       b.paid === false && !!blockadeAt(g, hex));
     check("Blockade upkeep: a dormant blockade halts nobody",
       !activeBlockadeAt(g, hex) && !movementBlockers(g, foe).has(hex));
-    check("Blockade upkeep: a dormant toll booth collects nothing", (() => {
-      const uid = g.nextId("chip");
-      g.chips[uid] = { uid, chipId: "toll-booth" };
-      b.chips = [...(b.chips || []), uid];
-      const dark = blockadeIncome(g, me);
-      b.paid = true;
-      const lit = blockadeIncome(g, me);
-      b.chips = (b.chips || []).filter((c) => c !== uid);
+    // §7.3 — a blockade DRAINS its victim now rather than paying its owner.
+    // A dormant one strangles nobody, which is the same contract dormancy has
+    // always had: the garrison drifts off and comes back.
+    check("Blockade upkeep: a dormant barricade strangles nobody", (() => {
+      const victim = Object.values(g.locations).find(
+        (l) => l.controller && l.controller !== me
+          && [l.hexId, ...(g.board.adjacency[l.hexId] || [])].includes(hex));
+      if (!victim) return true; // no Location in reach of this site on this seed
       b.paid = false;
-      return dark === 0 && lit === CHIPS["toll-booth"].output;
+      const dark = blockadeDrainOn(g, victim);
+      b.paid = true;
+      const lit = blockadeDrainOn(g, victim);
+      b.paid = false;
+      return dark === 0 && lit >= CONFIG.blockades.drainOutput;
     })());
 
     // Pay the arrears and it comes straight back.
@@ -2739,12 +2758,26 @@ line("\n  [Rail doc §3] Blockade structures");
     g.players[me].techLevel = 5;
     performAction(g, "upgrade-blockade", { hex, chipId: "toll-booth" });
     upkeep(g, me);
-    check("Blockade chip: Toll Booth installs and pays its own scrap",
-      b.chips.length === 1 && blockadeIncome(g, me) === CHIPS["toll-booth"].output);
-    const before = g.players[me].resource;
-    upkeep(g, me);
-    check("Blockade chip: the toll lands in the bank each Upkeep",
-      g.players[me].resource >= before + CHIPS["toll-booth"].output);
+    // §7.3 — the Toll Booth stopped being a stipend and became a tighter grip.
+    // The tariff-on-passing-trade version does not work: a route through a
+    // hex you dominate is SEVERED rather than taxed, so there is nothing
+    // passing to charge for.
+    check("Blockade chip: Toll Booth installs", b.chips.length === 1);
+    check("Blockade chip: …and pays its owner nothing", blockadeIncome(g, me) === 0);
+    const victim2 = Object.values(g.locations).find(
+      (l) => l.controller && l.controller !== me
+        && [l.hexId, ...(g.board.adjacency[l.hexId] || [])].includes(hex));
+    if (victim2) {
+      const withBooth = blockadeDrainOn(g, victim2);
+      b.chips = [];
+      const bare = blockadeDrainOn(g, victim2);
+      check("Blockade chip: …it makes the barricade bite harder on its victim",
+        withBooth === bare + CHIPS["toll-booth"].output,
+        `bare ${bare}, with booth ${withBooth}`);
+    } else {
+      check("Blockade chip: …it makes the barricade bite harder on its victim",
+        true, "(no Location in reach of this site on this seed)");
+    }
   }
 
   // §3.2/§3.3 — static defense, defender-stacking, and destroy-only.
@@ -5290,6 +5323,7 @@ line("\n  [Phase 11] text-token resolver");
       }
       walker.node = ringNeighbor;
       walker.moveRemaining = 1;
+      isolateTerrain(gG, walker.owner); // the TOLL is what is on trial here
       const reach = unitReach(gG, walker);
       check("toll gate: a taxed hex costs 2 to enter (unreachable on budget 1)",
         !(ringHex in reach));
@@ -5505,8 +5539,72 @@ line("\n  [Phase 11] text-token resolver");
     const f = g18.board.hexes[from18];
     f.elevation = false; f.cover = false;
     walker.node = from18; walker.moveRemaining = 3;
+    isolateTerrain(g18, walker.owner); // terrain only — see the helper
     return unitReach(g18, walker);
   };
+
+  // --- §10.2 — entering a rival's ZoC costs movement ---
+  //
+  // The most standard ZoC verb in the genre, and it was missing entirely:
+  // `blockerScan` never read `state.world.zoc`, so the field that defines
+  // "territory" for trespass, the withdraw ultimatum and `unitsInTerritory`
+  // had no effect whatever on walking through it.
+  {
+    const gz = createGame({ seed: 4242, humanFactionId: "versari" });
+    const w = Object.values(gz.units).find((u) => u.owner === "versari");
+    // A clean open lane out of the unit's hex, with nothing else charging.
+    const step = (gz.board.adjacency[w.node] || []).find(
+      (n) => !gz.locations[n] && !Object.values(gz.units).some((u) => u.node === n));
+    const hex = gz.board.hexes[step];
+    hex.elevation = false; hex.cover = false; hex.road = false; hex.rail = false;
+    gz.world.zoc = {};
+    w.moveRemaining = 2;
+    const before = unitReach(gz, w)[step];
+    check("§10.2 baseline: open ground costs one movement", before === 1, `${before}`);
+
+    // Now it is somebody else's ground.
+    gz.world.zoc[step] = "lakers";
+    setStanding(gz, "versari", "lakers", 0, "test");
+    setStanding(gz, "lakers", "versari", 0, "test");
+    const taxed = unitReach(gz, w)[step];
+    check("§10.2 a rival's ZoC costs extra to enter",
+      taxed === before - CONFIG.influence.zocMoveCost, `${before} -> ${taxed}`);
+
+    // …and it is the RELATIONSHIP that decides, not the border. The same
+    // predicate open borders and trespass read: you are not picking your way
+    // through a country you are welcome in.
+    formPact(gz, "versari", "lakers", "test");
+    check("§10.2 …but not an ally's — passesFreely waives it",
+      unitReach(gz, w)[step] === before);
+    breakPact(gz, "versari", "lakers", "test");
+    setStanding(gz, "versari", "lakers", 0, "test");
+    setStanding(gz, "lakers", "versari", 0, "test");
+
+    // Forward Supply already waives the supply wall in reinforcementRoute.
+    // One node, one meaning.
+    gz.players.versari.techLevel = 4;
+    assignTechNode(gz, "versari", "log-entry");
+    assignTechNode(gz, "versari", "log-a1");
+    assignTechNode(gz, "versari", "log-a2");
+    // The logistics nodes also grant Movement, and `assignTechNode` runs
+    // `recomputeStats` — so the budget has to be pinned again or the check
+    // measures the movement bonus rather than the waived toll.
+    w.moveRemaining = 2;
+    check("§10.2 …and Forward Supply waives it too",
+      unitReach(gz, w)[step] === before,
+      `log-a2 held: ${(gz.players.versari.techWheel || []).join(",")}`);
+
+    // Your OWN ground is never a toll.
+    const gz2 = createGame({ seed: 4242, humanFactionId: "versari" });
+    const w2 = Object.values(gz2.units).find((u) => u.owner === "versari");
+    const step2 = (gz2.board.adjacency[w2.node] || []).find(
+      (n) => !gz2.locations[n] && !Object.values(gz2.units).some((u) => u.node === n));
+    const h2 = gz2.board.hexes[step2];
+    h2.elevation = false; h2.cover = false; h2.road = false; h2.rail = false;
+    gz2.world.zoc = { [step2]: "versari" };
+    w2.moveRemaining = 2;
+    check("§10.2 your own territory is free to cross", unitReach(gz2, w2)[step2] === 1);
+  }
 
   const M18 = CONFIG.movement;
   check("mountain, unpaved: enterable but terminal (0 movement remains)",
@@ -5544,6 +5642,7 @@ line("\n  [Phase 11] text-token resolver");
       hex.elevation = false; hex.cover = false; hex.road = true; hex.rail = false;
     }
     u.moveRemaining = 2;
+    isolateTerrain(g, u.owner); // the ROAD is what is on trial here
     const paved = unitReach(g, u);
     check("2 Movement carries you FOUR hexes down a lane",
       lane.length >= 5 && paved[lane[4]] === 0 && paved[lane[3]] === 0.5);

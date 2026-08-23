@@ -25,6 +25,7 @@ import {
   meetsTech, meetsLoyalty, slotCapacity, slotsUsed, stationedUnitWithBay,
   techReqFor, upgradeOption, completeBuildIfDone, bankBuildSurplus, effectiveBuildCost,
   canRebuildCapital,
+  supplyVerdict, queueDelivery,
 } from "./economy.js";
 
 const fail = (reason) => ({ ok: false, reason });
@@ -195,6 +196,13 @@ function validateRecruit(state, { pid, player, params }) {
   // A recruit appears on the Location's own hex, so it is subject to the same
   // stacking cap as a unit walking in.
   if (hexIsFull(state, loc.hexId)) return fail(`that hex is full (${CONFIG.hexUnitCap} units)`);
+  // §7.1 — refused ONLY when nothing can reach here at all AND you hold
+  // somewhere else to route from. Your last city is explicitly unaffected:
+  // the first draft's version turned a supply rule into an elimination
+  // ratchet, because a faction reduced to one city could not recruit its way
+  // back out of it.
+  const supply = supplyVerdict(state, pid, loc.hexId);
+  if (supply.refused) return fail(supply.reason);
   return { ok: true };
 }
 
@@ -206,6 +214,13 @@ function runRecruit(state, { pid, player, params }) {
   });
 
   const loc = state.locations[params.at];
+  // §7.1 — PAID NOW, ARRIVES LATER. The same convoy model field reinforcement
+  // already uses, applied to the purchase rather than to the packet.
+  const supply = supplyVerdict(state, pid, loc.hexId);
+  if (supply.delay > 0) {
+    const d = queueDelivery(state, pid, "recruit", loc.hexId, supply.delay);
+    return { queued: d.id, arrivesOnRound: d.arrivesOnRound, hops: supply.dist };
+  }
   const u = state.nextId("unit");
   state.units[u] = makeUnit(u, pid, loc.hexId, factionDef(pid)?.name || pid, nextMusterIndex(state, pid));
   emit(state, "unit_recruited", { unit: u, player: pid, hex: loc.hexId });
@@ -408,6 +423,8 @@ function validateRush(state, { player, params }) {
   if (loc.controller !== player.id) return fail("you do not fully control that location");
   if (!loc.activeBuild) return fail("nothing is being built here");
   if (player.resource < CONFIG.economy.rushScrapPerPoint) return fail("not enough scrap to rush");
+  const supply = supplyVerdict(state, player.id, loc.hexId);
+  if (supply.refused) return fail(supply.reason);
   return { ok: true };
 }
 
@@ -422,6 +439,12 @@ function runRush(state, { pid, player, params }) {
   const spend = points * rate;
   player.resource -= spend;
   emit(state, "resource_spent", { player: pid, resource: "Resource", amount: -spend, source: "rush" });
+  // §7.1 — the scrap leaves now; the materials arrive when they get here.
+  const supply = supplyVerdict(state, pid, loc.hexId);
+  if (supply.delay > 0) {
+    const d = queueDelivery(state, pid, "rush", loc.hexId, supply.delay, { points });
+    return { hex: loc.hexId, points, spent: spend, queued: d.id, arrivesOnRound: d.arrivesOnRound };
+  }
   loc.buildProgress = (loc.buildProgress || 0) + points;
   // Rushing past the cost refunds the overshoot as scrap.
   bankBuildSurplus(state, loc.controller, completeBuildIfDone(state, loc));

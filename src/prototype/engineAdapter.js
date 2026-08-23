@@ -2133,7 +2133,53 @@ export function blockadeBuildOffer(state, unitUid) {
     cost: CONFIG.blockades.buildCost,
     turns: CONFIG.blockades.minTurns,
     upkeep: CONFIG.blockades.upkeep,
+    // §7.2 — WHAT IT WOULD CUT, before you pay for it.
+    //
+    // The research is blunt about this: economic strangulation needs an
+    // immediate visible number, and the canonical failure is blockades that
+    // are mechanically real and emotionally dead because "the impact isn't
+    // visually obvious, creating the false impression that blockades don't
+    // work at all." `routeCutter` and the drain rule already answer the
+    // question; nobody was asking it. This is the display work that makes
+    // severing supply the visible verb.
+    preview: blockadePreview(state, pid, hex),
   };
+}
+
+// Whose Output this site would bite, and by how much — plus whose supply it
+// would sever. Reads the same rules the blockade itself will run on, so the
+// preview cannot promise something the barricade will not deliver.
+function blockadePreview(state, pid, hex) {
+  const drain = CONFIG.blockades.drainOutput || 0;
+  const ring = new Set([hex, ...(state.board.adjacency[hex] || [])]);
+  const strangles = [];
+  for (const loc of Object.values(state.locations)) {
+    if (!loc.controller || loc.controller === pid) continue;
+    if (!ring.has(loc.hexId)) continue;
+    const output = locationOutput(state, loc);
+    strangles.push({
+      hexId: loc.hexId,
+      name: ENGINE_LOCATIONS[loc.locationId]?.name || loc.locationId,
+      owner: loc.controller,
+      ownerName: factionDef(loc.controller)?.name || loc.controller,
+      output,
+      // What it would fall TO. Floored at 0 — a strangled city produces
+      // nothing, it does not owe.
+      after: Math.max(0, output - drain),
+      drain: Math.min(output, drain),
+    });
+  }
+  // …and whose overland routes run through here. A blockade on a trunk road
+  // cuts more than the city next to it.
+  const cuts = [];
+  for (const fid of factionIds(state)) {
+    if (fid === pid) continue;
+    const before = supplyStatus(state, fid, hex, supplyCutter(state, fid));
+    if (before?.path) {
+      cuts.push({ id: fid, name: factionDef(fid)?.name || fid });
+    }
+  }
+  return { drainPerRound: drain, strangles, routesThrough: cuts };
 }
 
 // §17.7 — can this unit dig in a listening post where it stands? Same shape

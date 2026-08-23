@@ -3314,6 +3314,24 @@ export function aiAcceptsPact(state, f, proposer) {
   return (factionDef(f)?.sociability ?? 0.5) >= 0.3;
 }
 
+// Has `lord` been openly Warning `f` for long enough that it reads as a
+// standing threat rather than a mood? §15's second door.
+//
+// Three gates, and each is load-bearing. It has to be a WARNING (a stance with
+// a named grievance behind it, not a courtship); it has to have been SPOKEN
+// (`postureStated`), because a threat nobody has heard cannot corner anybody
+// and that is audit block 11's rule; and it has to have been held for
+// `submissionRounds`, because the whole point is that it is a campaign of
+// pressure rather than a switch.
+function warningHeldLongEnough(state, lord, f) {
+  const need = D().reach?.submissionRounds || 0;
+  if (!need) return false;
+  const p = postureOf(state, lord, f);
+  if (p.kind !== "Warning") return false;
+  if (!postureStated(state, lord, f)) return false;
+  return state.round - p.since >= need;
+}
+
 // §18.9 — a faction accepts vassalage when subordination beats its
 // alternatives. Two doors in:
 //  · Submission — much weaker than the lord AND cornered (at war / very low
@@ -3330,7 +3348,15 @@ export function aiAcceptsVassalage(state, f, lord) {
   if (reb && reb.lord === lord && state.round - reb.round < D().vassal.rebellionCooldownRounds) return false;
   const ratio = powerOf(state, f) / Math.max(1, powerOf(state, lord));
   if (ratio > D().ai.vassalPowerRatio) return false;
-  const cornered = atWar(state, lord, f) || getStanding(state, f, lord) <= D().tiers.wary;
+  // §15 — the second vassalage door. A MAJOR has exactly one road in
+  // (`cornered`), and it runs through a war; §8 and §9 both make wars rarer,
+  // so without a second door they narrow the vassal face by arithmetic rather
+  // than by design. A Warning held long enough against somebody who cannot
+  // resist IS being cornered — the shadow of the thing is doing the work the
+  // thing used to do.
+  const cornered = atWar(state, lord, f)
+    || getStanding(state, f, lord) <= D().tiers.wary
+    || warningHeldLongEnough(state, lord, f);
   if (cornered) return true;
   if ((factionDef(f)?.tier || "major") === "major") return false;
   // The patronage door reads the reach-adjusted number for the same reason
@@ -3377,6 +3403,79 @@ export function courtingList(state, pid) {
     && !state.players[f]?.eliminated);
 }
 
+// Economy §6.5 — OCCUPATION. The keystone: holding a Location whose
+// `affiliation` belongs to another SURVIVING faction costs Sway every round
+// you hold it.
+//
+// WHY SWAY AND NOT SCRAP. Because it is what makes conquest and courtship
+// compete for the same pool, under a win condition that needs every faction
+// dealt with — every foreign homeland you garrison is political capacity you
+// are not spending on the factions you still need. Charging scrap would be
+// conventional and easier to explain, and it would also be a separate tax
+// rather than the thesis.
+//
+// NOT GATED ON LOYALTY. The first draft charged only below half Loyalty, and
+// the measurement killed it: a captured Location starts at `loyalty.start: 2`
+// and `tickLoyalty` adds +1 per Upkeep while garrisoned, so a garrisoned
+// conquest clears half the ceiling in three rounds and the total lifetime
+// charge was smaller than one round of courting one faction. Charging the
+// whole tenure is also the rule the diplomacy layer already applies to the
+// same fact: an occupation is a standing grievance that "cannot be settled"
+// while you are still standing in it.
+//
+// AN EMPTY AFFILIATED LOCATION SETTLED PEACEFULLY STILL CHARGES, and should:
+// walking into an unclaimed `chigan` as Versari is taking the Lakers' homeland
+// whether or not anyone was home.
+export function occupationCharges(state, pid) {
+  const cfg = CONFIG.sway;
+  const out = [];
+  if (!cfg?.occupation) return out;
+  for (const loc of Object.values(state.locations || {})) {
+    if (loc.controller !== pid) continue;
+    const aff = LOCATIONS[loc.locationId]?.affiliation;
+    if (!aff || aff === pid) continue;
+    // Only a SURVIVING faction has a homeland to be aggrieved about.
+    if (!state.players[aff] || state.players[aff].eliminated) continue;
+    // …and only ground you TOOK. The setup deals affiliated Locations to
+    // other factions (the Croppers open holding Goldgrass's Omara), and
+    // billing somebody from round one for a city they never took is the
+    // failure `startingController` exists to prevent.
+    if (loc.startingController === pid) continue;
+    out.push({ hex: loc.hexId, locationId: loc.locationId, aggrieved: aff });
+  }
+  return out;
+}
+
+// The per-round occupation bill, and what happens when it cannot be paid.
+//
+// ARREARS ARE THE PART THE FIRST DRAFT LEFT UNRESOLVED. A conqueror who never
+// intends to do politics would otherwise get occupation for free — they simply
+// never hold Sway, so a Sway charge costs them nothing. Unpayable occupation
+// converts to Standing loss with the AGGRIEVED faction, so they pay in the
+// reputation the rest of the board reads instead.
+function chargeOccupation(state, pid) {
+  const cfg = CONFIG.sway;
+  let spent = 0;
+  for (const occ of occupationCharges(state, pid)) {
+    if (spendSway(state, pid, cfg.occupation, `holding ${LOCATIONS[occ.locationId]?.name || occ.locationId}`)) {
+      spent += cfg.occupation;
+      emit(state, "occupation_charged", {
+        holder: pid, hex: occ.hex, locationId: occ.locationId,
+        aggrieved: occ.aggrieved, sway: cfg.occupation, arrears: 0,
+      });
+      continue;
+    }
+    // Cannot pay: the bill lands on the relationship instead.
+    const hit = Math.max(1, Math.round(cfg.occupation / Math.max(1, cfg.arrearsStandingPer)));
+    adjustStanding(state, occ.aggrieved, pid, -hit, "occupation");
+    emit(state, "occupation_charged", {
+      holder: pid, hex: occ.hex, locationId: occ.locationId,
+      aggrieved: occ.aggrieved, sway: 0, arrears: hit,
+    });
+  }
+  return spent;
+}
+
 // The per-round bill, charged inside `tickSway` after income lands.
 //
 // WHEN A FACTION CANNOT PAY, the courtship is simply CALLED OFF — the cheapest
@@ -3390,7 +3489,12 @@ function chargeSwayUpkeep(state, pid) {
   const cfg = CONFIG.sway;
   const p = state.players[pid];
   if (!cfg || !p) return 0;
-  let spent = 0;
+  // OCCUPATION FIRST, courtships second. Ground you are sitting on is not a
+  // discretionary commitment you can quietly stop paying for — the garrison is
+  // there whether or not you can afford the politics. Billing it first is what
+  // makes the competition real: a conqueror who cannot cover both loses the
+  // courtship, not the conquest, and that is the trade the design is about.
+  let spent = chargeOccupation(state, pid);
   const courting = courtingList(state, pid);
   // Longest-running first: an established courtship is the one worth keeping.
   courting.sort((a, b) => (postureOf(state, pid, a).since) - (postureOf(state, pid, b).since));

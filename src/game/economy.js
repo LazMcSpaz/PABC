@@ -15,13 +15,93 @@ import { recomputeInfluence } from "./influence.js";
 import { hasTechNode } from "./tech.js";
 import { holderOf } from "./control.js";
 import {
-  resolveBlockadeSites, creditBlockade, blockadeIncome, ownedBlockades,
+  resolveBlockadeSites, creditBlockade, blockadeDrainOn, ownedBlockades,
 } from "./blockades.js";
-import { supplyCutter } from "./movement.js";
+import { supplyCutter, hexIsFull } from "./movement.js";
+import { supplyDistanceFrom } from "./board.js";
+import { makeUnit, nextMusterIndex } from "./setup.js";
+import { factionDef } from "./content.js";
+import { recomputeVisibility } from "./visibility.js";
 
 // §20.6 — the Tech Level a chip of `techLevel` T demands of the builder
 // (the same §17.2 thresholds, applied to building). techLevel 1 → L1,
 // 2 → L3, 3 → L5.
+// Economy brief §7.1 — the supply verdict for a purchase at `hexId`.
+//
+//   { delay: 0 }              arrives now: connected interior, or your last city
+//   { delay: n }              paid now, arrives in n rounds
+//   { refused: true, ... }    cut off entirely AND you hold somewhere else
+//
+// `supplyFreeHops` is what a connected empire looks like — see the measurement
+// in its config comment. Past that, every hop is a round of convoy, which is
+// the same rate `sweepReinforcements` already walks a field reinforcement at.
+export function supplyVerdict(state, pid, hexId) {
+  const cfg = CONFIG.economy;
+  if (!cfg.supplyDelaysSpending) return { delay: 0 };
+  const r = supplyDistanceFrom(state, pid, hexId);
+  if (r.cut) {
+    return { refused: true, reason: "cut off from the rest of your holdings — nothing can reach here" };
+  }
+  if (r.sole) return { delay: 0, sole: true }; // your last city is never starved by this rule
+  return { delay: Math.max(0, (r.dist || 0) - (cfg.supplyFreeHops ?? 0)), dist: r.dist };
+}
+
+/**
+ * Queue a purchase that has been paid for but has not arrived.
+ *
+ * Deliberately the same shape as `state.reinforcements`: paid up front, swept
+ * at round end, delivered when its clock runs out. One model for "the scrap
+ * left, the goods are on the road", so a player learns it once.
+ */
+export function queueDelivery(state, pid, kind, hexId, rounds, payload = {}) {
+  state.deliveries = state.deliveries || [];
+  const entry = {
+    id: `dlv${state.deliveries.length + 1}-${state.round}`,
+    owner: pid, kind, hex: hexId,
+    arrivesOnRound: state.round + rounds,
+    ...payload,
+  };
+  state.deliveries.push(entry);
+  emit(state, "purchase_delayed", {
+    player: pid, kind, hex: hexId, rounds, arrivesOnRound: entry.arrivesOnRound,
+  });
+  return entry;
+}
+
+/**
+ * Round-end delivery sweep.
+ *
+ * A delivery whose destination has CHANGED HANDS is lost, not refunded: the
+ * convoy arrived and somebody else was standing there. That is the same
+ * contract `sweepReinforcements` applies when its target unit dies, and it is
+ * what stops a besieged city being a free bank.
+ */
+export function sweepDeliveries(state) {
+  if (!state.deliveries?.length) return;
+  const keep = [];
+  for (const d of state.deliveries) {
+    if (state.round < d.arrivesOnRound) { keep.push(d); continue; }
+    const loc = state.locations[d.hex];
+    if (!loc || loc.controller !== d.owner) {
+      emit(state, "purchase_lost", { player: d.owner, kind: d.kind, hex: d.hex });
+      continue;
+    }
+    if (d.kind === "rush") {
+      loc.buildProgress = (loc.buildProgress || 0) + d.points;
+      bankBuildSurplus(state, loc.controller, completeBuildIfDone(state, loc));
+    } else if (d.kind === "recruit") {
+      if (hexIsFull(state, loc.hexId)) { keep.push(d); continue; } // wait for room
+      const u = state.nextId("unit");
+      state.units[u] = makeUnit(u, d.owner, loc.hexId,
+        factionDef(d.owner)?.name || d.owner, nextMusterIndex(state, d.owner));
+      emit(state, "unit_recruited", { unit: u, player: d.owner, hex: loc.hexId });
+      recomputeVisibility(state, d.owner);
+    }
+    emit(state, "purchase_arrived", { player: d.owner, kind: d.kind, hex: d.hex });
+  }
+  state.deliveries = keep;
+}
+
 export function techLevelReqFor(chipTechLevel) {
   return CONFIG.economy.buildTechGate[chipTechLevel] || 1;
 }
@@ -100,6 +180,10 @@ export function locationOutput(state, loc) {
   if (loc.controller && hasTechNode(state, loc.controller, "eco-entry")) out += 1;
   // §17.5 Economy A1 (Refineries): +1 more scrap/Location — ADDS to the entry.
   if (loc.controller && hasTechNode(state, loc.controller, "eco-a1")) out += 1;
+  // §7.3 — a barricade on the doorstep. Applied last so the drain bites the
+  // whole Output rather than only its base, and floored at 0 rather than going
+  // negative: a strangled city produces nothing, it does not owe.
+  out -= blockadeDrainOn(state, loc);
   return Math.max(0, out);
 }
 
@@ -433,7 +517,7 @@ export function applyOutputAndBuilds(state, pid) {
   }
   // §3.2 Toll Booth — a blockade's own income, emitted separately from city
   // Output so the log says where the scrap came from.
-  const toll = blockadeIncome(state, pid);
+  const toll = 0; // §7.3 — a blockade drains its victim now; it pays nobody
   if (toll > 0) {
     state.players[pid].resource += toll;
     emit(state, "resource_gained", {

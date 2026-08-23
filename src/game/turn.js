@@ -14,6 +14,7 @@ import { evaluateConditionalBeats, offerQuests } from "./quests.js";
 import { resetBeatBudget } from "./beatBudget.js";
 import {
   applyOutputAndBuilds, chargeChipUpkeep, chargeUnitUpkeep, enforceLoyaltySlotCap,
+  sweepDeliveries,
 } from "./economy.js";
 import {
   runDiplomacyRound, vassalsOf, arePacted, adjustMenace, sweepTrespass,
@@ -442,6 +443,9 @@ function runRoundEnd(state) {
   sweepPlayerFlags(state);
   sweepSecondments(state);
   sweepReinforcements(state);
+  // §7.1 — purchases paid for off-supply, arriving. Alongside the convoy
+  // sweep, because they are the same model.
+  sweepDeliveries(state);
   evaluateTriggers(state);
   evaluateConditionalBeats(state);
   expirePlacementMarkers(state);

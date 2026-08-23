@@ -34,6 +34,8 @@ import { recomputeResearch } from "../src/game/stats.js";
 import * as DIP from "../src/game/diplomacy.js";
 import { reinforcementRoute } from "../src/game/board.js";
 import { swayIncome, swayOf, dominatedHexes } from "../src/game/sway.js";
+import { supplyVerdict, sweepDeliveries } from "../src/game/economy.js";
+import { supplyDistanceFrom } from "../src/game/board.js";
 import { runDiplomacyRound } from "../src/game/diplomacy.js";
 
 const verbose = process.argv.includes("--verbose");
@@ -184,16 +186,77 @@ block(2, "A faction holding one Location can still Rush and Recruit there, round
 
 // --------------------------------------------------------------------
 block(3, "An off-supply purchase is DELAYED by route.dist, and refused only when the route is null and another holding exists",
-  "economy 3", false, (check, note) => {
+  "economy 3", true, (check, note) => {
+    note(`supplyDelaysSpending ${CONFIG.economy.supplyDelaysSpending}, ` +
+         `supplyFreeHops ${CONFIG.economy.supplyFreeHops}`);
+    check("the delay rule is switched on", CONFIG.economy.supplyDelaysSpending === true);
+
+    // A connected interior city is undelayed — "distance 0 at a connected
+    // city", which is the line that keeps this from taxing ordinary play.
+    // Measured: 42% of location-rounds are a faction's last city and 50% sit
+    // 1-2 hops from the nearest other holding.
     const g = mk();
     startTurn(g);
-    note(`CONFIG.economy.supplyDelaysSpending = ${CONFIG.economy.supplyDelaysSpending}`);
-    check("the delay rule is switched on",
-      CONFIG.economy.supplyDelaysSpending === true,
-      "the tunable does not exist");
-    check("a delayed purchase emits purchase_delayed carrying its ETA",
-      g.log.some((e) => e.name === "purchase_delayed"),
-      "no such event is ever emitted");
+    const pid = "versari";
+    const home = Object.values(g.locations).find((l) => l.controller === pid);
+    check("a connected city is not delayed", supplyVerdict(g, pid, home.hexId).delay === 0,
+      JSON.stringify(supplyVerdict(g, pid, home.hexId)));
+
+    // A far-flung holding pays a convoy's worth of rounds.
+    const far = Object.values(g.locations).find(
+      (l) => !l.controller && supplyDistanceFrom(g, pid, l.hexId).dist > CONFIG.economy.supplyFreeHops);
+    if (far) {
+      far.controller = pid; far.sections = far.sections.map(() => pid);
+      const v = supplyVerdict(g, pid, far.hexId);
+      note(`${far.locationId}: ${v.dist} hops -> ${v.delay} rounds`);
+      check("…and a distant one is delayed by the hops past the free range",
+        v.delay === v.dist - CONFIG.economy.supplyFreeHops, JSON.stringify(v));
+    } else {
+      note("(no Location past the free range on this seed)");
+    }
+
+    // A purchase there is PAID NOW and ARRIVES LATER, and the event says so.
+    const g2 = mk();
+    startTurn(g2);
+    const far2 = Object.values(g2.locations).find(
+      (l) => l.controller !== pid && supplyDistanceFrom(g2, pid, l.hexId).dist > CONFIG.economy.supplyFreeHops);
+    if (far2) {
+      far2.controller = pid; far2.sections = far2.sections.map(() => pid);
+      far2.actionsRemaining = 4;
+      g2.players[pid].resource = 200;
+      const opt = Object.values(CHIPS).find((c) => c.kind === "location" && (c.techLevel || 1) === 1);
+      performAction(g2, "build", { at: far2.hexId, chipId: opt.id });
+      const before = g2.players[pid].resource;
+      const r = performAction(g2, "rush", { at: far2.hexId });
+      check("an off-supply rush is accepted, not refused", r.ok, r.reason);
+      check("…and paid for immediately", g2.players[pid].resource < before);
+      check("…and queued rather than applied", !!r.queued && (far2.buildProgress || 0) === 0,
+        JSON.stringify(r));
+      check("…and the board is told, with an ETA",
+        g2.log.some((e) => e.name === "purchase_delayed" && e.payload.arrivesOnRound > g2.round));
+      // …and it lands when its clock runs out. Asserted on the ARRIVAL rather
+      // than on `buildProgress`: a rush big enough to finish the chip completes
+      // the build and resets progress to zero, so reading progress would call
+      // the most successful case a failure.
+      let guard = 12;
+      while (g2.deliveries?.length && guard-- > 0) { g2.round += 1; sweepDeliveries(g2); }
+      check("…and it arrives",
+        g2.log.some((e) => e.name === "purchase_arrived" && e.payload.kind === "rush")
+        && !g2.log.some((e) => e.name === "purchase_lost"));
+    } else {
+      note("(no takeable Location past the free range on this seed)");
+    }
+
+    // THE SOFT-LOCK GUARD, restated here because it is the thing this stage
+    // most easily breaks: refusal needs BOTH no route AND somewhere else to
+    // route from. A faction reduced to its last city is never starved.
+    const g3 = mk();
+    startTurn(g3);
+    const mine = Object.values(g3.locations).filter((l) => l.controller === pid);
+    for (const l of mine.slice(1)) { l.controller = null; l.sections = l.sections.map(() => null); }
+    check("your last city is never refused, however cut off it is",
+      !supplyVerdict(g3, pid, mine[0].hexId).refused,
+      JSON.stringify(supplyVerdict(g3, pid, mine[0].hexId)));
   });
 
 // --------------------------------------------------------------------
@@ -240,19 +303,112 @@ function giftPathsMovingStanding(g) {
 
 // --------------------------------------------------------------------
 block(5, "Occupation charges every round, stops on cession or elimination, and never charges a startingController Location",
-  "economy 6", false, (check, note) => {
-    const g = mk();
+  "economy 6", true, (check, note) => {
+    const g = mk({ minors: ["croppers"] });
+    startTurn(g);
+    const cfg = CONFIG.sway;
+
     const stamped = Object.values(g.locations).filter((l) => l.startingController);
     note(`Locations stamped with startingController: ${stamped.length} of ${Object.keys(g.locations).length}`);
     check("setup stamps loc.startingController", stamped.length > 0,
       "no Location carries the field, so provenance cannot be told from conquest");
-    // The Croppers open holding omara, whose affiliation is goldgrass — the
-    // exact case the brief names, and the reason the stamp exists.
-    const omara = Object.values(g.locations).find((l) => l.locationId === "omara");
-    if (omara) note(`omara: affiliation ${LOCATIONS.omara?.affiliation}, controller ${omara.controller}`);
-    check("an occupation charge is emitted while a rival homeland is held",
-      g.log.some((e) => e.name === "occupation_charged"),
-      "no such event is ever emitted");
+
+    // THE CASE THE STAMP EXISTS FOR. The setup deals affiliated Locations to
+    // other factions, so without provenance a faction is billed from round one
+    // for ground it never took.
+    const dealt = stamped.find((l) => {
+      const aff = LOCATIONS[l.locationId]?.affiliation;
+      return aff && aff !== l.startingController;
+    });
+    if (dealt) {
+      note(`${dealt.locationId}: affiliation ${LOCATIONS[dealt.locationId].affiliation},` +
+           ` dealt at setup to ${dealt.startingController}`);
+      check("…and ground the setup dealt you is never an occupation",
+        !DIP.occupationCharges(g, dealt.startingController).some((o) => o.hex === dealt.hexId));
+    } else {
+      note("(no affiliated Location was dealt to another faction on this seed)");
+    }
+
+    // Now TAKE somebody's homeland.
+    const prize = Object.values(g.locations).find((l) => {
+      const aff = LOCATIONS[l.locationId]?.affiliation;
+      return aff && aff !== "versari" && g.players[aff] && l.startingController !== "versari";
+    });
+    if (!prize) throw new Error("no takeable homeland on this board");
+    const aggrieved = LOCATIONS[prize.locationId].affiliation;
+    prize.controller = "versari";
+    prize.sections = prize.sections.map(() => "versari");
+    const charges = DIP.occupationCharges(g, "versari");
+    check("holding a surviving faction's homeland is an occupation",
+      charges.some((o) => o.hex === prize.hexId && o.aggrieved === aggrieved),
+      JSON.stringify(charges));
+
+    // It is charged EVERY round, not once, and not gated on Loyalty — a
+    // garrisoned conquest clears half the Loyalty ceiling in three rounds, so
+    // a Loyalty gate made the lifetime charge smaller than one round of
+    // courting one faction.
+    g.players.versari.sway = Math.floor(cfg.cap / 2);
+    g.round += 1; DIP.runDiplomacyRound(g);
+    g.round += 1; DIP.runDiplomacyRound(g);
+    check("…and it is billed every round it is held",
+      g.log.filter((e) => e.name === "occupation_charged").length >= 2);
+    // Read the SPEND, not the pool: income lands before the charge, so a
+    // faction near the ceiling pays in full and still shows the same total.
+    check("…in Sway, so conquest and courtship draw on the same pool",
+      g.log.some((e) => e.name === "sway_spent" && /holding/.test(e.payload.cause || "")),
+      "no Sway was spent on holding anything");
+
+    // ARREARS. A conqueror who never does politics must not get occupation
+    // free just by never holding any Sway. Forced by taking MORE homelands
+    // than the income covers — which is also the only way it happens in a real
+    // game, and worth knowing: at occupation 6 against a floor of 6, one
+    // conquest is always affordable and it is the second and third that bite.
+    const g3 = mk();
+    startTurn(g3);
+    let taken = 0;
+    const victims = [];
+    for (const l of Object.values(g3.locations)) {
+      const aff = LOCATIONS[l.locationId]?.affiliation;
+      if (!aff || aff === "versari" || !g3.players[aff]) continue;
+      if (l.startingController === "versari") continue;
+      l.controller = "versari"; l.sections = l.sections.map(() => "versari");
+      victims.push(aff); taken += 1;
+    }
+    note(`took ${taken} foreign homelands — owing ${taken * cfg.occupation} a round`);
+    g3.players.versari.sway = 0;
+    const owed = DIP.occupationCharges(g3, "versari").length * cfg.occupation;
+    const income = DIP.swayIncome(g3, "versari").total;
+    note(`owed ${owed} against an income of ${income}`);
+    const before3 = victims.map((v) => DIP.getStanding(g3, v, "versari"));
+    g3.round += 1; DIP.runDiplomacyRound(g3);
+    const after3 = victims.map((v) => DIP.getStanding(g3, v, "versari"));
+    check("a conqueror who cannot pay pays in reputation instead",
+      owed <= income || after3.some((s, i) => s < before3[i]),
+      `owed ${owed}, income ${income}, standings ${before3} -> ${after3}`);
+    check("…and the board is told which bills were paid and which were not",
+      owed <= income || g3.log.some((e) => e.name === "occupation_charged" && e.payload.arrears > 0));
+
+    // It STOPS on cession.
+    DIP.cedeLocation(g, "versari", aggrieved, prize.hexId, "test");
+    check("giving it back ends the charge immediately",
+      !DIP.occupationCharges(g, "versari").some((o) => o.hex === prize.hexId));
+
+    // …and on the aggrieved faction's elimination. There is nobody left to
+    // hold a grievance about it.
+    const g2 = mk();
+    startTurn(g2);
+    const prize2 = Object.values(g2.locations).find((l) => {
+      const aff = LOCATIONS[l.locationId]?.affiliation;
+      return aff && aff !== "versari" && g2.players[aff] && l.startingController !== "versari";
+    });
+    const agg2 = LOCATIONS[prize2.locationId].affiliation;
+    prize2.controller = "versari";
+    prize2.sections = prize2.sections.map(() => "versari");
+    check("…and holding it while they live is an occupation",
+      DIP.occupationCharges(g2, "versari").some((o) => o.hex === prize2.hexId));
+    g2.players[agg2].eliminated = true;
+    check("…which ends when there is nobody left to be aggrieved",
+      !DIP.occupationCharges(g2, "versari").some((o) => o.hex === prize2.hexId));
   });
 
 // --------------------------------------------------------------------
@@ -261,23 +417,44 @@ block(5, "Occupation charges every round, stops on cession or elimination, and n
 // 671 hexes of empty wilderness, walled supply for free, and made 199
 // unit-rounds of trespassers on their own ground.
 block(6, "Unit influence moves pressureSource and leaves state.world.zoc byte-identical",
-  "economy 7", false, (check, note) => {
+  "economy 7", true, (check, note) => {
     const g = mk();
     startTurn(g);
-    recomputeInfluence(g);
-    const zocBefore = JSON.stringify(g.world.zoc);
-    // Park every unit a faction owns on one rival Location's hex.
     const victim = Object.values(g.locations).find((l) => l.controller && l.controller !== "lakers");
     if (!victim) throw new Error("no rival Location on this board");
-    const stack = Object.values(g.units).filter((u) => u.owner === "lakers");
-    for (const u of stack) u.node = victim.hexId;
-    note(`${stack.length} lakers units parked on ${victim.locationId} (${victim.controller})`);
+    // A city already hollowed out — Loyalty low, which is what a place under
+    // siege actually looks like. A stack cannot out-project a capital at the
+    // ceiling and is not meant to: measured, three units TIE a Loyalty-4
+    // ring, six are needed against Loyalty 8 and eleven against a Beacon,
+    // while the largest same-owner stack seen across seven games was five.
+    victim.loyalty = 0;
     recomputeInfluence(g);
-    check("the ZoC map is unchanged by a unit stack",
-      JSON.stringify(g.world.zoc) === zocBefore, "units are painting the ZoC map");
+    // Snapshot AFTER the Loyalty change and BEFORE the units, so the only
+    // variable between the two readings is the stack. Taking it earlier would
+    // have blamed the units for a border the Loyalty drop legitimately moved.
+    const zocBefore = JSON.stringify(g.world.zoc);
+    const proto = Object.values(g.units).find((u) => u.owner === "lakers") || Object.values(g.units)[0];
+    for (let i = 0; i < 4; i += 1) {
+      const uid = g.nextId("unit");
+      g.units[uid] = { ...proto, uid, owner: "lakers", chips: [], node: victim.hexId };
+    }
+    recomputeInfluence(g);
+    note(`${Object.values(g.units).filter((u) => u.node === victim.hexId && u.owner === "lakers").length}` +
+      ` lakers units on ${victim.locationId} (${victim.controller}, Loyalty ${victim.loyalty})`);
+
+    // THE SCOPING CHECK, and it is the whole point of the stage. The first
+    // draft fed units into `deriveZoC`: of 745 ZoC hexes changed, 671 were
+    // empty wilderness being painted, ~4.6 free mobile supply walls appeared
+    // per round obsoleting the blockade, and 199 unit-rounds made a unit a
+    // trespasser on its own ground.
+    check("the ZoC map is byte-identical under a unit stack",
+      JSON.stringify(g.world.zoc) === zocBefore,
+      "units are painting the ZoC map — this is the failure the stage exists to avoid");
     check("…but the stack registers as pressure on the city",
       pressureSource(g, victim, victim.controller) === "lakers",
       `pressureSource returned ${pressureSource(g, victim, victim.controller)}`);
+    check("…and the unit field is kept separate from the influence field",
+      g.world.unitPressure && g.world.unitPressure !== g.world.influence);
   });
 
 // --------------------------------------------------------------------

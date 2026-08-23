@@ -13,6 +13,7 @@ import { CHIPS, ABILITIES, chipBlocksRail } from "./content.js";
 export { passesFreely, supplyCutter, hasRailAccess } from "./diplomacy.js";
 import { passesFreely, hasRailAccess } from "./diplomacy.js";
 import { isHexExplored, isHexVisible, isUnitVisibleTo, canSeeUnitAt } from "./visibility.js";
+import { hasTechNode } from "./tech.js";
 
 const BIG_BUDGET = 999; // budget-agnostic routing for display
 
@@ -138,6 +139,57 @@ export function tollTaxedHexes(state, ownerId) {
   return taxed;
 }
 
+// Economy brief §10.2 — ZoC COSTS MOVEMENT.
+//
+// The single most standard ZoC verb in the genre, and it was missing entirely:
+// `blockerScan` never consults `state.world.zoc` at all — it blocks on ground
+// truth (enemy units, enemy Location hexes, completed blockades). So the field
+// that defines "territory" for every DIPLOMATIC purpose — trespass, the
+// withdraw ultimatum, `unitsInTerritory` — had no effect whatever on walking
+// through it.
+//
+// This is the cheapest possible way to make the field something a player plays
+// AGAINST rather than merely receives, and it makes the dashed ring the board
+// already draws mean something at the moment of the move. It stays well clear
+// of contest maths, which `mechanical-spec` §18.3 deferred deliberately and
+// correctly: a border combat bonus makes the leader's border stronger with no
+// counterplay.
+//
+// Waived by `log-a2` Forward Supply, which already waives the supply wall in
+// `reinforcementRoute` — one node, one meaning: your columns move through
+// foreign ground as if it were open.
+//
+// `passesFreely` is the same predicate open borders and trespass read, so a
+// pact, a vassalage or genuinely warm relations all waive the toll. You are
+// not picking your way through a rival's country when you are welcome in it.
+export function zocTaxedHexes(state, ownerId) {
+  const taxed = new Map();
+  const cost = CONFIG.influence?.zocMoveCost || 0;
+  if (!cost) return taxed;                                  // 0 switches it off
+  if (hasTechNode(state, ownerId, "log-a2")) return taxed;   // Forward Supply
+  const zoc = state.world?.zoc || {};
+  for (const hex in zoc) {
+    const owner = zoc[hex];
+    if (!owner || owner === ownerId) continue;
+    if (passesFreely(state, ownerId, owner)) continue;
+    taxed.set(hex, cost);
+  }
+  return taxed;
+}
+
+// The two entry surcharges a mover faces, merged. A hex that is both a rival's
+// ZoC and inside a Toll Gate's ring costs BOTH — they are different things
+// being charged for (a border you are slipping across, and a gate you are
+// passing) and a max() would silently make one of them free.
+function entrySurcharges(state, ownerId) {
+  const toll = tollTaxedHexes(state, ownerId);
+  const zoc = zocTaxedHexes(state, ownerId);
+  if (!zoc.size) return toll;
+  const merged = new Map(toll);
+  for (const [hex, c] of zoc) merged.set(hex, (merged.get(hex) || 0) + c);
+  return merged;
+}
+
 // Rail hops this unit may take (docs/rail-road-blockade-design.md §2.1/2.3),
 // as a Map hexId -> [reachable hexIds]. Three gates, all from the doc:
 //   * the unit must not carry a rail-incompatible chip (2-slot chips — a
@@ -229,7 +281,7 @@ export function unitReach(state, unit) {
     blockedThrough: scan.blocked,
     surprise: scan.unseen,
     ignoreTerrain: unitIgnoresTerrain(state, unit),
-    extraCost: tollTaxedHexes(state, unit.owner),
+    extraCost: entrySurcharges(state, unit.owner),
     railEdges: unitRailEdges(state, unit),
   });
   // A full hex may still be walked THROUGH — the cap is about what can stand
@@ -252,7 +304,7 @@ export function unitMovePath(state, unit, dest) {
       ignoreUnits: unitPassesThroughUnits(state, unit), mover: unit,
     }),
     ignoreTerrain: unitIgnoresTerrain(state, unit),
-    extraCost: tollTaxedHexes(state, unit.owner),
+    extraCost: entrySurcharges(state, unit.owner),
     railEdges: unitRailEdges(state, unit),
   });
 }
