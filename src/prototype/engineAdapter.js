@@ -16,7 +16,7 @@ import {
 } from "../game/content.js";
 import {
   buildableChips, upgradeOption, slotCapacity, slotsUsed, locationOutput, meetsTech,
-  unitUpkeepFor,
+  unitUpkeepFor, chipUpkeepFor, chipsHeldBy,
 } from "../game/economy.js";
 import { recruitCapBonus } from "../game/actions.js";
 import { blockadeAt, blockadesOn, supplyStatus, blockadeSlotsUsed, blockadeIncome } from "../game/blockades.js";
@@ -216,19 +216,34 @@ function buildRows(state) {
     .map((r) => byRow[r].sort((a, b) => a.col - b.col).map((h) => h.id));
 }
 
-// What a chip list costs its owner each Upkeep (§20.9). One reader, so every
-// place the UI quotes an upkeep quotes the same number the engine charges.
-function chipUpkeep(state, chipUids) {
+// What a chip list costs its owner each Upkeep (§20.9, and economy §8's count
+// surcharge on top). One reader, so every place the UI quotes an upkeep quotes
+// the same number the engine charges — the count surcharge is exactly the kind
+// of cost that would otherwise appear only on the ledger, which is where a
+// player stops trusting the numbers.
+function chipUpkeep(state, chipUids, owner = null) {
   let n = 0;
-  for (const c of chipUids || []) n += ENGINE_CHIPS[state.chips[c]?.chipId]?.upkeep || 0;
+  if (!owner) {
+    for (const c of chipUids || []) n += ENGINE_CHIPS[state.chips[c]?.chipId]?.upkeep || 0;
+    return n;
+  }
+  for (const c of chipUids || []) n += chipUpkeepFor(state, owner, c);
   return n;
+}
+
+// ECONOMY §8 — what ONE MORE chip would add to the round's bill, beyond
+// whatever it authors itself. Zero until the free allowance is used up.
+function marginalChipSurcharge(state, fid) {
+  const cfg = CONFIG.economy;
+  if (!fid || !cfg.perExtraChip || cfg.freeChips == null) return 0;
+  return chipsHeldBy(state, fid).length >= cfg.freeChips ? cfg.perExtraChip : 0;
 }
 
 // A unit's FULL per-turn bill: its own keep (1, doubled once the bay is full)
 // plus whatever its chips charge on top. A Landship-carrying unit pays for
 // both the bay being full AND the chip, and the panel should say so.
 function unitTotalUpkeep(state, u) {
-  return unitUpkeepFor(state, u) + chipUpkeep(state, u.chips);
+  return unitUpkeepFor(state, u) + chipUpkeep(state, u.chips, u.owner);
 }
 
 function adaptChips(state, chipUids) {
@@ -682,7 +697,12 @@ function adaptEconomy(state, loc) {
       // per-unit outfit menu needs the family to explain a refusal.
       statType: o.def.statType || null,
       cost: o.def.buildCost ?? o.def.cost ?? 0,
-      upkeep: o.def.upkeep || 0,
+      // What it would ACTUALLY cost to keep: its own upkeep plus economy §8's
+      // count surcharge if it would land past the free allowance. Quoting the
+      // authored number alone would understate the bill for exactly the player
+      // who most needs to see it — the one with a lot of chips.
+      upkeep: (o.def.upkeep || 0) + marginalChipSurcharge(state, loc.controller),
+      surcharged: marginalChipSurcharge(state, loc.controller) > 0,
       slots: o.def.slots || 1,
       desc: o.def.desc || "",
       locked: o.locked,
@@ -700,6 +720,8 @@ function adaptEconomy(state, loc) {
         uiChipId: engineChipIdToUi(opt.chipId),
         name: chipDisplayName(opt.chipId, loc.controller),
         cost: opt.def.buildCost ?? opt.def.cost ?? 0,
+        // An upgrade REPLACES a chip in its own slot, so the count does not
+        // change and no surcharge applies — only the new chip's own upkeep.
         upkeep: opt.def.upkeep || 0,
         desc: opt.def.desc || "",
         locked: opt.locked,
@@ -2058,7 +2080,7 @@ export function economyReport(state, fid) {
     if (b.owner !== fid) continue;
     // An unfinished site costs nothing yet — it is paid for out of a
     // settlement's build output, not from the treasury.
-    const cost = (b.done ? CONFIG.blockades.upkeep : 0) + chipUpkeep(state, b.chips);
+    const cost = (b.done ? CONFIG.blockades.upkeep : 0) + chipUpkeep(state, b.chips, fid);
     if (!b.done && cost === 0) continue;
     structureCost += cost;
     structures.push({

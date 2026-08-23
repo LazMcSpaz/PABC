@@ -531,32 +531,48 @@ export function applyOutputAndBuilds(state, pid) {
 // player keeps as many chips live as possible; any chip that can't be paid
 // goes DORMANT (the §12.5 `disabled` flag suppresses its passives) and
 // reactivates the moment its upkeep can be paid again. Never destroyed.
-export function chargeChipUpkeep(state, pid) {
-  const player = state.players[pid];
-  const bearing = [];
+// Every chip `pid` holds, in install order. `nextId` hands out monotonically
+// increasing uids, so sorting on them is "oldest first" without a second
+// timestamp to keep in sync.
+export function chipsHeldBy(state, pid) {
+  const all = [];
   for (const loc of Object.values(state.locations)) {
     if (loc.controller !== pid) continue;
-    for (const c of loc.chips) {
-      const up = chipDefOf(state, c)?.upkeep || 0;
-      if (up > 0) bearing.push({ uid: c, upkeep: up, holder: loc });
-    }
+    for (const c of loc.chips) all.push({ uid: c, holder: loc });
   }
   for (const u of Object.values(state.units)) {
     if (u.owner !== pid) continue;
-    for (const c of u.chips) {
-      const up = chipDefOf(state, c)?.upkeep || 0;
-      if (up > 0) bearing.push({ uid: c, upkeep: up, holder: u });
-    }
+    for (const c of u.chips) all.push({ uid: c, holder: u });
   }
-  // Blockade chips pay upkeep like any other. None of the three authored today
-  // charges any, but a chip def's `upkeep` being silently ignored is exactly
-  // the hole that bites when the content batch adds one.
   for (const b of ownedBlockades(state, pid)) {
-    for (const c of b.chips || []) {
-      const up = chipDefOf(state, c)?.upkeep || 0;
-      if (up > 0) bearing.push({ uid: c, upkeep: up, holder: b });
-    }
+    for (const c of b.chips || []) all.push({ uid: c, holder: b });
   }
+  return all.sort((a, b) => String(a.uid).localeCompare(String(b.uid), undefined, { numeric: true }));
+}
+
+// ECONOMY §8 — what one chip actually costs its holder this round: its own
+// authored `upkeep`, plus the count surcharge if it sits past the free
+// allowance. Exported because the HUD quotes it, and a number the player is
+// quoted that differs from the number they are charged is the oldest bug in
+// this file.
+export function chipUpkeepFor(state, pid, uid, index = null) {
+  const cfg = CONFIG.economy;
+  const base = chipDefOf(state, uid)?.upkeep || 0;
+  if (!cfg.perExtraChip || cfg.freeChips == null) return base;
+  const i = index == null
+    ? chipsHeldBy(state, pid).findIndex((c) => c.uid === uid)
+    : index;
+  return base + (i >= cfg.freeChips ? cfg.perExtraChip : 0);
+}
+
+export function chargeChipUpkeep(state, pid) {
+  const player = state.players[pid];
+  const held = chipsHeldBy(state, pid);
+  const bearing = [];
+  held.forEach((c, i) => {
+    const up = chipUpkeepFor(state, pid, c.uid, i);
+    if (up > 0) bearing.push({ uid: c.uid, upkeep: up, holder: c.holder });
+  });
   if (!bearing.length) return;
   bearing.sort((a, b) => a.upkeep - b.upkeep);
 

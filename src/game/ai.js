@@ -11,7 +11,7 @@ import { bfsDistances } from "./board.js";
 import { unitReach } from "./movement.js";
 import { LOCATIONS, CHIPS } from "./content.js";
 import { CONFIG } from "./config.js";
-import { buildableChips, slotCapacity, slotsUsed, stationedUnitWithBay, upgradeOption, effectiveBuildCost } from "./economy.js";
+import { buildableChips, slotCapacity, slotsUsed, stationedUnitWithBay, upgradeOption, effectiveBuildCost, chipsHeldBy } from "./economy.js";
 import { chipValue, upgradeValue } from "./chipValue.js";
 import { isUnitVisibleTo } from "./visibility.js";
 import { previewAttackerStrength, previewLocationContest } from "./contest.js";
@@ -1086,6 +1086,7 @@ function pickBuild(state, pid, loc) {
   // swing hard on it — a Loyalty chip on a quiet interior city is worth a
   // fraction of the same chip on a border one point below the dominance bar.
   const ctx = { state, loc, contested: locationIsContested(state, pid, loc) };
+  const chipCount = chipsHeldBy(state, pid).length;
   // Value per scrap, not value. Two chips worth 3 and 4 are not ranked by
   // those numbers when one costs 3 and the other 7 — and neither the old
   // six-field table nor the first draft of the new one looked at price at all,
@@ -1105,6 +1106,14 @@ function pickBuild(state, pid, loc) {
     // capacity nobody is against. Priced here because the table sees the chip
     // and not the faction.
     if ((def.unitCapBonus || 0) > 0 && !haveRecruiting) s += 5;
+    // ECONOMY §8 — the count surcharge is a real per-round cost and the table
+    // cannot see it, because it is a property of how many chips you already
+    // hold and not of the chip. Priced on the same per-round axis as `upkeep`,
+    // so an AI past its free allowance stops treating slots as free.
+    const eco = CONFIG.economy;
+    if (eco.perExtraChip && eco.freeChips != null && chipCount >= eco.freeChips) {
+      s -= eco.perExtraChip * 2 * (CONFIG.ai.compoundingWeight ?? 1);
+    }
     return perScrap(def, s);
   };
 

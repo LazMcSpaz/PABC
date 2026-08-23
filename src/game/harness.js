@@ -72,7 +72,7 @@ import { evalCond, evalStrength } from "./dsl.js";
 import { registerQuest } from "./quests.js";
 import { CONFIG } from "./config.js";
 import { takeAITurn, maybeAssignTech, warPeaceTerms } from "./ai.js";
-import { enforceLoyaltySlotCap, chargeChipUpkeep, slotCapacity, effectiveBuildCost, buildableChips, applyOutputAndBuilds, locationOutput, unitUpkeepFor, chargeUnitUpkeep } from "./economy.js";
+import { enforceLoyaltySlotCap, chargeChipUpkeep, slotCapacity, effectiveBuildCost, buildableChips, applyOutputAndBuilds, locationOutput, unitUpkeepFor, chargeUnitUpkeep, chipsHeldBy, chipUpkeepFor } from "./economy.js";
 
 const seed = Number(process.argv[2]) || 42;
 const line = (s = "") => console.log(s);
@@ -4642,6 +4642,62 @@ line("\n  [§12.3] what Sway buys when the courtships are paid for");
       && g.players.versari.sway === 500);
   } finally { o.enabled = was; }
   check("…and the AI's own intrigue pass ships off", CONFIG.ai.intrigue === 0);
+}
+
+// Economy §8 — a COUNT-based obligation, because a per-chip one never arrived.
+//
+// Five of forty authored chips carry any `upkeep` at all, so a faction could
+// accumulate thirty-five of them for nothing. Measured on seed 1234 at round
+// 20, the leader held 20 chips while two of the four majors held none — so a
+// count obligation bites exactly where a sink should, on the faction that is
+// winning, and is invisible to the one that is losing.
+line("\n  [economy §8] the Nth chip past the allowance costs something");
+{
+  const eco = CONFIG.economy;
+  const g = createGame({ seed });
+  startTurn(g);
+  const pid = "versari";
+  const home = Object.values(g.locations).find((l) => l.controller === pid);
+  const free = Object.values(CHIPS).find((c) => !(c.upkeep > 0) && c.kind === "location");
+  for (let i = 0; i < eco.freeChips + 3; i += 1) {
+    const u = g.nextId("chip");
+    g.chips[u] = { uid: u, chipId: free.id };
+    home.chips.push(u);
+  }
+  const held = chipsHeldBy(g, pid);
+  check("every chip a faction holds is counted, wherever it sits",
+    held.length >= eco.freeChips + 3);
+  check("…a chip inside the allowance costs only what it authored",
+    held.slice(0, eco.freeChips).every((c, i) => chipUpkeepFor(g, pid, c.uid, i) === 0));
+  check(`…and each one past it costs ${eco.perExtraChip} more`,
+    held.slice(eco.freeChips).every((c, i) =>
+      chipUpkeepFor(g, pid, c.uid, eco.freeChips + i) === eco.perExtraChip));
+
+  // Charged, not merely quoted.
+  g.players[pid].resource = 200;
+  const before = g.players[pid].resource;
+  chargeChipUpkeep(g, pid);
+  check("…and the bill is actually taken",
+    before - g.players[pid].resource >= (held.length - eco.freeChips) * eco.perExtraChip);
+
+  // Cannot pay -> dormant, never destroyed. The surcharge must not be a way to
+  // lose chips you built, only a reason to stop building more.
+  g.players[pid].resource = 0;
+  chargeChipUpkeep(g, pid);
+  check("…and a faction that cannot pay goes dormant, never loses the chip",
+    chipsHeldBy(g, pid).length === held.length
+    && held.slice(eco.freeChips).some((c) => g.chips[c.uid].disabled));
+  g.players[pid].resource = 200;
+  chargeChipUpkeep(g, pid);
+  check("…and it comes back the moment the bill can be met",
+    held.slice(eco.freeChips).every((c) => !g.chips[c.uid].disabled));
+
+  const was = eco.perExtraChip;
+  try {
+    eco.perExtraChip = 0;
+    check("…and perExtraChip 0 is a true no-op",
+      held.every((c, i) => chipUpkeepFor(g, pid, c.uid, i) === 0));
+  } finally { eco.perExtraChip = was; }
 }
 
 // §1.2 / economy §6.3 — gifts are priced in SWAY now, not scrap. The

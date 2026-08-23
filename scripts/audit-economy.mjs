@@ -34,7 +34,7 @@ import { recomputeResearch } from "../src/game/stats.js";
 import * as DIP from "../src/game/diplomacy.js";
 import { reinforcementRoute } from "../src/game/board.js";
 import { swayIncome, swayOf, dominatedHexes } from "../src/game/sway.js";
-import { supplyVerdict, sweepDeliveries } from "../src/game/economy.js";
+import { supplyVerdict, sweepDeliveries, chipsHeldBy, chipUpkeepFor, chargeChipUpkeep } from "../src/game/economy.js";
 import { supplyDistanceFrom } from "../src/game/board.js";
 import { runDiplomacyRound } from "../src/game/diplomacy.js";
 import { chipValue, VALUED_FIELDS, NON_EFFECT_FIELDS } from "../src/game/chipValue.js";
@@ -530,13 +530,57 @@ block(8, "Every chip field authored in content.js is valued by the AI",
 
 // --------------------------------------------------------------------
 block(9, "The Nth chip past economy.freeChips costs 1 per round",
-  "economy 8", false, (check, note) => {
-    note(`CONFIG.economy.freeChips = ${CONFIG.economy.freeChips}`);
+  "economy 8", true, (check, note) => {
+    const cfg = CONFIG.economy;
+    note(`CONFIG.economy.freeChips = ${cfg.freeChips}, perExtraChip = ${cfg.perExtraChip}`);
     const paying = Object.values(CHIPS).filter((c) => (c.upkeep || 0) > 0);
-    note(`chips carrying their own upkeep today: ${paying.length} of ${Object.keys(CHIPS).length}` +
+    note(`chips carrying their own upkeep: ${paying.length} of ${Object.keys(CHIPS).length}` +
          ` — ${paying.map((c) => c.id).join(", ")}`);
-    check("the count-based obligation exists", CONFIG.economy.freeChips != null,
+    check("the count-based obligation exists", cfg.freeChips != null,
       "the tunable does not exist");
+
+    // Plant a run of free chips on one faction and read the bill.
+    const g = mk();
+    startTurn(g);
+    const pid = "versari";
+    const home = Object.values(g.locations).find((l) => l.controller === pid);
+    const free = Object.values(CHIPS).find((c) => !(c.upkeep > 0) && c.kind === "location");
+    if (!free) throw new Error("no zero-upkeep location chip in content.js");
+    const planted = [];
+    for (let i = 0; i < cfg.freeChips + 3; i += 1) {
+      const u = g.nextId("chip");
+      g.chips[u] = { uid: u, chipId: free.id };
+      home.chips.push(u); planted.push(u);
+    }
+    const held = chipsHeldBy(g, pid);
+    note(`chips held: ${held.length} (allowance ${cfg.freeChips})`);
+    const inAllowance = held.slice(0, cfg.freeChips)
+      .every((c, i) => chipUpkeepFor(g, pid, c.uid, i) === (CHIPS[g.chips[c.uid]?.chipId]?.upkeep || 0));
+    check("a chip inside the allowance costs only whatever it authored", inAllowance);
+    const past = held.slice(cfg.freeChips);
+    check(`each chip past the allowance costs ${cfg.perExtraChip} more per round`,
+      past.every((c, i) => chipUpkeepFor(g, pid, c.uid, cfg.freeChips + i)
+        === (CHIPS[g.chips[c.uid]?.chipId]?.upkeep || 0) + cfg.perExtraChip),
+      `${past.length} chips past the allowance and not all surcharged`);
+
+    // And it is actually charged, not merely quoted.
+    g.players[pid].resource = 200;
+    const before = g.players[pid].resource;
+    chargeChipUpkeep(g, pid);
+    const paid = before - g.players[pid].resource;
+    note(`bill for ${held.length} chips: ${paid}`);
+    check("…and the surcharge is charged, not merely quoted",
+      paid >= past.length * cfg.perExtraChip,
+      `paid ${paid}, expected at least ${past.length * cfg.perExtraChip}`);
+
+    // The no-op, per the plan's rule 1.4.
+    const was = cfg.perExtraChip;
+    try {
+      cfg.perExtraChip = 0;
+      check("…and perExtraChip 0 is a true no-op",
+        held.every((c, i) => chipUpkeepFor(g, pid, c.uid, i)
+          === (CHIPS[g.chips[c.uid]?.chipId]?.upkeep || 0)));
+    } finally { cfg.perExtraChip = was; }
   });
 
 // --------------------------------------------------------------------

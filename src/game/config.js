@@ -435,6 +435,24 @@ export const CONFIG = {
     // organic building happens without slider micromanagement — and banked
     // scrap is no longer a free 100% by default (docs/chip-set-v0.1.md).
     defaultSlider: 0.5,
+    // ECONOMY §8 — A COUNT-BASED OBLIGATION, because a per-chip one never
+    // arrived. Five of forty authored chips carry any `upkeep` at all, so a
+    // faction could accumulate thirty-five of them for nothing, and "the
+    // economy has no sink" was true in the most literal way available.
+    //
+    // Measured on seed 1234 at round 20: the leader held 20 chips while two of
+    // the four majors held none. A count obligation therefore bites exactly
+    // where a sink should — on the faction that is winning — and is invisible
+    // to the faction that is losing, which is the opposite of what per-chip
+    // upkeep does (it charges the five specific chips regardless of how many
+    // you hold).
+    //
+    // The free allowance is generous on purpose: six chips is roughly three
+    // developed cities, so an ordinary game never feels it and a runaway does.
+    freeChips: 6,
+    // Per chip past the allowance, per round. 0 is the no-op.
+    perExtraChip: 1,
+
     // §20.7 rush rate — banked scrap per build-point. 2 (was 1): Rush now
     // carries a real premium over organic building, so it's an emergency
     // lever, not a strictly-dominant default (docs/chip-economy-handoff.md).

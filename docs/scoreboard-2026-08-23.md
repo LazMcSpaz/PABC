@@ -610,3 +610,36 @@ run because `OPS()` read `CONFIG.diplomacy.ops` while the block lives under
 every verb refused politely. The new `intrigueOpsPerGame` row in the suite is
 what caught it, which is the argument for adding a measurement row with every
 mechanism rather than after it.
+
+### Economy §8 — the chip sink, and the last PENDING audit block
+
+Five of forty authored chips carry any `upkeep` at all, so a faction could
+accumulate thirty-five of them for nothing. `economy.freeChips: 6` /
+`perExtraChip: 1` makes it a **count** obligation instead of a per-chip one,
+and the difference matters: measured on seed 1234 at round 20 the leader held
+**20 chips while two of the four majors held none**, so a count obligation
+bites exactly where a sink should — on the faction that is winning — and is
+invisible to the one that is losing.
+
+Three things it deliberately is not: it never destroys a chip (unpayable ones
+go dormant and come back, exactly as authored upkeep already does); it does not
+apply to an **upgrade**, which replaces a chip in its own slot and does not
+change the count; and it is quoted in the **build menu**, not only on the
+ledger, because a cost that appears only after you commit is where a player
+stops trusting the numbers.
+
+The AI sees it too — `pickBuild` subtracts the marginal surcharge once past the
+allowance, on the same per-round axis as `upkeep`. That single line took the
+ending mix from 7 to 8.
+
+| | before | after |
+|---|---|---|
+| Ending mix | 7 | **8** |
+| Median rounds | 42 | **45** |
+| Games unresolved | 4 | **4** |
+| Median end scrap | 42.5 | **35** |
+| Max end scrap | 104 | **92** |
+
+`audit-economy.mjs` block 9 flips PENDING → LIVE, which makes it **10 of 10
+blocks live, 47 assertions, 0 pending** — the economy audit no longer has a
+single claim waiting on a stage.
