@@ -179,6 +179,31 @@ export const CONFIG = {
     // Rank chips by value PER SCRAP rather than by value. 0 restores the
     // price-blind comparison both the old and the new table shipped with.
     costAware: 1,
+    // §6.4 — the AI's gift, and why it ships SWITCHED OFF at 1.
+    //
+    // The AI used to gift 3 SCRAP through `applyDeal`, which walked straight
+    // through the wall the whole Sway design rests on: scrap buys what a
+    // faction HAS, Sway buys what a faction THINKS, and nothing converts. The
+    // human's Gift button has been Sway-priced since §6.3, so the AI had a
+    // Standing faucet the player did not — the same asymmetric-bar failure
+    // already fixed once for courtship, and not one that can stay.
+    //
+    // Re-pricing it in Sway is worse than removing it, and the reason is
+    // structural rather than a tuning miss: a Sway gift competes with
+    // COURTSHIP for the same pool, and courtship is what drives the endings.
+    // Measured across the 15-seed suite, mix / median / unresolved:
+    //
+    //   scrap gift (the breach)        9 / 68.5 / 1
+    //   no AI gift at all              7 / 42   / 4
+    //   Sway gift, surplus-only        3 / 46   / 5
+    //   Sway gift, one point at a time 4 / 51   / 6
+    //   Sway gift, whole surplus       5 / 52.5 / 5
+    //
+    // So the breach measured best and still cannot stay. Off is second best,
+    // and the branch stays switchable because the gap it leaves is exactly
+    // what phase 6's espionage ops are meant to give the surplus to spend on.
+    // Set below 1 to let the AI gift from surplus again.
+    giftAboveShareOfCap: 1,
   },
 
   // §17 Tech Wheel. Research fills a bar; Tech Level is a derived band

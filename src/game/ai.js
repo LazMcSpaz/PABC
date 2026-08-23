@@ -23,7 +23,7 @@ import { factionDef } from "./content.js";
 import {
   factionIds, powerOf, arePacted, atWar, vassalLord, mayEngage, mayCourt,
   speakPosture, postureOf, postureStated, isCourting, eitherCourting, courtRounds,
-  postureCitation, interestsOf, courtshipScore, swayIncome, swayOf, canSustainCourtship,
+  postureCitation, interestsOf, courtshipScore, swayIncome, swayOf, canSustainCourtship, courtingList,
   attackIsWorthIt, diplomaticPrice,
   getStanding, passesRepGates, formPact, vassalize, applyDeal, checkDominion,
   tableOffer, offersFor, warExhaustion,
@@ -552,6 +552,28 @@ function courtSomebody(state, pid, others) {
   return performDiplomacy(state, pid, "court", { faction: best }).ok === true;
 }
 
+// §6.4 — WHAT THE AI MAY SPEND ON GOODWILL, after its courtships are paid for.
+//
+// The AI's only Sway sink was courtship, and the pool was measured sitting at
+// its ceiling 30% of all rounds — a currency nothing can exhaust prices
+// nothing. The rule is the same one `canSustainCourtship` uses, and for the
+// same reason: commitments first, surplus second. What is left after every
+// running courtship's upkeep, less a round's reserve so a gift can never be
+// the thing that calls a courtship off.
+function giftBudget(state, pid) {
+  const cfg = CONFIG.sway;
+  const running = courtingList(state, pid).length;
+  // A gift NEVER competes with a courtship. Measured: letting it — even one
+  // point at a time, even with a round of upkeep reserved — took the ending
+  // mix from 9 to 5 and unresolved from 1 to 6, because the pool emptied,
+  // `chargeSwayUpkeep` called the running courtships off, and lapses per game
+  // went 3.9 to 6.4. Courtship is the ladder; a gift is what you do with money
+  // the ladder cannot use.
+  if (running) return 0;
+  const surplus = swayOf(state, pid) - cfg.cap * (CONFIG.ai.giftAboveShareOfCap ?? 0.7);
+  return Math.max(0, surplus);
+}
+
 // §18.8 — the AI works the political layer once per turn (free of Actions):
 // vassalize a cornered weakling, form a pact with a warm compatible
 // neighbour, or gift to warm a promising relationship. Bounded: one move.
@@ -663,10 +685,25 @@ function manageDiplomacy(state, pid) {
           return;
         }
       }
-      if (me.victoryLean === "diplomacy" && (state.players[pid].resource || 0) >= 4
-        && sFwd >= tiers.neutral && sFwd < CONFIG.diplomacy.pactStandingReq && f !== human) {
-        applyDeal(state, { proposer: pid, recipient: f, give: [{ resource: { resource: "scrap", amount: 3 } }], get: [] }, "gift");
-        return;
+      // A gift here used to be `applyDeal` handing over 3 SCRAP, which walked
+      // straight through the wall the whole Sway design rests on: scrap buys
+      // what a faction HAS, Sway buys what a faction THINKS, and nothing
+      // converts. The human's Gift button has been priced in Sway since §6.3;
+      // the AI was still paying in coin, so the wall held at one faucet and not
+      // the other. It goes through the same verb the player presses.
+      //
+      // ONE POINT AT A TIME, and only for a faction that leads with diplomacy.
+      // Both restraints are measured. Spending the whole surplus in one gift
+      // took the ending mix from 9 to 5 and unresolved from 1 to 5: the pool
+      // emptied, `chargeSwayUpkeep` called the running courtships off, and
+      // lapses per game went 3.9 to 6.3. Letting every faction gift did the
+      // same thing to the board at large. The pool sitting at its ceiling is a
+      // real problem — 30% of rounds — but it is phase 6's to solve with an op
+      // to spend it ON, not this branch's to solve by burning it.
+      if (me.victoryLean === "diplomacy"
+        && sFwd >= tiers.neutral && sFwd < CONFIG.diplomacy.pactStandingReq
+        && giftBudget(state, pid) >= CONFIG.sway.perStanding) {
+        if (performDiplomacy(state, pid, "gift", { faction: f, standing: 1 }).ok) return;
       }
     }
   }

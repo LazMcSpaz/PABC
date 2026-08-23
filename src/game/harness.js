@@ -4466,6 +4466,48 @@ line("\n  [§5] the six wants reach the price, not only the sentence");
   }
 }
 
+// §6.3/§6.4 — THE WALL HOLDS AT THE AI's FAUCET TOO.
+//
+// Scrap buys what a faction HAS; Sway buys what a faction THINKS, and nothing
+// converts. The human's Gift button has been Sway-priced since §6.3 — but the
+// AI was still handing over 3 scrap through `applyDeal` and getting Standing
+// for it, so the wall held at one faucet and not the other. That is the same
+// asymmetric-bar failure already fixed once for courtship.
+line("\n  [§6.4] no faction buys goodwill with coin — the AI included");
+{
+  const g = createGame({ seed }); ensureDiplomacy(g);
+  const before = {};
+  for (const f of factionIds(g)) for (const o of factionIds(g)) {
+    if (f !== o) before[`${f}|${o}`] = getStanding(g, f, o);
+  }
+  const purses = {};
+  for (const f of factionIds(g)) if (g.players[f]) { g.players[f].resource = 500; g.players[f].sway = 0; purses[f] = 500; }
+  // Run the political layer with every faction rich in coin and broke in Sway.
+  for (let i = 0; i < 6; i++) { g.round += 1; runDiplomacyRound(g); }
+  // Standing may move for a dozen legitimate reasons — drift, war, peace,
+  // grievances. What must NOT appear is a `gift` cause, because that is the
+  // one that would mean somebody bought it.
+  const bought = g.log.filter((e) => e.name === "standing_changed" && e.payload.cause === "gift");
+  check("a board full of scrap and empty of Sway buys nobody's goodwill",
+    bought.length === 0, );
+}
+{
+  // …and the switch that would let the AI gift again is off, deliberately.
+  // The measured table is in the config comment: the scrap breach read best
+  // (mix 9, unresolved 1) and still cannot stay, and every Sway-priced version
+  // reads worse than removing it because a gift competes with COURTSHIP for
+  // the same pool.
+  check("the AI's gift branch ships switched off", CONFIG.ai.giftAboveShareOfCap >= 1);
+  // The human's, of course, does not.
+  const g = createGame({ seed }); ensureDiplomacy(g);
+  g.players.versari.sway = 200;
+  g.players.versari.resource = 0;
+  setStanding(g, "lakers", "versari", 0);
+  const res = performDiplomacy(g, "versari", "gift", { faction: "lakers", standing: 1 });
+  check("…while a player with Sway and no scrap can still send one", res.ok);
+  check("…and it lands", getStanding(g, "lakers", "versari") > 0);
+}
+
 // §1.2 / economy §6.3 — gifts are priced in SWAY now, not scrap. The
 // diminishing-returns window is unchanged, because which currency pays for a
 // gift has nothing to do with how quickly a faction tires of being flattered.

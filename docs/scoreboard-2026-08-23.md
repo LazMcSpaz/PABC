@@ -513,3 +513,38 @@ Swept `priceMultiplier` at 0 / 0.4 / 0.5 / 0.6 / 0.7 / 0.8 → unresolved
 4 / 2 / 3 / **1** / 4 / 5 and mix 9 / 9 / 8 / **9** / 7 / 6. The shipped 0.6 is
 the best point on both, so this stage tunes nothing: the value it was given in
 phase 3 was already right, and wiring it up is the whole change.
+
+### §6.4 — the AI's Sway policy, and a wall that was only half built
+
+The AI's gift branch handed over **3 scrap** through `applyDeal` and got
+Standing for it. The human's Gift button has been Sway-priced since §6.3, so
+the wall the whole design rests on — *scrap buys what a faction HAS, Sway buys
+what a faction THINKS, and nothing converts* — held at one faucet and not the
+other. That is the same asymmetric-bar failure already fixed once for
+courtship, and it is not one that can stay.
+
+Re-pricing it in Sway turned out to be **worse than removing it**, and the
+reason is structural rather than a tuning miss: a Sway gift competes with
+**courtship** for the same pool, and courtship is what drives the endings.
+
+| AI gift policy | mix | median | unresolved |
+|---|---|---|---|
+| 3 scrap (the breach) | **9** | 68.5 | **1** |
+| none — shipped | 7 | 42 | 4 |
+| Sway, surplus only | 3 | 46 | 5 |
+| Sway, one point at a time | 4 | 51 | 6 |
+| Sway, whole surplus | 5 | 52.5 | 5 |
+
+So the breach measured best and still cannot stay. `ai.giftAboveShareOfCap`
+ships at 1 (off) and the branch stays switchable, because the gap it leaves is
+exactly what phase 6's espionage ops are meant to give the Sway surplus to
+spend on — the pool still sits at its ceiling 30% of rounds, which is the
+finding recorded back in phase 3 and still waiting on its sink.
+
+**A note on reading this suite.** It is fully deterministic — two inert
+perturbations (`attackPrice.perReputationPoint` at 0.8 and 0.9, with
+`attackPrice.enabled: 0`) return byte-identical governing numbers. But
+individual games are chaotic: a branch that fires a handful of times across
+15 games moved the ending mix by 4. Differences of one or two endings are not
+signal. The rows above are ranked on the shape of the whole table, not on any
+single cell.
