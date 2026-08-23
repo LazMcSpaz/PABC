@@ -1497,6 +1497,14 @@ record for the political layer. Where it conflicts with earlier text,
 the tables get filled and tuned in a later pass; this section fixes the
 *model*, not the constants.
 
+> **Currency note (2026-08-23).** Those tables have since been filled: the
+> political layer is built and `CONFIG.diplomacy` in `src/game/config.js`
+> holds 146 tuned constants, several carrying playtest rationale in the
+> comments beside them. Treat `CONFIG.diplomacy` — not this section's TBDs —
+> as the source of truth for any number. Parts of §18 have also been
+> superseded; see `diplomacy-brief-input-2026-08-23.md` §3 for the list, and
+> the banners on §18.10 and §18.12 below.
+
 ### 18.0 Terminology (ratified)
 
 These names are now canonical across the spec, the engine, and the UI:
@@ -1898,7 +1906,17 @@ inputs:
 player's threat crosses a **threshold**, eligible factions (not allied or
 vassal to that player, and able to cooperate) **join the coalition**: their
 Standing toward the player drops and they are pushed to war the player and
-to ally **each other**. The coalition **dissolves** when threat falls
+to ally **each other**.
+
+> **Changed in the engine (2026-08-23 note).** Members no longer ally each
+> other — after the 2026-08-13 playtest, force-pacting the bloc was found to
+> mint free summit VP and leave a permanent alliance web behind, so members
+> now make peace and warm slightly ("common cause") with **no pacts minted**.
+> Live weights are `wM 1, wP 2, threshold 16`. Note also that joining is not
+> a decision: every eligible AI faction is enrolled with an unasked
+> `declareWar`, which overwrites its Standing toward the target regardless of
+> prior relationship. Only the human is spared. See
+> `diplomacy-brief-input-2026-08-23.md` §1.4. The coalition **dissolves** when threat falls
 (territory lost, peace made, Menace decayed). Consequences by playstyle:
 - **Conquest player:** a rising-difficulty brake — the more you win, the
   more the world unites against you. Pacing + anti-runaway in one.
@@ -1950,6 +1968,18 @@ sub-state above Allied.
 
 ### 18.10 The diplomacy victory — Recognition (reputation-gated, not peace-gated)
 
+> **SUPERSEDED 2026-08-21 — do not design against this section.** The
+> Recognition track and the parallel "Conquest (VP 12)" threshold described
+> below were both removed. See `victory-redesign-2026-08-21.md`, which
+> replaced them with a single condition: *every surviving faction is your
+> ally, your vassal, or gone, held for three consecutive rounds.* Across 20
+> AI-only games the VP threshold ended all twenty and Recognition never fired
+> once. The engine's `recognitionScore` / `recognitionMet` /
+> `CONFIG.diplomacy.recognition` survive as vestigial names and decide
+> nothing — `checkRecognitionVictory()` is a one-line alias for
+> `checkDominion()`. §18.8's closing paragraph inherits this error where it
+> speaks of "sprinting toward Recognition".
+
 - **Recognition track.** Each faction contributes **Recognition weight** by
   its formal relation to you: **Allied = 1, Vassal = 2** *(weights TBD)*.
   You win when total Recognition crosses a **threshold** *(TBD; e.g. a
@@ -1988,6 +2018,14 @@ sub-state above Allied.
   and all numeric constants are authoring tasks for the content pass.
 
 ### 18.12 Engine mapping (for implementers — design only, not yet built)
+
+> **Out of date 2026-08-23 — this heading is wrong; the layer IS built.**
+> Standing with baselines and grudges, Menace, Honor, just war, coalitions,
+> vassalage, trading pacts, war exhaustion, ultimatums and offers-with-expiry
+> all ship today. The mapping below is kept as the design record. For what
+> the engine actually does, read `src/game/diplomacy.js` and run
+> `node scripts/audit-diplomacy.mjs`, which exercises eight named behaviours
+> against a live engine.
 
 High-level; consistent with §15–§17 patterns. Detailed schemas and the full
 effect/event lists are finalized when this leaves the design phase.
