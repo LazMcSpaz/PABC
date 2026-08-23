@@ -21,7 +21,7 @@ import { standingTier } from "./standing.js";
 import { factionDef } from "./content.js";
 import {
   factionIds, powerOf, arePacted, atWar, vassalLord, mayEngage,
-  getStanding, passesRepGates, formPact, vassalize, applyDeal, checkRecognitionVictory,
+  getStanding, passesRepGates, formPact, vassalize, applyDeal, checkDominion,
   tableOffer, offersFor, warExhaustion,
   denounce, denounceWarrant, denounceCooldown, honorOf, grievanceWeight, wouldAccept,
   counterOffer, ultimatumsFor, answerUltimatum, aiComplies, unitsInTerritory, declareWar,
@@ -459,7 +459,7 @@ function manageDiplomacy(state, pid) {
   const others = factionIds(state).filter((f) => f !== pid);
   const tiers = CONFIG.diplomacy.tiers;
 
-  // 1) Vassalize a much-weaker, cornered, engageable faction (recognition
+  // 1) Vassalize a much-weaker, cornered, engageable faction (the vassal
   //    runs through converting weak factions, §18.9). Lords only.
   if (!vassalLord(state, pid) && (me.victoryLean === "diplomacy" || (me.aggression ?? 0) >= 0.7)) {
     for (const f of others) {
@@ -469,7 +469,7 @@ function manageDiplomacy(state, pid) {
       // post-rebellion cooldown (no more same-round re-vassalizing).
       if (aiAcceptsVassalage(state, f, pid)) {
         vassalize(state, pid, f, "ai-vassalize");
-        checkRecognitionVictory(state);
+        checkDominion(state);
         return;
       }
     }
@@ -534,7 +534,7 @@ function manageDiplomacy(state, pid) {
           }
         } else {
           formPact(state, pid, f, "ai-offer");
-          checkRecognitionVictory(state);
+          checkDominion(state);
           return;
         }
       }

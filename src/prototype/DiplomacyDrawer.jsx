@@ -511,7 +511,7 @@ function OfferCard({ offer: o, dip, onAction }) {
 }
 
 function LandingView({ dip, onSelectFaction, onAction, onClose }) {
-  const rec = dip.recognition;
+  const dom = dip.dominion;
   const inbox = dip.pendingCalls || [];
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
@@ -562,20 +562,20 @@ function LandingView({ dip, onSelectFaction, onAction, onClose }) {
             <RepStat label="Threat" value={dip.threat.toFixed(1)} color={dip.threat > 6 ? "#d2453f" : C.holoHi} sub="coalition risk" />
             <RepStat
               label="Dominion"
-              value={`${rec.score}/${rec.threshold}`}
-              color={rec.met ? "#5fc27a" : "#c9b24e"}
-              sub={rec.roundsLeft != null
-                ? `${rec.roundsLeft} to victory`
-                : `${rec.outstanding?.length || 0} still to deal with`}
+              value={`${dom.score}/${dom.threshold}`}
+              color={dom.met ? "#5fc27a" : "#c9b24e"}
+              sub={dom.roundsLeft != null
+                ? `${dom.roundsLeft} to victory`
+                : `${dom.outstanding?.length || 0} still to deal with`}
             />
           </div>
         </Card>
 
         <Receipts receipts={dip.receipts} />
 
-        {/* Path to Recognition — the per-faction backing checklist. Coarse
+        {/* Path to Dominion — the per-faction backing checklist. Coarse
             status is common knowledge; exact numbers ride with the Spy Ring. */}
-        <RecognitionCard rec={rec} />
+        <PathToDominionCard dom={dom} />
 
 
         {dip.coalitionAgainstYou && (
@@ -694,29 +694,29 @@ const BACKING_LABEL = {
   backs: "DEALT WITH", warming: "WARMING", cold: "OUTSTANDING",
   blocked: "DISTRUSTS", coalition: "COALITION",
 };
-function RecognitionCard({ rec }) {
-  const backing = rec.backing || [];
+function PathToDominionCard({ dom }) {
+  const backing = dom.backing || [];
   if (!backing.length) return null;
   const hasSpy = backing.some((b) => b.detail);
   return (
     <Card>
-      <SectionLabel>The Road to Victory</SectionLabel>
+      <SectionLabel>Path to Dominion</SectionLabel>
       <div className="pc-prose" style={{ fontSize: 11, lineHeight: 1.5, color: "rgba(143,246,234,0.6)", marginBottom: 8 }}>
         You win when every faction still standing is your ally, your vassal, or
         gone — by conquest, by diplomacy, or any mix of the two. Then hold it
-        for <b style={{ color: C.holoHi }}>{rec.holdRounds}</b> rounds.
-        {" "}<b style={{ color: rec.met ? "#5fc27a" : C.holoHi }}>{rec.score}</b> of{" "}
-        <b style={{ color: C.holoHi }}>{rec.threshold}</b> dealt with.
+        for <b style={{ color: C.holoHi }}>{dom.holdRounds}</b> rounds.
+        {" "}<b style={{ color: dom.met ? "#5fc27a" : C.holoHi }}>{dom.score}</b> of{" "}
+        <b style={{ color: C.holoHi }}>{dom.threshold}</b> dealt with.
       </div>
-      {rec.roundsLeft != null && (
+      {dom.roundsLeft != null && (
         <div style={{
           fontFamily: C.font, fontSize: 11, letterSpacing: 1, marginBottom: 8,
           padding: "6px 8px", borderRadius: 5,
           color: "#08100f", fontWeight: 700,
           background: `linear-gradient(180deg, ${C.holoHi}, ${C.holo})`,
         }}>
-          {rec.roundsLeft > 0
-            ? `Hold it — ${rec.roundsLeft} round${rec.roundsLeft === 1 ? "" : "s"} to victory`
+          {dom.roundsLeft > 0
+            ? `Hold it — ${dom.roundsLeft} round${dom.roundsLeft === 1 ? "" : "s"} to victory`
             : "The board is yours"}
         </div>
       )}

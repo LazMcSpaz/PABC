@@ -25,7 +25,7 @@ import { postAt } from "../game/posts.js";
 import { isUnitVisibleTo } from "../game/visibility.js";
 import { factionDef } from "../game/content.js";
 import {
-  recognitionScore, threatScore, tolerance, trustFloor, standingTier, getStanding,
+  threatScore, tolerance, trustFloor, standingTier, getStanding,
   arePacted, atWar, vassalLord, coalitionAgainst, factionIds,
   aiAcceptsPact, aiAcceptsVassalage, aiAcceptsPeace, wouldAccept, passesRepGates,
   denounceCooldown, denounceWarrant, denounceGrounds, grievanceWeight, grievancesAgainst,
@@ -737,13 +737,12 @@ function adaptEconomy(state, loc) {
 }
 
 // §18 — the Diplomacy screen view from `viewer`'s seat: its global
-// reputations + Recognition progress, and a row per other faction with
+// reputations + Dominion progress, and a row per other faction with
 // Standing, relation, the derived gates, and a courtship hint.
 function adaptDiplomacy(state, viewer) {
   if (!state.diplomacy || !viewer) return null;
   const dip = state.diplomacy;
   const me = state.players[viewer];
-  const rec = recognitionScore(state, viewer);
   const spyRing = hasTechNode(state, viewer, "int-b1");
   const viewerVis = state.visibility?.[viewer] || null;
   const factions = factionIds(state).filter((f) => f !== viewer).map((f) => {
@@ -864,7 +863,7 @@ function adaptDiplomacy(state, viewer) {
     // The win condition: every surviving faction eliminated, your ally, or
     // your vassal — held for `holdRounds`. It used to be a weighted score
     // against a threshold of 6, which never once decided a game.
-    recognition: (() => {
+    dominion: (() => {
       const st = dominionStanding(state, viewer);
       const left = dominionCountdown(state, viewer);
       return {
@@ -884,7 +883,7 @@ function adaptDiplomacy(state, viewer) {
         // Per-faction checklist — WHO is dealt with and, for the rest, a
         // coarse why-not. Coarse status is common knowledge; the precise
         // numbers behind it are Spy Ring product.
-        backing: recognitionBacking(state, viewer, spyRing),
+        backing: dominionBacking(state, viewer, spyRing),
       };
     })(),
     // Where your own numbers came from, act by act.
@@ -1152,7 +1151,7 @@ function describeDealItem(it, state) {
 //
 // A destroyed faction is not a task, so it leaves the list with the count. The
 // victory rule is about who is STILL STANDING; the dead are not a box to tick.
-function recognitionBacking(state, viewer, spyRing) {
+function dominionBacking(state, viewer, spyRing) {
   const tiers = CONFIG.diplomacy.tiers;
   const me = state.players[viewer];
   const coal = coalitionAgainst(state, viewer);

@@ -156,9 +156,11 @@ export const CONFIG = {
   tech: {
     researchThresholds: [2, 4, 6, 8], // research needed for L2, L3, L4, L5
     maxLevel: 5,
-    marketTierByLevel: { 2: 3, 3: 5 }, // Market tier 2 @ L3, tier 3 @ L5
+    // No `marketTierByLevel` / `marketRowSizes`. The Market is retired
+    // (mechanical-spec §4.1's banner) and `unlockedTier` does not exist, so
+    // both were constants describing a subsystem nothing reads. The live chip
+    // gate is CONFIG.economy.buildTechGate.
   },
-  marketRowSizes: { 1: 5, 2: 4, 3: 3 },
 
   // Derived per the spec — garrison Strength and base chip slots by a
   // location's strategic value.
@@ -503,14 +505,14 @@ export const CONFIG = {
       minRounds: 4, reformCooldownRounds: 5,
     },
 
-    // §18.10 Recognition victory — Allied=1, Vassal=2; win at threshold while
-    // Menace < each contributor's Tolerance and Honor > its floor. Threshold
-    // ≈ a majority of the field's worth of acknowledgement (e.g. 3 vassals,
-    // or 2 vassals + 2 allies) so the peaceful win is earned, not trivial.
-    // `summitVp`: the first time each faction EVER backs you, you bank VP —
-    // diplomacy pays into the same race conquest does, not only the long-shot
-    // instant win. Once per backer per game, majors only (minors don't win).
-    recognition: { alliedWeight: 1, vassalWeight: 2, threshold: 6, summitVp: 1 },
+    // No `recognition` block. It was a weighted second victory condition
+    // (Allied 1, Vassal 2, threshold 6) plus a `summitVp` dividend, and across
+    // 20 AI-only games it decided nothing: the alliance trickle always crossed
+    // the VP line first, and both the trickle and the VP line are themselves
+    // gone. Deleted 2026-08-23 with the rest of the vestige — `recognitionScore`,
+    // `recognitionMet`, `recognizedEver` and `checkRecognitionVictory` — at
+    // zero content cost, because no authored beat ever gated on it. The one
+    // condition is Dominion (`checkDominion`, CONFIG.victory).
 
     // §18.9 Vassalage.
     vassal: {

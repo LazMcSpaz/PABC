@@ -32,20 +32,17 @@ export function ensureDiplomacy(state) {
       vassals: {}, // vassalFid -> lordId
       resentment: {}, // vassalFid -> number
       threatScores: {}, // pid -> number
-      recognition: {}, // pid -> number (cached)
       giftCounter: {}, // §1.2 — { fromPid: { toPid: gifts-in-window } }
       pendingCalls: [], // AI→human pact-call inbox: { id, from, target, since, expiresOnRound }
       offers: [], // the round trip — offers awaiting an answer (see §6.10)
       ultimatums: [], // demands with a deadline and a consequence (§6.11)
       asks: {}, // pester bookkeeping: { round, byPair: { "a|b": n } }
       standingBaselines: {}, // earned drift targets: { a: { b: -cap..+cap } }
-      recognizedEver: {}, // summit VP bookkeeping: { pid: [fids that ever backed pid] }
     };
   }
   if (!state.diplomacy.giftCounter) state.diplomacy.giftCounter = {};
   if (!state.diplomacy.pendingCalls) state.diplomacy.pendingCalls = [];
   if (!state.diplomacy.standingBaselines) state.diplomacy.standingBaselines = {};
-  if (!state.diplomacy.recognizedEver) state.diplomacy.recognizedEver = {};
   if (!state.diplomacy.truces) state.diplomacy.truces = {};
   if (!state.diplomacy.pendingWarnings) state.diplomacy.pendingWarnings = [];
   if (!state.diplomacy.offers) state.diplomacy.offers = [];
@@ -1155,7 +1152,7 @@ export function answerOffer(state, fid, offerId, accept) {
   }
   applyDeal(state, offer.deal, offer.isCounter ? "counter-accepted" : "offer-accepted");
   emit(state, "offer_accepted", { offer: offer.id, from: offer.from, to: fid });
-  checkRecognitionVictory(state);
+  checkDominion(state);
   return { ok: true, accepted: true };
 }
 
@@ -2302,26 +2299,6 @@ export function onAttack(state, attackerPid, targetFid, hex = null) {
   menaceFromAttack(state, attackerPid, targetFid, hex);
 }
 
-// --- Recognition victory (§18.10) -----------------------------------
-// Recognition weight a faction lends `pid`: Vassal=2, Allied=1, but 0 if it
-// is in a coalition against pid. Gated by Menace<Tolerance & Honor>floor.
-export function recognitionScore(state, pid) {
-  const rc = D().recognition;
-  const coal = coalitionAgainst(state, pid);
-  let total = 0;
-  const contributors = [];
-  for (const f of factionIds(state)) {
-    if (f === pid) continue;
-    if (coal && coal.members.includes(f)) continue; // contributes nothing
-    if (!passesRepGates(state, f, pid)) continue; // Menace/Honor gate
-    if (vassalLord(state, f) === pid) { total += rc.vassalWeight; contributors.push(f); }
-    else if (arePacted(state, f, pid) && standingTier(getStanding(state, f, pid)) === "allied") {
-      total += rc.alliedWeight; contributors.push(f);
-    }
-  }
-  return { total, contributors };
-}
-
 // --- the win condition ------------------------------------------------
 //
 // ONE condition with three faces: every surviving faction is eliminated, your
@@ -2395,25 +2372,6 @@ export function dominionCountdown(state, pid) {
   const at = state.diplomacy?.dominionSince?.[pid];
   if (at == null) return null;
   return Math.max(0, CONFIG.victory.holdRounds - (state.round - at));
-}
-
-export function recognitionMet(state, pid) {
-  if (!state.players[pid]) return false;
-  return recognitionScore(state, pid).total >= D().recognition.threshold;
-}
-
-// Kept as a NAME the rest of the codebase already calls at every point where
-// the political situation moves — it now runs the one win condition
-// (checkDominion) rather than a second, different one of its own.
-//
-// What it used to be: a weighted Recognition threshold (allied 1, vassal 2,
-// reach 6) that latched a winner in parallel with the VP threshold — plus a
-// "summit dividend" that banked 1 VP the first time each faction ever backed
-// you. Across 20 AI-only games it never once decided a game, because the
-// alliance trickle always crossed the VP line first. Both are gone: alliances
-// and vassals are worth a HELD score, and there is a single condition.
-export function checkRecognitionVictory(state) {
-  checkDominion(state);
 }
 
 // --- coalitions (§18.8) ---------------------------------------------
@@ -2626,7 +2584,7 @@ function applyFlow(state, from, to, item) {
 
 // --- the round cadence (§18.12) -------------------------------------
 // Runs once per round in the §15.12 rollover: decay Menace, drift Standing,
-// pay flows, AI-to-AI politics, vassal tick, coalitions, then Recognition.
+// pay flows, AI-to-AI politics, vassal tick, coalitions, then Dominion.
 export function runDiplomacyRound(state) {
   ensureDiplomacy(state);
   // Menace decays with clean play / time.
@@ -2653,7 +2611,7 @@ export function runDiplomacyRound(state) {
   vassalTick(state);
   recomputeCoalitions(state);
   queueHumanWarnings(state); // after politics/coalitions — warn on settled state
-  checkRecognitionVictory(state);
+  checkDominion(state);
 }
 
 // --- seeding (§18.4.1 alliance variety) -----------------------------
@@ -2691,7 +2649,7 @@ export function seedStanding(state, rng) {
 export function performDiplomacy(state, pid, action, params = {}) {
   ensureDiplomacy(state);
   const f = params.faction;
-  const r = (extra) => { checkRecognitionVictory(state); return { ok: true, ...extra }; };
+  const r = (extra) => { checkDominion(state); return { ok: true, ...extra }; };
   switch (action) {
     case "declare-war":
       declareWar(state, pid, f, "player");
@@ -3012,7 +2970,7 @@ export function aiAcceptsPact(state, f, proposer) {
 //  · Patronage — a MINOR faction takes a protector it genuinely likes:
 //    Friendly+ Standing, the lord is its best friend on the board, and the
 //    lord's reputation passes its gates. This is the peaceful road to the
-//    vassal weight Recognition needs — courtship, not coercion.
+//    vassal face Dominion needs — courtship, not coercion.
 export function aiAcceptsVassalage(state, f, lord) {
   if (f === lord || vassalLord(state, f)) return false;
   if (!mayEngage(state, f, lord)) return false;

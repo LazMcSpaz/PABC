@@ -113,11 +113,12 @@ export function factionDef(fid) {
 // strategicValue drives garrison Strength and chip slots (see config).
 // affiliation: a faction id, or null for unaffiliated.
 // production: [min, max] scrap/turn — PROVISIONAL ranges by value.
-// vpReward: VP banked by the player on FIRST capture of this Location.
-// One-shot — recaptures don't grant it again (loc.vpAwarded gates it).
-// Total board VP = 3·1 (med) + 5·2 (high) + 2·3 (veryHigh) = 19, so
-// the win threshold of 12 needs a little under two-thirds of the map.
-// (Was 18 before Tin Town was promoted to high as the Plainers capital.)
+// vpReward: what this Location is worth to whoever HOLDS it. Not a bounty:
+// VP is held, not banked (victory.js), so the total rises when you take the
+// place and falls when you lose it, at half value below half Loyalty. There
+// is no `loc.vpAwarded` and no first-capture one-shot — both went with the VP
+// redesign, and nothing reads a VP threshold any more; the win condition is
+// Dominion. Total board VP = 3·1 (med) + 5·2 (high) + 2·3 (veryHigh) = 19.
 // `flavour` and `basis` are the authored lines from content/locations.csv —
 // a sheet that, like unit-names.csv before it, was wired to nothing: nineteen
 // cities on the board and not a word of the prose written for them reaching a

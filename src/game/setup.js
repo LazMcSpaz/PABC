@@ -183,7 +183,10 @@ export function createGame({
       permanentResearch: 0,
       techLevel: 1,
       techWheel: [],
-      unitCap: 1,
+      // No `unitCap` here. It sat at 1 and was silently overridden everywhere
+      // that matters: the real cap is CONFIG.baseUnitCap (3) + unitCapBonus,
+      // which `validateRecruit` enforces and `engineAdapter` reports. A stale
+      // field disagreeing with the live rule is worse than no field.
       hand: [],
       // Layer 5 (encounter & quest system) per spec §15.11
       tracks: { trust: 0, reputation: 0, alignment: 0 },

@@ -545,7 +545,7 @@ const EFFECTS = {
   FORM_PACT(state, e, ctx) {
     const a = resolveTargets(state, e.actor || "active", ctx)[0];
     diplo.formPact(state, a, e.faction, e.cause);
-    diplo.checkRecognitionVictory(state);
+    diplo.checkDominion(state);
   },
   BREAK_PACT(state, e, ctx) {
     const a = resolveTargets(state, e.actor || "active", ctx)[0];
@@ -568,7 +568,7 @@ const EFFECTS = {
   VASSALIZE(state, e, ctx) {
     const lord = resolveTargets(state, e.actor || "active", ctx)[0];
     diplo.vassalize(state, lord, e.faction, e.cause);
-    diplo.checkRecognitionVictory(state);
+    diplo.checkDominion(state);
   },
   RELEASE_VASSAL(state, e, ctx) {
     diplo.releaseVassal(state, e.faction, e.cause);
@@ -577,7 +577,7 @@ const EFFECTS = {
   RESOLVE_DEAL(state, e, ctx) {
     if (e.accept === false || !e.deal) return;
     diplo.applyDeal(state, e.deal, e.cause || "deal");
-    diplo.checkRecognitionVictory(state);
+    diplo.checkDominion(state);
   },
   // Deliver a proposal to a human recipient as a §15.5 private encounter,
   // or (AI recipient) evaluate immediately via the valuation engine.
@@ -591,7 +591,7 @@ const EFFECTS = {
     }
     if (diplo.wouldAccept(state, deal.recipient, deal)) {
       diplo.applyDeal(state, deal, "ai-accept");
-      diplo.checkRecognitionVictory(state);
+      diplo.checkDominion(state);
     }
   },
 

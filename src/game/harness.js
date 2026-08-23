@@ -14,7 +14,7 @@ import { recomputeVisibility, isUnitVisibleTo, revealRegion, unitVision, isHexVi
 import {
   ensureDiplomacy, menaceFromAttack, onAttack,
   formPact, declareWar, vassalize, runDiplomacyRound,
-  recognitionScore, recognitionMet, wouldAccept, dealValue, performDiplomacy,
+  wouldAccept, dealValue, performDiplomacy,
   getStanding, atWar, arePacted, vassalLord, mayEngage, areNeighbours,
   tolerance, passesRepGates, factionIds,
   // diplomacy-spec.md additions
@@ -24,7 +24,7 @@ import {
   findPactAgreement, honorOf, powerOf,
   // diplomacy robustness pass — baselines, patronage, summit VP
   getBaseline, adjustBaseline, aiAcceptsVassalage, breakPact,
-  resolvePactCall, checkRecognitionVictory,
+  resolvePactCall,
   // diplomacy tuning pass — cooldowns + citations
   mediate, sweepTrespass, warJustification, threatScore,
   // pace pass — truces + partial control
@@ -3634,8 +3634,13 @@ line("\n§18 DIPLOMACY CAPSTONE");
     runDiplomacyRound(g);
     check("a clean runaway leader still provokes a coalition (power trigger)",
       !!g.diplomacy.coalitions.find((c) => c.target === "versari"));
-    check("a coalition member contributes 0 to the runaway's Recognition",
-      recognitionScore(g, "versari").total === 0 || (g.diplomacy.coalitions.find((c) => c.target === "versari")));
+    // Was: "a coalition member contributes 0 to the runaway's Recognition."
+    // Recognition is gone (2026-08-23); the thing a coalition actually costs
+    // the runaway is the win condition itself — a member marching against you
+    // is a rival who is neither your ally nor your vassal, so it is
+    // OUTSTANDING and Dominion cannot be met while the coalition stands.
+    check("a coalition member leaves the runaway short of Dominion",
+      dominionStanding(g, "versari").outstanding.length > 0);
   }
 
   // --- vassalage: formation, tribute, rebellion (§18.9) ---
@@ -5512,7 +5517,7 @@ line("\n  [Phase 11] text-token resolver");
   recomputeVp(g2);
   check("a new vassal is worth its score to the lord",
     lp.vp === vpBefore + CONFIG.victory.score.vassal);
-  checkRecognitionVictory(g2);
+  checkDominion(g2);
   recomputeVp(g2);
   check("…and re-checking never pays twice", lp.vp === vpBefore + CONFIG.victory.score.vassal);
   releaseVassal(g2, minor, "test");

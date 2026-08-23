@@ -320,7 +320,7 @@ Location's build menu), installed into two slots:
 |---|---|
 | Palisade | +3 blockade defense |
 | Signal Mast | +1 Vision from the blockade |
-| Toll Booth | +1 scrap each Upkeep, independent of the funding settlement |
+| Toll Booth | **+2** scrap each Upkeep, independent of the funding settlement |
 
 Bonuses are read off the chip def (`blockadeDefense` / `blockadeVision` /
 `output`), so `blockades.js` never branches on a chip id. Queuing one is free
@@ -701,6 +701,14 @@ already works rather than as a new parallel system.
   *§2.3 as built* above.
 
 ## Engineering footprint (rough scoping only, not a task breakdown)
+
+> **This section describes work that has since SHIPPED.** The build-status
+> table at the top of this document is the current one: rail transport,
+> pooling, generation, access and the rail-access agreement are all built, as
+> are all three blockade parts. This list was scoping written before any of it
+> existed, and calling it "future work, not yet detailed" contradicted the
+> table it sits under. Kept as the record of what the work looked like from
+> the front.
 
 - `movement.js`: vision-gate `movementBlockers` using each blocker's own
   detection (`canSee`) instead of ground-truth occupancy.

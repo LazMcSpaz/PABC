@@ -46,6 +46,20 @@ effects) — not in the engine.
 
 ## 3. Resources, Stats and Tech
 
+> **Out of date 2026-08-23 — two rows and two bullets below are dead.** VP is a
+> **held score that wins nothing** (`src/game/victory.js`): a faction draws a
+> Location's VP for as long as it holds the place, the win condition is
+> Dominion (§18.10's banner), and nothing anywhere reads a VP threshold.
+> `Actions` are **per-entity**, not a per-turn pool: `CONFIG.baseActions` is
+> **0**, plus 1 per unit and `locationActionCapacity` per Location
+> (`turn.js` `refreshActionBudgets`). The old global pool survives only as a
+> wildcard any entity may spend. §4.1 one paragraph below already carries a
+> banner; this section needed the same one and did not have it.
+>
+> The narrative-tracks paragraph is also stale in a way worth knowing about:
+> `p.tracks` is written 44 times by authored content and **read by nothing** in
+> gameplay. See `diplomacy-brief-2026-08-23.md` §11.
+
 Mechanically distinct categories. The engine treats them differently; do
 not conflate them.
 
@@ -219,6 +233,11 @@ from each other.
 
 #### 6.3.2 Foothold and decay
 
+> **Out of date — superseded by §18.2 (Loyalty).** Foothold does not exist;
+> nor does the Town Hall that raised its cap. The Loyalty ceiling is **fixed
+> at 8** and nothing raises it (`config.js`: `ceiling: 8 — fixed; nothing
+> raises it`). Kept for history.
+
 The meter's centre holds a signed **foothold score `F`** — the
 controller's grip on the Location.
 
@@ -324,6 +343,12 @@ Reaction windows (§10) can interrupt at defined points regardless of whose
 turn it is.
 
 ## 8. Actions
+
+> **Out of date 2026-08-23.** **Acquire is gone** — the Market is retired and
+> chips are **built** locally (§20, and §4.1's banner). **Recruit costs 6**,
+> not 10 (`CONFIG.unitRecruitCost`), less 2 at a Motor Pool. Actions are
+> per-entity (see §3's banner), so "costs `Actions` from the budget" means the
+> acting entity's own action, or a wildcard. The rest of the table is current.
 
 During the Main phase, each action costs `Actions` from the budget
 (default 1 unless stated otherwise). The action set:
@@ -666,6 +691,23 @@ matrix, `state.triggerCooldowns`, `state.deferred`, and
 ## 14. Configuration & Open Questions
 
 ### 14.1 Locked constants (v0.1)
+
+> **Out of date 2026-08-23 — this table is a list of wrong numbers and had no
+> marker at all, which makes it the most dangerous page in the document.**
+> Every row below marked ✗ is superseded. **`src/game/config.js` is the
+> numbers**, and it carries the playtest rationale beside each one.
+>
+> | row | status |
+> |---|---|
+> | VP threshold (win) 12 | ✗ VP wins nothing; the condition is Dominion |
+> | Base Actions / turn 2 | ✗ `baseActions: 0`, per-entity (§3 banner) |
+> | Foothold cap | ✗ replaced by Loyalty, ceiling fixed at 8 |
+> | Movement 1 | ✗ `baseMovement: 2` |
+> | Recruit cost 10 | ✗ `unitRecruitCost: 6` |
+> | Unit cap 1 + Training Grounds | ✗ `baseUnitCap: 3` + `unitCapBonus` |
+> | Market row sizes | ✗ the Market is retired |
+> | Base chip slots by value | ✗ `{low:1, medium:2, high:3, veryHigh:4}` |
+> | Strength 4, bay slots 2, contest dice, garrison by value | ✓ still current |
 
 | Constant | Value |
 |---|---|
@@ -1624,6 +1666,15 @@ influence(faction, hex) =
   you (§18.5). It is **not** wired to contest math or passive yield in
   this pass (those were considered and deliberately deferred).
 
+> **Half out of date 2026-08-23.** Contest math is still untouched and should
+> stay that way — a border combat bonus makes the leader's border stronger with
+> no counterplay. But **passive yield is wired**: `tickLoyalty`
+> (`turn.js`) reads `pressureSource` every Upkeep, so a rival out-projecting
+> you on your own city's hex bleeds its Loyalty and costs them Standing and
+> Menace. That is the influence-pressure mechanic, and it is the best thing in
+> the layer. Full list of what consumes the field:
+> `economy-influence-brief-2026-08-23.md` §4.
+
 ### 18.4 Faction model
 
 A faction is no longer cosmetic (cf. §6.6). It carries authored
@@ -2493,6 +2544,17 @@ board and rush Recognition), and a warmonger can't neglect either — the army
 needs scrap *and* its gear needs construction.
 
 ### 20.11 Engine mapping (design only, not yet built)
+
+> **Out of date 2026-08-23 — this heading is wrong; every item below is
+> built.** Location `output` / `buildSlider` / `buildProgress` /
+> `activeBuild`, the chip schema's `buildCost` / `upgradesTo` / `loyaltyReq` /
+> `upkeep`, the Upkeep order, all four effects and all six events ship today.
+> The Market and Acquire are removed. The mapping is kept as the design
+> record; for what the engine actually does read `src/game/economy.js` and
+> `CONFIG.economy`, and run `node scripts/audit-economy.mjs`.
+>
+> §18.12 got this identical banner on 2026-08-23 and this section did not,
+> which made it the single most misleading heading left in the repo.
 
 - **Location state:** add `output` (derived), `buildSlider` (`f`),
   `buildProgress`, and `activeBuild { kind: build|upgrade, chipId,

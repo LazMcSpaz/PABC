@@ -58,7 +58,7 @@ const check = (n, ok, d) => { if (!ok) fail++; console.log(`${ok ? "PASS" : "FAI
   g.players[victim].eliminated = true;
 
   const view = adaptState(g, "versari");
-  const rec = view.diplomacy.recognition;
+  const rec = view.diplomacy.dominion;
   const st = dominionStanding(g, "versari");
 
   check("9. a destroyed faction leaves the victory checklist",

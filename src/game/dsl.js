@@ -14,7 +14,7 @@ import {
   honorOf,
   tolerance as dipTolerance,
   trustFloor as dipTrustFloor,
-  recognitionScore,
+  dominionStanding,
 } from "./diplomacy.js";
 
 // Resolve a dot-path string against the engine state. Unknown paths
@@ -389,7 +389,7 @@ export function evalCond(state, cond, ctx = {}) {
   }
 
   // `score` — returns a diplomacy / reputation scalar.
-  //   kind: "menace" | "honor" | "recognition"
+  //   kind: "menace" | "honor" | "dominion"
   //         (subject-keyed; resolved via `player`/`faction` token)
   //   kind: "standing"
   //         (matrix-keyed; `fromFaction` × `toFaction`)
@@ -408,9 +408,16 @@ export function evalCond(state, cond, ctx = {}) {
         const fid = resolvePlayer(state, s.player ?? s.faction ?? "active", ctx);
         return fid ? honorOf(state, fid) : 0;
       }
-      case "recognition": {
+      // Renamed from "recognition" 2026-08-23 with the vestige. Recognition
+      // was a weighted score against a threshold of 6 that never once decided
+      // a game; Dominion is the one condition, and its score is simply how
+      // many surviving rivals are your ally or your vassal. Zero content cost
+      // — the only score.kind gates in the corpus are menace x2 and honor x1.
+      case "dominion": {
         const fid = resolvePlayer(state, s.player ?? s.faction ?? "active", ctx);
-        return fid ? recognitionScore(state, fid).total : 0;
+        if (!fid) return 0;
+        const st = dominionStanding(state, fid);
+        return st.allied.length + st.vassals.length;
       }
       case "standing": {
         const from = resolvePlayer(state, s.fromFaction ?? "active", ctx);
