@@ -134,3 +134,42 @@ node scripts/sim-suite.mjs --baseline docs/sim-baseline.json   # the delta
 Every later PR quotes the delta. Any stage that pushes the three governing
 numbers outside their band gets retuned or reverted **before the next stage
 lands** — two stages deep is where you stop being able to tell which one did it.
+
+### Isolating a stage: `--set`
+
+```
+node scripts/sim-suite.mjs --set diplomacy.reach.reachabilityRounds=0
+node scripts/sim-suite.mjs --set diplomacy.deals.dealStandingPerValue=0,diplomacy.deals.chargeAskOnAccept=false
+```
+
+Patches `CONFIG` before any game is built. This is what makes "retune or
+revert" possible: **it already caught one interaction.** Phase 2 shipped two
+changes, and each measured well alone (pump close: mix 5→7, unresolved 6→4;
+reachability: unresolved 6→5, minors courted up) while together they took
+unresolved from 6 of 15 to **11**. Isolating them found the cause — the
+reachability escape had been put on `mayEngage`, which also gates the AI's
+grudge-war path, so distance was manufacturing wars (52→78 per game) and a
+board where somebody is always at war can never complete Dominion. Narrowing
+the escape to the ally and vassal doors (`mayCourt`) fixed it.
+
+Every rule this work adds ships with a value that switches it off, so the
+"before" of any stage stays reachable without a branch revert. That is also
+how `docs/sim-baseline.json` is kept comparable: it is regenerated with the
+current script and every later rule switched off, and it reproduces the
+original 5 / 62 / 6 exactly.
+
+## Phase 2 result (2026-08-23)
+
+| | baseline | after phase 2 |
+|---|---|---|
+| Ending mix (submission + mixed) | 5 | **8** |
+| Median rounds to Dominion | 62 | **46** |
+| Games unresolved | 6 | **4** |
+| Minors ever allied or vassalised, per game | 3.27 | **3.53** |
+| Minors killed, per game | 3.47 | **3.33** |
+| Wars opened by an undeclared attack | 25.1 | **22.3** |
+
+The minors row was re-specified in phase 2. Reading it off the final board
+measures something else — a minor allied for twenty rounds and then conquered
+scores zero — so it collapses toward zero whenever the war rate is high and
+stops reporting on reachability at all. Both readings are kept.

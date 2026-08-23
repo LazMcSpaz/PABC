@@ -47,6 +47,7 @@ import { takeAITurn } from "../src/game/ai.js";
 import { activePlayerId } from "../src/game/targeting.js";
 import { MINOR_FACTIONS, factionDef } from "../src/game/content.js";
 import { vassalLord, arePacted } from "../src/game/diplomacy.js";
+import { CONFIG } from "../src/game/config.js";
 import { readFileSync, writeFileSync } from "node:fs";
 
 export const SEEDS = [
@@ -73,6 +74,31 @@ const seeds = argOf("--seeds")
 const jsonOut = argOf("--json");
 const baselinePath = argOf("--baseline");
 const quiet = argv.includes("--quiet");
+
+// --set diplomacy.reach.reachabilityRounds=0,diplomacy.deals.chargeAskOnAccept=false
+//
+// Patches CONFIG before any game is built. This is how a stage that moves a
+// governing number gets ISOLATED: the plan's rule is that a stage pushing the
+// three numbers out of band is retuned or reverted before the next one lands,
+// and you cannot do either without being able to run each half on its own.
+// It is also how tuning happens once, at the end, rather than per stage.
+const overrides = argOf("--set");
+if (overrides) {
+  for (const pair of overrides.split(",")) {
+    const [path, raw] = pair.split("=");
+    const keys = path.trim().split(".");
+    let node = CONFIG;
+    for (const k of keys.slice(0, -1)) {
+      if (node[k] == null) throw new Error(`--set: no CONFIG path ${path}`);
+      node = node[k];
+    }
+    const last = keys[keys.length - 1];
+    const v = raw === "true" ? true : raw === "false" ? false
+      : raw === "null" ? null : Number.isNaN(Number(raw)) ? raw : Number(raw);
+    node[last] = v;
+    if (!quiet) console.log(`  --set ${path} = ${JSON.stringify(v)}`);
+  }
+}
 
 // --- one game --------------------------------------------------------
 
@@ -149,10 +175,25 @@ function summarise(g, { aiTurns, snapshot, seed }) {
   const surprises = evName(g, "surprise_attack_honor_lost").length;
 
   // --- minors: allied or vassalised RATHER THAN killed. The brief's row.
+  //
+  // Counted EVER, from the log, not only at the final board. Reading it off
+  // the end state measures something else: a minor that was allied for twenty
+  // rounds and then conquered scores zero, so the row collapses toward zero
+  // whenever the war rate is high and stops reporting on reachability at all.
+  // "Was this faction ever reachable by something other than an army" is the
+  // question §15 is asking.
   const minorIds = Object.keys(g.players).filter((p) => factionDef(p)?.tier === "minor");
+  const everCourted = new Set();
+  for (const e of g.log) {
+    if (e.name === "pact_formed") {
+      for (const k of [e.payload?.a, e.payload?.b]) if (minorIds.includes(k)) everCourted.add(k);
+    } else if (e.name === "vassal_established") {
+      if (minorIds.includes(e.payload?.vassal)) everCourted.add(e.payload.vassal);
+    }
+  }
   let minorsAllied = 0, minorsVassal = 0, minorsDead = 0;
   for (const m of minorIds) {
-    if (g.players[m]?.eliminated) { minorsDead += 1; continue; }
+    if (g.players[m]?.eliminated) minorsDead += 1;
     if (vassalLord(g, m)) { minorsVassal += 1; continue; }
     if (Object.keys(g.players).some((f) => f !== m && arePacted(g, f, m))) minorsAllied += 1;
   }
@@ -182,7 +223,10 @@ function summarise(g, { aiTurns, snapshot, seed }) {
     wars: wars.length,
     surpriseOpenings: surprises,
     coalitions: evName(g, "coalition_formed").length,
-    minors: { allied: minorsAllied, vassal: minorsVassal, dead: minorsDead, total: minorIds.length },
+    minors: {
+      allied: minorsAllied, vassal: minorsVassal, dead: minorsDead,
+      everCourted: everCourted.size, total: minorIds.length,
+    },
     // Economy rows
     endScrap: snapshot,
     emptyWheels: snapshot.filter((r) => r.nodes === 0).length,
@@ -237,6 +281,7 @@ const mixLike = (byEnding.submission || 0) + (byEnding.mixed || 0);
 const report = {
   generatedFor: seeds.length + " seeds",
   seeds,
+  overrides: overrides || null,
   // --- the three governing numbers -----------------------------------
   governing: {
     endingMix: { submissionPlusMixed: mixLike, of: seeds.length, band: ">= 11" },
@@ -251,7 +296,11 @@ const report = {
     warsPerGame: r2(mean(ok.map((g) => g.wars))),
     warsOpenedByUndeclaredAttack: r2(mean(ok.map((g) => g.surpriseOpenings))),
     coalitionsPerGame: r2(mean(ok.map((g) => g.coalitions))),
-    minorsAlliedOrVassalisedPerGame: r2(mean(ok.map((g) => g.minors.allied + g.minors.vassal))),
+    // At the final board — a snapshot, and confounded by the war rate.
+    minorsAlliedOrVassalisedAtEnd: r2(mean(ok.map((g) => g.minors.allied + g.minors.vassal))),
+    // Ever, from the log. THIS is §15's row: was the faction reachable by
+    // something other than an army at any point in the game.
+    minorsEverCourtedPerGame: r2(mean(ok.map((g) => g.minors.everCourted))),
     minorsKilledPerGame: r2(mean(ok.map((g) => g.minors.dead))),
   },
   // --- economy brief §17 ----------------------------------------------

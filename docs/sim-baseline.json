@@ -17,6 +17,7 @@
     77,
     31415
   ],
+  "overrides": "diplomacy.deals.dealStandingPerValue=0,diplomacy.deals.chargeAskOnAccept=false,diplomacy.reach.reachabilityRounds=0",
   "governing": {
     "endingMix": {
       "submissionPlusMixed": 5,
@@ -45,7 +46,8 @@
     "warsPerGame": 52.67,
     "warsOpenedByUndeclaredAttack": 25.13,
     "coalitionsPerGame": 4.33,
-    "minorsAlliedOrVassalisedPerGame": 0.33,
+    "minorsAlliedOrVassalisedAtEnd": 1,
+    "minorsEverCourtedPerGame": 3.27,
     "minorsKilledPerGame": 3.47
   },
   "economy": {
@@ -74,8 +76,9 @@
       "coalitions": 4,
       "minors": {
         "allied": 0,
-        "vassal": 0,
+        "vassal": 1,
         "dead": 4,
+        "everCourted": 4,
         "total": 4
       },
       "endScrap": [
@@ -115,7 +118,7 @@
         "maxMajor": 0,
         "atCapRounds": 0
       },
-      "ms": 1243
+      "ms": 1227
     },
     {
       "seed": 424242,
@@ -130,8 +133,9 @@
       "coalitions": 4,
       "minors": {
         "allied": 0,
-        "vassal": 0,
+        "vassal": 2,
         "dead": 4,
+        "everCourted": 3,
         "total": 4
       },
       "endScrap": [
@@ -171,7 +175,7 @@
         "maxMajor": 0,
         "atCapRounds": 0
       },
-      "ms": 2101
+      "ms": 2188
     },
     {
       "seed": 7,
@@ -188,6 +192,7 @@
         "allied": 0,
         "vassal": 0,
         "dead": 3,
+        "everCourted": 3,
         "total": 4
       },
       "endScrap": [
@@ -227,7 +232,7 @@
         "maxMajor": 0,
         "atCapRounds": 0
       },
-      "ms": 2160
+      "ms": 2187
     },
     {
       "seed": 991,
@@ -244,6 +249,7 @@
         "allied": 0,
         "vassal": 1,
         "dead": 3,
+        "everCourted": 4,
         "total": 4
       },
       "endScrap": [
@@ -283,7 +289,7 @@
         "maxMajor": 0,
         "atCapRounds": 0
       },
-      "ms": 1033
+      "ms": 1010
     },
     {
       "seed": 4711,
@@ -300,6 +306,7 @@
         "allied": 0,
         "vassal": 0,
         "dead": 4,
+        "everCourted": 3,
         "total": 4
       },
       "endScrap": [
@@ -339,7 +346,7 @@
         "maxMajor": 0,
         "atCapRounds": 0
       },
-      "ms": 1519
+      "ms": 1319
     },
     {
       "seed": 8123,
@@ -356,6 +363,7 @@
         "allied": 0,
         "vassal": 0,
         "dead": 3,
+        "everCourted": 3,
         "total": 4
       },
       "endScrap": [
@@ -395,7 +403,7 @@
         "maxMajor": 0,
         "atCapRounds": 0
       },
-      "ms": 2198
+      "ms": 2100
     },
     {
       "seed": 20260821,
@@ -409,9 +417,10 @@
       "surpriseOpenings": 56,
       "coalitions": 4,
       "minors": {
-        "allied": 0,
+        "allied": 1,
         "vassal": 0,
         "dead": 4,
+        "everCourted": 4,
         "total": 4
       },
       "endScrap": [
@@ -451,7 +460,7 @@
         "maxMajor": 0,
         "atCapRounds": 0
       },
-      "ms": 1856
+      "ms": 2047
     },
     {
       "seed": 31337,
@@ -468,6 +477,7 @@
         "allied": 1,
         "vassal": 0,
         "dead": 3,
+        "everCourted": 3,
         "total": 4
       },
       "endScrap": [
@@ -507,7 +517,7 @@
         "maxMajor": 0,
         "atCapRounds": 0
       },
-      "ms": 2361
+      "ms": 2510
     },
     {
       "seed": 55555,
@@ -522,8 +532,9 @@
       "coalitions": 4,
       "minors": {
         "allied": 0,
-        "vassal": 0,
+        "vassal": 1,
         "dead": 4,
+        "everCourted": 3,
         "total": 4
       },
       "endScrap": [
@@ -563,7 +574,7 @@
         "maxMajor": 0,
         "atCapRounds": 0
       },
-      "ms": 1684
+      "ms": 1728
     },
     {
       "seed": 90210,
@@ -578,8 +589,9 @@
       "coalitions": 3,
       "minors": {
         "allied": 1,
-        "vassal": 0,
+        "vassal": 1,
         "dead": 3,
+        "everCourted": 2,
         "total": 4
       },
       "endScrap": [
@@ -619,7 +631,7 @@
         "maxMajor": 0,
         "atCapRounds": 0
       },
-      "ms": 2477
+      "ms": 2727
     },
     {
       "seed": 123456,
@@ -634,8 +646,9 @@
       "coalitions": 3,
       "minors": {
         "allied": 0,
-        "vassal": 0,
+        "vassal": 1,
         "dead": 3,
+        "everCourted": 2,
         "total": 4
       },
       "endScrap": [
@@ -675,7 +688,7 @@
         "maxMajor": 0,
         "atCapRounds": 0
       },
-      "ms": 1925
+      "ms": 2009
     },
     {
       "seed": 2026,
@@ -692,6 +705,7 @@
         "allied": 0,
         "vassal": 0,
         "dead": 4,
+        "everCourted": 4,
         "total": 4
       },
       "endScrap": [
@@ -731,7 +745,7 @@
         "maxMajor": 0,
         "atCapRounds": 0
       },
-      "ms": 1624
+      "ms": 1774
     },
     {
       "seed": 606,
@@ -746,8 +760,9 @@
       "coalitions": 7,
       "minors": {
         "allied": 0,
-        "vassal": 1,
+        "vassal": 2,
         "dead": 3,
+        "everCourted": 4,
         "total": 4
       },
       "endScrap": [
@@ -787,7 +802,7 @@
         "maxMajor": 0,
         "atCapRounds": 0
       },
-      "ms": 1687
+      "ms": 1766
     },
     {
       "seed": 77,
@@ -802,8 +817,9 @@
       "coalitions": 3,
       "minors": {
         "allied": 0,
-        "vassal": 0,
+        "vassal": 2,
         "dead": 4,
+        "everCourted": 4,
         "total": 4
       },
       "endScrap": [
@@ -843,7 +859,7 @@
         "maxMajor": 0,
         "atCapRounds": 0
       },
-      "ms": 1419
+      "ms": 1502
     },
     {
       "seed": 31415,
@@ -860,6 +876,7 @@
         "allied": 1,
         "vassal": 0,
         "dead": 3,
+        "everCourted": 3,
         "total": 4
       },
       "endScrap": [
@@ -899,7 +916,7 @@
         "maxMajor": 0,
         "atCapRounds": 0
       },
-      "ms": 1469
+      "ms": 1467
     }
   ]
 }

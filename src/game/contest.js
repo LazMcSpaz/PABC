@@ -17,6 +17,7 @@ import { onAttack, checkDominion, arePacted } from "./diplomacy.js";
 import { makeUnit, nextMusterIndex } from "./setup.js";
 import { TECH_NODES, hasTechNode } from "./tech.js";
 import { destroyPost } from "./posts.js";
+import { syncControlHistory } from "./control.js";
 import { blockadeAt, blockadeDefense, destroyBlockade } from "./blockades.js";
 import { recomputeVp } from "./victory.js";
 
@@ -479,6 +480,10 @@ function captureLocation(state, loc, victor) {
   loc.buildPriority = "blockade"; // rail doc §3.4 — a captor inherits the default
   loc.poolTarget = null;          // §2.2 — a captured city pools nowhere until told to
   emit(state, "location_captured", { hex: loc.hexId, controller: victor, from });
+  // Close the old holder's entry and open the captor's now, rather than at
+  // round end: `control_duration` should read 0 the moment a place changes
+  // hands, not carry the previous holder's tenure until the rollover.
+  syncControlHistory(state);
 
   // §16.5 severed supply — any in-transit reinforcement whose origin was
   // this Location is stranded: it becomes a fresh, chip-less unit (cap 4)

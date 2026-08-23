@@ -19,7 +19,7 @@ import {
   runDiplomacyRound, vassalsOf, arePacted, adjustMenace, sweepTrespass,
   checkDominion, dominionStanding,
 } from "./diplomacy.js";
-import { holdsLocation } from "./control.js";
+import { holdsLocation, syncControlHistory } from "./control.js";
 import { adjustStanding } from "./standing.js";
 import { pressureSource } from "./influence.js";
 import { hasTechNode } from "./tech.js";
@@ -431,6 +431,13 @@ export function endTurn(state) {
 // The §15.12 round-end pipeline. Deferred resolution comes first so a
 // queued consequence can update the state that triggers then read.
 function runRoundEnd(state) {
+  // The control ledger, before anything reads it. `control_duration` is a DSL
+  // condition that could never fire — `controlHistory` was seeded at setup and
+  // never appended to — so a content author asking "have they held this place
+  // for three rounds?" got a silent permanent no. Swept rather than hooked:
+  // control changes hands through five paths today and a ledger that misses
+  // one is worse than none.
+  syncControlHistory(state);
   sweepDeferred(state);
   sweepPlayerFlags(state);
   sweepSecondments(state);
@@ -441,7 +448,7 @@ function runRoundEnd(state) {
   decayWorldCounters(state);
   // §18.8/§18.12 — the diplomacy round cadence: Menace decay, Standing
   // drift, flows, AI-to-AI politics, vassal tick, coalitions, then the
-  // Recognition win check (sets winnerId if a peaceful victory has landed).
+  // Dominion win check (sets winnerId if the arrangement has held).
   runDiplomacyRound(state);
 }
 

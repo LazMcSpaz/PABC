@@ -730,6 +730,73 @@ export const CONFIG = {
       cooldownRounds: 8,
     },
 
+    // Reach — who a faction can talk to at all (diplomacy brief §15).
+    //
+    // THE HOLE THIS CLOSES, which predates both briefs and is the single
+    // largest problem the 15-game suite measures. Every minor in content.js
+    // is `scope: "local"`. `mayEngage` returns false when a local faction is
+    // outside `ai.localityRadius` (3), and BOTH `aiAcceptsPact` and
+    // `aiAcceptsVassalage` return false on `!mayEngage`. But `dominionStanding`
+    // counts every surviving faction, minors included. So a minor four hops
+    // away can be neither allied nor vassalized — only killed — while still
+    // being required for the win condition.
+    //
+    // Measured on the baseline suite: 3.47 of 4 minors die per game, 0.33 are
+    // allied or vassalised, and 6 of 15 games never resolve at all. It is also
+    // the mechanism behind the one unresolved game
+    // `victory-redesign-2026-08-21.md` reported.
+    //
+    // The fix is NOT a special ruleset for minors — the research is clear that
+    // a simplified parallel ruleset is what earns city-states and tribes their
+    // "vending machine" reputation. It is that distance stops being permanent.
+    reach: {
+      // Out of contact this long and a pair becomes engageable anyway. Silence
+      // across a continent is a reason to write a letter, not a wall.
+      // 0 switches the escape off entirely and restores the old behaviour.
+      reachabilityRounds: 6,
+      // …but they are strangers, so the bar is higher. Applied to the Standing
+      // both `aiAcceptsPact` and `aiAcceptsVassalage` read, so reaching past
+      // your neighbourhood costs something without being impossible.
+      distantStandingPenalty: 2,
+    },
+
+    // Deals and the Standing they move (diplomacy brief §7.1). This is the
+    // exploit fix, and everything downstream of it assumes Standing is scarce.
+    //
+    // WHAT WAS WRONG. `applyDeal` warmed BOTH sides by a flat +2 for every
+    // non-gift deal. Gifts have diminishing returns; ordinary deals did not.
+    // `chargePester` only fired on a flat refusal, so an accepted deal cost no
+    // ask budget. And a 1-scrap give-and-get-nothing deal always has
+    // dealValue >= 0, so it was always accepted. Probed on a live engine,
+    // seed 424242, round 1: four one-scrap deals took Goldgrass from Standing
+    // 0 to 8, and the pact signed. Four scrap, one round, alliance — against a
+    // win condition that reads Standing, and against `diplomacy.js`'s own
+    // stated guarantee that "a pile of scrap cannot buy past the Standing bar
+    // aiAcceptsPact guards, or Standing stops being the currency of the
+    // diplomacy game."
+    deals: {
+      // Standing from a deal now scales with the NET value transferred, each
+      // side's half measured by whoever received it. A fair swap is business
+      // and warms nobody; generosity is what warms, which is the same thing
+      // gifts already say. At 6, three scrap of net generosity buys +1 and
+      // nine buys the cap.
+      //
+      // 0 is the REVERT SWITCH: it restores the historical flat +2 both ways,
+      // exploit included. It exists because a bad tuning should be a config
+      // revert rather than a branch revert, and because measuring a stage
+      // against its own "before" needs the before to still be reachable.
+      dealStandingPerValue: 6,
+      // …and is capped per pair per round, so the answer to "warm them faster"
+      // is never "table more deals this turn".
+      dealStandingCapPerRound: 2,
+      // Negotiation costs the ask budget either way. `freeAsksPerRound` has
+      // always counted accepted asks; only refusals were ever charged for
+      // them, so spamming cheap deals a faction would obviously take was free.
+      // This is Johnson's warning made mechanical: unlimited free negotiation
+      // trades a vending machine for a slot machine.
+      chargeAskOnAccept: true,
+    },
+
     // The round trip. A proposal is a thing that sits on a table, not a
     // button that resolves the instant it is pressed.
     offers: {

@@ -15,7 +15,7 @@ import {
   ensureDiplomacy, menaceFromAttack, onAttack,
   formPact, declareWar, vassalize, runDiplomacyRound,
   wouldAccept, dealValue, performDiplomacy,
-  getStanding, atWar, arePacted, vassalLord, mayEngage, areNeighbours,
+  getStanding, atWar, arePacted, vassalLord, mayEngage, mayCourt, areNeighbours,
   tolerance, passesRepGates, factionIds,
   // diplomacy-spec.md additions
   findWar, warExhaustion, aiAcceptsPeace, evaluatePactCall,
@@ -41,7 +41,7 @@ import {
   // §3.2 Locations as deal items — ceding ground
   locationWorth, cedeBlocker, cedeableLocations, cedeLocation, resolveProposal,
 } from "./diplomacy.js";
-import { holderOf, controlLevel, holdsLocation } from "./control.js";
+import { holderOf, controlLevel, holdsLocation, syncControlHistory } from "./control.js";
 import { recomputeVp, settlementVp, locationVp } from "./victory.js";
 import { setStanding } from "./standing.js";
 import { factionDef, MINOR_FACTIONS } from "./content.js";
@@ -3786,6 +3786,107 @@ line("\n§18 DIPLOMACY CAPSTONE");
       check("a scope:local minor will not engage a non-neighbour (no far faction this seed)", true);
     }
     check("a global major may engage anyone", mayEngage(g, "versari", "goldgrass"));
+    // §15 — and the ally/vassal doors open on their own clock. `mayEngage`
+    // stays the scope predicate for war, grudges, ultimatums and coalition
+    // membership; only `mayCourt` widens. Gating both on the widened one was
+    // measured and reverted: wars per game 52 -> 78, unresolved 6 of 15 -> 11.
+    if (farMajor) {
+      check("…and cannot court one either, at first",
+        !mayCourt(g, "tempest", farMajor));
+      g.round = CONFIG.diplomacy.reach.reachabilityRounds + 1;
+      check("…but silence long enough makes them strangers you can write to",
+        mayCourt(g, "tempest", farMajor));
+      check("…while the WAR predicate is untouched by distance",
+        !mayEngage(g, "tempest", farMajor));
+      // Strangers are a harder sell. The escape opens a door; it does not
+      // lower the bar behind it.
+      adjustStanding(g, "tempest", farMajor, CONFIG.diplomacy.pactStandingReq, "test");
+      check("…and a stranger at the ordinary bar is still not enough",
+        !aiAcceptsPact(g, "tempest", farMajor));
+      adjustStanding(g, "tempest", farMajor, CONFIG.diplomacy.reach.distantStandingPenalty, "test");
+      check("…they want the distance paid for",
+        aiAcceptsPact(g, "tempest", farMajor) ||
+        // sociability / rep gates are separate rulings; only the reach term
+        // is under test here
+        getStanding(g, "tempest", farMajor) >= CONFIG.diplomacy.pactStandingReq
+          + CONFIG.diplomacy.reach.distantStandingPenalty);
+      g.round = 1;
+    }
+  }
+
+  // --- brief §7.1: the Standing pump is closed ---
+  {
+    const g = createGame({ seed, humanFactionId: "versari" });
+    ensureDiplomacy(g);
+    g.players.versari.resource = 200;
+    const s0 = getStanding(g, "goldgrass", "versari");
+    // The measured exploit, verbatim: four one-scrap deals took Goldgrass
+    // from 0 to 8 and signed a pact on round one.
+    for (let i = 0; i < 4; i += 1) {
+      performDiplomacy(g, "versari", "propose-deal",
+        { faction: "goldgrass", give: [{ resource: { resource: "scrap", amount: 1 } }], get: [] });
+    }
+    check("four scrap no longer buys eight Standing",
+      getStanding(g, "goldgrass", "versari") <= s0);
+    check("…and no pact with it",
+      !performDiplomacy(g, "versari", "propose-pact", { faction: "goldgrass" }).accepted);
+    check("…because a token deal transfers no net value worth warming to",
+      getStanding(g, "goldgrass", "versari") < CONFIG.diplomacy.pactStandingReq);
+
+    // Generosity still works, and is still capped per pair per round.
+    const g2 = createGame({ seed, humanFactionId: "versari" });
+    ensureDiplomacy(g2);
+    g2.players.versari.resource = 200;
+    performDiplomacy(g2, "versari", "propose-deal",
+      { faction: "goldgrass", give: [{ resource: { resource: "scrap", amount: 12 } }], get: [] });
+    const afterOne = getStanding(g2, "goldgrass", "versari");
+    check("a generous deal still warms", afterOne > 0);
+    performDiplomacy(g2, "versari", "propose-deal",
+      { faction: "goldgrass", give: [{ resource: { resource: "scrap", amount: 12 } }], get: [] });
+    check("…and the per-pair, per-round cap holds",
+      getStanding(g2, "goldgrass", "versari") === afterOne);
+    g2.round += 1;
+    performDiplomacy(g2, "versari", "propose-deal",
+      { faction: "goldgrass", give: [{ resource: { resource: "scrap", amount: 12 } }], get: [] });
+    check("…and lifts again next round", getStanding(g2, "goldgrass", "versari") > afterOne);
+
+    // A swap of equals is business, not friendship.
+    const g3 = createGame({ seed, humanFactionId: "versari" });
+    ensureDiplomacy(g3);
+    g3.players.versari.resource = 200; g3.players.goldgrass.resource = 200;
+    performDiplomacy(g3, "versari", "propose-deal", { faction: "goldgrass",
+      give: [{ resource: { resource: "scrap", amount: 10 } }],
+      get: [{ resource: { resource: "scrap", amount: 10 } }] });
+    check("an even swap warms nobody", getStanding(g3, "goldgrass", "versari") === 0);
+  }
+
+  // --- economy §13: the control ledger is appended to ---
+  {
+    const g = createGame({ seed, humanFactionId: "versari" });
+    const loc = Object.values(g.locations).find((l) => l.controller === "versari");
+    const before = g.world.controlHistory.length;
+    check("setup seeds the ledger", before > 0);
+    // Hand it over and sweep: the old tenure closes, a new one opens.
+    loc.sections = loc.sections.map(() => "lakers");
+    loc.controller = "lakers";
+    g.round = 5;
+    syncControlHistory(g);
+    const open = g.world.controlHistory.filter((h) => h.hex === loc.hexId && h.toRound == null);
+    const closed = g.world.controlHistory.filter((h) => h.hex === loc.hexId && h.toRound != null);
+    check("a change of hands closes the old tenure", closed.length === 1 && closed[0].controller === "versari");
+    check("…and opens the new one", open.length === 1 && open[0].controller === "lakers" && open[0].fromRound === 5);
+    // Which is the whole point: control_duration could never fire before.
+    g.round = 8;
+    check("…so control_duration finally answers",
+      evalCond(g, {
+        op: "gte",
+        left: { control_duration: { player: "lakers", hex: loc.hexId } },
+        right: 3,
+      }, {}) === true);
+    // Idempotent — the sweep runs every round end and must not churn.
+    const n = g.world.controlHistory.length;
+    syncControlHistory(g); syncControlHistory(g);
+    check("…and the sweep is idempotent", g.world.controlHistory.length === n);
   }
 
   // --- performDiplomacy verbs (the player's levers, §18.7) ---

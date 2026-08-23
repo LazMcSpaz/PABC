@@ -13,7 +13,7 @@ import { FACTIONS, MINOR_FACTIONS, factionDef, LOCATIONS, CHIPS } from "./conten
 import { emit, registerEventHook } from "./events.js";
 import { getStanding, adjustStanding, setStanding, standingTier, standingReceipts } from "./standing.js";
 import { bfsDistances, reinforcementRoute } from "./board.js";
-import { holdsLocation } from "./control.js";
+import { holdsLocation, syncControlHistory } from "./control.js";
 import {
   revealRegion, applySharedVision, recomputeVisibilityFor, isUnitVisibleTo, isHexVisible,
 } from "./visibility.js";
@@ -43,8 +43,12 @@ export function ensureDiplomacy(state) {
       // measure with no receipt at all. Written by `recordStandingCause` in
       // standing.js; read by `standingReceipts`.
       standingLog: {},
+      // §15 — the last round each unordered pair was within reach of each
+      // other. Absent means never. Feeds `engagementReach`.
+      contact: {},
     };
   }
+  if (!state.diplomacy.contact) state.diplomacy.contact = {};
   if (!state.diplomacy.standingLog) state.diplomacy.standingLog = {};
   if (!state.diplomacy.giftCounter) state.diplomacy.giftCounter = {};
   if (!state.diplomacy.pendingCalls) state.diplomacy.pendingCalls = [];
@@ -608,14 +612,99 @@ export function areNeighbours(state, a, b) {
   return false;
 }
 
+// When were these two last within reach of each other? Stamped each round by
+// `sweepContact`; absent means never. Unordered — contact is a property of the
+// pair, not a direction.
+const contactKey = (a, b) => [a, b].sort().join("|");
+export function lastContactRound(state, a, b) {
+  return state.diplomacy?.contact?.[contactKey(a, b)] ?? null;
+}
+
+// Record who is currently in reach of whom. Runs once per round, before the
+// politics: `areNeighbours` is a BFS per Location pair, so calling it from
+// every acceptance gate would be the expensive way to ask a question that only
+// changes when somebody moves a city.
+export function sweepContact(state) {
+  const book = state.diplomacy.contact = state.diplomacy.contact || {};
+  const ids = factionIds(state);
+  for (let i = 0; i < ids.length; i += 1) {
+    for (let j = i + 1; j < ids.length; j += 1) {
+      if (state.players[ids[i]]?.eliminated || state.players[ids[j]]?.eliminated) continue;
+      if (areNeighbours(state, ids[i], ids[j])) book[contactKey(ids[i], ids[j])] = state.round;
+    }
+  }
+}
+
 // May `a` engage `b` diplomatically/militarily given scope? A local faction
-// only engages neighbours; globals engage anyone.
+// only engages neighbours; globals engage anyone. UNCHANGED — see `mayCourt`
+// below for why the §15 reachability escape does not live here.
 export function mayEngage(state, a, b) {
   const aLocal = factionDef(a)?.scope === "local";
   const bLocal = factionDef(b)?.scope === "local";
   if (aLocal && !areNeighbours(state, a, b)) return false;
   if (bLocal && !areNeighbours(state, a, b)) return false;
   return true;
+}
+
+// How `a` and `b` can reach each other FOR THE ALLY AND VASSAL DOORS, and
+// what it costs.
+//
+//   { ok: false }                     out of scope and not yet distant enough
+//   { ok: true, distant: false }      neighbours, or both global — ordinary terms
+//   { ok: true, distant: true }       reachable only because the silence has
+//                                     run long enough, at a Standing penalty
+//
+// THE HOLE (diplomacy brief §15). Every minor is `scope: "local"`, so a minor
+// outside `ai.localityRadius` could be neither allied nor vassalised — and
+// `dominionStanding` counts it anyway. Measured on the baseline suite: 3.47 of
+// 4 minors killed per game, 0.33 allied or vassalised, 6 of 15 games never
+// resolving. The win condition demanded something the rules made impossible,
+// and the only remaining answer was genocide.
+//
+// The fix is not a separate ruleset for minors — the research is unambiguous
+// that a simplified parallel ruleset is exactly what earns city-states their
+// "vending machine" reputation. It is that DISTANCE STOPS BEING PERMANENT for
+// the two doors the win condition needs: a pair out of contact for
+// `reachabilityRounds` can ally or submit, at a higher Standing bar, because
+// they are strangers.
+//
+// WHY THIS IS NOT `mayEngage`. The first cut of this fix widened `mayEngage`
+// itself, and the suite caught it: unresolved games went from 6 of 15 to 11.
+// `mayEngage` gates `runAIPolitics`'s grudge-war path, coalition membership
+// and ultimatums as well as the two acceptance functions, so widening it gave
+// every distant pair a WAR path too — wars per game 52 -> 78, undeclared
+// attacks 25 -> 40, and a board where somebody is always at war with somebody
+// can never complete Dominion. Each half of this stage measured well alone and
+// badly together, which is exactly the interaction the plan's "retune before
+// the next stage lands" rule exists to catch.
+//
+// The win condition asks that every surviving faction be reachable by ally,
+// vassal or elimination. Elimination was never gated. So only the other two
+// doors need opening, and opening only those is the whole fix.
+export function engagementReach(state, a, b) {
+  if (mayEngage(state, a, b)) return { ok: true, distant: false };
+  const rounds = D().reach?.reachabilityRounds || 0;
+  if (!rounds) return { ok: false, distant: false }; // escape switched off
+  // Never in contact counts from the start of the game, not from never: two
+  // factions that have spent six rounds on the same continent without meeting
+  // have still had six rounds in which word could travel.
+  const since = lastContactRound(state, a, b) ?? 0;
+  if (state.round - since < rounds) return { ok: false, distant: false };
+  return { ok: true, distant: true };
+}
+
+// May `a` be courted or take `b` as a protector? The ally/vassal doors only.
+export function mayCourt(state, a, b) {
+  return engagementReach(state, a, b).ok;
+}
+
+// The Standing `f` effectively reads from `other`, once the distance between
+// them is priced in. A pair reachable only through the §15 escape is dealing
+// with strangers, and strangers need to be keener.
+function reachAdjustedStanding(state, f, other) {
+  const s = getStanding(state, f, other);
+  const reach = engagementReach(state, f, other);
+  return reach.distant ? s - (D().reach?.distantStandingPenalty || 0) : s;
 }
 
 // --- deal valuation (§18.6 / §18.8) ---------------------------------
@@ -648,7 +737,7 @@ function pactAppetite(state, fid, other) {
   const social = def.sociability ?? 0.5;
   if (aiAcceptsPact(state, fid, other)) return 5 + social * 4;
   // Below the bar, but not worthless: it is still an alliance being offered.
-  if (!mayEngage(state, fid, other) || atWar(state, fid, other)) return 0;
+  if (!mayCourt(state, fid, other) || atWar(state, fid, other)) return 0;
   const shortfall = D().pactStandingReq - getStanding(state, fid, other);
   return Math.max(0, (5 + social * 4) - shortfall);
 }
@@ -772,6 +861,7 @@ export function cedeLocation(state, from, to, hexId, cause = "cession") {
   if (aff && aff !== to && state.players[aff]) {
     adjustStanding(state, aff, to, -CESSION().thirdPartyStandingHit, "location-ceded");
   }
+  syncControlHistory(state); // a city signed away changes hands as surely as one stormed
   recomputeResearch(state);
   recomputeInfluence(state);
   recomputeVisibilityFor(state, [to, from], { emitEvents: false });
@@ -1094,6 +1184,12 @@ export function resolveProposal(state, pid, f, deal, cause, kind) {
   if (wouldAccept(state, f, deal)) {
     applyDeal(state, deal, cause);
     emit(state, "deal_struck", { proposer: pid, recipient: f, cause });
+    // Brief §7.1 — negotiation costs the ask budget EITHER WAY. This used to
+    // bite only on refusal, so tabling a run of cheap deals a faction would
+    // obviously take was free, and that was half of the round-one alliance.
+    // Johnson's warning is the reason it is not: unlimited free negotiation
+    // trades a vending machine for a slot machine.
+    if (pestering && D().deals.chargeAskOnAccept) chargePester(state, pid, f);
     return { accepted: true };
   }
   const counter = counterOffer(state, f, deal);
@@ -1425,15 +1521,75 @@ export function applyDeal(state, deal, cause = "deal") {
       expiresOnRound: state.round + term,
     });
   }
-  // §1.2 — a gift warms Standing with diminishing returns; any other deal
-  // warms both ways at the flat rate.
+  // §1.2 / brief §7.1 — a gift warms Standing with diminishing returns; any
+  // other deal warms by how LOPSIDED it was, capped per pair per round.
   if (cause === "gift") {
     applyGiftStanding(state, deal);
   } else {
-    adjustStanding(state, deal.proposer, deal.recipient, 2, cause);
-    adjustStanding(state, deal.recipient, deal.proposer, 2, cause);
+    applyDealStanding(state, deal, cause);
   }
   emit(state, "deal_struck", { proposer: deal.proposer, recipient: deal.recipient, cause });
+}
+
+// Brief §7.1 — Standing from an ordinary deal.
+//
+// It used to be a flat +2 both ways for ANY non-gift deal, which is what let
+// four one-scrap deals buy an alliance on round one. Three things replace it,
+// and each one alone would close the hole:
+//
+//   · it scales with the NET value transferred, so a swap of equals warms
+//     nobody. Generosity is what warms — the same thing gifts already say —
+//     and a token deal is worth a token amount, which rounds to nothing.
+//   · it is capped per pair per round, so "warm them faster" is never
+//     answered by "table more deals this turn".
+//   · the ask budget is charged on acceptance as well as refusal (see
+//     `resolveProposal`), so the spam itself has a price.
+//
+// The net is measured from each RECEIVER's own side of the table: what the
+// recipient got, valued by them, against what the proposer got, valued by
+// them. That is the only symmetric reading available — there is no neutral
+// valuer in this engine — and it prices a lopsided city-for-nothing exactly
+// the way both parties would describe it.
+//
+// Both sides warm by the same amount, which is deliberate: a generous deal is
+// a warm event for the pair, not a debt one of them owes.
+// The historical flat rate, kept reachable so a stage can be measured against
+// its own "before" without a branch revert (config comment on
+// `dealStandingPerValue`).
+const LEGACY_FLAT_DEAL_STANDING = 2;
+
+function applyDealStanding(state, deal, cause) {
+  const cfg = D().deals;
+  if (!(cfg.dealStandingPerValue > 0)) {
+    adjustStanding(state, deal.proposer, deal.recipient, LEGACY_FLAT_DEAL_STANDING, cause);
+    adjustStanding(state, deal.recipient, deal.proposer, LEGACY_FLAT_DEAL_STANDING, cause);
+    return;
+  }
+  const value = (fid, items, side) =>
+    (items || []).reduce((n, it) => n + valueOfItem(state, fid, it, { other: fid === deal.proposer ? deal.recipient : deal.proposer, side }), 0);
+  // What each party received, priced by the party that received it.
+  const toRecipient = value(deal.recipient, deal.give, "get");
+  const toProposer = value(deal.proposer, deal.get, "get");
+  const net = Math.abs(toRecipient - toProposer);
+  const gain = Math.min(
+    cfg.dealStandingCapPerRound,
+    Math.round(net / Math.max(1, cfg.dealStandingPerValue)),
+  );
+  if (gain <= 0) return;
+  // The per-pair, per-round ceiling. Unordered — "warm them" is one budget,
+  // not two, or the same pair could be pumped from both directions.
+  const book = state.diplomacy.dealStanding =
+    state.diplomacy.dealStanding && state.diplomacy.dealStanding.round === state.round
+      ? state.diplomacy.dealStanding
+      : { round: state.round, byPair: {} };
+  const k = [deal.proposer, deal.recipient].sort().join("|");
+  const spent = book.byPair[k] || 0;
+  const allowed = Math.max(0, cfg.dealStandingCapPerRound - spent);
+  const actual = Math.min(gain, allowed);
+  if (actual <= 0) return;
+  book.byPair[k] = spent + actual;
+  adjustStanding(state, deal.proposer, deal.recipient, actual, cause);
+  adjustStanding(state, deal.recipient, deal.proposer, actual, cause);
 }
 
 // §1.2/§6.9 — gift Standing with sliding-window diminishing returns. The n-th
@@ -2572,11 +2728,18 @@ function runAIPolitics(state) {
     for (const b of ids) {
       if (a === b || b === human) continue; // AI-to-AI only (human acts via the screen)
       if (a === human) continue;
-      if (!mayEngage(state, a, b)) continue;
+      // §15 — the two branches below take DIFFERENT reach predicates, and
+      // that distinction is the whole fix. The pact branch uses `mayCourt`,
+      // so a distant minor can be allied; the war branch stays on
+      // `mayEngage`, so distance never manufactures a grudge war. Gating both
+      // on the widened predicate was measured and reverted: it took wars per
+      // game from 52 to 78 and unresolved games from 6 of 15 to 11.
+      if (!mayEngage(state, a, b) && !mayCourt(state, a, b)) continue;
       if (vassalLord(state, a) === b || vassalLord(state, b) === a) continue;
       const s = getStanding(state, a, b);
       // form a pact: high mutual Standing + sociability + rep gates + compat
-      if (!arePacted(state, a, b) && !atWar(state, a, b)
+      if (mayCourt(state, a, b)
+        && !arePacted(state, a, b) && !atWar(state, a, b)
         && s >= d.pactStandingReq && getStanding(state, b, a) >= d.pactStandingReq
         && (aDef.sociability ?? 0.5) >= 0.4
         && passesRepGates(state, a, b) && passesRepGates(state, b, a)) {
@@ -2585,7 +2748,8 @@ function runAIPolitics(state) {
       }
       // declare war: low Standing + aggression, and not already at war/pact
       // — and never through a live truce (peace holds for its window).
-      if (!atWar(state, a, b) && !arePacted(state, a, b) && !truceBetween(state, a, b)
+      if (mayEngage(state, a, b)
+        && !atWar(state, a, b) && !arePacted(state, a, b) && !truceBetween(state, a, b)
         && s <= d.ai.warGrudgeThreshold && (aDef.aggression ?? 0.5) >= 0.6) {
         declareWar(state, a, b, "ai-grudge");
         continue;
@@ -2644,6 +2808,10 @@ export function runDiplomacyRound(state) {
       if (h !== tgt) adjustHonor(state, pid, Math.sign(tgt - h) * D().honor.decayPerRound, "decay");
     }
   }
+  // §15 — who is within reach of whom, before anything reads it. Stamped once
+  // per round rather than derived per acceptance gate: `areNeighbours` is a
+  // BFS per Location pair and only moves when somebody's holdings do.
+  sweepContact(state);
   expireOffers(state); // §6.10 — an unanswered offer lapses; silence is not a no
   resolveUltimatums(state); // §6.11 — deadlines fall due, and bluffs get called
   pactTenureBaselines(state); // warm long-alliance baselines before the fade
@@ -3002,8 +3170,10 @@ export function performDiplomacy(state, pid, action, params = {}) {
 // Standing, rep gates, no conflicting war, and basic sociability.
 export function aiAcceptsPact(state, f, proposer) {
   if (f === proposer || arePacted(state, f, proposer)) return false;
-  if (!mayEngage(state, f, proposer)) return false;
-  if (getStanding(state, f, proposer) < D().pactStandingReq) return false;
+  if (!mayCourt(state, f, proposer)) return false; // §15 — the ally door, not the war one
+  // Reach-adjusted: a faction you can only speak to because the silence ran
+  // long enough is a stranger, and wants more before it signs anything.
+  if (reachAdjustedStanding(state, f, proposer) < D().pactStandingReq) return false;
   if (!passesRepGates(state, f, proposer)) return false;
   // won't ally you if you're allied to its sworn enemy
   for (const enemy of factionIds(state)) {
@@ -3022,7 +3192,7 @@ export function aiAcceptsPact(state, f, proposer) {
 //    vassal face Dominion needs — courtship, not coercion.
 export function aiAcceptsVassalage(state, f, lord) {
   if (f === lord || vassalLord(state, f)) return false;
-  if (!mayEngage(state, f, lord)) return false;
+  if (!mayCourt(state, f, lord)) return false; // §15 — the vassal door, not the war one
   // A recent rebel refuses its old lord until the cooldown clears.
   const reb = state.diplomacy?.rebellions?.[f];
   if (reb && reb.lord === lord && state.round - reb.round < D().vassal.rebellionCooldownRounds) return false;
@@ -3031,7 +3201,9 @@ export function aiAcceptsVassalage(state, f, lord) {
   const cornered = atWar(state, lord, f) || getStanding(state, f, lord) <= D().tiers.wary;
   if (cornered) return true;
   if ((factionDef(f)?.tier || "major") === "major") return false;
-  const s = getStanding(state, f, lord);
+  // The patronage door reads the reach-adjusted number for the same reason
+  // the pact door does: a distant protector is a stranger offering protection.
+  const s = reachAdjustedStanding(state, f, lord);
   if (s < D().tiers.friendly) return false;
   if (!passesRepGates(state, f, lord)) return false;
   // the lord must be this minor's top Standing on the board (ties count)

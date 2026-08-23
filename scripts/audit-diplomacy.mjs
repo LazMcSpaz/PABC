@@ -10,6 +10,7 @@
 import { createGame } from "../src/game/setup.js";
 import * as D from "../src/game/diplomacy.js";
 import { takeAITurn } from "../src/game/ai.js";
+import { CONFIG } from "../src/game/config.js";
 
 const mk = () => createGame({
   seed: 424242,
@@ -175,4 +176,106 @@ line(10, "Asking too often costs you");
   console.log("  five hopeless asks in one round: standing", before, "->", D.getStanding(g, "lakers", "versari"));
   console.log("  >> asks recorded:", D.asksThisRound(g, "versari", "lakers"),
     "| free per round:", 2);
+}
+
+// --- blocks 11-16, added with the 2026-08-23 briefs -------------------
+// Numbered to match diplomacy brief §17. Blocks whose rule has not shipped
+// print what they will assert and what is true today, exactly as
+// `audit-economy.mjs` does — the same discipline, so a stage that lands can
+// flip its block in the same commit as the rule.
+
+line(11, "A faction never acts on a posture it has not stated at least a round earlier");
+{
+  console.log("  PENDING — diplomacy stage 3. Posture does not exist yet.");
+  console.log("  will assert: every act carries state.diplomacy.posture[a][b].statedRound <= round - 1");
+  const g = mk();
+  console.log("  today: state.diplomacy.posture is", g.diplomacy.posture === undefined ? "undefined" : "present");
+}
+
+line(12, "No coalition forms against a spotless target below fearThreshold");
+{
+  console.log("  PENDING — diplomacy stage 6. The grounds gate does not exist yet.");
+  const g = mk();
+  g.players.versari.menace = 0;
+  g.players.versari.vp = 11;
+  for (const loc of Object.values(g.locations)) if (loc.controller) loc.controller = "versari";
+  D.runDiplomacyRound(g);
+  const c = g.diplomacy.coalitions.find((x) => x.target === "versari");
+  console.log("  a clean runaway, Menace 0, threat", Math.round(D.threatScore(g, "versari") * 10) / 10,
+    "-> coalition:", !!c);
+  console.log("  >> today a spotless leader is coalitioned on POSITION alone, which is exactly the\n" +
+    "     Attila failure the research names. The 2026-08-15 log has the pure case: Goldgrass's\n" +
+    "     Menace never moved once all game and it had two wars declared on it in R7 for leading.");
+}
+
+line(13, "A conscripted member's Standing never drops below draftStandingFloor");
+{
+  console.log("  PENDING — diplomacy stage 6.");
+  const g = mk();
+  D.adjustStanding(g, "lakers", "versari", 5, "test");
+  g.players.versari.menace = 0; g.players.versari.vp = 11;
+  for (const loc of Object.values(g.locations)) if (loc.controller) loc.controller = "versari";
+  D.runDiplomacyRound(g);
+  const inCoal = (g.diplomacy.coalitions.find((c) => c.target === "versari")?.members || []).includes("lakers");
+  console.log("  lakers stood at +5, drafted:", inCoal, "-> standing now", D.getStanding(g, "lakers", "versari"));
+  console.log("  >> a draft should cool a partner, not make them an enemy: +5 should land at Wary (-3),\n" +
+    "     not at hostile. And a coalition declaration should not charge declareUnjustified — with\n" +
+    "     wM 1 that raises the members' OWN threat scores and seeds the next coalition.");
+}
+
+line(14, "A player position broken is cited by name within 3 rounds");
+{
+  console.log("  PENDING — diplomacy stage 7. state.diplomacy.positions does not exist yet.");
+  const g = mk();
+  console.log("  today: positions is", g.diplomacy.positions === undefined ? "undefined" : "present");
+  console.log("  the half that DOES exist: promises are recorded and broken ones cost —");
+  console.log("    ENACTED/standing promise kinds are read by breakPromiseIfAny, and dontAllyPledge");
+  console.log("    already blocks formPact. What is missing is the player VOLUNTEERING one.");
+}
+
+line(15, "Every surviving faction is reachable by ally, vassal or elimination, from turn 1");
+{
+  const g = createGame({
+    seed: 424242,
+    factionIds: ["versari", "goldgrass", "lakers", "plainers"],
+    humanFactionId: "versari",
+    minors: ["tempest", "croppers", "steeltraders", "dambarans"],
+    mapSize: "medium",
+  });
+  D.ensureDiplomacy(g);
+  const ids = D.factionIds(g);
+  const unreachable = [];
+  for (const a of ids) {
+    for (const b of ids) {
+      if (a === b) continue;
+      // Elimination is never gated, so the question is whether EITHER of the
+      // other two doors can ever open. `mayCourt` is that question.
+      if (!D.mayCourt(g, a, b)) unreachable.push(`${a}->${b}`);
+    }
+  }
+  console.log("  pairs with no ally/vassal door on round 1:", unreachable.length ? unreachable.join(", ") : "(none)");
+  console.log("  …and after the reachability window (round " + (CONFIG.diplomacy.reach.reachabilityRounds + 1) + "):");
+  g.round = CONFIG.diplomacy.reach.reachabilityRounds + 1;
+  const stillClosed = [];
+  for (const a of ids) for (const b of ids) if (a !== b && !D.mayCourt(g, a, b)) stillClosed.push(`${a}->${b}`);
+  console.log("   ", stillClosed.length ? stillClosed.join(", ") : "(none — every pair is reachable)");
+  console.log("  >> was: a scope:\"local\" minor outside ai.localityRadius could be neither allied nor");
+  console.log("     vassalised, only killed — while dominionStanding counted it anyway. 6 of 15 games");
+  console.log("     never resolved. The escape opens the ALLY and VASSAL doors only: widening mayEngage");
+  console.log("     itself also widened the war path and took unresolved from 6 to 11.");
+}
+
+line(16, "A full-corpus quest playthrough never pushes Honor below any live faction's trustFloor");
+{
+  console.log("  PENDING — diplomacy stage 8 (the trust->Honor merge).");
+  const g = mk();
+  const floors = D.factionIds(g).map((f) => `${f} ${Math.round(D.trustFloor(g, f) * 10) / 10}`);
+  console.log("  live trust floors:", floors.join(" · "));
+  console.log("  honor.decayPerRound:", CONFIG.diplomacy.honor.decayPerRound,
+    "— Honor does not recover passively, which is the hazard.");
+  console.log("  >> the 23 authored `trust` writes sum to -16. Merged at full magnitude into a stat");
+  console.log("     that never recovers, a normal spread of quest choices can push a player under");
+  console.log("     several factions' floors, and passesRepGates hard-gates every pact on it — the");
+  console.log("     diplomacy face would close permanently. Three mitigations, all three needed:");
+  console.log("     halve the magnitudes, give Honor a positive decayPerRound, and assert this block.");
 }

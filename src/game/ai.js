@@ -20,7 +20,7 @@ import { postAt } from "./posts.js";
 import { standingTier } from "./standing.js";
 import { factionDef } from "./content.js";
 import {
-  factionIds, powerOf, arePacted, atWar, vassalLord, mayEngage,
+  factionIds, powerOf, arePacted, atWar, vassalLord, mayEngage, mayCourt,
   getStanding, passesRepGates, formPact, vassalize, applyDeal, checkDominion,
   tableOffer, offersFor, warExhaustion,
   denounce, denounceWarrant, denounceCooldown, honorOf, grievanceWeight, wouldAccept,
@@ -483,7 +483,10 @@ function manageDiplomacy(state, pid) {
   //    faction that has burned its reputation.
   if ((me.aggression ?? 0.5) < 0.7) {
     for (const f of others) {
-      if (atWar(state, pid, f) || !mayEngage(state, pid, f)) continue;
+      // §15 — `mayCourt`, not `mayEngage`: making amends is an overture, and
+      // the escape exists so a faction the win condition counts is reachable
+      // by something other than an army.
+      if (atWar(state, pid, f) || !mayCourt(state, pid, f)) continue;
       if (!grievanceWeight(state, f, pid)) continue;
       // Ask what it would take rather than guessing: counterOffer already
       // walks exactly this gap, and already clamps to what the payer holds.
@@ -517,7 +520,9 @@ function manageDiplomacy(state, pid) {
   if ((me.sociability ?? 0) >= 0.5) {
     for (const f of others) {
       if (arePacted(state, pid, f) || atWar(state, pid, f) || vassalLord(state, f) === pid) continue;
-      if (!mayEngage(state, pid, f)) continue;
+      // §15 — the ally door. Widening the WAR predicate here instead was
+      // measured and reverted: it took unresolved games from 6 of 15 to 11.
+      if (!mayCourt(state, pid, f)) continue;
       const sFwd = getStanding(state, pid, f), sBack = getStanding(state, f, pid);
       if (sFwd >= CONFIG.diplomacy.pactStandingReq && sBack >= CONFIG.diplomacy.pactStandingReq
         && passesRepGates(state, pid, f) && passesRepGates(state, f, pid)) {
@@ -693,7 +698,7 @@ function warTalk(state, pid, me) {
 // stays a thing that happens rather than a thing that accumulates.
 function proposeToHuman(state, pid, me) {
   const human = state.humanFactionId;
-  if (!mayEngage(state, pid, human)) return;
+  if (!mayCourt(state, pid, human)) return; // §15 — an approach, not an attack
   if (offersFor(state, human).some((o) => o.from === pid)) return;
   const cfg = CONFIG.diplomacy.offers;
   const tiers = CONFIG.diplomacy.tiers;
