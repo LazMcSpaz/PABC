@@ -41,6 +41,8 @@ import {
   dominionStanding, dominionMet, checkDominion, dominionCountdown, releaseVassal, aiAcceptsPact,
   // §3.2 Locations as deal items — ceding ground
   locationWorth, cedeBlocker, cedeableLocations, cedeLocation, resolveProposal,
+  // §8 what a fight costs your name
+  diplomaticPrice, attackIsWorthIt,
 } from "./diplomacy.js";
 import { holderOf, controlLevel, holdsLocation, syncControlHistory } from "./control.js";
 import { recomputeVp, settlementVp, locationVp } from "./victory.js";
@@ -545,6 +547,22 @@ line("");
 // =====================================================================
 line("v0.2 VERIFICATION  (movement / attrition / reinforcement / combat)");
 let v2pass = 0, v2fail = 0;
+// Small readers for the §8 fixture: the price rule is about WHOSE ground a
+// fight happens on, so the fixture needs real hexes off the generated board
+// rather than invented ids.
+function hexControlledBy(g, fid) {
+  for (const [hexId, loc] of Object.entries(g.locations || {})) {
+    if (loc.controller === fid) return hexId;
+  }
+  return null;
+}
+function firstEnemyHex(g, pid) {
+  for (const [hexId, loc] of Object.entries(g.locations || {})) {
+    if (loc.controller && loc.controller !== pid) return hexId;
+  }
+  return Object.keys(g.locations || {})[0];
+}
+
 const check = (label, cond) => {
   if (cond) { v2pass++; line(`  ✓ ${label}`); }
   else { v2fail++; line(`  ✗ FAIL — ${label}`); }
@@ -3996,6 +4014,50 @@ line("\n  [§1.1] surprise-attack Honor");
   declareWar(g, a, b, "player"); // breaks the pact → −breakLoss only
   check("declaring war on a pacted ally costs only the pact-break (−5)",
     honorOf(g, a) === h0 - DH.honor.breakLoss);
+}
+
+// §8 — the price of a fight, and whether it is worth paying.
+//
+// The rule ships with `attackPrice.enabled: 0` because every live setting of
+// it made the three governing numbers worse (the table is in config.js). That
+// makes a fixture MORE important, not less: an unexercised mechanism rots, and
+// phase 5 is going to switch this on. Everything below sets `enabled` locally
+// and puts it back, so the suite still measures the shipped default.
+line("\n  [§8] a fight costs your name, and the AI can price it");
+{
+  const AP = CONFIG.diplomacy.attackPrice;
+  const was = AP.enabled;
+  try {
+    AP.enabled = 0;
+    const g0 = createGame({ seed }); ensureDiplomacy(g0);
+    check("switched off, the price is zero and every fight is worth it",
+      diplomaticPrice(g0, "versari", "lakers") === 0
+      && attackIsWorthIt(g0, "versari", firstEnemyHex(g0, "versari"), 0.1));
+
+    AP.enabled = 1;
+    const g = createGame({ seed }); ensureDiplomacy(g);
+    const a = "versari", b = "lakers";
+    const surprise = diplomaticPrice(g, a, b);
+    const declared = diplomaticPrice(g, a, b, { declared: true });
+    check("a surprise strike costs more than declaring first", surprise > declared);
+    check("…and declaring is not free either, absent a grievance", declared > 0);
+
+    // The one thing the price must never do: stop you answering a war you are
+    // already in. That reputation is spent.
+    declareWar(g, a, b, "test");
+    const hex = hexControlledBy(g, b);
+    check("a war already open prices at nothing more",
+      hex == null || attackIsWorthIt(g, a, hex, 0.05));
+
+    // Defence is never priced — the exemption that took unresolved games back
+    // from 6 to 3 when it was added.
+    const g2 = createGame({ seed }); ensureDiplomacy(g2);
+    const own = hexControlledBy(g2, "versari");
+    check("clearing your own ground is never a treacherous strike",
+      own == null || attackIsWorthIt(g2, "versari", own, 0.01, { victim: "lakers" }));
+  } finally {
+    AP.enabled = was;
+  }
 }
 
 // §1.2 / economy §6.3 — gifts are priced in SWAY now, not scrap. The

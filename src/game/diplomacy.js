@@ -798,6 +798,124 @@ export function locationWorth(state, fid, hexId) {
   return worth;
 }
 
+// §8 — WHAT ATTACKING `target` WOULD COST `pid`, in locationWorth units.
+//
+// The comparison the brief states precisely, because the first draft of it
+// overstated the gap: declaring first does NOT save you the Standing collapse.
+// `declareWar` sets both sides to hostile on either path, and `onAttack` calls
+// `declareWar` anyway. What declaring saves is the 8 Honor and the grievance,
+// against `menace.declareUnjustified: 2` — still a large enough gap to change
+// behaviour, but not "a quarter of the cost".
+export function diplomaticPrice(state, pid, target, { declared = false } = {}) {
+  const cfg = D().attackPrice;
+  if (!cfg?.enabled) return 0;
+  const h = D().honor, m = D().menace;
+  let points = 0;
+  if (declared) {
+    // A justified war costs nothing to declare — which is the whole point of
+    // having earned one.
+    points += warIsJustified(state, pid, target) ? 0 : m.declareUnjustified;
+  } else {
+    points += h.surpriseAttackLoss;
+    points += D().grievance.severity["surprise-attack"] ?? D().grievance.defaultSeverity;
+  }
+  // Expected Menace, forecast the way `menaceFromAttack` scores it: by the
+  // share of the board that can see, and by the target's own temperament —
+  // bullying a pacifist costs more than checking a warlord.
+  const tDef = factionDef(target) || {};
+  const raw = Math.max(-1, Math.round(m.base * (0.5 - (tDef.aggression ?? 0.5)) * 2));
+  if (raw > 0) points += raw * witnessShare(state, null, { attacker: pid, victim: target });
+
+  const aggression = factionDef(pid)?.aggression ?? 0.5;
+  return points * cfg.perReputationPoint * (1 - aggression) * desperation(state, pid, target);
+}
+
+// How much a faction's SITUATION changes its ethics rather than its
+// arithmetic — the one place in the design where that is allowed, and the term
+// most likely to need tuning to stop a losing faction turning saintly.
+//
+// Below 1 when it is being ground down (a cornered faction discounts its
+// reputation), above 1 when it is comfortable (a leader has more to lose).
+function desperation(state, pid, target) {
+  const cfg = D().attackPrice;
+  const ex = Math.min(1.5, warExhaustion(state, pid, target) || 0);
+  const lead = powerLead(state, pid);
+  const scale = Math.max(1, powerOf(state, pid) || 1);
+  // Losing ground and bleeding both push it down; a commanding lead pushes up.
+  const comfort = 1 + Math.max(-0.6, Math.min(0.6, lead / (scale * 2))) - ex * 0.4;
+  return Math.max(cfg.desperationFloor, Math.min(cfg.comfortCeiling, comfort));
+}
+
+// What this attack STANDS TO WIN, on the same scale the price is quoted in.
+//
+// Two prizes, because there are two attack paths and they want different
+// things. Contesting a Location wants the Location. Raiding wants the enemy
+// unit off the ground — and `state.locations` holds only Locations, so pricing
+// a raid on `locationWorth` alone values every fight in open country at zero
+// and would block the entire raid path outright.
+function attackPrize(state, pid, hexId, victim) {
+  const cfg = D().attackPrice;
+  let worth = locationWorth(state, pid, hexId);
+  if (victim) {
+    // The strongest thing of theirs standing here. Strength is the one unit
+    // scale every other system already prices fights on, so the conversion is
+    // a single stated constant rather than a second valuation model.
+    let best = 0;
+    for (const u of Object.values(state.units || {})) {
+      if (u.node === hexId && u.owner === victim) best = Math.max(best, u.strength || 0);
+    }
+    worth += best * cfg.unitWorth;
+  }
+  return worth;
+}
+
+// Is this hex your own ground, or the ring around it?
+function defendsOwnGround(state, pid, hexId) {
+  if (state.locations?.[hexId]?.controller === pid) return true;
+  for (const n of state.board?.adjacency?.[hexId] || []) {
+    if (state.locations?.[n]?.controller === pid) return true;
+  }
+  return false;
+}
+
+// Is this fight worth what it costs the attacker's name? The comparison is
+// `prize x winProbability` against the diplomatic price — the one existing
+// value scale on the same objects, rather than an invented one.
+//
+// WHO gets priced is the part the first draft got wrong. It read the
+// Location's controller, but `onAttack` fires against whoever actually
+// DEFENDED — so the raid branch, which strikes a unit on ground its owner may
+// not hold, paid nothing at all. Measured over three full games: 58 of 62 war
+// openings came through that branch and only 9 attacks ever reached the gate.
+export function attackIsWorthIt(state, pid, hexId, winProbability, { declared = false, victim = null } = {}) {
+  const cfg = D().attackPrice;
+  if (!cfg?.enabled) return true;
+  const victims = new Set();
+  if (victim) victims.add(victim);
+  else {
+    const c = state.locations?.[hexId]?.controller;
+    if (c) victims.add(c);
+    for (const u of Object.values(state.units || {})) {
+      if (u.node === hexId && u.owner !== pid) victims.add(u.owner);
+    }
+  }
+  // DEFENCE IS NEVER PRICED. An enemy standing on ground you hold, or one hex
+  // off it, is a threat you answer — nobody reads clearing your own doorstep
+  // as a treacherous strike, and pricing it is what turned this gate from a
+  // brake into a paralysis: measured, 84% of all refusals were fights on or
+  // beside the attacker's own Locations, and unresolved games went 2 -> 6.
+  if (defendsOwnGround(state, pid, hexId)) return true;
+  let price = 0;
+  for (const v of victims) {
+    // Already at war with them: the reputation for it is spent, and refusing
+    // to press a war you are already in is not restraint, it is paralysis.
+    if (!v || v === pid || atWar(state, pid, v)) continue;
+    price += diplomaticPrice(state, pid, v, { declared });
+  }
+  if (price <= 0) return true;
+  return attackPrize(state, pid, hexId, victim) * (winProbability ?? 1) > price;
+}
+
 // Ground given up is worth more than ground gained. You lose the place, the
 // zone of control around it and the base you were working from — and a
 // warlord feels that harder than a merchant does, which is `aggression`

@@ -23,6 +23,7 @@ import {
   factionIds, powerOf, arePacted, atWar, vassalLord, mayEngage, mayCourt,
   speakPosture, postureOf, postureStated, isCourting, eitherCourting, courtRounds,
   postureCitation, interestsOf, courtshipScore, swayIncome, swayOf, canSustainCourtship,
+  attackIsWorthIt, diplomaticPrice,
   getStanding, passesRepGates, formPact, vassalize, applyDeal, checkDominion,
   tableOffer, offersFor, warExhaustion,
   denounce, denounceWarrant, denounceCooldown, honorOf, grievanceWeight, wouldAccept,
@@ -194,6 +195,37 @@ function wouldFight(state, pid, ownerFid) {
   return (factionDef(pid)?.aggression ?? 0.5) >= CONFIG.diplomacy.ai.blindAttackAggressionMin;
 }
 
+// §8 — may this unit press the attack, and at what political price?
+//
+// The gate is deliberately NOT a veto. A veto with no alternative is what
+// deadlocked the first draft: refuse the fight, the unit has nothing else to
+// do, and the game runs out the clock (unresolved games went 2 -> 6 across the
+// 15-seed suite). So there are three outcomes, not two:
+//
+//   worth the surprise      -> strike, and pay for it
+//   worth it only DECLARED  -> declare first, then strike
+//   worth neither           -> walk away
+//
+// The middle branch is the brief's actual point. Declaring does not save the
+// Standing collapse — `declareWar` sets both sides hostile on either path —
+// but it does save the 8 Honor and the grievance, against `declareUnjustified`
+// of 2. That gap is the whole incentive to fight in the open.
+function mayPressAttack(state, pid, hex, chance, victim = null) {
+  const opts = victim ? { victim } : {};
+  if (attackIsWorthIt(state, pid, hex, chance, opts)) return true;
+  if (!attackIsWorthIt(state, pid, hex, chance, { ...opts, declared: true })) return false;
+  const targets = victim
+    ? [victim]
+    : [state.locations?.[hex]?.controller].filter(Boolean);
+  let declared = false;
+  for (const t of targets) {
+    if (!t || t === pid || atWar(state, pid, t)) continue;
+    declareWar(state, pid, t, "declared");
+    declared = true;
+  }
+  return declared;
+}
+
 // Returns true if the AI spent at least one Action (whether the action
 // succeeded or not — failed actions don't decrement remaining, so the
 // loop must give up if no priority matches a runnable action).
@@ -215,7 +247,12 @@ function tryOneAction(state, pid) {
       // garrison and then walked into an allied stack would misjudge exactly
       // the fights this ruling creates.
       const plan = planContest(state, pid, unit.node);
-      if (plan) {
+      // §8 — and is it worth what it costs your name? The gate goes HERE, on
+      // the contest decision, and deliberately not in `wouldFight`: that is
+      // also the pathing predicate, so making it expensive would stop the AI
+      // treating enemy Locations as goals at all and send its units off to
+      // scout fog instead of pressuring anybody.
+      if (plan && mayPressAttack(state, pid, unit.node, plan.chance)) {
         const r = performAction(state, "contest",
           { unit: plan.lead, coalition: plan.support });
         if (r.ok) return true;
@@ -231,7 +268,11 @@ function tryOneAction(state, pid) {
     if (enemyHere && (!loc || !loc.sections.includes("neutral"))
       && wouldFight(state, pid, enemyHere.owner)) {
       const plan = planContest(state, pid, unit.node, { target: enemyHere.uid });
-      if (plan) {
+      // §8 again, and this is the branch that mattered: a raid names its own
+      // victim, who may not be the faction whose ground this is. Measured over
+      // three games, 58 of 62 wars opened here — gating only the Location
+      // contest above left the price rule reaching 9 attacks in total.
+      if (plan && mayPressAttack(state, pid, unit.node, plan.chance, enemyHere.owner)) {
         const r = performAction(state, "contest", {
           unit: plan.lead, coalition: plan.support, target: enemyHere.uid,
         });

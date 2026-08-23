@@ -683,6 +683,76 @@ export const CONFIG = {
       rebellionCooldownRounds: 4, // a rebel won't re-submit to the SAME lord this long
     },
 
+    // §8 — WHAT ATTACKING COSTS, in a number the AI can weigh.
+    //
+    // `wouldFight` prices pacts, war, truce, standing and aggression. It does
+    // not price the 8 Honor a surprise attack costs, the Menace
+    // `menaceFromAttack` can already forecast, or the severity-3
+    // `surprise-attack` grievance. So the AI attacks as if reputation were
+    // free, and the 2026-08-15 log records the endpoint: the Lakers paid 8
+    // Honor for a surprise attack SIX TIMES and kept going, finishing on 1 VP
+    // with an empty tech wheel. A price that is never weighed is not a price.
+    //
+    // WHERE THE GATE GOES. Not in `wouldFight`: that is also the pathing
+    // predicate (`knownGoalHexes` uses it to decide where units WALK), so
+    // making it expensive would make the AI stop treating enemy Locations as
+    // goals, `pickMoveTarget` would fall through to `nearestFrontier`, and
+    // units would scout fog instead of pressuring anybody — quietly gutting
+    // expansion and the submission ending with it. It goes on the CONTEST
+    // decision, leaving `wouldFight` the predicate it is.
+    //
+    // THE UNITS. "On the same scale as the contest EV" refers to nothing —
+    // `planContest` returns a win PROBABILITY. So the price is expressed in
+    // `locationWorth` units, the one existing value scale on the same objects,
+    // and compared against worth x winProbability.
+    attackPrice: {
+      // What one point of Honor, Menace or grievance severity is worth in
+      // locationWorth. The one stated conversion constant.
+      perReputationPoint: 0.8,
+      // …and how much of it a faction actually feels. Scaled by (1 -
+      // aggression), so a warlord at 0.9 feels a tenth of it and still
+      // surprise-attacks while it is ahead. That is deliberate: a faction that
+      // weighs the cost and does it anyway is a character.
+      //
+      // DESPERATION is the answer to "aggression 0.9 never learns": the price
+      // scales DOWN as a faction's own war exhaustion and power position
+      // worsen, and UP when it is comfortable. A warlord who is winning can
+      // afford its reputation; one on 1 VP with an empty wheel should start
+      // feeling the bill. The failure recorded in the log was never "attacked
+      // too much" — it was "attacked while losing and never re-evaluated".
+      desperationFloor: 0.35, // the most the price can be discounted by losing
+      comfortCeiling: 1.6,    // …and the most it can be marked up by winning
+      // What one point of an enemy unit's Strength is worth as a prize, in the
+      // same locationWorth units. Only the RAID branch uses it: `state.locations`
+      // holds Locations, so a raid in open country scores a prize of zero on
+      // locationWorth alone and every raid that would open a war would be
+      // refused. 2 puts a Strength-3 unit at roughly a small town, which is
+      // about what killing one is worth. 0 restores that (wrong) behaviour.
+      unitWorth: 2,
+      // 0 switches the whole gate off and restores the old blind behaviour.
+      //
+      // IT SHIPS AT 0, AND THAT IS THE MEASUREMENT TALKING, not a hedge. The
+      // rule was built, wired into both attack branches, exempted for defence,
+      // and given a declare-instead-of-ambush escape. Every shape of it made
+      // all three governing numbers worse, monotonically in the price:
+      //
+      //   perReputationPoint   0 (off)  0.2   0.3   0.4   0.5   0.6   0.8
+      //   games unresolved       3       2     3     3     5     6     6
+      //   ending mix             6       6     4     7     5     4     5
+      //
+      // The reason is not the price, it is what the AI does when it refuses.
+      // It has nowhere to put the action — no Sway policy, no valuation of the
+      // political alternative — so it stands still and the clock runs out.
+      // Adding the declare-first escape made it worse again (mix 2), because
+      // declaring is cheaper than restraint and the AI just declares.
+      //
+      // That alternative is phase 5's whole job. Turn this to 1 once the AI
+      // can price a courtship against a conquest, re-run the suite, and tune
+      // perReputationPoint against the table above. Until then this is a
+      // mechanism with a fixture, not a live rule.
+      enabled: 0,
+    },
+
     // §18.8 AI valuation / cadence dials.
     ai: {
       relationshipBiasPerStanding: 0.5, // bias in wouldAccept, scales with Standing

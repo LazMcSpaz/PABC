@@ -271,3 +271,69 @@ not per-stage".
   betrayed would open a courtship asking for a road. Caught by
   `check-spines.mjs` asserting that an unsettled grievance produces a `redress`
   condition.
+
+---
+
+## Phase 4 — consequences
+
+### The territory half (shipped live)
+
+ZoC movement cost, supply-delayed purchases, occupation charges and the
+blockade drain all landed together, and they hold the numbers:
+
+| | baseline | phase 3 | phase 4 |
+|---|---|---|---|
+| Ending mix (submission + mixed) | 5 | 7 | **6** |
+| Median rounds to Dominion | 62 | 49 | **48** |
+| Games unresolved | 6 | 4 | **3** |
+| Purchases delayed by supply | 0 | 0 | **324** |
+| Purchases refused unsupplied | 0 | 0 | **0** |
+| Occupation charges | 0 | 0 | **1634** |
+| Influence pressure events | — | — | **257** |
+
+`purchasesRefusedUnsupplied: 0` against 324 delays is the one to keep an eye
+on: supply *delays* spending, it never *refuses* it, which is the design.
+
+### §8, the price of a fight — SHIPPED SWITCHED OFF, and why
+
+`diplomaticPrice` and `attackIsWorthIt` are written, wired into both attack
+branches, and covered by five harness checks. `attackPrice.enabled` ships at
+**0**. That is a measurement, not a hedge.
+
+**What the first draft got wrong, and the probe that found it.** The gate read
+`state.locations[hexId].controller`, but `onAttack` fires against whoever
+actually *defended*. Instrumented over three full games: **58 of 62 wars opened
+through the raid branch**, which strikes a unit on ground its owner may not
+hold — and that branch was never gated at all. The Location branch reached the
+gate 9 times in three games and blocked nothing. Fixed by deriving the victim
+set from the unit standing there, and by giving a raid a prize (`unitWorth`)
+so open-country fights aren't valued at zero.
+
+**What happened once it actually bit.** 84% of attacks were refused, and 84% of
+those refusals were fights *on or beside the attacker's own Locations* —
+factions paralysed on their own doorstep. Added the defence exemption, which
+took the refusal rate from 983/1175 to 123/273.
+
+**And it still made everything worse, monotonically in the price:**
+
+| `perReputationPoint` | 0 (off) | 0.2 | 0.3 | 0.4 | 0.5 | 0.6 | 0.8 |
+|---|---|---|---|---|---|---|---|
+| games unresolved | 3 | 2 | 3 | 3 | 5 | 6 | 6 |
+| ending mix | 6 | 6 | 4 | 7 | 5 | 4 | 5 |
+| median rounds | 48 | 49 | 53.5 | 45 | 59 | 49 | 50 |
+
+The ending-mix row is noise at n=15 — it bounces 4/6/7/4/5. The unresolved row
+is not: it climbs with the price and never comes back.
+
+**The cause is not the price, it is what the AI does when it refuses.** It has
+nowhere to put the action. There is no Sway policy and no valuation of the
+political alternative, so a faction that declines a fight stands still and the
+clock runs out. Adding the brief's declare-instead-of-ambush escape made it
+*worse* (mix 2, unresolved 5), because declaring is cheaper than restraint and
+the AI simply declares.
+
+**So it waits for phase 5**, which is exactly the pairing §5 of the plan warns
+about — this is a rule that only works once the AI can price a courtship
+against a conquest. `--set diplomacy.attackPrice.enabled=0` reproduces the
+pre-stage numbers to the round (mix 6 / median 48 / unresolved 3), so the
+"before" stays reachable and the switch-on in phase 5 is a config change.
