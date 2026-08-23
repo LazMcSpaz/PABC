@@ -681,6 +681,111 @@ function UltimatumCard({ u, dip, onAction }) {
 // buttons. The interesting part is that it EXISTS — before this, a proposal
 // resolved the instant it was made and there was no state in which anything
 // was pending.
+// §12.3 — THE INTRIGUE BRANCH.
+//
+// Three ops, and the card's job is to make the difference between them
+// legible before a press, because the difference is the design: Expose is
+// TRUE and cannot rebound; Forge and Fabricate are lies and can be seen
+// through. A lie whose chance of being caught the player cannot read is a coin
+// flip, not a decision — so the percentage is on the button.
+function IntrigueCard({ intrigue, factions, onAction }) {
+  const [mode, setMode] = useState(null); // null | "expose" | "forge" | "fabricate"
+  const [forgeAgainst, setForgeAgainst] = useState(null);
+  if (!intrigue) return null;
+  const { cost, affordable, caughtPercent, targets } = intrigue;
+  const dim = { fontFamily: C.font, fontSize: 8.5, letterSpacing: 0.4, color: "rgba(143,246,234,0.5)" };
+  const colFor = (id) => factions.find((f) => f.id === id)?.color || C.holoHi;
+  const pill = (label, active, onClick, disabled, title) => (
+    <button
+      className="hud-int"
+      disabled={disabled}
+      onClick={onClick}
+      title={title}
+      style={{
+        flex: 1, fontFamily: C.font, fontSize: 9.5, fontWeight: 700, letterSpacing: 0.9,
+        textTransform: "uppercase", color: active ? "#08100f" : "#f4efe2",
+        padding: "5px 6px", borderRadius: 3,
+        border: `1px solid ${active ? "#a878c8" : "rgba(168,120,200,0.35)"}`,
+        background: active ? "linear-gradient(180deg,#c9a0e0,#9b6fbe)" : "rgba(168,120,200,0.07)",
+        cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.4 : 1,
+      }}
+    >{label}</button>
+  );
+  const row = (t, label, enabled, why, onClick) => (
+    <button
+      key={t.id + label}
+      className="hud-int"
+      disabled={!enabled}
+      onClick={onClick}
+      title={why || undefined}
+      style={{
+        display: "block", width: "100%", textAlign: "left",
+        fontSize: 12, color: "#f4efe2", padding: "5px 8px", borderRadius: 3,
+        marginBottom: 3, border: "1px solid rgba(168,120,200,0.25)",
+        background: "rgba(168,120,200,0.05)",
+        cursor: enabled ? "pointer" : "not-allowed", opacity: enabled ? 1 : 0.4,
+      }}
+    >
+      <b style={{ color: colFor(t.id) }}>{t.name}</b>
+      {why ? <span style={{ opacity: 0.7 }}> — {why}</span> : null}
+    </button>
+  );
+  return (
+    <Card accent="#a878c8">
+      <SectionLabel color="#c9a0e0">Quiet work</SectionLabel>
+      <div className="pc-prose" style={{ fontSize: 12, lineHeight: 1.5, marginBottom: 7 }}>
+        Sway buys what the board <i>believes</i>. Each of these costs{" "}
+        <b style={{ color: affordable ? C.holoHi : "#ffb4ae" }}>{cost} Sway</b>.
+      </div>
+      <div style={{ display: "flex", gap: 5, marginBottom: 7 }}>
+        {pill("Expose", mode === "expose", () => setMode(mode === "expose" ? null : "expose"),
+          !affordable, "Publish a strike they got away with. True, so it cannot rebound on you.")}
+        {pill("Forge", mode === "forge", () => setMode(mode === "forge" ? null : "forge"),
+          !affordable, "Plant evidence they wronged somebody else. A lie.")}
+        {pill("Fabricate", mode === "fabricate", () => setMode(mode === "fabricate" ? null : "fabricate"),
+          !affordable, "Invent a wrong done to you, and a war worth fighting over it. A lie.")}
+      </div>
+      {mode === "expose" && (
+        <div>
+          <div style={{ ...dim, marginBottom: 5 }}>THE TRUTH COSTS YOU NOTHING BUT THE SWAY.</div>
+          {targets.map((t) => row(t, "expose", t.canExpose,
+            t.canExpose ? `struck ${t.exposeAgainst} unseen` : "nothing the board has not seen",
+            () => { setMode(null); onAction("expose", { faction: t.id }); }))}
+        </div>
+      )}
+      {(mode === "forge" || mode === "fabricate") && (
+        <div>
+          <div style={{ ...dim, marginBottom: 5, color: "#ffb4ae" }}>
+            {`SEEN THROUGH ${caughtPercent}% OF THE TIME — ${intrigue.caughtHonorLoss} HONOR, `}
+            {`${intrigue.caughtMenace} MENACE, AND EVERYONE IT TOUCHED HOLDS IT AGAINST YOU. `}
+            {`IF IT LANDS IT LASTS ${intrigue.lastsRounds} ROUNDS.`}
+          </div>
+          {mode === "fabricate" && targets.map((t) => row(t, "fab", t.canFabricate, t.fabricateWhy,
+            () => { setMode(null); onAction("fabricate", { faction: t.id }); }))}
+          {mode === "forge" && !forgeAgainst && (
+            <>
+              <div style={{ ...dim, marginBottom: 4 }}>WHO IS THE FORGERY ABOUT?</div>
+              {targets.map((t) => row(t, "who", true, null, () => setForgeAgainst(t.id)))}
+            </>
+          )}
+          {mode === "forge" && forgeAgainst && (
+            <>
+              <div style={{ ...dim, marginBottom: 4 }}>
+                {`AND WHO IS TOLD THAT ${(targets.find((x) => x.id === forgeAgainst)?.name || "").toUpperCase()} WRONGED THEM?`}
+              </div>
+              {targets.filter((t) => t.id !== forgeAgainst).map((t) => row(t, "told", true, null,
+                () => { setMode(null); setForgeAgainst(null); onAction("forge", { faction: forgeAgainst, against: t.id }); }))}
+            </>
+          )}
+        </div>
+      )}
+      {!affordable && (
+        <div style={{ ...dim, marginTop: 5 }}>NOT ENOUGH SWAY — QUIET WORK IS PAID FOR OUT OF SURPLUS.</div>
+      )}
+    </Card>
+  );
+}
+
 // §13 — WHAT YOU STAND FOR.
 //
 // Every other political act in this drawer is a transaction: pay Sway, trade
@@ -964,6 +1069,8 @@ function LandingView({ dip, onSelectFaction, onAction, onClose }) {
         <SwayCard sway={dip.sway} />
 
         <PositionsCard positions={dip.positions} onAction={onAction} />
+
+        <IntrigueCard intrigue={dip.intrigue} factions={dip.factions} onAction={onAction} />
 
         <Receipts receipts={dip.receipts} />
 

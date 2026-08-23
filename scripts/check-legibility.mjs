@@ -20,6 +20,7 @@ import {
   performDiplomacy, adjustStanding, standingReceipts, trespassPreview, ensureDiplomacy,
   tableOffer, positionBlocker,
 } from "../src/game/diplomacy.js";
+import { emit } from "../src/game/events.js";
 
 let fail = 0;
 const check = (n, ok, d) => { if (!ok) fail++; console.log(`${ok ? "PASS" : "FAIL"}  ${n}${ok ? "" : "\n        " + (d ?? "")}`); };
@@ -330,6 +331,42 @@ const mk = () => createGame({
   }
 }
 
+// --- 11. §12.3 — the intrigue branch is reachable, and reads its own risk ---
+//
+// A lie whose chance of being seen through the player cannot read before
+// pressing is a coin flip, not a decision. This is the one number on the card
+// that has to be there.
+{
+  const g = mk();
+  startTurn(g);
+  ensureDiplomacy(g);
+  g.players.versari.sway = 500;
+  const a = adaptState(g, "versari").diplomacy;
+  const I = a.intrigue;
+  check("39. the intrigue branch reaches the drawer", !!I, "intrigue block missing");
+  if (I) {
+    check("40. …with its price on it", I.cost === CONFIG.sway.opCost && I.affordable);
+    check("41. …and the chance of being seen through, before the press",
+      I.caughtPercent > 0 && I.caughtPercent < 100, `caughtPercent ${I.caughtPercent}`);
+    check("42. …and what being caught costs",
+      I.caughtHonorLoss > 0 && I.caughtMenace > 0 && I.lastsRounds > 0);
+    check("43. …and a target list that says why Expose is unavailable",
+      I.targets.length > 0 && I.targets.every((t) => t.canExpose === false));
+    // Give it something true to publish, and the offer must appear.
+    const them = I.targets[0].id;
+    emit(g, "attack_unwitnessed", { attacker: them, victim: "goldgrass", hex: null });
+    const a2 = adaptState(g, "versari").diplomacy;
+    const t2 = a2.intrigue.targets.find((t) => t.id === them);
+    check("44. …and appears the moment there is something true to publish",
+      t2.canExpose === true && !!t2.exposeAgainst);
+    const res = performDiplomacy(g, "versari", "expose", { faction: them });
+    check("45. …and the verb the button calls actually runs", res.ok, res.reason);
+    check("46. …and it charges the Sway the card quoted",
+      g.players.versari.sway === 500 - CONFIG.sway.opCost);
+  }
+}
+
 console.log(`\n${fail ? `${fail} FAILED` : "all checks passed"}`);
+
 
 process.exit(fail ? 1 : 0);

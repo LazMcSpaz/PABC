@@ -1213,6 +1213,18 @@ export default function Prototype({ config, onNewGame }) {
       bumpTick();
       return;
     }
+    // §12.3 — the ops report their own outcome, and a lie that was seen
+    // through is the one result the player most needs told plainly. The
+    // generic line below would say "Lakers agrees" about a forgery.
+    if (action === "expose" || action === "forge" || action === "fabricate") {
+      msg = !r.ok ? (r.reason || "no effect")
+        : action === "expose" ? "It is in the open now. The board has read it."
+        : r.caught ? "They saw through it. Your name is worth less than it was this morning."
+        : "It is put about, and it is believed.";
+      setDiploResult({ ...r, msg });
+      bumpTick();
+      return;
+    }
     // …and a position is said to the room, not to a faction, so the generic
     // "Done — undefined" would be exactly wrong.
     if (action === "declare-position" || action === "withdraw-position") {

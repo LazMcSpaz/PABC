@@ -173,6 +173,12 @@ function summarise(g, { aiTurns, snapshot, seed }) {
   // word. `surprise_attack_honor_lost` is emitted only on that path.
   const wars = evName(g, "war_declared");
   const surprises = evName(g, "surprise_attack_honor_lost").length;
+  // §12.3 — the intrigue branch, and whether it is the Sway sink it was built
+  // to be. `swayRoundsAtCapShare` has read ~0.30 since phase 3 with the note
+  // "wait for ops" against it every time; this is the row that settles it.
+  const opsRun = evName(g, "op_expose").length + evName(g, "op_forge").length
+    + evName(g, "op_fabricate").length;
+  const opsBackfired = evName(g, "op_backfired").length;
 
   // --- minors: allied or vassalised RATHER THAN killed. The brief's row.
   //
@@ -230,6 +236,7 @@ function summarise(g, { aiTurns, snapshot, seed }) {
     denounceShare: acts ? denouncements / acts : 0,
     wars: wars.length,
     surpriseOpenings: surprises,
+    opsRun, opsBackfired,
     coalitions: evName(g, "coalition_formed").length,
     minors: {
       allied: minorsAllied, vassal: minorsVassal, dead: minorsDead,
@@ -305,6 +312,8 @@ const report = {
     warsPerGame: r2(mean(ok.map((g) => g.wars))),
     warsOpenedByUndeclaredAttack: r2(mean(ok.map((g) => g.surpriseOpenings))),
     coalitionsPerGame: r2(mean(ok.map((g) => g.coalitions))),
+    intrigueOpsPerGame: r2(mean(ok.map((g) => g.opsRun))),
+    intrigueOpsBackfired: r2(mean(ok.map((g) => g.opsBackfired))),
     // At the final board — a snapshot, and confounded by the war rate.
     minorsAlliedOrVassalisedAtEnd: r2(mean(ok.map((g) => g.minors.allied + g.minors.vassal))),
     // Ever, from the log. THIS is §15's row: was the faction reachable by

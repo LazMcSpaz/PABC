@@ -3045,6 +3045,180 @@ export function citablePositions(state, pid, against = null) {
     && (against == null || p.target == null || p.target === against));
 }
 
+// --- §12.3 the intrigue branch: Expose, Forge, Fabricate ---------------
+//
+// `sway.opCost` has sat in config since Sway shipped with nothing reading it,
+// and the recorded finding from phase 3 is that the political pool sits at its
+// ceiling 30% of all rounds — a currency nothing can exhaust prices nothing.
+// This is the sink it was waiting for, and it is deliberately a POLITICAL one:
+// Sway buys what a faction THINKS, so what it buys here is what the board
+// believes about who wronged whom.
+//
+// THE SHAPE OF THE TRIO. Each op is a claim, and they differ in whether the
+// claim is true and in who it is about:
+//
+//   Expose     a TRUE wrong, done by them, that nobody saw
+//   Forge      a FALSE wrong, done by them, to somebody else
+//   Fabricate  a FALSE wrong, done by them, to YOU
+//
+// Expose needs grounds and cannot rebound, because it is true — you are not
+// lying, you are publishing. The other two are lies, both can be seen through,
+// and that is the whole thing standing between this branch and a
+// Sway-to-casus-belli vending machine.
+// Lives under CONFIG.sway, not CONFIG.diplomacy: an op is priced in Sway and
+// every number here is about what Sway buys.
+const OPS = () => CONFIG.sway.ops || {};
+
+export function opsEnabled() { return !!OPS().enabled; }
+
+// What Expose has to find: a strike this faction got away with, recent enough
+// that publishing it is news. `attack_unwitnessed` is already emitted by
+// `menaceFromAttack` on exactly the case — an attack whose Menace rounded to
+// nothing because nobody saw it — so the op reads the log rather than keeping
+// a second ledger of the same fact.
+export function exposableStrikes(state, target) {
+  if (!opsEnabled()) return [];
+  const window = OPS().exposeWindowRounds;
+  const out = [];
+  for (const e of state.log || []) {
+    if (e.name !== "attack_unwitnessed") continue;
+    if (e.payload.attacker !== target) continue;
+    if (state.round - (e.round ?? 0) > window) continue;
+    if (state.diplomacy?.exposed?.[`${e.round}|${e.payload.attacker}|${e.payload.victim}`]) continue;
+    out.push(e);
+  }
+  return out;
+}
+
+// Is the lie seen through? Rolled once, at cast time, against the caster's
+// Honor — so a faction with a spotless name has cover, which is the
+// interesting reason to keep Honor and the interesting reason to spend it.
+export function lieDetectionChance(state, pid) {
+  const o = OPS();
+  const p = o.lieBaseDetection + o.lieDetectionPerHonor * honorOf(state, pid);
+  return Math.max(o.lieDetectionMin, Math.min(o.lieDetectionMax, p));
+}
+
+// Caught. Steeper than an ordinary promise-break, because a promise is broken
+// under pressure and a forgery is premeditated — and everyone the lie was told
+// to or about is entitled to hold it against you.
+function opBackfires(state, pid, kind, wronged) {
+  const o = OPS();
+  if (state.players[pid]) adjustHonor(state, pid, -o.caughtHonorLoss, `${kind}-exposed`);
+  adjustMenace(state, pid, o.caughtMenace, `${kind}-exposed`);
+  for (const w of new Set(wronged.filter(Boolean))) {
+    if (w === pid || !state.players[w]) continue;
+    recordGrievance(state, w, pid, "position-broken", { severity: o.caughtMenace });
+  }
+  emit(state, "op_backfired", { by: pid, kind, wronged: [...new Set(wronged.filter(Boolean))] });
+}
+
+function chargeOp(state, pid) {
+  const cost = CONFIG.sway.opCost;
+  if (!canAffordSway(state, pid, cost)) {
+    return `not enough Sway — ${cost} needed, you hold ${swayOf(state, pid)}`;
+  }
+  spendSway(state, pid, cost, "intrigue");
+  return null;
+}
+
+// EXPOSE — publish a strike they got away with. True, so it charges the Menace
+// the strike escaped at the full public rate and hands the victim the grievance
+// they were denied. The caster's own name is untouched: you are not lying.
+export function expose(state, pid, target) {
+  if (!opsEnabled()) return { ok: false, reason: "there is no one to carry it" };
+  if (!target || target === pid) return { ok: false, reason: "there is nobody to expose" };
+  const strikes = exposableStrikes(state, target);
+  if (!strikes.length) {
+    return { ok: false, reason: "there is nothing of theirs the board has not already seen" };
+  }
+  const bad = chargeOp(state, pid);
+  if (bad) return { ok: false, reason: bad };
+  const o = OPS();
+  const m = D().menace;
+  state.diplomacy.exposed = state.diplomacy.exposed || {};
+  const e = strikes[0];
+  const { attacker, victim, hex } = e.payload;
+  state.diplomacy.exposed[`${e.round}|${attacker}|${victim}`] = state.round;
+  // The Menace it escaped, scored the way `menaceFromAttack` would have scored
+  // it in the open — the same arithmetic, at witness share 1.
+  const tDef = factionDef(victim) || {};
+  const raw = Math.max(-1, Math.round(m.base * (0.5 - (tDef.aggression ?? 0.5)) * 2));
+  const delta = Math.max(1, Math.round(raw * o.exposeWitnessShare));
+  adjustMenace(state, attacker, delta, `exposed:${pid}`);
+  recordGrievance(state, victim, attacker, "surprise-attack", { at: hex });
+  emit(state, "op_expose", { by: pid, target: attacker, victim, hex, menace: delta });
+  return { ok: true, target: attacker, victim, menace: delta };
+}
+
+// FORGE — plant evidence that they wronged SOMEBODY ELSE. A lie, so it can be
+// seen through, and being seen through hands the grievance to the two factions
+// you tried to set against each other.
+export function forge(state, pid, target, against) {
+  if (!opsEnabled()) return { ok: false, reason: "there is no one to carry it" };
+  if (!target || target === pid) return { ok: false, reason: "there is nobody to forge against" };
+  if (!against || against === pid || against === target) {
+    return { ok: false, reason: "a forgery has to be about somebody else" };
+  }
+  if (!state.players[against]) return { ok: false, reason: "they are not on the board" };
+  const bad = chargeOp(state, pid);
+  if (bad) return { ok: false, reason: bad };
+  if (state.rng.next() < lieDetectionChance(state, pid)) {
+    opBackfires(state, pid, "forge", [target, against]);
+    return { ok: true, caught: true };
+  }
+  const entry = recordGrievance(state, against, target, "promise-broken");
+  if (entry) entry.forged = { by: pid, until: state.round + OPS().lieDecaysAfterRounds };
+  emit(state, "op_forge", { by: pid, target, against });
+  return { ok: true, caught: false };
+}
+
+// FABRICATE — a wrong done to YOU. The one that buys a war, so it is the one
+// most worth lying about and the one where being caught costs most: the
+// grievance it plants is the thing `warJustification` reads.
+export function fabricate(state, pid, target) {
+  if (!opsEnabled()) return { ok: false, reason: "there is no one to carry it" };
+  if (!target || target === pid) return { ok: false, reason: "there is nobody to accuse" };
+  if (!state.players[target]) return { ok: false, reason: "they are not on the board" };
+  if (grievanceWeight(state, pid, target) > 0) {
+    // You do not need to invent one. Refusing here is not politeness — a
+    // fabricated grievance stacked on a real one launders the real one's
+    // expiry, and the AI would fabricate every round to keep a war righteous.
+    return { ok: false, reason: "you already have something real to hold against them" };
+  }
+  const bad = chargeOp(state, pid);
+  if (bad) return { ok: false, reason: bad };
+  if (state.rng.next() < lieDetectionChance(state, pid)) {
+    opBackfires(state, pid, "fabricate", [target]);
+    return { ok: true, caught: true };
+  }
+  const entry = recordGrievance(state, pid, target, "promise-broken");
+  if (entry) entry.forged = { by: pid, until: state.round + OPS().lieDecaysAfterRounds };
+  emit(state, "op_fabricate", { by: pid, target });
+  return { ok: true, caught: false };
+}
+
+// A lie is real while it lasts and then evaporates. Swept on the round tick so
+// a fabricated casus belli buys a WINDOW rather than a permanent licence —
+// without this, one Fabricate would make every war that faction ever fought
+// against that target righteous forever.
+export function sweepForgeries(state) {
+  const gr = state.diplomacy?.grievances;
+  if (!gr) return 0;
+  let dropped = 0;
+  for (const victim of Object.keys(gr)) {
+    for (const offender of Object.keys(gr[victim])) {
+      const before = gr[victim][offender].length;
+      gr[victim][offender] = gr[victim][offender].filter(
+        (e) => !e.forged || state.round <= e.forged.until,
+      );
+      dropped += before - gr[victim][offender].length;
+    }
+  }
+  if (dropped) emit(state, "forgeries_lapsed", { count: dropped });
+  return dropped;
+}
+
 // --- coalitions (§18.8) ---------------------------------------------
 // Playtest lesson (R7 of the 2026-08-13 log): a coalition must never
 // CONSCRIPT — the old version drafted the human (declared war on their
@@ -3326,6 +3500,7 @@ export function runDiplomacyRound(state) {
   runAIPolitics(state);
   vassalTick(state);
   recomputeCoalitions(state);
+  sweepForgeries(state); // §12.3 — a lie is real while it lasts, then evaporates
   queueHumanWarnings(state); // after politics/coalitions — warn on settled state
   checkDominion(state);
 }
@@ -3715,6 +3890,21 @@ export function performDiplomacy(state, pid, action, params = {}) {
     // countering IS one, and `resolveProposal` charges it like any other.
     case "counter-offer": {
       const res = counterTheOffer(state, pid, params.offerId, params.scrap ?? 0);
+      return res.ok ? r(res) : res;
+    }
+
+    // §12.3 — the intrigue branch. All three are Sway, and none of them is an
+    // ask: nobody is being petitioned, so none costs the pestering budget.
+    case "expose": {
+      const res = expose(state, pid, f);
+      return res.ok ? r(res) : res;
+    }
+    case "forge": {
+      const res = forge(state, pid, f, params.against);
+      return res.ok ? r(res) : res;
+    }
+    case "fabricate": {
+      const res = fabricate(state, pid, f);
       return res.ok ? r(res) : res;
     }
 

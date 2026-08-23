@@ -41,6 +41,7 @@ import {
   // §5/§6 — posture and political capacity.
   postureOf, conditionText, isCourting, mayBeginCourtship, courtingList,
   positionsOf, positionText, positionKinds, citablePositions, positionBlocker,
+  opsEnabled, exposableStrikes, lieDetectionChance,
   swayIncome, swayOf, swayLedger, canSustainCourtship,
 } from "../game/diplomacy.js";
 import { hasTechNode } from "../game/tech.js";
@@ -1114,6 +1115,40 @@ function adaptDiplomacy(state, viewer) {
         };
       })(),
     })),
+    // §12.3 — the intrigue branch, as three offers with their prices and their
+    // risks on the face of them. A lie whose chance of being seen through the
+    // player cannot read before pressing is a coin flip, not a decision.
+    intrigue: (() => {
+      if (!opsEnabled()) return null;
+      const cost = CONFIG.sway.opCost;
+      const caught = lieDetectionChance(state, viewer);
+      const o = CONFIG.sway.ops;
+      return {
+        cost,
+        affordable: swayOf(state, viewer) >= cost,
+        // Rounded for display only; the engine rolls the exact number.
+        caughtPercent: Math.round(caught * 100),
+        caughtHonorLoss: o.caughtHonorLoss,
+        caughtMenace: o.caughtMenace,
+        lastsRounds: o.lieDecaysAfterRounds,
+        targets: factionIds(state).filter((f) => f !== viewer && state.players[f]).map((f) => {
+          const strikes = exposableStrikes(state, f);
+          return {
+            id: f,
+            name: factionDef(f)?.name || f,
+            // Expose needs grounds and says what they are; the other two are
+            // lies and need only somebody to tell them about.
+            canExpose: strikes.length > 0,
+            exposeAgainst: strikes[0]?.payload?.victim
+              ? (factionDef(strikes[0].payload.victim)?.name || strikes[0].payload.victim)
+              : null,
+            canFabricate: grievanceWeight(state, viewer, f) === 0,
+            fabricateWhy: grievanceWeight(state, viewer, f) > 0
+              ? "you already have something real to hold against them" : null,
+          };
+        }),
+      };
+    })(),
     // §13 — what you stand for, in public, at nobody's request. A promise is
     // bilateral and priced; a position is unilateral and free to keep. It is
     // the only political act in the game that is not a transaction, which is

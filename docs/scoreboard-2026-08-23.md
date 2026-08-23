@@ -548,3 +548,65 @@ individual games are chaotic: a branch that fires a handful of times across
 15 games moved the ending mix by 4. Differences of one or two endings are not
 signal. The rows above are ranked on the shape of the whole table, not on any
 single cell.
+
+---
+
+## Phase 6 — content, intrigue, tuning
+
+### §12.3 — the intrigue branch: Expose, Forge, Fabricate
+
+`sway.opCost` had sat in config since Sway shipped with **nothing reading it**,
+and the recorded phase-3 finding — the political pool sits at its ceiling 30%
+of all rounds, "wait for ops" against it every time — is what it was waiting
+for.
+
+Each op is a claim about who wronged whom, and they differ in whether the claim
+is *true* and in *who it is about*:
+
+| op | the claim | can it rebound? |
+|---|---|---|
+| **Expose** | a TRUE wrong, done by them, that nobody saw | no — you are publishing, not lying |
+| **Forge** | a FALSE wrong, done by them, to somebody else | yes |
+| **Fabricate** | a FALSE wrong, done by them, to YOU | yes |
+
+Expose reads `attack_unwitnessed` — already emitted by `menaceFromAttack` on
+exactly the case where a strike's Menace rounded to nothing because nobody saw
+it — rather than keeping a second ledger of the same fact. Publishing charges
+the Menace the strike escaped at the full public rate and hands the victim the
+grievance they were denied.
+
+Both lies roll against the caster's **own Honor**: a spotless name is *cover*,
+which is the interesting reason to keep Honor and the interesting reason to
+spend it. Being caught costs 7 Honor (an ordinary broken promise costs 5), 2
+Menace, and a grievance to everyone the lie was told to *or* about. And a lie
+that lands **evaporates** after 8 rounds — without `sweepForgeries`, one
+Fabricate would make every war that faction ever fought against that target
+righteous forever.
+
+**The AI's use of it ships off** (`ai.intrigue: 0`), on the same evidence as the
+AI gift: the verbs are live for the player either way, but the AI's Expose pass
+took unresolved games 4 → 6 for one point of ending mix, because exposing the
+leader slows the leader and the games stop concluding.
+
+| | ops off | AI Expose on |
+|---|---|---|
+| Ending mix | 7 | 6 |
+| Median rounds | 42 | 43 |
+| Games unresolved | 4 | 6 |
+| Intrigue ops / game | 0 | 11.1 |
+| Sway rounds at cap | 0.30 | 0.27 |
+
+**So the recorded Sway-at-cap finding is still open, and now for a better
+reason.** The sink exists and works; giving it to the AI costs endings. That is
+the third time in two phases the same shape has appeared — §8's price gate, the
+AI gift, and now ops — and it is one finding, not three: *this AI has no way to
+convert political capacity into progress toward winning*, so every new thing it
+can spend on is a distraction from the two it already knows how to do. Closing
+it is a policy problem, not a content one.
+
+**A bug worth recording.** The whole branch measured as zero ops for its first
+run because `OPS()` read `CONFIG.diplomacy.ops` while the block lives under
+`CONFIG.sway.ops`. It failed *silently* — `opsEnabled()` returned false and
+every verb refused politely. The new `intrigueOpsPerGame` row in the suite is
+what caught it, which is the argument for adding a measurement row with every
+mechanism rather than after it.

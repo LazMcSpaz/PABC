@@ -204,6 +204,12 @@ export const CONFIG = {
     // what phase 6's espionage ops are meant to give the surplus to spend on.
     // Set below 1 to let the AI gift from surplus again.
     giftAboveShareOfCap: 1,
+    // §12.3 — whether the AI reaches for the intrigue branch at all. The verbs
+    // are live for the player either way; this is only the AI's policy, and it
+    // ships at 0 for the reason recorded in the scoreboard: exposing the
+    // leader slows the leader, and unresolved games went 4 -> 6 for one point
+    // of ending mix. 1 turns the AI's Expose pass back on.
+    intrigue: 0,
   },
 
   // §17 Tech Wheel. Research fills a bar; Tech Level is a derived band
@@ -549,11 +555,49 @@ export const CONFIG = {
     perStanding: 8,
     // Expose / Forge / Fabricate (diplomacy §12.3). The intrigue branch
     // finally has an economy.
+    //
+    // THE SHAPE OF THE TRIO, because it is the thing to get right and not the
+    // numbers. Each op is a claim about who wronged whom, and they differ in
+    // whether the claim is TRUE and in who it is about:
+    //
+    //   Expose     a true wrong, done by them, that nobody saw
+    //   Forge      a false wrong, done by them, to somebody else
+    //   Fabricate  a false wrong, done by them, to YOU
+    //
+    // Expose needs grounds and cannot backfire, because it is true. The other
+    // two are lies and both can be seen through — which is what stops the
+    // intrigue branch being a Sway-to-casus-belli vending machine.
     opCost: 20,
     // Per round, per SURVIVING faction's homeland you hold and did not start
     // with. The keystone: conquest and courtship compete for the same pool,
     // under a win condition that needs every faction dealt with.
     occupation: 6,
+    // §12.3 THE OPS, in detail.
+    ops: {
+      // An unwitnessed strike stays exposable this long. Beyond it the board
+      // has moved on and the op would be archaeology, not news.
+      exposeWindowRounds: 6,
+      // Expose is TRUE, so it charges the Menace the strike escaped at full
+      // public rate — that is the whole point, and it is why Expose is the one
+      // op that cannot rebound on the caster.
+      exposeWitnessShare: 1,
+      // A lie is seen through on a roll against the liar's Honor. High Honor
+      // is not just a reputation, it is cover — which is the interesting
+      // reason to keep it, and the interesting reason to spend it.
+      lieBaseDetection: 0.45,
+      lieDetectionPerHonor: -0.03, // per point of the caster's Honor
+      lieDetectionMin: 0.1,
+      lieDetectionMax: 0.85,
+      // Caught in one: the Menace, the Honor, and a grievance for everybody
+      // the lie was told to or about. Deliberately steeper than the ordinary
+      // promise-break, because this was premeditated.
+      caughtHonorLoss: 7,
+      caughtMenace: 3,
+      // A fabricated grievance is real while it lasts and then evaporates.
+      lieDecaysAfterRounds: 8,
+      // 0 removes the whole branch; every verb refuses and nothing else reads it.
+      enabled: 1,
+    },
     // Unpayable occupation converts to Standing loss with the aggrieved
     // faction at this rate. A conqueror who never intends to do politics does
     // not get occupation for free; they pay in the reputation the rest of the

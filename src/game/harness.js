@@ -39,6 +39,8 @@ import {
   counterOffer, tableOffer, offersFor, answerOffer, asksThisRound, counterTheOffer,
   // §13 player positions
   declarePosition, withdrawPosition, positionsOf, positionHeld, citablePositions, positionText, menaceOf,
+  // §12.3 the intrigue branch
+  expose, forge, fabricate, exposableStrikes, lieDetectionChance, sweepForgeries, opsEnabled,
   // the one win condition
   dominionStanding, dominionMet, checkDominion, dominionCountdown, releaseVassal, aiAcceptsPact,
   // §3.2 Locations as deal items — ceding ground
@@ -4506,6 +4508,140 @@ line("\n  [§6.4] no faction buys goodwill with coin — the AI included");
   const res = performDiplomacy(g, "versari", "gift", { faction: "lakers", standing: 1 });
   check("…while a player with Sway and no scrap can still send one", res.ok);
   check("…and it lands", getStanding(g, "lakers", "versari") > 0);
+}
+
+// §12.3 — the intrigue branch: Expose, Forge, Fabricate.
+//
+// `sway.opCost` sat in config with nothing reading it, and the recorded
+// phase-3 finding was that the political pool sits at its ceiling 30% of all
+// rounds. This is the sink. Each op is a claim about who wronged whom, and
+// they differ in whether the claim is TRUE and in who it is about:
+//
+//   Expose     a true wrong, done by them, that nobody saw
+//   Forge      a false wrong, done by them, to somebody else
+//   Fabricate  a false wrong, done by them, to YOU
+line("\n  [§12.3] what Sway buys when the courtships are paid for");
+{
+  const g = createGame({ seed }); ensureDiplomacy(g);
+  const me = "versari", them = "lakers", third = "goldgrass";
+  g.players[me].sway = 500;
+  check("with nothing to publish, Expose is refused rather than invented",
+    !performDiplomacy(g, me, "expose", { faction: them }).ok);
+  const sway0 = g.players[me].sway;
+  check("…and it costs nothing to be told so", sway0 === 500);
+
+  // Manufacture the one thing Expose reads: a strike whose Menace rounded to
+  // nothing because nobody saw it. `menaceFromAttack` emits it; the op does
+  // not keep a second ledger of the same fact.
+  emit(g, "attack_unwitnessed", { attacker: them, victim: third, hex: null });
+  check("an unwitnessed strike is exposable", exposableStrikes(g, them).length === 1);
+  const m0 = menaceOf(g, them), h0 = honorOf(g, me);
+  const res = performDiplomacy(g, me, "expose", { faction: them });
+  check("…and publishing it works", res.ok);
+  check("…it charges the Menace the strike escaped", menaceOf(g, them) > m0);
+  check("…it hands the victim the grievance they were denied",
+    grievancesAgainst(g, third, them).some((x) => x.kind === "surprise-attack"));
+  check("…the truth costs the teller no Honor", honorOf(g, me) === h0);
+  check("…and it costs Sway", g.players[me].sway === 500 - CONFIG.sway.opCost);
+  check("…and the same strike cannot be sold twice",
+    exposableStrikes(g, them).length === 0
+    && !performDiplomacy(g, me, "expose", { faction: them }).ok);
+}
+{
+  // A lie is seen through on a roll against the LIAR's Honor. High Honor is
+  // cover — the interesting reason to keep it, and to spend it.
+  const g = createGame({ seed }); ensureDiplomacy(g);
+  const me = "versari";
+  g.players[me].honor = 0;
+  const dishonest = lieDetectionChance(g, me);
+  g.players[me].honor = 12;
+  check("a spotless name is cover for a lie", lieDetectionChance(g, me) < dishonest);
+  const o = CONFIG.sway.ops;
+  check("…within bounds either way",
+    lieDetectionChance(g, me) >= o.lieDetectionMin
+    && dishonest <= o.lieDetectionMax);
+}
+{
+  // Forge, forced to succeed and forced to fail, so both halves are pinned.
+  const o = CONFIG.sway.ops;
+  const was = [o.lieBaseDetection, o.lieDetectionMin, o.lieDetectionMax];
+  try {
+    o.lieBaseDetection = 0; o.lieDetectionMin = 0; o.lieDetectionMax = 0;
+    const g = createGame({ seed }); ensureDiplomacy(g);
+    const me = "versari", them = "lakers", third = "goldgrass";
+    g.players[me].sway = 500;
+    check("a forgery has to be about somebody else",
+      !performDiplomacy(g, me, "forge", { faction: them, against: them }).ok);
+    const r = performDiplomacy(g, me, "forge", { faction: them, against: third });
+    check("an undetected forgery plants a grievance", r.ok && !r.caught);
+    check("…held by the party it was told to, against the party it was about",
+      grievancesAgainst(g, third, them).length === 1);
+    check("…and it is marked as the lie it is",
+      grievancesAgainst(g, third, them)[0].forged?.by === me);
+    // …and it evaporates. Without this, one Fabricate would make every war
+    // that faction ever fought against that target righteous forever.
+    g.round += o.lieDecaysAfterRounds + 1;
+    sweepForgeries(g);
+    check("…and a lie is real while it lasts and then evaporates",
+      grievancesAgainst(g, third, them).length === 0);
+
+    o.lieBaseDetection = 1; o.lieDetectionMin = 1; o.lieDetectionMax = 1;
+    const g2 = createGame({ seed }); ensureDiplomacy(g2);
+    g2.players[me].sway = 500;
+    const h0 = honorOf(g2, me), m0 = menaceOf(g2, me);
+    const caught = performDiplomacy(g2, me, "forge", { faction: them, against: third });
+    check("a forgery seen through is still an act that happened", caught.ok && caught.caught);
+    check("…and it costs the forger more than an ordinary broken promise",
+      honorOf(g2, me) === h0 - o.caughtHonorLoss
+      && o.caughtHonorLoss > CONFIG.diplomacy.honor.breakLoss);
+    check("…and the board marks them", menaceOf(g2, me) === m0 + o.caughtMenace);
+    check("…and BOTH parties they tried to set against each other hold it",
+      grievancesAgainst(g2, them, me).length > 0 && grievancesAgainst(g2, third, me).length > 0);
+    check("…and no grievance was planted", grievancesAgainst(g2, third, them).length === 0);
+  } finally {
+    [o.lieBaseDetection, o.lieDetectionMin, o.lieDetectionMax] = was;
+  }
+}
+{
+  // Fabricate is the one that buys a war, so it is the one most worth lying
+  // about — and the one that must refuse to stack on a real grievance, or the
+  // AI would fabricate every round to keep a war righteous.
+  const o = CONFIG.sway.ops;
+  const was = [o.lieBaseDetection, o.lieDetectionMin, o.lieDetectionMax];
+  try {
+    o.lieBaseDetection = 0; o.lieDetectionMin = 0; o.lieDetectionMax = 0;
+    const g = createGame({ seed }); ensureDiplomacy(g);
+    const me = "versari", them = "lakers";
+    g.players[me].sway = 500;
+    check("a fabricated wrong makes your war righteous",
+      performDiplomacy(g, me, "fabricate", { faction: them }).ok
+      && warJustification(g, me, them) != null);
+    const sway1 = g.players[me].sway;
+    check("…but you cannot stack one on a grievance you actually hold",
+      !performDiplomacy(g, me, "fabricate", { faction: them }).ok);
+    check("…and being refused is free", g.players[me].sway === sway1);
+    g.round += o.lieDecaysAfterRounds + 1;
+    sweepForgeries(g);
+    check("…and the licence expires with the lie", grievancesAgainst(g, me, them).length === 0);
+  } finally {
+    [o.lieBaseDetection, o.lieDetectionMin, o.lieDetectionMax] = was;
+  }
+}
+{
+  // The whole branch is switchable, per the plan's rule 1.4.
+  const o = CONFIG.sway.ops;
+  const was = o.enabled;
+  try {
+    o.enabled = 0;
+    const g = createGame({ seed }); ensureDiplomacy(g);
+    g.players.versari.sway = 500;
+    check("ops.enabled 0 removes the branch entirely",
+      !opsEnabled()
+      && !performDiplomacy(g, "versari", "expose", { faction: "lakers" }).ok
+      && !performDiplomacy(g, "versari", "fabricate", { faction: "lakers" }).ok
+      && g.players.versari.sway === 500);
+  } finally { o.enabled = was; }
+  check("…and the AI's own intrigue pass ships off", CONFIG.ai.intrigue === 0);
 }
 
 // §1.2 / economy §6.3 — gifts are priced in SWAY now, not scrap. The

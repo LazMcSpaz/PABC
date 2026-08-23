@@ -24,6 +24,7 @@ import {
   factionIds, powerOf, arePacted, atWar, vassalLord, mayEngage, mayCourt,
   speakPosture, postureOf, postureStated, isCourting, eitherCourting, courtRounds,
   postureCitation, interestsOf, courtshipScore, swayIncome, swayOf, canSustainCourtship, courtingList,
+  opsEnabled, exposableStrikes, powerLead,
   attackIsWorthIt, diplomaticPrice,
   getStanding, passesRepGates, formPact, vassalize, applyDeal, checkDominion,
   tableOffer, offersFor, warExhaustion,
@@ -560,6 +561,38 @@ function courtSomebody(state, pid, others) {
 // same reason: commitments first, surplus second. What is left after every
 // running courtship's upkeep, less a round's reserve so a gift can never be
 // the thing that calls a courtship off.
+// §12.3 — THE SINK THE SURPLUS WAS WAITING FOR.
+//
+// The recorded phase-3 finding was that the political pool sits at its ceiling
+// 30% of all rounds, and the note against it said the same thing every time:
+// only one of the four sinks is live, wait for ops. This is ops.
+//
+// The policy is deliberately narrow. EXPOSE only — the AI publishes true
+// things and does not lie. That is not squeamishness, it is the same
+// discipline `denounceWarrant` already enforces: an accusation has to be
+// grounded in something the target actually did, or the verb is a laundry.
+// Forge and Fabricate are the PLAYER's to reach for, which is the right
+// asymmetry for an intrigue branch — the AI can be caught out by them, and it
+// answers with the machinery it already has.
+function tryIntrigue(state, pid, others) {
+  if (!CONFIG.ai.intrigue || !opsEnabled()) return false;
+  const cost = CONFIG.sway.opCost;
+  // Commitments first, exactly as `canSustainCourtship` does it: an op must
+  // never be the thing that calls a running courtship off.
+  const committed = courtingList(state, pid).length * CONFIG.sway.courtUpkeep;
+  if (swayOf(state, pid) - committed < cost) return false;
+  // Whose exposure helps most? The faction with the largest lead — Menace on
+  // a runaway is what gives the rest of the board grounds to rise.
+  let best = null, bestLead = 0;
+  for (const f of others) {
+    if (!exposableStrikes(state, f).length) continue;
+    const lead = powerLead(state, f);
+    if (lead > bestLead || best == null) { bestLead = lead; best = f; }
+  }
+  if (!best) return false;
+  return performDiplomacy(state, pid, "expose", { faction: best }).ok === true;
+}
+
 function giftBudget(state, pid) {
   const cfg = CONFIG.sway;
   const running = courtingList(state, pid).length;
@@ -600,6 +633,11 @@ function manageDiplomacy(state, pid) {
   // player LESS, which is the one regression audit finding 7 explicitly warns
   // against. Argmax has no ordering to be starved by.
   if (courtSomebody(state, pid, others)) return;
+
+  // 0b) …and if the courtships are paid for and the pool is still deep, spend
+  //     it on what the board believes. See `tryIntrigue`: EXPOSE only, because
+  //     an accusation has to be grounded in something the target actually did.
+  if (tryIntrigue(state, pid, others)) return;
 
   // 1) Vassalize a much-weaker, cornered, engageable faction (the vassal
   //    runs through converting weak factions, §18.9). Lords only.
