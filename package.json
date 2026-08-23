@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "The Remnant Continent — post-pole-shift hex-tile strategy game",
+  "description": "The Remnant Continent \u2014 post-pole-shift hex-tile strategy game",
   "scripts": {
     "predev": "node scripts/build-units.mjs",
     "dev": "vite",
@@ -21,7 +21,11 @@
     "check:blockade": "node scripts/check-blockade-ui.mjs",
     "check:upkeep": "node scripts/check-upkeep-ui.mjs",
     "check:setup": "node scripts/check-setup-screen.mjs",
-    "check:audio": "node scripts/check-audio.mjs"
+    "check:audio": "node scripts/check-audio.mjs",
+    "audit:diplomacy": "node scripts/audit-diplomacy.mjs",
+    "audit:economy": "node scripts/audit-economy.mjs",
+    "sim:suite": "node scripts/sim-suite.mjs",
+    "harness": "node src/game/harness.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.30.1",

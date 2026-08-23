@@ -1,0 +1,310 @@
+// The scoreboard. N seeded AI-only games on the real engine, reporting the
+// numbers the 2026-08-23 diplomacy and economy briefs are graded against.
+//
+//   node scripts/sim-suite.mjs                 # the pinned 15-seed suite
+//   node scripts/sim-suite.mjs --seeds 7,991   # a subset, for a quick look
+//   node scripts/sim-suite.mjs --json out.json # machine-readable, for deltas
+//   node scripts/sim-suite.mjs --baseline docs/sim-baseline.json
+//                                              # …and print the delta against it
+//
+// WHY THIS EXISTS. Between them the two briefs name roughly fifteen numbers to
+// move, and before this script the repo could measure exactly one of them
+// (`node src/game/harness.js`). Eight of the proposals are explicitly
+// conditioned on measurement. A scoreboard that arrives after the rules change
+// turns every later decision into an argument.
+//
+// THE THREE GOVERNING NUMBERS (implementation plan §1.6). Any stage that
+// pushes these outside the band gets retuned or reverted BEFORE the next stage
+// lands — two stages deep is where you stop being able to tell which one did
+// it.
+//
+//   ending mix (submission + mixed, of 15)   band >= 11
+//   median rounds to Dominion                band  baseline +/- 4
+//   games unresolved                         band  0
+//
+// The doc-reported values (13 / 29 / 1) are NOT this suite's baseline — see
+// the note on the seeds below. docs/sim-baseline.json holds the real one.
+//
+// A NOTE ON THE SEEDS, AND ON THE DOC'S NUMBERS. The implementation plan asks
+// for "the same 15 seeds victory-redesign-2026-08-21.md used, so today's
+// numbers are directly comparable." They cannot be: that doc reports a 15-game
+// AI-only suite and names exactly ONE of its seeds (1234, the game that never
+// resolved), records no faction roster, no map size and no minor list, and the
+// engine has moved since. Sweeping the plausible configurations reproduces
+// none of its headline figures — 4 majors on the legacy board medians 46, on a
+// medium board 47, with two minors 59.
+//
+// So the honest thing, and the thing the rest of the plan actually needs: pin
+// a configuration and a seed list HERE, run it, and re-anchor the §1.6 bands
+// to this suite's own baseline. The list is 1234 plus the ten seeds
+// `check-route-geometry.mjs` already treats as the repo's canonical spread,
+// plus four more to reach fifteen. Do not reshuffle it; comparability across
+// stages is the whole point, and it is comparability with the NEXT run that
+// matters, not with a number nobody can recompute.
+import { createGame } from "../src/game/setup.js";
+import { startTurn, endTurn } from "../src/game/turn.js";
+import { takeAITurn } from "../src/game/ai.js";
+import { activePlayerId } from "../src/game/targeting.js";
+import { MINOR_FACTIONS, factionDef } from "../src/game/content.js";
+import { vassalLord, arePacted } from "../src/game/diplomacy.js";
+import { readFileSync, writeFileSync } from "node:fs";
+
+export const SEEDS = [
+  1234, 424242, 7, 991, 4711, 8123, 20260821, 31337, 55555, 90210,
+  123456, 2026, 606, 77, 31415,
+];
+
+// Past this a game is called unresolved. 80 is well clear of the median so the
+// cap is never the story: spot-checked at 150 rounds, the games that pass 80
+// are genuinely deadlocked rather than slow, which is exactly the failure the
+// diplomacy brief §15 predicts from the `mayEngage` minor-reachability hole.
+const MAX_ROUNDS = 80;
+const SNAPSHOT_ROUND = 15; // where the 2026-08-15 playtest took its readings
+
+// --- argv ------------------------------------------------------------
+const argv = process.argv.slice(2);
+const argOf = (name) => {
+  const i = argv.indexOf(name);
+  return i >= 0 ? argv[i + 1] : null;
+};
+const seeds = argOf("--seeds")
+  ? argOf("--seeds").split(",").map((s) => Number(s.trim()))
+  : SEEDS;
+const jsonOut = argOf("--json");
+const baselinePath = argOf("--baseline");
+const quiet = argv.includes("--quiet");
+
+// --- one game --------------------------------------------------------
+
+// Every faction is driven by takeAITurn. `humanFactionId` still names a
+// faction because `isAI` keys off it and a few display paths want a seat, but
+// nothing here ever calls endTurn on the human's behalf — the AI plays all
+// four majors and every seeded minor, which is what makes the ending mix a
+// measurement of the RULES rather than of one scripted policy.
+function runGame(seed) {
+  const g = createGame({
+    seed,
+    factionIds: ["versari", "goldgrass", "lakers", "plainers"],
+    humanFactionId: "versari",
+    minors: Object.keys(MINOR_FACTIONS),
+    mapSize: "medium",
+  });
+  for (const p of Object.values(g.players)) p.isAI = true;
+  startTurn(g);
+
+  const snapshot = {};
+  let guard = MAX_ROUNDS * (g.turnOrder.length + 2) + 64;
+  let aiTurns = 0;
+  while (!g.winnerId && g.round <= MAX_ROUNDS && guard-- > 0) {
+    const pid = activePlayerId(g);
+    if (!pid) { endTurn(g); continue; }
+    const before = g.log.length;
+    takeAITurn(g);
+    aiTurns += 1;
+    if (g.log.length === before) endTurn(g); // a wedged seat never stalls the suite
+    if (!snapshot.taken && g.round > SNAPSHOT_ROUND) {
+      snapshot.taken = true;
+      snapshot.at = readSnapshot(g);
+    }
+  }
+  if (!snapshot.taken) snapshot.at = readSnapshot(g);
+  return summarise(g, { aiTurns, snapshot: snapshot.at, seed });
+}
+
+// The 2026-08-15 playtest's readings, taken at the same point in the game so
+// the "36 scrap, Tech 1, no nodes" row means the same thing it did then.
+function readSnapshot(g) {
+  const rows = [];
+  for (const pid of Object.keys(g.players)) {
+    const p = g.players[pid];
+    if (!p || factionDef(pid)?.tier === "minor") continue;
+    const nodes = (p.techWheel || []).length;
+    rows.push({ pid, scrap: p.resource || 0, techLevel: p.techLevel || 1, nodes });
+  }
+  return rows;
+}
+
+const evName = (g, name) => g.log.filter((e) => e.name === name);
+
+function summarise(g, { aiTurns, snapshot, seed }) {
+  const won = evName(g, "dominion_won")[0];
+  const ending = g.winnerId ? (won?.payload?.by || "unknown") : "unresolved";
+
+  // --- diplomacy acts, and their mix. `performDiplomacy` does not emit a
+  // single "an act happened" event, so the act set is the union of the events
+  // the verbs actually produce. Counting events rather than intentions means a
+  // refused ask does not inflate the rate.
+  const ACT_EVENTS = [
+    "deal_proposed", "offer_tabled", "denounced", "ultimatum_issued",
+    "pact_formed", "vassal_established", "tribute_demanded", "mediated",
+    "trading_pact_formed", "grievances_settled", "peace_made",
+  ];
+  const acts = ACT_EVENTS.reduce((n, k) => n + evName(g, k).length, 0);
+  const denouncements = evName(g, "denounced").length;
+
+  // --- wars, and how they opened. A war whose declaration is preceded by the
+  // attacker's own surprise-attack Honor charge was opened by a blow, not a
+  // word. `surprise_attack_honor_lost` is emitted only on that path.
+  const wars = evName(g, "war_declared");
+  const surprises = evName(g, "surprise_attack_honor_lost").length;
+
+  // --- minors: allied or vassalised RATHER THAN killed. The brief's row.
+  const minorIds = Object.keys(g.players).filter((p) => factionDef(p)?.tier === "minor");
+  let minorsAllied = 0, minorsVassal = 0, minorsDead = 0;
+  for (const m of minorIds) {
+    if (g.players[m]?.eliminated) { minorsDead += 1; continue; }
+    if (vassalLord(g, m)) { minorsVassal += 1; continue; }
+    if (Object.keys(g.players).some((f) => f !== m && arePacted(g, f, m))) minorsAllied += 1;
+  }
+
+  // --- Sway. Read defensively off the player record: the currency does not
+  // exist yet, so every row is zero until economy stage 4 lands. The rows are
+  // here from day one so the baseline commit shows what "before" looked like
+  // and the delta after stage 4 is a number rather than a new column.
+  const sway = {};
+  for (const pid of Object.keys(g.players)) {
+    if (g.players[pid]?.eliminated) continue;
+    const p = g.players[pid];
+    sway[pid] = { income: p.swayIncome || 0, pool: p.sway || 0 };
+  }
+  const minorIncomes = minorIds.filter((m) => sway[m]).map((m) => sway[m].income);
+  const majorIncomes = Object.keys(sway)
+    .filter((p) => factionDef(p)?.tier !== "minor").map((p) => sway[p].income);
+
+  return {
+    seed,
+    round: g.round,
+    winner: g.winnerId || null,
+    ending,
+    aiTurns,
+    actsPerTurn: aiTurns ? acts / aiTurns : 0,
+    denounceShare: acts ? denouncements / acts : 0,
+    wars: wars.length,
+    surpriseOpenings: surprises,
+    coalitions: evName(g, "coalition_formed").length,
+    minors: { allied: minorsAllied, vassal: minorsVassal, dead: minorsDead, total: minorIds.length },
+    // Economy rows
+    endScrap: snapshot,
+    emptyWheels: snapshot.filter((r) => r.nodes === 0).length,
+    delayedPurchases: evName(g, "purchase_delayed").length,
+    supplyRefusals: evName(g, "purchase_refused_unsupplied").length,
+    chipUpgrades: evName(g, "chip_upgraded").length,
+    pressureEvents: evName(g, "influence_pressure").length,
+    occupationCharges: evName(g, "occupation_charged").length,
+    sway: {
+      minMinor: minorIncomes.length ? Math.min(...minorIncomes) : 0,
+      maxMajor: majorIncomes.length ? Math.max(...majorIncomes) : 0,
+      atCapRounds: 0, // filled once the pool has a ceiling to sit at
+    },
+  };
+}
+
+// --- the suite -------------------------------------------------------
+
+const median = (xs) => {
+  if (!xs.length) return null;
+  const s = [...xs].sort((a, b) => a - b);
+  const m = s.length >> 1;
+  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+};
+const mean = (xs) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0);
+const r2 = (n) => Math.round(n * 100) / 100;
+
+const games = [];
+for (const seed of seeds) {
+  const t0 = Date.now();
+  let g;
+  try {
+    g = runGame(seed);
+  } catch (err) {
+    g = { seed, ending: "threw", error: String(err && err.message || err), round: 0 };
+    if (!quiet) console.error(`  seed ${seed} threw: ${g.error}`);
+  }
+  g.ms = Date.now() - t0;
+  games.push(g);
+  if (!quiet) {
+    console.log(`  seed ${String(seed).padStart(8)}  ${String(g.ending).padEnd(11)}` +
+      ` round ${String(g.round).padStart(3)}  winner ${(g.winner || "—").padEnd(10)}  ${g.ms}ms`);
+  }
+}
+
+const ok = games.filter((g) => g.ending !== "threw");
+const byEnding = {};
+for (const g of games) byEnding[g.ending] = (byEnding[g.ending] || 0) + 1;
+const resolved = ok.filter((g) => g.winner);
+const mixLike = (byEnding.submission || 0) + (byEnding.mixed || 0);
+
+const report = {
+  generatedFor: seeds.length + " seeds",
+  seeds,
+  // --- the three governing numbers -----------------------------------
+  governing: {
+    endingMix: { submissionPlusMixed: mixLike, of: seeds.length, band: ">= 11" },
+    medianRoundsToDominion: { value: median(resolved.map((g) => g.round)), band: "baseline +/- 4" },
+    unresolved: { value: byEnding.unresolved || 0, band: "0" },
+  },
+  endings: byEnding,
+  // --- diplomacy brief §17 --------------------------------------------
+  diplomacy: {
+    actsPerAITurn: r2(mean(ok.map((g) => g.actsPerTurn))),
+    denounceShareOfActs: r2(mean(ok.map((g) => g.denounceShare))),
+    warsPerGame: r2(mean(ok.map((g) => g.wars))),
+    warsOpenedByUndeclaredAttack: r2(mean(ok.map((g) => g.surpriseOpenings))),
+    coalitionsPerGame: r2(mean(ok.map((g) => g.coalitions))),
+    minorsAlliedOrVassalisedPerGame: r2(mean(ok.map((g) => g.minors.allied + g.minors.vassal))),
+    minorsKilledPerGame: r2(mean(ok.map((g) => g.minors.dead))),
+  },
+  // --- economy brief §17 ----------------------------------------------
+  economy: {
+    medianEndScrap: median(ok.flatMap((g) => g.endScrap.map((r) => r.scrap))),
+    maxEndScrap: Math.max(0, ...ok.flatMap((g) => g.endScrap.map((r) => r.scrap))),
+    factionsWithEmptyWheelAtR15: r2(mean(ok.map((g) => g.emptyWheels))),
+    chipUpgradesByAI: ok.reduce((n, g) => n + g.chipUpgrades, 0),
+    purchasesDelayedBySupply: ok.reduce((n, g) => n + g.delayedPurchases, 0),
+    purchasesRefusedUnsupplied: ok.reduce((n, g) => n + g.supplyRefusals, 0),
+    influencePressureEvents: ok.reduce((n, g) => n + g.pressureEvents, 0),
+    occupationCharges: ok.reduce((n, g) => n + g.occupationCharges, 0),
+    swayMinorIncomeMin: Math.min(...ok.map((g) => g.sway.minMinor), Infinity),
+    swayLeaderToMinorRatio: (() => {
+      const lo = mean(ok.map((g) => g.sway.minMinor));
+      const hi = mean(ok.map((g) => g.sway.maxMajor));
+      return lo > 0 ? r2(hi / lo) : null;
+    })(),
+  },
+  games,
+};
+
+if (!quiet) {
+  const G = report.governing;
+  console.log("\n=== the three governing numbers ===");
+  console.log(`  ending mix (submission + mixed)   ${G.endingMix.submissionPlusMixed} of ${G.endingMix.of}   band ${G.endingMix.band}`);
+  console.log(`  median rounds to Dominion         ${G.medianRoundsToDominion.value}   band ${G.medianRoundsToDominion.band}`);
+  console.log(`  games unresolved                  ${G.unresolved.value}   band ${G.unresolved.band}`);
+  console.log(`  endings: ${JSON.stringify(byEnding)}`);
+  console.log("\n=== diplomacy brief §17 ===");
+  for (const [k, v] of Object.entries(report.diplomacy)) console.log(`  ${k.padEnd(34)} ${v}`);
+  console.log("\n=== economy brief §17 ===");
+  for (const [k, v] of Object.entries(report.economy)) console.log(`  ${k.padEnd(34)} ${v}`);
+}
+
+if (baselinePath) {
+  const base = JSON.parse(readFileSync(baselinePath, "utf8"));
+  console.log(`\n=== delta against ${baselinePath} ===`);
+  const walk = (a, b, path = "") => {
+    for (const k of Object.keys(b)) {
+      if (k === "games" || k === "seeds") continue;
+      const av = a?.[k], bv = b[k];
+      if (bv && typeof bv === "object") { walk(av, bv, `${path}${k}.`); continue; }
+      if (typeof bv !== "number") continue;
+      const d = bv - (av ?? 0);
+      if (Math.abs(d) < 1e-9) continue;
+      console.log(`  ${(path + k).padEnd(44)} ${av} -> ${bv}  (${d > 0 ? "+" : ""}${r2(d)})`);
+    }
+  };
+  walk(base, report);
+}
+
+if (jsonOut) {
+  writeFileSync(jsonOut, JSON.stringify(report, null, 2));
+  console.log(`\nwrote ${jsonOut}`);
+}
