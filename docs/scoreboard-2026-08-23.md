@@ -420,3 +420,63 @@ AI policy — is the wrong instrument and correctly reads flat. What covers them
 instead: 23 new harness fixtures, audit block 14 flipped to RESOLVED, and
 legibility checks 27–38, which assert the adapter actually carries them to the
 drawer and that every position the drawer offers is one the engine accepts.
+
+---
+
+## Phase 5 — the AI
+
+### Economy §10 — the effect→value table
+
+`pickBuild` scored **six of forty-two** authored chip fields. Every movement
+chip, every vision chip, the whole blockade kit, the influence chips and the
+Loyalty chips were worth exactly zero to an AI deciding what to build — and
+`chipUpgradesByAI` measured **0** across the whole 15-seed suite, so every
+tier-2 chip in the content set was human-only.
+
+The table now lives in `src/game/chipValue.js`. Audit block 8 reads
+`VALUED_FIELDS` **from the module** rather than restating the list, so a field
+added to `content.js` and forgotten in the table fails the audit — that
+mechanism is the only thing standing between here and the six-of-forty-two
+state recurring.
+
+| | before | after |
+|---|---|---|
+| **Ending mix (submission + mixed)** | 6 | **9** |
+| Median rounds | 51.5 | **45** |
+| Games unresolved | 3 | **4** |
+| Chip upgrades by AI | 0 | **340** |
+| Chip fields the AI can see | 6 of 42 | **42 of 42** |
+
+Ending mix 6 → 9 is the largest single move on the project's first governing
+number. Unresolved went the wrong way by one game; the whole switch set was
+swept (`warChestUnits` 0/2/4, `buildSliderLean` 0/0.3, `compoundingWeight`
+1/1.5/2/3/4, `upgrades` on/off, `costAware` on/off) and no combination beat
+9/45/4. Recorded, not hidden.
+
+**Three findings, all of which cost real time and all of which are load-bearing:**
+
+1. **A fifth of a point rewrote the entire game.** Garrison shipped at 1.6,
+   which put `defense-turrets` (garrison 2 → 3.20) one fifth of a point above
+   `recyclers` (output 1 → 3.00). Instrumented on seed 1234 to round 25: the AI
+   built **23 turrets and 0 recyclers** where it had built 39 recyclers, and its
+   captures fell from **22 to 8**. Fighting weights are now all below `output`
+   per point, and the audit asserts that ordering directly. *A defensive chip
+   holds what you have; an economic one buys what you do not.*
+2. **Compounding needed its own axis.** Output pays every round forever; siege
+   pays once per fight. A flat points-per-point scale cannot express that, so
+   per-round fields get `ai.compoundingWeight`. It ships at 1 — at 2 the AI
+   hoarded (109 median end scrap, 14 of 15 unresolved). The axis matters; the
+   multiplier does not want to be large.
+3. **Value is not the decision — value per scrap is.** Neither the old
+   six-field table nor the first draft of the new one looked at price at all,
+   so a city preferred a 7-scrap stronghold to two factories. `ai.costAware`
+   divides by `effectiveBuildCost`, and **that single change took the ending
+   mix from 6 to 9** — more than the table itself.
+
+**And a discipline note.** The first `manageEconomy` rewrite quietly loosened
+the rush rule (`chest * rushMultiple` with `chest: 0` means "rush above 0", not
+"rush above 14"), so the supposed no-op read 5 unresolved instead of 3 and I
+spent a sweep chasing a regression I had introduced in the off switch. It is
+now `chest + rushAbove` with `rushAbove: 14` — the original number — and
+`--set ai.valueTable=0,ai.upgrades=0,ai.warChestUnits=0` reproduces
+6 / 51.5 / 3 exactly. **A no-op you have to squint at is not one.**

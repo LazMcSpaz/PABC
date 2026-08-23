@@ -54,6 +54,7 @@ import { setStanding } from "./standing.js";
 import { factionDef, MINOR_FACTIONS } from "./content.js";
 import { activePlayerId } from "./targeting.js";
 import { FACTIONS, LOCATIONS, ABILITIES, REACTIVES, CHIPS, chipBlocksRail } from "./content.js";
+import { chipValue, upgradeValue, VALUED_FIELDS, NON_EFFECT_FIELDS } from "./chipValue.js";
 import { resolveSalvage } from "./contest.js";
 import { readRivalIntel } from "./intel.js";
 import { postAt, isPostVisibleTo, chargePostUpkeep } from "./posts.js";
@@ -4319,6 +4320,88 @@ line("\n  [§13] you can stand for something, and be named when you don't");
     check(`you can stand on at most ${PC.max} things at once`, taken === PC.max);
     check("…and the cap counts what you HOLD", positionsOf(g, me).length === PC.max);
   }
+}
+
+// Economy §10 — the effect→value table, and the upgrade pass it unblocked.
+//
+// `pickBuild` scored six of forty-two authored chip fields. Every movement
+// chip, every vision chip, the whole blockade kit, the influence chips and the
+// Loyalty chips were worth exactly zero to an AI deciding what to build, and
+// `chipUpgradesByAI` measured 0 across the whole 15-seed suite — every tier-2
+// chip in the content set was human-only.
+line("\n  [economy §10] the AI can price content, and can upgrade");
+{
+  const SKIP = new Set(NON_EFFECT_FIELDS);
+  const authored = new Set();
+  for (const def of Object.values(CHIPS)) {
+    for (const k of Object.keys(def)) if (!SKIP.has(k)) authored.add(k);
+  }
+  const unseen = [...authored].filter((f) => !VALUED_FIELDS.includes(f));
+  check("every authored chip field has a row in the value table",
+    unseen.length === 0);
+  check("…and the table has no rows for fields nobody authors",
+    VALUED_FIELDS.every((f) => authored.has(f)));
+  check("…and every authored chip prices to a finite number",
+    Object.values(CHIPS).every((d) => Number.isFinite(chipValue(d))));
+
+  // The ordering that cost an evening. Garrison shipped at 1.6, which put
+  // defense-turrets a fifth of a point over recyclers — and on seed 1234 the
+  // AI then built 23 turrets, 0 recyclers, and its captures fell 22 -> 8.
+  check("production outranks fortification, point for point",
+    chipValue(CHIPS["recyclers"]) >= chipValue(CHIPS["defense-turrets"]));
+  check("…and an upgrade is worth its DELTA, not its destination",
+    upgradeValue(CHIPS["recyclers"], CHIPS["factory"])
+      === chipValue(CHIPS["factory"]) - chipValue(CHIPS["recyclers"]));
+  check("…which is smaller than the destination, so upgrades do not swamp builds",
+    upgradeValue(CHIPS["recyclers"], CHIPS["factory"]) < chipValue(CHIPS["factory"]));
+}
+{
+  // The field-aware influence term. Dominance is a step function with a wide
+  // dead zone, so an influence chip is worth nothing mid-band and a great deal
+  // one point below a bar — and a flat weight prices it at the average of
+  // those, which is a number that is never right anywhere.
+  const g = createGame({ seed });
+  const loc = Object.values(g.locations).find((l) => l.controller);
+  const chip = Object.values(CHIPS).find((c) => (c.localInfluence || 0) > 0);
+  if (chip) {
+    g.world = g.world || {};
+    g.world.influence = {};
+    const gain = chip.localInfluence;
+    // Parked just under the 6-hex bar, the same chip should be worth more than
+    // parked well inside a band.
+    g.world.influence[loc.hexId] = 6 - gain;
+    const atTheBar = chipValue(chip, { state: g, loc, contested: false });
+    g.world.influence[loc.hexId] = 0;
+    const deadZone = chipValue(chip, { state: g, loc, contested: false });
+    check("an influence chip that crosses a dominance bar is worth more than one that does not",
+      atTheBar > deadZone);
+  }
+  // Loyalty at the ceiling buys nothing, and the table has to know that.
+  const loyChip = Object.values(CHIPS).find((c) => (c.loyaltyRise || 0) > 0);
+  if (loyChip) {
+    const full = { ...loc, loyalty: CONFIG.loyalty.max };
+    const low = { ...loc, loyalty: 0 };
+    check("a Loyalty chip on a city at the ceiling is worth nothing",
+      chipValue(loyChip, { state: g, loc: full }) < chipValue(loyChip, { state: g, loc: low }));
+  }
+}
+{
+  // The compounding horizon. output/research/upkeep pay EVERY ROUND; strength
+  // and siege pay once. A flat points-per-point scale cannot tell those apart,
+  // and the first draft did not try.
+  const AI = CONFIG.ai;
+  const was = AI.compoundingWeight;
+  try {
+    AI.compoundingWeight = 1;
+    const flat = chipValue(CHIPS["factory"]);
+    AI.compoundingWeight = 2;
+    check("the horizon lifts a per-round chip and nothing else",
+      chipValue(CHIPS["factory"]) > flat
+      && chipValue(CHIPS["defense-turrets"]) === chipValue(CHIPS["defense-turrets"]));
+  } finally { AI.compoundingWeight = was; }
+  // …and the horizon is the SHIPPED value, not an accident of the sweep. 2
+  // sent the AI hoarding (109 median end scrap, 14 of 15 games unresolved).
+  check("…and it ships at the value the suite chose", CONFIG.ai.compoundingWeight === 1);
 }
 
 // §1.2 / economy §6.3 — gifts are priced in SWAY now, not scrap. The

@@ -149,6 +149,36 @@ export const CONFIG = {
     contestWinProbBase: 0.55, // required win% at aggression 0
     contestWinProbAggressionScale: 0.35, // subtracted at aggression 1
     contestWinProbMin: 0.15, // never accept worse odds than this, however aggressive
+
+    // §10 — THE WAR CHEST. What `manageEconomy` will not spend on building.
+    //
+    // This exists because the effect→value table broke the old loop by
+    // succeeding. Before it, an AI ran out of things worth building, its
+    // slider fell back to 0, and the treasury refilled by accident. With every
+    // chip field valued AND upgrades reachable, there is always something
+    // worth building, so the slider stayed at 0.7 forever and no faction ever
+    // saved the price of a unit again: measured, unresolved games went 3 -> 9
+    // and conquest endings to zero. An economy with no floor under the army is
+    // not a smarter AI, it is a pacifist one by accident.
+    // Every value here is chosen so that ZEROING the chest reproduces the old
+    // loop exactly — slider 0.7 whenever anything is queued, rush above 14
+    // scrap — rather than approximately. A no-op you have to squint at is not
+    // one, and the first draft of this block silently loosened the rush rule.
+    warChestUnits: 2,      // keep the price of this many recruits, always
+    buildSliderBusy: 0.7,  // …and how hard to build when the chest is full
+    buildSliderLean: 0.3,  // …against when it is not
+    rushAbove: 14,         // rush with this much ON TOP of the chest
+    // 0 switches the AI's upgrade pass off and restores build-only behaviour;
+    // 0 on `valueTable` restores the six-field scoring it had before §10.
+    upgrades: 1,
+    valueTable: 1,
+    // How many one-off effects a PERMANENT one is worth. See the PER_ROUND
+    // note in chipValue.js: 1 is the flat scale the first draft shipped, and
+    // it stopped the AI compounding.
+    compoundingWeight: 1,
+    // Rank chips by value PER SCRAP rather than by value. 0 restores the
+    // price-blind comparison both the old and the new table shipped with.
+    costAware: 1,
   },
 
   // §17 Tech Wheel. Research fills a bar; Tech Level is a derived band

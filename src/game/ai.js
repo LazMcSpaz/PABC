@@ -9,9 +9,10 @@ import { endTurn } from "./turn.js";
 import { activePlayerId } from "./targeting.js";
 import { bfsDistances } from "./board.js";
 import { unitReach } from "./movement.js";
-import { LOCATIONS } from "./content.js";
+import { LOCATIONS, CHIPS } from "./content.js";
 import { CONFIG } from "./config.js";
-import { buildableChips, slotCapacity, slotsUsed, stationedUnitWithBay } from "./economy.js";
+import { buildableChips, slotCapacity, slotsUsed, stationedUnitWithBay, upgradeOption, effectiveBuildCost } from "./economy.js";
+import { chipValue, upgradeValue } from "./chipValue.js";
 import { isUnitVisibleTo } from "./visibility.js";
 import { previewAttackerStrength, previewLocationContest } from "./contest.js";
 import { assignTechNode } from "./stats.js";
@@ -959,44 +960,112 @@ function pickMoveTarget(state, pid, unit) {
 // Actions (build/upgrade/rush/set-slider all cost 0).
 function manageEconomy(state, pid) {
   const player = state.players[pid];
+  const cfg = CONFIG.ai;
+  // THE WAR CHEST. What this loop will not spend. See the config comment: the
+  // effect→value table broke the old economy by working — there is now always
+  // something worth building, so the slider never falls back and the treasury
+  // never refills by accident the way it used to.
+  const chest = cfg.warChestUnits * CONFIG.unitRecruitCost;
+  const flush = (player.resource || 0) >= chest;
+
   for (const loc of Object.values(state.locations)) {
     if (loc.controller !== pid) continue;
 
     if (!loc.activeBuild) pickBuild(state, pid, loc);
 
-    // Lean toward construction when something is queued, but keep banking a
-    // share so the army still gets scrap for recruiting / reinforcing.
-    const wantSlider = loc.activeBuild ? 0.7 : 0;
+    // Build hard when the army is funded, lean when it is not. The old rule
+    // was binary on "is anything queued", which is now always true.
+    const wantSlider = loc.activeBuild
+      ? (flush ? cfg.buildSliderBusy : cfg.buildSliderLean)
+      : 0;
     if ((loc.buildSlider ?? 0) !== wantSlider) {
       performAction(state, "set-slider", { at: loc.hexId, value: wantSlider });
     }
 
-    // Spend a flush treasury into local construction (rush a few points).
-    if (loc.activeBuild && player.resource > 14) {
+    // Rushing is the fastest way to empty a treasury, so it wants more than a
+    // full chest — it wants a chest it can afford to break into.
+    if (loc.activeBuild && player.resource > chest + cfg.rushAbove) {
       performAction(state, "rush", { at: loc.hexId, amount: 3 });
     }
   }
 }
 
-// Choose what a city should build next: the highest-value buildable
-// (Tech-allowed, Loyalty-unlocked, slot-fitting) chip. Prefers economy /
-// research / a first recruit-unlocking chip (Training Grounds today, or
-// whatever content adds later — scored via `unitCapBonus`, not by id);
-// falls back to arming a stationed unit.
+// Choose what a city should build next — or what to UPGRADE.
+//
+// This used to score six of forty-two authored chip fields. Everything else —
+// every movement chip, every vision chip, the whole blockade kit, the
+// influence chips, the Loyalty chips — was worth exactly zero to the AI, and
+// the playtest log has the consequence: three of six factions ended a
+// 15-round game with an empty tech wheel and the Lakers on 36 unspent scrap.
+// The table now lives in `chipValue.js` and the economy audit fails if a new
+// authored field is missing from it.
+//
+// Two things are still decided HERE rather than in the table, because they
+// need to know about the faction and not just the chip: the first
+// recruit-unlocking chip is worth far more than the second, and an upgrade is
+// worth its DELTA rather than its destination.
 function pickBuild(state, pid, loc) {
   const options = buildableChips(state, loc).filter((o) => !o.locked);
   const haveRecruiting = recruitCapBonus(state, pid) > 0;
+  // Is this ground contested? The influence and Loyalty terms in the table
+  // swing hard on it — a Loyalty chip on a quiet interior city is worth a
+  // fraction of the same chip on a border one point below the dominance bar.
+  const ctx = { state, loc, contested: locationIsContested(state, pid, loc) };
+  // Value per scrap, not value. Two chips worth 3 and 4 are not ranked by
+  // those numbers when one costs 3 and the other 7 — and neither the old
+  // six-field table nor the first draft of the new one looked at price at all,
+  // which is how a city came to prefer a 7-scrap stronghold to two factories.
+  const perScrap = (def, raw) => {
+    if (!CONFIG.ai.costAware) return raw;
+    return raw / Math.max(1, effectiveBuildCost(state, pid, def));
+  };
   const score = (def) => {
-    let s = (def.output || 0) * 3 + (def.research || 0) * 3 + (def.garrison || 0) + (def.strength || 0);
+    let s = CONFIG.ai.valueTable
+      ? chipValue(def, ctx)
+      // The six-field table this replaced, kept reachable so the "before" of
+      // this stage is a config flip rather than a branch revert.
+      : (def.output || 0) * 3 + (def.research || 0) * 3 + (def.garrison || 0)
+        + (def.strength || 0) - (def.upkeep || 0);
+    // The first one opens recruiting at all; the second adds a slot to a
+    // capacity nobody is against. Priced here because the table sees the chip
+    // and not the faction.
     if ((def.unitCapBonus || 0) > 0 && !haveRecruiting) s += 5;
-    return s - (def.upkeep || 0); // mild aversion to upkeep when poor
+    return perScrap(def, s);
   };
 
   // Location chips into a free slot first.
   const locFits = options
     .filter((o) => o.def.kind === "location" && slotsUsed(state, loc.chips) + (o.def.slots || 1) <= slotCapacity(loc, state))
     .sort((a, b) => score(b.def) - score(a.def));
-  if (locFits.length) {
+
+  // §20.5 — UPGRADING WAS NEVER ATTEMPTED. `chipUpgradesByAI` measured 0 across
+  // the whole 15-seed suite: the AI built until the slots were full and then
+  // stopped, so every tier-2 chip in the content set was human-only. An
+  // upgrade is scored on the DELTA — an AI scoring the destination would rate
+  // every upgrade above every fresh build, because an upgrade target is by
+  // construction the better chip, and it would be paying full price for the gap.
+  const upFits = [];
+  for (const uid of (CONFIG.ai.upgrades ? loc.chips : [])) {
+    const opt = upgradeOption(state, loc, uid);
+    if (!opt || opt.locked) continue;
+    const from = CHIPS[state.chips[uid]?.chipId];
+    if (!from) continue;
+    // An upgrade's price is the new chip's full cost, not the difference, so
+    // its value-per-scrap is the delta over the whole bill.
+    upFits.push({ uid, opt, gain: perScrap(opt.def, upgradeValue(from, opt.def, ctx)) });
+  }
+  upFits.sort((a, b) => b.gain - a.gain);
+
+  const bestBuild = locFits.length ? score(locFits[0].def) : -Infinity;
+  const bestUp = upFits.length ? upFits[0].gain : -Infinity;
+  // A free slot is worth taking before a marginal upgrade — a slot filled is a
+  // slot that keeps paying, while an upgrade consumes the one it replaces. So
+  // the upgrade has to actually beat the build, not merely tie it.
+  if (bestUp > bestBuild && bestUp > 0) {
+    const r = performAction(state, "upgrade", { at: loc.hexId, chip: upFits[0].uid });
+    if (r.ok) return true;
+  }
+  if (locFits.length && bestBuild > 0) {
     return performAction(state, "build", { at: loc.hexId, chipId: locFits[0].chipId }).ok;
   }
 
@@ -1006,6 +1075,23 @@ function pickBuild(state, pid, loc) {
     .sort((a, b) => score(b.def) - score(a.def));
   if (unitFits.length) {
     return performAction(state, "build", { at: loc.hexId, chipId: unitFits[0].chipId }).ok;
+  }
+  // Nothing fits and nothing upgrades: fall back to the best chip going, even
+  // one the table scores at zero. An empty slot earns nothing at all, and the
+  // old loop reached this state and simply stopped.
+  if (locFits.length) return performAction(state, "build", { at: loc.hexId, chipId: locFits[0].chipId }).ok;
+  return false;
+}
+
+// Is somebody else's reach on this ground? Read from the influence field the
+// engine already maintains, so "contested" means the same thing to the AI as
+// the dashed ring means to the player.
+function locationIsContested(state, pid, loc) {
+  const zoc = state.world?.zoc;
+  if (!zoc) return false;
+  for (const n of [loc.hexId, ...(state.board.adjacency[loc.hexId] || [])]) {
+    const o = zoc[n];
+    if (o && o !== pid) return true;
   }
   return false;
 }

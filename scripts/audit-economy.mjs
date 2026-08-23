@@ -37,6 +37,7 @@ import { swayIncome, swayOf, dominatedHexes } from "../src/game/sway.js";
 import { supplyVerdict, sweepDeliveries } from "../src/game/economy.js";
 import { supplyDistanceFrom } from "../src/game/board.js";
 import { runDiplomacyRound } from "../src/game/diplomacy.js";
+import { chipValue, VALUED_FIELDS, NON_EFFECT_FIELDS } from "../src/game/chipValue.js";
 
 const verbose = process.argv.includes("--verbose");
 
@@ -488,24 +489,43 @@ block(7, "A stack of any size cannot flip a hex adjacent to a Loyalty-4 Location
   });
 
 // --------------------------------------------------------------------
-// v0.3-roadmap item 1, open since 2026-08-06. `pickBuild` scores six fields of
-// roughly twenty-six; the playtest evidence is three of six factions ending a
-// 15-round game with an empty tech wheel and the Lakers on 36 unspent scrap.
-const SCORED_BY_PICKBUILD = ["output", "research", "garrison", "strength", "unitCapBonus", "upkeep"];
+// v0.3-roadmap item 1, open since 2026-08-06. `pickBuild` scored six fields of
+// forty-two; the playtest evidence was three of six factions ending a 15-round
+// game with an empty tech wheel and the Lakers on 36 unspent scrap.
+//
+// The list is READ FROM THE TABLE ITSELF rather than restated here, so a field
+// added to `content.js` and forgotten in `chipValue.js` fails this block —
+// which is the only mechanism that stops the six-of-forty-two state recurring.
 block(8, "Every chip field authored in content.js is valued by the AI",
-  "economy 10", false, (check, note) => {
+  "economy 10", true, (check, note) => {
     const fields = new Set();
-    const SKIP = new Set(["id", "name", "kind", "faction", "desc", "slots", "cost", "buildCost",
-      "techLevel", "loyaltyReq", "upgradesTo", "upgradeFrom", "tags", "requires"]);
+    const SKIP = new Set(NON_EFFECT_FIELDS);
     for (const def of Object.values(CHIPS)) {
       for (const k of Object.keys(def)) if (!SKIP.has(k)) fields.add(k);
     }
-    const unseen = [...fields].filter((f) => !SCORED_BY_PICKBUILD.includes(f)).sort();
+    const unseen = [...fields].filter((f) => !VALUED_FIELDS.includes(f)).sort();
+    const stale = VALUED_FIELDS.filter((f) => !fields.has(f)).sort();
     note(`authored effect fields: ${fields.size}`);
-    note(`scored by pickBuild:   ${SCORED_BY_PICKBUILD.length}`);
-    note(`invisible to the AI:   ${unseen.length} — ${unseen.join(", ")}`);
-    check("no authored chip field is invisible to pickBuild", unseen.length === 0,
-      `${unseen.length} of ${fields.size} fields score nothing`);
+    note(`valued by chipValue:    ${VALUED_FIELDS.length}`);
+    check("no authored chip field is invisible to the AI", unseen.length === 0,
+      `${unseen.length} of ${fields.size} score nothing: ${unseen.join(", ")}`);
+    check("…and the table has no rows for fields nobody authors", stale.length === 0,
+      `stale rows: ${stale.join(", ")}`);
+    // Every chip must price to a finite number. A NaN here would sort chips at
+    // random and be invisible in the endings.
+    const bad = Object.values(CHIPS).filter((d) => !Number.isFinite(chipValue(d)));
+    check("…and every authored chip prices to a finite number", bad.length === 0,
+      `not finite: ${bad.map((d) => d.id).join(", ")}`);
+    // The ordering that cost an evening: a defensive chip must not outrank an
+    // economic one per point. Garrison at 1.6 put `defense-turrets` a fifth of
+    // a point over `recyclers` and captures fell from 22 to 8 on seed 1234.
+    const rec = CHIPS["recyclers"], turret = CHIPS["defense-turrets"];
+    if (rec && turret) {
+      note(`recyclers ${chipValue(rec).toFixed(2)} vs defense-turrets ${chipValue(turret).toFixed(2)}`);
+      check("…and production still outranks fortification, point for point",
+        chipValue(rec) >= chipValue(turret),
+        "a defensive chip outscores the economic one it competes with");
+    }
   });
 
 // --------------------------------------------------------------------
