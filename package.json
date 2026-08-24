@@ -27,7 +27,11 @@
     "sim:suite": "node scripts/sim-suite.mjs",
     "harness": "node src/game/harness.js",
     "check:legibility": "node scripts/check-legibility.mjs",
-    "check:spines": "node scripts/check-spines.mjs"
+    "check:spines": "node scripts/check-spines.mjs",
+    "probe:pacifist": "node scripts/probe-policies.mjs pacifist",
+    "probe:spender": "node scripts/probe-policies.mjs spender",
+    "probe:chips": "node scripts/probe-chip-table.mjs",
+    "check:policies": "node scripts/probe-policies.mjs pacifist --assert && node scripts/probe-chip-table.mjs --assert"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.30.1",

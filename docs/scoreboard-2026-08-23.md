@@ -724,3 +724,137 @@ against 0.25's 10/54/**4**, consistently across 0.1/0.15/0.25/0.5). That is a
 real trade and it is bought deliberately: recovery is what makes "no face
 closes permanently" true, and the mix figure bounces 5/10/10/5 across those
 four values, so picking the cheaper one would be tuning on noise.
+
+---
+
+## Post-merge: three concerns, tested with scripted policies
+
+`sim-suite.mjs` runs every faction on `takeAITurn`, which makes it a
+measurement of the *rules* rather than of one policy — that is its point. But
+it means it can only ever say what happens when everybody plays the way the AI
+plays, and three decisions in this rework rested on claims about what happens
+when somebody doesn't. `scripts/probe-policies.mjs` runs one faction on a
+scripted policy against the ordinary AI; the policies reuse the real
+`manageEconomy` and the real political pass, because a probe that substitutes a
+stand-in for those is measuring the stand-in.
+
+### Concern 1 — "the AI cannot convert political capacity into progress"
+
+That sentence justified shipping three features dark (`attackPrice.enabled: 0`,
+`ai.giftAboveShareOfCap: 1`, `ai.intrigue: 0`). It was inferred from three
+correlated regressions and never tested.
+
+**It is wrong.** A scripted pacifist that never attacks anybody — verified at
+zero aggressions — **wins 2 of 15 games** and opens 8–9 courtships apiece. The
+diplomacy face closes. The three regressions need a different explanation, and
+the switches are worth revisiting rather than accepting as settled.
+
+### …and the defect that found
+
+The same run turned up something the static audit could not see: **a spotless
+pacifist was coalitioned in 7 of 15 games, every early one on `fear` grounds.**
+That is the Attila failure walking back in through the escape hatch built to
+keep it out.
+
+The cause: `powerLead` compared a faction against the **mean of all others**.
+The board empties — 4.4 of 7 rivals eliminated per game, mean round 21 — so
+that mean collapses and a survivor's "lead" balloons for reasons that have
+nothing to do with what it did. Traced on seed 424242: the fear line is crossed
+at **round 11 by a faction with Menace 0**, and from there somebody is above it
+every round to the end (threat 77.6 at round 30 on a lead of 38.8 over four
+corpses). The escape hatch meant for a flawless runaway was open two-thirds of
+every game.
+
+**`coalition.leadMeasure: "runnerUp"`** measures the gap to the strongest
+surviving rival instead — which is what runaway means. Eliminated factions are
+excluded outright; counting the dead as zeroes is the same bug in a hat.
+
+| | mean (before) | runnerUp |
+|---|---|---|
+| Coalitions raised against a spotless pacifist | **10** / 15 games | **3** (1 fear, 2 grievance) |
+| …of those, early `fear` risings | **7** | **1** |
+| Wars declared on the pacifist | 14.5 | 13.7 |
+| Minors allied or vassalised at end (suite) | 1.73 | **2.33** |
+| Suite: ending mix | 10 | 6 |
+| Suite: coalitions per game | 3.33 | 2.6 |
+
+**The mix cost is real and worth stating plainly: part of the old figure was
+manufactured by the bug.** Spurious coalitions cornered factions into
+submission, and submission is half the mix metric. Restoring the coalition
+*rate* (threshold 10) does not restore the mix — it puts the pacifist failure
+straight back instead (1 → 5 risings, wins 2 → 0). The rate is not the thing
+worth having, so `threshold`/`dissolve` stay at 16/11.
+
+The three remaining risings are correct behaviour, and the regression gate now
+says so by testing the **mechanism** rather than a count: an early `fear`
+rising against a Menace-0 faction is the failure; a `grievance` one is not (a
+pacifist that settles an empty *affiliated* Location has genuinely taken
+somebody's homeland, and the occupation rule already says so).
+
+### Concern 2 — the Sway economy has never been exercised by a spender
+
+Also true, and the conclusion drawn from it was wrong. The recorded finding
+"the pool sits at its ceiling 30% of rounds, so Sway is over-funded — tune the
+cap" is **not** an economy problem:
+
+| | AI | scripted spender |
+|---|---|---|
+| Rounds Sway hit the ceiling | **55.5** | **4.3** |
+| End pool / income | 60 / 20.7 | 28 / 16.4 |
+| Gifts + ops per game | 0 | 16.4 + 1.8 |
+| **Times the pool refused a purchase** | — | **572 across 15 games** (≈38/game) |
+
+The budget binds hard — 295 gift refusals, 158 op refusals, 119 courtship
+refusals. The numbers are sized correctly for somebody who spends; the ceiling
+reading is entirely an artifact of an AI that doesn't. **Do not tune the cap on
+the 30% figure.**
+
+### Concern 3 — the chip table is 42 rows fitted to one A/B comparison
+
+`scripts/probe-chip-table.mjs` censuses every competing pair. The table itself
+is sounder than feared — 7% of pairs decided by under 5%, a 25% nudge to
+`compoundingWeight` flips 6% of orderings, and no single field prices a chip
+outside the real range. But it found something worse than fragility:
+
+**The AI built 7 of 40 authored chips. `recyclers` accounted for 263 of them.**
+
+Eight of the nine closest pairs were *exact ties* — `recyclers` vs `labs`,
+`works` vs `defense-turrets` vs `training-grounds`. A tie does not randomise: a
+stable sort resolves it by position in the generated content file, so one chip
+of each pair is permanently invisible. And the deeper cause is not the table at
+all — it is that `pickBuild` takes the argmax every round and **the fifth
+recycler scores exactly what the first did.**
+
+The game already says the opposite about goodwill: `giftCounter` divides a
+gift's effect by how often you have leaned on somebody, because a gift is a
+campaign and not a bribe. A chip is the same shape. `ai.repeatDiminish: 0.2`:
+
+| | before | after |
+|---|---|---|
+| Distinct chips the AI ever builds | **7 of 40** | **13 of 40** |
+| `labs` builds (lost a tie, never built) | 0 | **92** |
+| Factions with an empty tech wheel at r15 | 2.87 | **2.07** |
+| Median end scrap | 35 | **26** |
+| **Games unresolved** | 4 | **2** |
+
+Unresolved 2 is the best reading the project has produced against a band of 0.
+Swept at 0.2 / 0.3 / 0.5: coverage saturates at 13 by 0.2 and buys nothing
+above it, while unresolved climbs 2 / 5 / 6. The gentlest slope that opens the
+content is the one to take.
+
+One trade-off measured on the way, worth recording because it cuts against a
+claim made earlier: `costAware` — the single change that gave the largest
+ending-mix gain in phase 5 — **costs content diversity**, because per-scrap
+ranking makes cheap chips dominate harder. Coverage reads 6 of 40 with the old
+six-field table, 9 cost-blind, 7 cost-aware, 13 with the repeat penalty.
+
+### The three governing numbers, after all of it
+
+| | baseline | before these probes | now | band |
+|---|---|---|---|---|
+| Ending mix | 5 | 10 | **6** | ≥ 11 |
+| Median rounds | 62 | 54 | **47** | 58–66 |
+| **Games unresolved** | 6 | 4 | **2** | 0 |
+
+Mix down 4 (partly a bug that was inflating it), unresolved down to its best
+figure yet. Both probes are wired as gates: `npm run check:policies`.

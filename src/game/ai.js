@@ -610,7 +610,7 @@ function giftBudget(state, pid) {
 // §18.8 — the AI works the political layer once per turn (free of Actions):
 // vassalize a cornered weakling, form a pact with a warm compatible
 // neighbour, or gift to warm a promising relationship. Bounded: one move.
-function manageDiplomacy(state, pid) {
+export function manageDiplomacy(state, pid) {
   const me = factionDef(pid) || {};
   const human = state.humanFactionId;
   const others = factionIds(state).filter((f) => f !== pid);
@@ -1033,7 +1033,11 @@ function pickMoveTarget(state, pid, unit) {
 // §20 — drive each city's economy: set its slider, queue a build into any
 // free slot, and rush when flush with scrap. Runs once per turn, free of
 // Actions (build/upgrade/rush/set-slider all cost 0).
-function manageEconomy(state, pid) {
+// Exported as a TEST SEAM. A scripted policy that wants to isolate one part of
+// the AI (say, a pacifist that never attacks) has to reuse the real economy
+// and the real political pass, or it is measuring its own stand-in rather than
+// the engine — see `scripts/probe-policies.mjs`.
+export function manageEconomy(state, pid) {
   const player = state.players[pid];
   const cfg = CONFIG.ai;
   // THE WAR CHEST. What this loop will not spend. See the config comment: the
@@ -1086,7 +1090,15 @@ function pickBuild(state, pid, loc) {
   // swing hard on it — a Loyalty chip on a quiet interior city is worth a
   // fraction of the same chip on a border one point below the dominance bar.
   const ctx = { state, loc, contested: locationIsContested(state, pid, loc) };
-  const chipCount = chipsHeldBy(state, pid).length;
+  const holdings = chipsHeldBy(state, pid);
+  const chipCount = holdings.length;
+  // How many of each chipId this faction already holds — the input to the
+  // repeat penalty below.
+  const owned = {};
+  for (const c of holdings) {
+    const id = state.chips[c.uid]?.chipId;
+    if (id) owned[id] = (owned[id] || 0) + 1;
+  }
   // Value per scrap, not value. Two chips worth 3 and 4 are not ranked by
   // those numbers when one costs 3 and the other 7 — and neither the old
   // six-field table nor the first draft of the new one looked at price at all,
@@ -1114,6 +1126,11 @@ function pickBuild(state, pid, loc) {
     if (eco.perExtraChip && eco.freeChips != null && chipCount >= eco.freeChips) {
       s -= eco.perExtraChip * 2 * (CONFIG.ai.compoundingWeight ?? 1);
     }
+    // The fifth workshop is not worth what the first was. See the config note:
+    // without this the argmax loop builds one chip forever and 33 of 40
+    // authored chips are never built at all.
+    const repeat = CONFIG.ai.repeatDiminish;
+    if (repeat && owned[def.id]) s /= 1 + owned[def.id] * repeat;
     return perScrap(def, s);
   };
 

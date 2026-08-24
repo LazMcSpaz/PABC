@@ -603,13 +603,30 @@ export function powerOf(state, fid) {
   return c.vpWeight * vp + c.territoryWeight * territory + 0.5 * strength;
 }
 
-// Lead over the rest of the board (mean of the others).
+// How far ahead of the board `fid` is.
+//
+// Measured against the STRONGEST RIVAL by default, not the mean, and the
+// difference is not cosmetic. Against the mean, a lead grows every time
+// somebody dies — the board empties (4.9 of 7 rivals per game, mean round 24)
+// and the survivor's number balloons for reasons that have nothing to do with
+// what it did. Traced on seed 424242, that put a MENACE 0 faction over the
+// coalition fear line at round 11 and kept somebody over it every round to the
+// end. Runaway means "pulling away from your nearest competitor"; four equal
+// factions are not runaways however many minors are buried between them.
+//
+// A faction is compared only against SURVIVORS. Counting the dead as zeroes is
+// the same bug wearing a different hat.
 export function powerLead(state, fid) {
-  const others = factionIds(state).filter((f) => f !== fid);
+  const others = factionIds(state).filter(
+    (f) => f !== fid && state.players[f] && !state.players[f].eliminated,
+  );
   if (!others.length) return 0;
   const mine = powerOf(state, fid);
-  const mean = others.reduce((s, f) => s + powerOf(state, f), 0) / others.length;
-  return mine - mean;
+  if (D().coalition.leadMeasure === "mean") {
+    const mean = others.reduce((s, f) => s + powerOf(state, f), 0) / others.length;
+    return mine - mean;
+  }
+  return mine - Math.max(...others.map((f) => powerOf(state, f)));
 }
 
 // §18.8 threat(player) = wM·Menace + wP·max(0, powerLead).

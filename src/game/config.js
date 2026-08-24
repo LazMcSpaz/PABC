@@ -179,6 +179,26 @@ export const CONFIG = {
     // Rank chips by value PER SCRAP rather than by value. 0 restores the
     // price-blind comparison both the old and the new table shipped with.
     costAware: 1,
+    // DIMINISHING RETURNS ON REPEATS. The value table made the AI able to SEE
+    // all 42 authored fields; it did not make it build them. Measured over 5
+    // games, the AI builds 7 of 40 authored chips and `recyclers` accounts for
+    // 263 of them — because `pickBuild` takes the argmax every time and the
+    // fifth recycler scores exactly what the first did. Nothing in the table
+    // can fix that: it is a property of the LOOP, not of the prices.
+    //
+    // The game already says this about goodwill — `giftCounter` divides a
+    // gift's effect by how often you have leaned on somebody lately, because a
+    // gift is a campaign and not a bribe. A chip is the same shape: the second
+    // workshop in a city is worth less than the first. Divides by
+    // 1 + count*repeatDiminish, counting what the FACTION holds, not the city,
+    // because the surplus is fungible across cities and the city-local count
+    // would just move the monoculture next door. 0 restores the old behaviour.
+    //
+    // 0.2 rather than a steeper number, and the sweep is the reason: content
+    // coverage saturates at 13 of 40 by 0.2 and buys nothing more above it,
+    // while unresolved games climb — 0.2 reads 2, 0.3 reads 5, 0.5 reads 6.
+    // The gentlest slope that opens the content is the one to take.
+    repeatDiminish: 0.2,
     // §6.4 — the AI's gift, and why it ships SWITCHED OFF at 1.
     //
     // The AI used to gift 3 SCRAP through `applyDeal`, which walked straight
@@ -828,6 +848,15 @@ export const CONFIG = {
     // 2026-08-15: 19 coalitions formed across 8 games, and their war
     // declarations were the last source of peace→war churn).
     coalition: {
+      // These stay at 16/11 THROUGH the `leadMeasure` change below, and the
+      // reason is measured rather than conservative. `runnerUp` shrinks the
+      // threat scale, so 16 does mean a higher bar than it used to and the
+      // coalition rate falls 3.33 -> 2.6 a game. Lowering it to 10 restores
+      // the rate and puts the suite's median inside its band for the first
+      // time (59 against 58-66) — and it also puts the spotless-pacifist
+      // failure straight back: coalitions raised against a faction that never
+      // attacked anybody went 1 -> 5 across 15 games, and its wins went 2 -> 0.
+      // The rate is not the thing worth having.
       wM: 1, wP: 2, threshold: 16, dissolve: 11,
       vpWeight: 1.5, territoryWeight: 1, standingHit: 4,
       minRounds: 4, reformCooldownRounds: 5,
@@ -849,6 +878,25 @@ export const CONFIG = {
       groundsGate: 1,      // 0 restores the old position-alone behaviour
       menaceGrounds: 4,    // Menace at or above this IS grounds by itself
       fearThreshold: 26,   // …and so is a lead this far past the board
+      // WHAT "AHEAD" IS MEASURED AGAINST, and this is the one that was wrong.
+      //
+      // `powerLead` compares a faction against the MEAN of everybody else. On
+      // a board that empties — 4.9 of 7 rivals eliminated per game, mean round
+      // 24 — that mean collapses, so a survivor's "lead" balloons for reasons
+      // that have nothing to do with what it did. Traced on seed 424242: the
+      // fear threshold is crossed at round 11 by a faction with MENACE 0, and
+      // from there somebody is above it every round to the end (threat 77.6 at
+      // round 30, on a lead of 38.8 over a mean of four corpses and two
+      // stragglers). The escape hatch meant for a flawless runaway was open
+      // two thirds of every game, which put the Attila failure straight back
+      // in through the door built to keep it out — a spotless pacifist was
+      // coalitioned in 7 of 15 games, every early one on `fear`.
+      //
+      // "runnerUp" measures the gap to the STRONGEST RIVAL, which is what
+      // runaway actually means: four equal factions are not runaways however
+      // many minors they have between them buried. "mean" restores the old
+      // behaviour.
+      leadMeasure: "runnerUp",
       // DELIBERATION. Each faction decides for itself, and the terms are the
       // ones a faction would actually weigh: how frightening the target is,
       // what it has done to ME, and whether I like it.
