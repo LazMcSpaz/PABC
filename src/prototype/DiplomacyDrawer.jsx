@@ -22,6 +22,7 @@
 import { useEffect, useLayoutEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { C, CornerBrackets, useEscClose } from "./HudChrome.jsx";
+import { Term } from "./RichText.jsx";
 import { FACTIONS as UI_FACTIONS } from "./data.js";
 
 const A = import.meta.env.BASE_URL;
@@ -173,13 +174,24 @@ function Card({ children, accent = C.holo, style }) {
   );
 }
 
-function SectionLabel({ children, color = C.holoHi }) {
+// The four label primitives below all take an optional `term`, and that is
+// how the whole screen becomes clickable without touching a hundred call
+// sites: the vocabulary of this drawer lives almost entirely in section
+// headings, stat labels, status pills and section rules, so teaching those
+// four components to link is teaching the screen to link.
+//
+// `term` is a glossary id (see src/game/content/rules-glossary.js). Passing
+// one that does not resolve renders the label plainly — a missing entry
+// degrades to the old appearance rather than to a broken control — and
+// scripts/check-glossary.mjs fails the build if any `term=` on this screen
+// has no entry behind it.
+function SectionLabel({ children, color = C.holoHi, term }) {
   return (
     <div style={{
       fontFamily: C.font, fontSize: 10, fontWeight: 600,
       letterSpacing: 2, textTransform: "uppercase", color,
       marginBottom: 6,
-    }}>{children}</div>
+    }}>{term ? <Term id={term}>{children}</Term> : children}</div>
   );
 }
 
@@ -436,7 +448,7 @@ function SwayCard({ sway }) {
   );
   return (
     <Card accent={overspent ? "#d2453f" : atCap ? "#c9b24e" : C.holo}>
-      <SectionLabel color={overspent ? "#ffb4ae" : C.holo}>Political Capacity</SectionLabel>
+      <SectionLabel color={overspent ? "#ffb4ae" : C.holo} term="r-sway">Political Capacity</SectionLabel>
       <div style={{ display: "flex", alignItems: "flex-end", gap: 14, marginTop: 4 }}>
         <div>
           <div style={{
@@ -445,7 +457,7 @@ function SwayCard({ sway }) {
             textShadow: `0 0 10px ${atCap ? "#c9b24e" : C.holo}66`,
           }}>{sway.pool}<span style={{ fontSize: 13, color: C.textFaint }}>/{sway.cap}</span></div>
           <div style={{ fontFamily: C.font, fontSize: 8.5, letterSpacing: 1.4, textTransform: "uppercase", color: C.textFaint }}>
-            Sway held
+            <Term id="r-sway">Sway held</Term>
           </div>
         </div>
         <div>
@@ -464,7 +476,7 @@ function SwayCard({ sway }) {
       )}
       {sway.courting.length > 0 && (
         <div className="pc-prose" style={{ fontSize: 11.5, lineHeight: 1.5, marginTop: 7, color: "rgba(207,214,220,0.85)" }}>
-          Courting <b style={{ color: C.holoHi }}>{sway.courting.map((c) => c.name).join(", ")}</b>
+          <Term id="r-courtship">Courting</Term>{" "}<b style={{ color: C.holoHi }}>{sway.courting.map((c) => c.name).join(", ")}</b>
           {" "}— {sway.committed} Sway a round, every round it runs.
         </div>
       )}
@@ -488,7 +500,7 @@ function SwayCard({ sway }) {
           {p.chips > 0 && row("Buildings", p.chips, null)}
           <div style={{ height: 1, background: "rgba(86,211,198,0.18)", margin: "4px 0" }} />
           {row("Income", sway.income, null)}
-          {row("Courtships", -sway.committed, `${sway.costs.courtUpkeep} each, per round`)}
+          {row(<Term id="r-courtship">Courtships</Term>, -sway.committed, `${sway.costs.courtUpkeep} each, per round`)}
           <div style={{
             fontFamily: C.font, fontSize: 9.5, letterSpacing: 0.4, lineHeight: 1.5,
             color: "rgba(143,246,234,0.55)", marginTop: 6,
@@ -526,7 +538,7 @@ function GiftPane({ f, dip, onBack, onSubmit }) {
   const canSend = affordable >= 1 && cost <= sway.pool;
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      <SectionLabel>Send Word to {f.name}</SectionLabel>
+      <SectionLabel term="r-gift-diplomacy">Send Word to {f.name}</SectionLabel>
       <div className="pc-prose" style={{ fontSize: 12, lineHeight: 1.5, color: C.textDim }}>
         Envoys, favours, a hearing at the right table. Costs{" "}
         <b style={{ color: C.holoHi }}>{rate} Sway</b> per point of their regard —
@@ -751,10 +763,12 @@ function IntrigueCard({ intrigue, factions, onAction }) {
   );
   return (
     <Card accent="#a878c8">
-      <SectionLabel color="#c9a0e0">Quiet work</SectionLabel>
+      <SectionLabel color="#c9a0e0" term="r-intrigue">Quiet work</SectionLabel>
       <div className="pc-prose" style={{ fontSize: 12, lineHeight: 1.5, marginBottom: 7 }}>
-        Sway buys what the board <i>believes</i>. Each of these costs{" "}
-        <b style={{ color: affordable ? C.holoHi : "#ffb4ae" }}>{cost} Sway</b>.
+        <Term id="r-sway">Sway</Term> buys what the board <i>believes</i>. Each of
+        these costs <b style={{ color: affordable ? C.holoHi : "#ffb4ae" }}>{cost} Sway</b>
+        {" "}— <Term id="r-expose">expose</Term> the true, <Term id="r-forge">forge</Term>{" "}
+        against a third party, <Term id="r-fabricate">fabricate</Term> about yourself.
       </div>
       {/* §12.3 — WHAT YOUR EARS ARE. Expose publishes a strike nobody saw, so
           the first question is how you would know about it, and the answer is
@@ -766,7 +780,7 @@ function IntrigueCard({ intrigue, factions, onAction }) {
         background: intrigue.apparatus ? "rgba(168,120,200,0.06)" : "rgba(210,69,63,0.06)",
         color: intrigue.apparatus ? "#f4efe2" : "#ffb4ae",
       }}>
-        {intrigue.apparatusText}
+        <Term id="r-spy-ring">{intrigue.apparatusText}</Term>
       </div>
       <div style={{ display: "flex", gap: 5, marginBottom: 7 }}>
         {pill("Expose", mode === "expose", () => setMode(mode === "expose" ? null : "expose"),
@@ -837,7 +851,7 @@ function PositionsCard({ positions, onAction }) {
   const dim = { fontFamily: C.font, fontSize: 8.5, letterSpacing: 0.4, color: "rgba(143,246,234,0.5)" };
   return (
     <Card accent="#c9b24e">
-      <SectionLabel color="#c9b24e">What you stand for</SectionLabel>
+      <SectionLabel color="#c9b24e" term="r-position">What you stand for</SectionLabel>
       {held.length === 0 && !picking && (
         <div className="pc-prose" style={{ fontSize: 12, lineHeight: 1.5, opacity: 0.75 }}>
           You have said nothing to the board that anyone can hold you to.
@@ -1084,12 +1098,13 @@ function LandingView({ dip, onSelectFaction, onAction, onClose }) {
 
         {/* Reputation block — your aggregate scores. */}
         <Card>
-          <SectionLabel>Your Standing on the Continent</SectionLabel>
+          <SectionLabel term="r-standing">Your Standing on the Continent</SectionLabel>
           <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-            <RepStat label="Menace" value={dip.menace.toFixed(1)} color="#d2913c" sub="aggression weight" />
-            <RepStat label="Honor" value={dip.honor.toFixed(1)} color="#5fc27a" sub="kept your word" />
-            <RepStat label="Threat" value={dip.threat.toFixed(1)} color={dip.threat > 6 ? "#d2453f" : C.holoHi} sub="coalition risk" />
+            <RepStat term="r-menace" label="Menace" value={dip.menace.toFixed(1)} color="#d2913c" sub="aggression weight" />
+            <RepStat term="r-honor" label="Honor" value={dip.honor.toFixed(1)} color="#5fc27a" sub="kept your word" />
+            <RepStat term="r-threat" label="Threat" value={dip.threat.toFixed(1)} color={dip.threat > 6 ? "#d2453f" : C.holoHi} sub="coalition risk" />
             <RepStat
+              term="r-dominion"
               label="Dominion"
               value={`${dom.score}/${dom.threshold}`}
               color={dom.met ? "#5fc27a" : "#c9b24e"}
@@ -1110,7 +1125,7 @@ function LandingView({ dip, onSelectFaction, onAction, onClose }) {
 
         {dip.coalitionAgainstYou && (
           <Card accent="#d2453f">
-            <SectionLabel color="#ffb4ae">Coalition against you</SectionLabel>
+            <SectionLabel color="#ffb4ae" term="r-coalition">Coalition against you</SectionLabel>
             <div className="pc-prose" style={{ fontSize: 12, lineHeight: 1.5 }}>
               {dip.coalitionAgainstYou.join(", ")} have aligned against your rise. Their walls are higher; your reach is shorter.
             </div>
@@ -1123,7 +1138,7 @@ function LandingView({ dip, onSelectFaction, onAction, onClose }) {
             expires quietly and a call does not. */}
         {(dip.offers || []).length > 0 && (
           <>
-            <SectionLabel color={C.holoHi}>On the Table</SectionLabel>
+            <SectionLabel color={C.holoHi} term="r-offer">On the Table</SectionLabel>
             {dip.offers.map((o) => (
               <OfferCard key={o.id} offer={o} dip={dip} onAction={onAction} />
             ))}
@@ -1133,7 +1148,7 @@ function LandingView({ dip, onSelectFaction, onAction, onClose }) {
         {/* §6.11 — threats standing over you, and your own clock running. */}
         {(dip.ultimatums || []).length > 0 && (
           <>
-            <SectionLabel color="#d2453f">Or Else</SectionLabel>
+            <SectionLabel color="#d2453f" term="r-ultimatum">Or Else</SectionLabel>
             {dip.ultimatums.map((u) => (
               <UltimatumCard key={u.id} u={u} dip={dip} onAction={onAction} />
             ))}
@@ -1141,7 +1156,7 @@ function LandingView({ dip, onSelectFaction, onAction, onClose }) {
         )}
         {(dip.ultimatumsIssued || []).length > 0 && (
           <>
-            <SectionLabel color="#c9b24e">Your Word</SectionLabel>
+            <SectionLabel color="#c9b24e" term="r-ultimatum">Your Word</SectionLabel>
             {dip.ultimatumsIssued.map((u) => (
               <Card key={u.id} accent="#c9b24e">
                 <div className="pc-prose" style={{ fontSize: 12, lineHeight: 1.5 }}>
@@ -1161,7 +1176,7 @@ function LandingView({ dip, onSelectFaction, onAction, onClose }) {
         {/* §1.8 — pact-call inbox: allies calling you into their wars. */}
         {inbox.length > 0 && (
           <>
-            <SectionLabel color="#c9b24e">Calls to Arms</SectionLabel>
+            <SectionLabel color="#c9b24e" term="r-pact-call">Calls to Arms</SectionLabel>
             {inbox.map((c) => (
               <Card key={c.id} accent="#c9b24e">
                 <div className="pc-prose" style={{ fontSize: 12, lineHeight: 1.5, marginBottom: 8 }}>
@@ -1200,7 +1215,7 @@ function LandingView({ dip, onSelectFaction, onAction, onClose }) {
           </>
         )}
 
-        <SectionLabel>The Other Powers</SectionLabel>
+        <SectionLabel term="r-dominion">The Other Powers</SectionLabel>
 
         {/* Faction list */}
         {dip.factions.map((f) => (
@@ -1230,10 +1245,11 @@ function PathToDominionCard({ dom }) {
   const hasSpy = backing.some((b) => b.detail);
   return (
     <Card>
-      <SectionLabel>Path to Dominion</SectionLabel>
+      <SectionLabel term="r-dominion">Path to Dominion</SectionLabel>
       <div className="pc-prose" style={{ fontSize: 11, lineHeight: 1.5, color: "rgba(143,246,234,0.6)", marginBottom: 8 }}>
-        You win when every faction still standing is your ally, your vassal, or
-        gone — by conquest, by diplomacy, or any mix of the two. Then hold it
+        You win when every faction still standing is your{" "}
+        <Term id="r-alliance">ally</Term>, your <Term id="r-vassalage">vassal</Term>,
+        or gone — by conquest, by diplomacy, or any mix of the two. Then hold it
         for <b style={{ color: C.holoHi }}>{dom.holdRounds}</b> rounds.
         {" "}<b style={{ color: dom.met ? "#5fc27a" : C.holoHi }}>{dom.score}</b> of{" "}
         <b style={{ color: C.holoHi }}>{dom.threshold}</b> dealt with.
@@ -1290,13 +1306,13 @@ function PathToDominionCard({ dom }) {
   );
 }
 
-function RepStat({ label, value, sub, color }) {
+function RepStat({ label, value, sub, color, term }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", minWidth: 70 }}>
       <span style={{
         fontFamily: C.font, fontSize: 9, letterSpacing: 1.6,
         textTransform: "uppercase", color: "rgba(143,246,234,0.55)",
-      }}>{label}</span>
+      }}>{term ? <Term id={term}>{label}</Term> : label}</span>
       <span style={{
         fontFamily: C.font, fontSize: 18, fontWeight: 700,
         color: color || "#f4efe2",
@@ -1403,11 +1419,11 @@ function FactionRow({ f, onClick }) {
           <span style={{
             fontFamily: C.font, fontSize: 9.5, fontWeight: 800, letterSpacing: 1.4,
             textTransform: "uppercase", color: POSTURE_COLOR[f.posture.kind] || C.holoHi,
-          }}>{f.posture.kind}</span>
+          }}><Term id="r-posture">{f.posture.kind}</Term></span>
           {f.posture.condition && (
             <span className="pc-prose" style={{
               fontSize: 11.5, lineHeight: 1.4, color: "rgba(207,214,220,0.9)", fontStyle: "italic",
-            }}>“{f.posture.condition}”</span>
+            }}>“<Term id="r-condition">{f.posture.condition}</Term>”</span>
           )}
           {!f.posture.stated && (
             <span title="They have not said this out loud yet — and a faction does not act on a posture it has not stated."
@@ -1421,7 +1437,7 @@ function FactionRow({ f, onClick }) {
         <div style={{
           fontFamily: C.font, fontSize: 9, letterSpacing: 1.1, textTransform: "uppercase",
           color: "#5fc27a", marginTop: 3,
-        }}>You are courting them · round {f.posture.yourCourtRounds}</div>
+        }}><Term id="r-courtship">You are courting them</Term> · round {f.posture.yourCourtRounds}</div>
       )}
       <div className="pc-prose" style={{
         fontSize: 11.5, color: "rgba(207,214,220,0.86)", marginTop: 5, lineHeight: 1.4,
@@ -1570,7 +1586,7 @@ function LeaderTransmission({ f, tierColor }) {
 
 // Small holo pill — used as a tag row below the leader transmission to
 // surface relationship state at a glance (Pacted, At War, Vassal, etc).
-function StatusPill({ color, children }) {
+function StatusPill({ color, children, term }) {
   return (
     <span style={{
       display: "inline-flex", alignItems: "center", gap: 4,
@@ -1581,30 +1597,30 @@ function StatusPill({ color, children }) {
       fontFamily: C.font, fontSize: 8.5, fontWeight: 700,
       letterSpacing: 1.4, textTransform: "uppercase",
       color, whiteSpace: "nowrap",
-    }}>{children}</span>
+    }}>{term ? <Term id={term}>{children}</Term> : children}</span>
   );
 }
 
 function StatusRow({ f, tierColor }) {
   const pills = [];
-  pills.push({ color: tierColor, label: TIER_LABEL[f.standingTier] || f.standingTier });
+  pills.push({ color: tierColor, label: TIER_LABEL[f.standingTier] || f.standingTier, term: "r-standing" });
   if (f.vp != null) pills.push({ color: "#e8c95a", label: `★ ${f.vp} VP` });
   if (f.temperament) pills.push({ color: C.holo, label: f.temperament });
-  if (f.atWar)        pills.push({ color: "#d2453f", label: "◤ At War" });
-  if (f.pacted)       pills.push({ color: "#5fc27a", label: "◆ Pacted" });
-  if (f.vassalOfYou)  pills.push({ color: C.gold,    label: "◇ Your Vassal" });
-  if (f.lordOfYou)    pills.push({ color: C.gold,    label: "◆ Sworn To" });
-  if (f.inCoalition)  pills.push({ color: "#d2453f", label: "⚠ Coalition" });
+  if (f.atWar)        pills.push({ color: "#d2453f", label: "◤ At War",     term: "r-war" });
+  if (f.pacted)       pills.push({ color: "#5fc27a", label: "◆ Pacted",     term: "r-pact" });
+  if (f.vassalOfYou)  pills.push({ color: C.gold,    label: "◇ Your Vassal", term: "r-vassalage" });
+  if (f.lordOfYou)    pills.push({ color: C.gold,    label: "◆ Sworn To",   term: "r-vassalage" });
+  if (f.inCoalition)  pills.push({ color: "#d2453f", label: "⚠ Coalition",  term: "r-coalition" });
   return (
     <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
-      {pills.map((p, i) => <StatusPill key={i} color={p.color}>{p.label}</StatusPill>)}
+      {pills.map((p, i) => <StatusPill key={i} color={p.color} term={p.term}>{p.label}</StatusPill>)}
     </div>
   );
 }
 
 // A thin gradient rule with an inline numeric marker — used to separate
 // sections in the scrolling detail body without piling Cards on Cards.
-function SectionRule({ index, label, color = C.holo }) {
+function SectionRule({ index, label, color = C.holo, term }) {
   return (
     <div style={{
       display: "flex", alignItems: "center", gap: 8,
@@ -1619,7 +1635,7 @@ function SectionRule({ index, label, color = C.holo }) {
         fontFamily: C.font, fontSize: 9, fontWeight: 700,
         letterSpacing: 2.4, textTransform: "uppercase", color,
         opacity: 0.9,
-      }}>▸ {label}</span>
+      }}>▸ {term ? <Term id={term}>{label}</Term> : label}</span>
       <span style={{
         flex: 1, height: 1,
         background: `linear-gradient(90deg, ${color}99, ${color}10 80%, transparent)`,
@@ -1902,7 +1918,7 @@ function FactionDetailView({ f, dip, onBack, onClose, onVerb, onOpenPane, onConf
       }}>
         {theirOffers.length > 0 && (
           <>
-            <SectionRule index={0} label={theirOffers[0].isCounter ? "Their Terms" : "On the Table"} color={C.holoHi} />
+            <SectionRule index={0} label={theirOffers[0].isCounter ? "Their Terms" : "On the Table"} color={C.holoHi} term="r-offer" />
             {theirOffers.map((o) => (
               <OfferCard key={o.id} offer={o} dip={dip} onAction={onVerb} />
             ))}
@@ -1913,16 +1929,16 @@ function FactionDetailView({ f, dip, onBack, onClose, onVerb, onOpenPane, onConf
         <LeaderTransmission f={f} tierColor={tierColor} />
         <StatusRow f={f} tierColor={tierColor} />
 
-        <SectionRule index={1} label="Intel Brief" color={tierColor} />
+        <SectionRule index={1} label="Intel Brief" color={tierColor} term="r-spy-ring" />
         <IntelBrief f={f} tierColor={tierColor} />
 
-        <SectionRule index={2} label="Relationship" color={C.holo} />
+        <SectionRule index={2} label="Relationship" color={C.holo} term="r-standing" />
         <Card>
           <ObligationsList f={f} dip={dip} />
         </Card>
         <GrievanceLedger f={f} />
 
-        <SectionRule index={3} label="What They Want" color={C.holo} />
+        <SectionRule index={3} label="What They Want" color={C.holo} term="r-interests" />
         <Card>
           <div className="pc-prose" style={{ fontSize: 12, lineHeight: 1.5 }}>
             <div style={{ marginBottom: 4 }}>
@@ -1942,7 +1958,7 @@ function FactionDetailView({ f, dip, onBack, onClose, onVerb, onOpenPane, onConf
             it, so this is the reveal that pays for the node. */}
         {dip.spyRing && f.theirIntel && (
           <>
-            <SectionRule index={4} label="What they are after" color="#c9a0e0" />
+            <SectionRule index={4} label="What they are after" color="#c9a0e0" term="r-interests" />
             <Card accent="#a878c8">
               {f.theirIntel.interests.length ? (
                 <div className="pc-prose" style={{ fontSize: 12, lineHeight: 1.6 }}>
@@ -1994,7 +2010,7 @@ function FactionDetailView({ f, dip, onBack, onClose, onVerb, onOpenPane, onConf
           </Card>
         )}
 
-        <SectionRule index={5} label="Actions" color={C.holoHi} />
+        <SectionRule index={5} label="Actions" color={C.holoHi} term="r-actions" />
         <ActionGroups
           f={f}
           onVerb={onVerb}
@@ -2028,7 +2044,7 @@ function GrievanceLedger({ f }) {
   };
   return (
     <Card accent="#d2913c">
-      <SectionLabel color="#e8b467">The books</SectionLabel>
+      <SectionLabel color="#e8b467" term="r-grievance">The books</SectionLabel>
       <Side label="They hold against you" entries={l.theyHold} weight={l.theirWeight} color="#d2453f" />
       <Side label="You hold against them" entries={l.youHold} weight={l.yourWeight} color="#c9b24e" />
       {(l.theyHold.some((e) => e.kind === "occupation") || l.youHold.some((e) => e.kind === "occupation")) && (
@@ -2109,19 +2125,19 @@ function DetailHeader({ f, tierColor, onBack, onClose }) {
 
 function ObligationsList({ f, dip }) {
   const items = [];
-  if (f.lordOfYou) items.push("You are sworn to them as their vassal.");
-  if (f.vassalOfYou) items.push("They are your vassal — tribute flows to your bank each Upkeep.");
-  if (f.pacted) items.push("You have a mutual-defence pact.");
-  if (f.atWar) items.push("You are at war.");
-  if (f.inCoalition) items.push("They have joined a coalition against you.");
+  if (f.lordOfYou) items.push(<>You are sworn to them as their <Term id="r-vassalage">vassal</Term>.</>);
+  if (f.vassalOfYou) items.push(<>They are your <Term id="r-vassalage">vassal</Term> — <Term id="r-tribute">tribute</Term> flows to your bank each Upkeep.</>);
+  if (f.pacted) items.push(<>You have a mutual-defence <Term id="r-pact">pact</Term>.</>);
+  if (f.atWar) items.push(<>You are <Term id="r-war">at war</Term>.</>);
+  if (f.inCoalition) items.push(<>They have joined a <Term id="r-coalition">coalition</Term> against you.</>);
   if (f.tradingPact) {
     items.push(f.tradingPact.suspended
-      ? `Trading pact — suspended (round ${f.tradingPact.suspendedRounds} of grace).`
-      : "Trading pact — a clear route from your ground to theirs.");
+      ? <><Term id="r-trading-pact">Trading pact</Term> — suspended (round {f.tradingPact.suspendedRounds} of grace).</>
+      : <><Term id="r-trading-pact">Trading pact</Term> — a clear route from your ground to theirs.</>);
   }
-  if (f.openBordersFromYou && f.openBordersFromThem) items.push("Open borders both ways.");
-  else if (f.openBordersFromYou) items.push("You allow their units through your territory.");
-  else if (f.openBordersFromThem) items.push("They allow your units through their territory.");
+  if (f.openBordersFromYou && f.openBordersFromThem) items.push(<><Term id="r-open-borders">Open borders</Term> both ways.</>);
+  else if (f.openBordersFromYou) items.push(<>You allow their units <Term id="r-open-borders">through your territory</Term>.</>);
+  else if (f.openBordersFromThem) items.push(<>They allow your units <Term id="r-open-borders">through their territory</Term>.</>);
   if (items.length === 0) items.push("No formal agreements with this faction.");
 
   return (
@@ -2359,7 +2375,7 @@ function DealPane({ f, dip, kind = "custom", onBack, onSubmit }) {
             OFFERED a hand in is worth as much as one you buy help for. */}
         {!isGift && !isTribute && ((f.couldHireAgainst || []).length > 0 || (f.couldFightFor || []).length > 0) && (
           <Card>
-            <SectionLabel>Swords</SectionLabel>
+            <SectionLabel term="r-pact-call">Swords</SectionLabel>
             {(f.couldHireAgainst || []).length > 0 && (
               <>
                 <div className="pc-prose" style={{ fontSize: 11.5, lineHeight: 1.5, marginBottom: 5 }}>

@@ -21,6 +21,7 @@
 // society.
 
 import { WIKI_ENTRIES as EXPORTED_WIKI_ENTRIES } from "./wiki.js";
+import { RULES_GLOSSARY } from "./rules-glossary.js";
 
 const TECH = "Technology & Vehicles";
 const LAND = "The Land";
@@ -830,4 +831,18 @@ A foundry forms its numerals raised in the mold itself rather than stamping them
   },
 };
 
-export const WIKI_ENTRIES = { ...REPO_WIKI_ENTRIES, ...EXPORTED_WIKI_ENTRIES };
+// The merged view every screen consumes. Three sources, and the order is the
+// precedence: repo lore first, then the editor's export (which wins on an id
+// collision, so an entry migrated into the editor can be retired here at
+// leisure), then the rules glossary LAST.
+//
+// The rules glossary goes last on purpose. Its ids are all `r-` prefixed and
+// scripts/check-glossary.mjs asserts it shares no term or alias with the lore,
+// so in practice it collides with nothing — being last means that if somebody
+// ever authors lore that does collide, the mechanics entry is the one the
+// screen's own underlined word still resolves to.
+export const WIKI_ENTRIES = {
+  ...REPO_WIKI_ENTRIES,
+  ...EXPORTED_WIKI_ENTRIES,
+  ...RULES_GLOSSARY,
+};

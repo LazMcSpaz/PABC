@@ -28,6 +28,7 @@
     "harness": "node src/game/harness.js",
     "check:legibility": "node scripts/check-legibility.mjs",
     "check:spines": "node scripts/check-spines.mjs",
+    "check:glossary": "node scripts/check-glossary.mjs",
     "probe:pacifist": "node scripts/probe-policies.mjs pacifist",
     "probe:spender": "node scripts/probe-policies.mjs spender",
     "probe:chips": "node scripts/probe-chip-table.mjs",
