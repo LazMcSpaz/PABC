@@ -1000,6 +1000,11 @@ function cessionsIn(deal) {
 export function cedeLocation(state, from, to, hexId, cause = "cession") {
   const loc = state.locations?.[hexId];
   if (!loc) return false;
+  // Never to a faction that is out. `sweepEliminations` now drops the dead
+  // from the diplomacy graph, which removes the path that reached here; this
+  // is the guard rather than the fix, because ground parked under an owner
+  // that can never act is unrecoverable and silent.
+  if (!state.players[to] || state.players[to].eliminated) return false;
   loc.controller = to;
   loc.loyaltyOwner = to;
   loc.sections = loc.sections.map(() => to);
@@ -1921,6 +1926,24 @@ export function makePeace(state, a, b, cause = "peace") {
   state.diplomacy.wars = state.diplomacy.wars.filter(
     (w) => !((w.a === a && w.b === b) || (w.a === b && w.b === a)),
   );
+  // §9 — MAKING YOUR OWN PEACE IS HOW YOU LEAVE A RISING.
+  //
+  // `declareWar` enrols anyone who declares on a coalition's target — that is
+  // the human's only road INTO one, since coalitions never conscript them. It
+  // had no road out: membership outlived the war that created it, so a faction
+  // that fought, settled and moved on stayed on the roster of a coalition it
+  // was no longer part of. Measured across ten games, the human sat in two
+  // coalitions against factions they were at peace with.
+  //
+  // Leaving by settling is also the right rule to have: a rising held together
+  // by nothing but a list is not a coalition, it is a label.
+  for (const c of state.diplomacy.coalitions || []) {
+    if (c.target !== a && c.target !== b) continue;
+    const member = c.target === a ? b : a;
+    if (!c.members.includes(member)) continue;
+    c.members = c.members.filter((m) => m !== member);
+    emit(state, "coalition_left", { target: c.target, member, cause });
+  }
   if (state.diplomacy.wars.length !== before) {
     adjustStanding(state, a, b, 3, cause);
     adjustStanding(state, b, a, 3, cause);
@@ -4134,6 +4157,18 @@ export function occupationCharges(state, pid) {
     if (loc.startingController === pid) continue;
     out.push({ hex: loc.hexId, locationId: loc.locationId, aggrieved: aff });
   }
+  // …AND AN OCCUPIER HAS TO BE AN EMPIRE. A faction holding `occupierFloor`
+  // Locations or fewer is not occupying anybody, it is cornered on the last
+  // ground it has — and billing it 6 Sway a round against a floor income of 6
+  // is a hundred per cent of its political capacity for the crime of losing.
+  //
+  // This is an ELIMINATION RATCHET, which the design has already refused once:
+  // the first draft of the supply rule refused off-supply purchases and was
+  // reverted for being exactly this shape. Measured with a faction cut down to
+  // one city at round 20 — it recovered ground in 0 of 15 games with
+  // occupation live and 3 of 15 with it off, and died seven rounds sooner.
+  const held = Object.values(state.locations || {}).filter((l) => l.controller === pid).length;
+  if (held <= (cfg.occupierFloor ?? 0)) return [];
   return out;
 }
 

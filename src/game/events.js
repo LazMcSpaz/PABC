@@ -56,7 +56,7 @@ export const EVENT_NAMES = new Set([
   // is dropped with it.
   "build_started", "build_completed", "chip_upgraded",
   "chip_dormant", "chip_reactivated", "slider_changed", "garrison_erosion",
-  "chip_activated", "chip_granted", "chip_removed", "faction_eliminated",
+  "chip_activated", "chip_granted", "chip_removed", "faction_eliminated", "faction_released",
   "influence_pressure",
   // §19 Exploration, Vision & Fog of War (APPEND-ONLY — distinct keys).
   "hex_explored", "unit_spotted", "unit_lost_sight", "ambush_triggered",
@@ -83,6 +83,7 @@ export const EVENT_NAMES = new Set([
   // diplomacy-spec.md §6.4 — verbs, AI eval, war tracking, open borders.
   "surprise_attack_honor_lost",
   "coalition_murmur",
+  "coalition_left",
   "offer_countered",
   "position_declared",
   "position_withdrawn",

@@ -858,3 +858,115 @@ six-field table, 9 cost-blind, 7 cost-aware, 13 with the repeat penalty.
 
 Mix down 4 (partly a bug that was inflating it), unresolved down to its best
 figure yet. Both probes are wired as gates: `npm run check:policies`.
+
+---
+
+## Second probe pass: player verbs, invariants, and the ratchet
+
+### The five player-only verbs had never run in a game
+
+Counter, Positions, Expose/Forge/Fabricate and Hire exist for a human and the
+AI uses none of them, so `sim-suite.mjs` — which plays every faction on
+`takeAITurn` — had never executed one. They had harness fixtures (a frozen
+board) and adapter checks (do they reach the screen). Nothing had watched what
+they do to a game over eighty rounds.
+
+`scripts/probe-invariants.mjs` runs a faction that hammers every one of them
+every round, and sweeps the whole state after **every turn** for anything the
+rules say can never be true — bounds, war records, vassal cycles, coalition
+rosters, position caps, grievance ledgers, orphaned chips and units. 2,264
+turns across 10 games. The sweep is the point: an exploit hunt only finds what
+you thought to look for.
+
+It found **two real bugs**, neither of which I would have predicted.
+
+**1. Land was ceded to eliminated factions.** Twice in ten games (seed 8123
+r43, seed 90210 r61) a Location ended up controlled by a dead faction, with its
+sections and `loyaltyOwner` reassigned — the signature of `cedeLocation`. The
+cause: **elimination cleaned nothing up.** A dead faction kept its wars, so the
+AI's peace machinery kept trying to settle with a corpse and handed it a city
+to do it. That parks real ground under an owner who can never act, use it, or
+give it back.
+
+Fixed at the source: `sweepEliminations` now calls `releaseFromDiplomacy`,
+which drops the dead faction's wars, pacts, offers, ultimatums, pact calls,
+truces, coalition memberships and vassal bonds in one place. Deliberately one
+place — the alternative is an `!eliminated` guard at a dozen readers and the
+one that gets missed is this bug again. `cedeLocation` also refuses an
+eliminated recipient as a guard.
+
+**2. Coalition membership outlived the war that created it.** `declareWar`
+enrols anyone who declares on a coalition's target — that is the human's only
+road *into* one, since coalitions never conscript them. There was no road
+*out*: a faction that fought, settled and moved on stayed on the roster. The
+human sat in two coalitions against factions they were at peace with.
+
+`makePeace` now removes a member from any coalition against the party they just
+settled with. That is also the better rule to have: **making your own peace is
+how you leave a rising**, and a coalition held together by nothing but a list
+is a label rather than an alliance.
+
+The first version of this invariant asserted "the human is never a coalition
+member", which fired on correct behaviour — the voluntary-join path. It now
+asserts they are never a member *without being at war with the target*, which
+is the thing that was actually wrong.
+
+### The elimination ratchet — a design principle I broke
+
+The design has refused this shape once already: the first draft of the supply
+rule refused off-supply purchases and was reverted for being *"an elimination
+ratchet dressed as a supply rule"*. Phase 4 landed **four** recurring costs at
+once — Sway upkeep, occupation charges, the chip count surcharge, supply delay
+— and nobody looked at them together.
+
+A `crippled` policy cuts a faction to one Location with an empty treasury at
+round 20 and asks whether it can climb back:
+
+| | new costs off | new costs on |
+|---|---|---|
+| Eliminated outright | 11 of 15 | **14 of 15** |
+| Games where it took ground back | **4 of 15** | **0 of 15** |
+| Mean rounds survived | 41 | **34.3** |
+
+**Zero recoveries.** Isolated per cost, two of the four did it: `zocMoveCost`
+(the side with furthest to march is always the side that is losing, and it pays
+for every hex) and `occupation` (a faction on one city pays 6 Sway a round
+against a floor income of 6 — a hundred per cent of its political capacity for
+the crime of losing).
+
+`sway.occupierFloor: 1` — **below two Locations you are not an occupier, you
+are cornered.** That single rule restores it:
+
+| | eliminated | took ground back | rounds survived |
+|---|---|---|---|
+| neither fix | 14 of 15 | 0 | 34.3 |
+| ZoC doorstep exemption alone | 15 of 15 | 0.4 Locations | 29.1 |
+| **`occupierFloor` alone** | **11 of 15** | **2.7 Locations** | **39.9** |
+| both | 13 of 15 | 1.5 Locations | 35.6 |
+
+**The ZoC doorstep exemption ships off**, and it is worth recording why,
+because the argument for it was good. Being charged movement to cross your own
+city is confusing, and §8's attack price already makes exactly that exemption
+for defence. But a defensive exemption helps whoever is defending, and the
+faction with the most ground to defend is the one that is *winning* — so it
+made the ratchet worse on its own. `influence.zocFreeOnOwnGround: 1` turns it
+on for anyone who wants the legibility over the balance; the mechanism has a
+fixture either way.
+
+The claim is not that a beaten faction usually recovers — it usually should
+not, and 11 of 15 still die. It is that **the door is not one-way**, and that
+is now a gate.
+
+### Where the numbers landed
+
+| | baseline | before this pass | now | band |
+|---|---|---|---|---|
+| Ending mix | 5 | 6 | **7** | ≥ 11 |
+| Median rounds | 62 | 47 | **48** | 58–66 |
+| Games unresolved | 6 | 2 | **4** | 0 |
+
+Unresolved 2 → 4 is the price of breaking the ratchet, paid deliberately: a
+faction that cannot be finished is a faction that can still play, and the
+alternative was a one-way door the design had already rejected once.
+
+**Four probes, eleven claims, one command:** `npm run check:policies`.

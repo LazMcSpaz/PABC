@@ -6338,9 +6338,30 @@ line("\n  [Phase 11] text-token resolver");
   {
     const gz = createGame({ seed: 4242, humanFactionId: "versari" });
     const w = Object.values(gz.units).find((u) => u.owner === "versari");
-    // A clean open lane out of the unit's hex, with nothing else charging.
+    // A clean open lane out of the unit's hex, with nothing else charging —
+    // and AWAY FROM VERSARI'S OWN GROUND, because the toll is deliberately
+    // waived on your own Locations and the ring around them (see
+    // `zocFreeOnOwnGround`). Testing it on the doorstep would be testing the
+    // exemption and calling it the rule; the exemption gets its own check
+    // below.
+    // With the exemption off by default this set only steers the fixture away
+    // from home; it is kept so the check reads the same either way.
+    const ownRing = new Set();
+    for (const l of Object.values(gz.locations)) {
+      if (l.controller !== "versari") continue;
+      ownRing.add(l.hexId);
+      for (const n of gz.board.adjacency[l.hexId] || []) ownRing.add(n);
+    }
+    // The unit starts at home, so walk it out to open country first — every
+    // hex beside its own capital is exempt by construction.
+    const away = Object.keys(gz.board.hexes).find((h) => !ownRing.has(h) && !gz.locations[h]
+      && (gz.board.adjacency[h] || []).some((n) => !ownRing.has(n) && !gz.locations[n]
+        && !Object.values(gz.units).some((u) => u.node === n)));
+    if (away) w.node = away;
     const step = (gz.board.adjacency[w.node] || []).find(
-      (n) => !gz.locations[n] && !Object.values(gz.units).some((u) => u.node === n));
+      (n) => !gz.locations[n] && !ownRing.has(n)
+        && !Object.values(gz.units).some((u) => u.node === n));
+    check("§10.2 fixture: found open ground off versari's own doorstep", !!step);
     const hex = gz.board.hexes[step];
     hex.elevation = false; hex.cover = false; hex.road = false; hex.rail = false;
     gz.world.zoc = {};
@@ -6355,6 +6376,30 @@ line("\n  [Phase 11] text-token resolver");
     const taxed = unitReach(gz, w)[step];
     check("§10.2 a rival's ZoC costs extra to enter",
       taxed === before - CONFIG.influence.zocMoveCost, `${before} -> ${taxed}`);
+
+    // …and NEVER on your own doorstep. The toll is a border friction, not a
+    // charge for defending yourself — without this exemption the side with the
+    // furthest to march is always the side that is losing, and a faction cut
+    // to one city recovered ground in 0 of 15 games instead of 4.
+    {
+      // The exemption ships OFF (see the config note — it made the elimination
+      // ratchet worse rather than better), so the fixture turns it on to check
+      // the mechanism still works for whoever switches it on.
+      const wasFree = CONFIG.influence.zocFreeOnOwnGround;
+      CONFIG.influence.zocFreeOnOwnGround = 1;
+      const home = Object.values(gz.locations).find((l) => l.controller === "versari");
+      const doorstep = (gz.board.adjacency[home.hexId] || []).find((n) => !gz.locations[n]);
+      if (doorstep) {
+        const u2 = Object.values(gz.units).find((x) => x.owner === "versari" && x.node !== w.node) || w;
+        u2.node = home.hexId; u2.moveRemaining = 2;
+        const clean = unitReach(gz, u2)[doorstep];
+        gz.world.zoc[doorstep] = "lakers";
+        check("§10.2 …but never on ground of your own, or the ring around it",
+          unitReach(gz, u2)[doorstep] === clean, `${clean} -> ${unitReach(gz, u2)[doorstep]}`);
+        delete gz.world.zoc[doorstep];
+      }
+      CONFIG.influence.zocFreeOnOwnGround = wasFree;
+    }
 
     // …and it is the RELATIONSHIP that decides, not the border. The same
     // predicate open borders and trespass read: you are not picking your way

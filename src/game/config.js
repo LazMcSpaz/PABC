@@ -429,6 +429,29 @@ export const CONFIG = {
     // costs most of a hex without stopping an army, and unresolved dropped to
     // 2 of 15 — the best reading the suite has produced.
     zocMoveCost: 0.5,
+    // Waive the toll on your own Locations and the ring around them.
+    //
+    // SHIPS OFF, and this one is worth recording because the argument for it
+    // is good and the measurement said no anyway. The design case is real —
+    // being charged movement to cross your own city is confusing, and §8's
+    // attack price already makes exactly this exemption for defence. The
+    // BALANCE case was that the ZoC toll builds an elimination ratchet,
+    // because the side with the furthest to march is always the side that is
+    // losing.
+    //
+    // Measured against a faction cut down to one city at round 20:
+    //
+    //   neither fix        14 of 15 eliminated, 0 recovered, survived 34.3
+    //   this alone         15 of 15 eliminated, 0.4 Locations back, 29.1
+    //   occupierFloor alone 11 of 15 eliminated, 2.7 Locations back, 39.9
+    //   both               13 of 15 eliminated, 1.5 Locations back, 35.6
+    //
+    // It makes the ratchet WORSE on its own, and the reason is obvious in
+    // hindsight: a defensive exemption helps whoever is defending, and the
+    // faction with the most ground to defend is the one that is winning. The
+    // occupier floor targets the cornered faction specifically; this does not.
+    // 1 turns it on.
+    zocFreeOnOwnGround: 0,
     // §10.1 — what a UNIT projects. Contributes to `pressureSource` ONLY, never
     // to `deriveZoC`. See influence.js for the measurement behind that scoping.
     unitInfluence: 1,
@@ -610,6 +633,9 @@ export const CONFIG = {
     // with. The keystone: conquest and courtship compete for the same pool,
     // under a win condition that needs every faction dealt with.
     occupation: 6,
+    // Below this many Locations you are not an occupier, you are cornered —
+    // see the note in `occupationCharges`. 0 restores the untempered charge.
+    occupierFloor: 1,
     // §12.3 THE OPS, in detail.
     ops: {
       // An unwitnessed strike stays exposable this long. Beyond it the board

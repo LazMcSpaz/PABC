@@ -168,9 +168,29 @@ export function zocTaxedHexes(state, ownerId) {
   if (!cost) return taxed;                                  // 0 switches it off
   if (hasTechNode(state, ownerId, "log-a2")) return taxed;   // Forward Supply
   const zoc = state.world?.zoc || {};
+  // YOUR OWN DOORSTEP IS NEVER TAXED. A rival's zone can sit on top of ground
+  // you hold — that is the whole point of influence pressure — and charging
+  // you to move across your own Locations turns a border friction into an
+  // elimination ratchet. Measured: a faction cut down to one city recovered
+  // ground in 4 of 15 games with `zocMoveCost` off and 0 of 15 with it on,
+  // because the side with the furthest to march is always the side that is
+  // losing, and it paid for every hex of the march.
+  //
+  // This is the same exemption §8's attack price already makes for defence,
+  // and for the same reason: nobody reads clearing your own doorstep as an
+  // incursion.
+  const free = new Set();
+  if (CONFIG.influence?.zocFreeOnOwnGround) {
+    for (const loc of Object.values(state.locations || {})) {
+      if (loc.controller !== ownerId) continue;
+      free.add(loc.hexId);
+      for (const n of state.board?.adjacency?.[loc.hexId] || []) free.add(n);
+    }
+  }
   for (const hex in zoc) {
     const owner = zoc[hex];
     if (!owner || owner === ownerId) continue;
+    if (free.has(hex)) continue;
     if (passesFreely(state, ownerId, owner)) continue;
     taxed.set(hex, cost);
   }

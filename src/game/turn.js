@@ -197,6 +197,30 @@ function tickVictoryFaucets() {}
 // Being last standing is no longer its own win condition: it is the pure-
 // conquest face of the one condition (checkDominion), which every surviving
 // faction being dead satisfies vacuously.
+// Everything a faction is party to, dropped when it dies. Deliberately in one
+// place: the alternative is a `!eliminated` guard at a dozen call sites, and
+// the one that gets missed is the bug.
+function releaseFromDiplomacy(state, pid) {
+  const d = state.diplomacy;
+  if (!d) return;
+  d.wars = (d.wars || []).filter((w) => w.a !== pid && w.b !== pid);
+  d.pacts = (d.pacts || []).filter((p) => p.a !== pid && p.b !== pid);
+  d.offers = (d.offers || []).filter((o) => o.from !== pid && o.to !== pid);
+  d.ultimatums = (d.ultimatums || []).filter((u) => u.from !== pid && u.to !== pid);
+  d.pendingCalls = (d.pendingCalls || []).filter((c) => c.from !== pid && c.target !== pid);
+  d.coalitions = (d.coalitions || []).filter((c) => c.target !== pid);
+  for (const c of d.coalitions) c.members = c.members.filter((m) => m !== pid);
+  // …including as somebody's lord: a vassal of a dead faction is free, not
+  // orphaned under a name that no longer plays.
+  for (const [vassal, lord] of Object.entries(d.vassals || {})) {
+    if (lord === pid || vassal === pid) delete d.vassals[vassal];
+  }
+  for (const key of Object.keys(d.truces || {})) {
+    if (key.split("|").includes(pid)) delete d.truces[key];
+  }
+  emit(state, "faction_released", { player: pid });
+}
+
 function sweepEliminations(state) {
   for (const pid of state.turnOrder) {
     const p = state.players[pid];
@@ -207,6 +231,17 @@ function sweepEliminations(state) {
     if (!holdsAnything) {
       p.eliminated = true;
       emit(state, "faction_eliminated", { player: pid });
+      // A DEAD FACTION LEAVES THE DIPLOMACY GRAPH. Without this it keeps its
+      // wars, and the AI's peace machinery keeps trying to settle with a
+      // corpse — measured, `warPeaceTerms` ceded a city TO an eliminated
+      // faction twice across ten games (seed 8123 r43, seed 90210 r61), which
+      // parks real ground on the board under an owner who can never act, use
+      // it, or give it back.
+      //
+      // It also has to happen HERE rather than at each reader, because the
+      // readers are many (peace, pacts, coalitions, offers, ultimatums, the
+      // vassal tick) and every one that forgot would be this bug again.
+      releaseFromDiplomacy(state, pid);
     }
   }
   checkDominion(state);

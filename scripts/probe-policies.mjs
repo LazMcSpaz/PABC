@@ -210,7 +210,39 @@ function spendPolitically(state, pid) {
   }
 }
 
-const POLICIES = { pacifist: pacifistTurn, spender: spenderTurn, ai: null };
+// --- policy: CRIPPLED -------------------------------------------------
+//
+// Starts the ordinary AI, then gets kneecapped at a fixed round: most of its
+// ground taken, its treasury emptied, its Sway zeroed. The question is whether
+// it can climb back, and it is a question the rework made urgent rather than
+// academic — four recurring costs landed at once (Sway upkeep, occupation
+// charges, the chip count surcharge, supply delay) plus chip dormancy, and
+// nobody looked at them together.
+//
+// The design has refused this shape before: the first draft of the supply rule
+// REFUSED off-supply purchases, and it was reverted precisely because it was
+// "an elimination ratchet dressed as a supply rule". Four costs that each
+// bite harder the less you hold can rebuild that ratchet by accident.
+const CRIPPLE_ROUND = 20;
+function crippledTurn(state, pid) {
+  if (state.round === CRIPPLE_ROUND && !state.__crippled) {
+    state.__crippled = true;
+    const mine = Object.values(state.locations).filter((l) => l.controller === pid);
+    // Leave exactly one Location — the "reduced to your last city" case the
+    // supply guard was written for.
+    for (const l of mine.slice(1)) {
+      l.controller = null;
+      l.sections = l.sections.map(() => "neutral");
+      l.loyaltyOwner = null;
+      l.loyalty = null;
+    }
+    state.players[pid].resource = 0;
+    state.players[pid].sway = 0;
+  }
+  takeAITurn(state);
+}
+
+const POLICIES = { pacifist: pacifistTurn, spender: spenderTurn, crippled: crippledTurn, ai: null };
 
 // --- the run ----------------------------------------------------------
 
@@ -236,6 +268,11 @@ function runGame(seed, policyName) {
   }
 
   const ev = (name) => g.log.filter((e) => e.name === name);
+  // Recovery, for the crippled run: did it get anything back after the blow?
+  const crippleAt = CRIPPLE_ROUND;
+  const gainedAfter = ev("location_captured")
+    .filter((e) => e.round > crippleAt && e.payload.controller === SUBJECT).length;
+  const dormant = ev("chip_dormant").filter((e) => e.round > crippleAt).length;
   // Did the subject ever attack a FACTION? The pacifist claim has to be
   // checked, not assumed — a policy that quietly fights is not a test.
   const attacks = ev("surprise_attack_honor_lost").filter((e) => e.payload.attacker === SUBJECT).length
@@ -301,6 +338,12 @@ function runGame(seed, policyName) {
       return d.length ? Math.round(mean(d.map((e) => e.round))) : null;
     })(),
     eliminations: ev("faction_eliminated").length,
+    regained: gainedAfter,
+    dormantChips: dormant,
+    eliminatedSubject: !!g.players[SUBJECT]?.eliminated,
+    survivedTo: g.players[SUBJECT]?.eliminated
+      ? (ev("faction_eliminated").find((e) => e.payload.player === SUBJECT)?.round ?? null)
+      : g.round,
   };
 }
 
@@ -351,7 +394,17 @@ if (policyName === "spender") {
     ` — courtship ${REFUSALS.court}, gift ${REFUSALS.gift}, op ${REFUSALS.op}`);
   console.log("  (a budget nothing is ever refused by is not a budget)");
 }
-console.log(`  mean Locations held          ${r1(mean(rows.map((r) => r.locations)))}\n`);
+console.log(`  mean Locations held          ${r1(mean(rows.map((r) => r.locations)))}`);
+if (policyName === "crippled") {
+  console.log(`\n  --- after being reduced to one city at round ${CRIPPLE_ROUND} ---`);
+  console.log(`  eliminated outright          ${rows.filter((r) => r.eliminatedSubject).length} of ${rows.length}`);
+  console.log(`  games where it took ground back ${rows.filter((r) => r.regained > 0).length} of ${rows.length}` +
+    `  (mean ${r1(mean(rows.map((r) => r.regained)))} Locations)`);
+  console.log(`  mean Locations at the end    ${r1(mean(rows.map((r) => r.locations)))}`);
+  console.log(`  chips that went dormant      ${r1(mean(rows.map((r) => r.dormantChips)))}`);
+  console.log(`  mean rounds survived         ${r1(mean(rows.map((r) => r.survivedTo)))}`);
+}
+console.log();
 
 if (process.argv.includes("--json")) {
   console.log(JSON.stringify(rows, null, 2));
@@ -371,9 +424,33 @@ if (process.argv.includes("--json")) {
 //      full game, as `powerLead` inflates against a shrinking field. Measured
 //      before the fix: 10 coalitions raised across 15 games, every early one
 //      on `fear`, against a faction with Menace 0.
+if (process.argv.includes("--assert") && policyName === "crippled") {
+  // THE ANTI-RATCHET CLAIM. The design has refused this shape once already —
+  // the first draft of the supply rule refused off-supply purchases and was
+  // reverted for being "an elimination ratchet dressed as a supply rule". Four
+  // smaller costs landing at once rebuilt one by accident: a faction cut down
+  // to one city at round 20 took ground back in 0 of 15 games, against 4 of 15
+  // with the new costs switched off.
+  //
+  // The claim is NOT that a beaten faction usually recovers — it usually
+  // should not, and 13 of 15 still die. It is that the door is not one-way.
+  let bad = 0;
+  const recovered = rows.filter((r) => r.regained > 0).length;
+  const claim = (label, ok, detail) => {
+    console.log(`\n${ok ? "PASS" : "FAIL"}  ${label}${ok ? "" : `\n        ${detail}`}`);
+    if (!ok) bad += 1;
+  };
+  console.log();
+  claim("a faction cut down to one city can still take ground back",
+    recovered >= 2,
+    `${recovered} of ${rows.length} games saw any recovery — the costs have become a one-way door`);
+  console.log(`\n${bad ? `${bad} FAILED` : "all claims hold"}`);
+  process.exit(bad ? 1 : 0);
+}
+
 if (process.argv.includes("--assert")) {
   if (policyName !== "pacifist") {
-    console.error("--assert only means anything for the pacifist policy");
+    console.error("--assert only means anything for the pacifist or crippled policies");
     process.exit(2);
   }
   const raised = rows.reduce((n, r) => n + r.coalitionsFormed, 0);
