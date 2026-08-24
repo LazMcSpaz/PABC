@@ -50,10 +50,35 @@ import { vassalLord, arePacted } from "../src/game/diplomacy.js";
 import { CONFIG } from "../src/game/config.js";
 import { readFileSync, writeFileSync } from "node:fs";
 
+// The fifteen pinned seeds. Pinned because a moving seed set makes every
+// comparison across commits meaningless.
 export const SEEDS = [
   1234, 424242, 7, 991, 4711, 8123, 20260821, 31337, 55555, 90210,
   123456, 2026, 606, 77, 31415,
 ];
+
+// `--n N` extends the run past the pinned fifteen, DETERMINISTICALLY: the
+// extra seeds are generated from a fixed formula, so seed 16 is the same seed
+// on every machine and every commit and the first fifteen never move.
+//
+// Why this exists. Three switches ship dark on the strength of readings taken
+// at n=15, where one seed flipping moves the ending mix by a whole point — and
+// the same fifteen games have been re-read so many times that a difference of
+// one or two endings has been called signal more than once in this document.
+// A decision that stays set for a long time deserves a bigger sample than a
+// tuning nudge does.
+function seedsFor(n) {
+  if (!n || n <= SEEDS.length) return SEEDS.slice(0, n || SEEDS.length);
+  const out = [...SEEDS];
+  // A cheap LCG off a fixed constant. Any deterministic generator would do;
+  // what matters is that it never changes.
+  let x = 20260823;
+  while (out.length < n) {
+    x = (x * 1103515245 + 12345) % 2147483648;
+    if (!out.includes(x)) out.push(x);
+  }
+  return out;
+}
 
 // Past this a game is called unresolved. 80 is well clear of the median so the
 // cap is never the story: spot-checked at 150 rounds, the games that pass 80
@@ -68,7 +93,10 @@ const argOf = (name) => {
   const i = argv.indexOf(name);
   return i >= 0 ? argv[i + 1] : null;
 };
-const seeds = argOf("--seeds")
+// `--seeds a,b,c` names an explicit set; `--n 40` extends the pinned fifteen.
+const seeds = argOf("--n")
+  ? seedsFor(Number(argOf("--n")))
+  : argOf("--seeds")
   ? argOf("--seeds").split(",").map((s) => Number(s.trim()))
   : SEEDS;
 const jsonOut = argOf("--json");
@@ -176,6 +204,10 @@ function summarise(g, { aiTurns, snapshot, seed }) {
   // §12.3 — the intrigue branch, and whether it is the Sway sink it was built
   // to be. `swayRoundsAtCapShare` has read ~0.30 since phase 3 with the note
   // "wait for ops" against it every time; this is the row that settles it.
+  // Courtship is the only political act that advances Dominion, so it is the
+  // one to watch when a new Sway sink lands: both `ai.intrigue` and the AI
+  // gift drain the pool `canSustainCourtship` reads.
+  const courtOpened = evName(g, "posture_changed").filter((e) => e.payload.to === "Courting").length;
   const opsRun = evName(g, "op_expose").length + evName(g, "op_forge").length
     + evName(g, "op_fabricate").length;
   const opsBackfired = evName(g, "op_backfired").length;
@@ -236,7 +268,7 @@ function summarise(g, { aiTurns, snapshot, seed }) {
     denounceShare: acts ? denouncements / acts : 0,
     wars: wars.length,
     surpriseOpenings: surprises,
-    opsRun, opsBackfired,
+    opsRun, opsBackfired, courtOpened,
     coalitions: evName(g, "coalition_formed").length,
     minors: {
       allied: minorsAllied, vassal: minorsVassal, dead: minorsDead,
@@ -312,6 +344,7 @@ const report = {
     warsPerGame: r2(mean(ok.map((g) => g.wars))),
     warsOpenedByUndeclaredAttack: r2(mean(ok.map((g) => g.surpriseOpenings))),
     coalitionsPerGame: r2(mean(ok.map((g) => g.coalitions))),
+    courtshipsOpenedPerGame: r2(mean(ok.map((g) => g.courtOpened))),
     intrigueOpsPerGame: r2(mean(ok.map((g) => g.opsRun))),
     intrigueOpsBackfired: r2(mean(ok.map((g) => g.opsBackfired))),
     // At the final board — a snapshot, and confounded by the war rate.

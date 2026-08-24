@@ -155,15 +155,21 @@ Four things are recorded, not fixed, and your play is the tiebreaker.
 1. **Unresolved games: 4 of 15, band is 0.** If a game of yours goes quiet
    around round 50 with nobody able to finish anybody, note *which faces were
    still open* when it happened.
-2. **The AI cannot convert political capacity into progress toward winning.**
-   This showed up three separate times — §8's attack price, the AI gift, and
-   the intrigue ops — and each made the suite *worse*, so all three ship
-   switched off for the AI while live for you (`attackPrice.enabled: 0`,
-   `ai.giftAboveShareOfCap: 1`, `ai.intrigue: 0`). **Does the AI feel
-   politically passive to you?** If it does, that is this, and it is one policy
-   problem rather than three missing features.
-3. **Sway sits at its ceiling 30% of rounds.** The sink now exists (ops); the
-   AI does not use it. See §2's question.
+2. **Two of the three "AI ships this dark" switches are still dark, and the
+   reason they were dark turned out to be wrong.** The claim was that the AI
+   cannot convert political capacity into progress toward winning; a scripted
+   pacifist that never attacks anybody wins 2 games in 15, so it can.
+   Re-measured at n=45, **`ai.intrigue` now ships ON** and the AI runs about 7
+   espionage ops a game. `attackPrice.enabled: 0` and
+   `ai.giftAboveShareOfCap: 1` stay off on better evidence than before. **Does
+   the AI feel politically active to you now?** That is the question those
+   switches turn on.
+3. **Sway sits at its ceiling ~29% of rounds for the AI — and 4 for a
+   spender.** Measured: a scripted faction that actually spends is refused 38
+   purchases a game. The currency is sized correctly for somebody who spends,
+   so **do not tune the cap on the 30% figure** — it measures an AI that
+   hoards, not an economy that overflows. The question for you is whether YOU
+   ever feel Sway-poor.
 4. **`influence.hexCap: 20` never binds** — the best faction on this board
    dominates 11. Inert, harmless, but the bounded-advantage argument is
    currently carried by the floor alone.
@@ -201,7 +207,7 @@ The switches most worth flipping if something feels wrong:
 | feels like | try |
 |---|---|
 | the AI never fights for its reputation | `--set diplomacy.attackPrice.enabled=1` |
-| the AI is politically passive | `--set ai.intrigue=1` or `ai.giftAboveShareOfCap=0.7` |
+| the AI is politically passive | `--set ai.giftAboveShareOfCap=0.7` (intrigue is on by default now) |
 | coalitions gang up unfairly | `--set diplomacy.coalition.groundsGate=0` to see the old behaviour |
 | the AI builds badly | `--set ai.valueTable=0,ai.upgrades=0` |
 | movement friction is wrong | `--set influence.zocMoveCost=0` |

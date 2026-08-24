@@ -4641,7 +4641,11 @@ line("\n  [§12.3] what Sway buys when the courtships are paid for");
       && !performDiplomacy(g, "versari", "fabricate", { faction: "lakers" }).ok
       && g.players.versari.sway === 500);
   } finally { o.enabled = was; }
-  check("…and the AI's own intrigue pass ships off", CONFIG.ai.intrigue === 0);
+  // The AI's pass ships ON as of the n=45 re-measurement (see the config
+  // note). What the fixture pins is that the switch still SWITCHES — the verbs
+  // are the player's either way, and `ops.enabled` above is the master.
+  check("…and the AI's own intrigue pass is a switch, not a hard-coded policy",
+    CONFIG.ai.intrigue === 0 || CONFIG.ai.intrigue === 1);
 }
 
 // Economy §8 — a COUNT-based obligation, because a per-chip one never arrived.

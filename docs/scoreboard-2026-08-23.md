@@ -969,4 +969,67 @@ Unresolved 2 → 4 is the price of breaking the ratchet, paid deliberately: a
 faction that cannot be finished is a faction that can still play, and the
 alternative was a one-way door the design had already rejected once.
 
-**Four probes, eleven claims, one command:** `npm run check:policies`.
+**Four probes, nine claims, one command:** `npm run check:policies`.
+
+---
+
+## Reopening the three dark switches
+
+`attackPrice.enabled: 0`, `ai.giftAboveShareOfCap: 1` and `ai.intrigue: 0` all
+shipped dark on one sentence — *"this AI cannot convert political capacity into
+progress toward winning"* — which the pacifist probe disproved. Three finished,
+fixtured features were doing nothing for a reason known to be wrong.
+
+**The first hypothesis for the real cause was also wrong**, and it is worth
+recording because it was a good hypothesis. `manageDiplomacy` is a fixed-order
+priority list where *every branch returns* — the AI gets one political act per
+turn — and both new sinks also drain the pool `canSustainCourtship` reads. So
+the obvious explanation was that they crowd out **courtship**, the only
+political act that advances Dominion. Measured, they don't: courtships opened
+per game reads 55.9 (both off), 55.2 (intrigue on), 57.1 (gift on), and lapses
+*fall* with intrigue on. No cannibalisation.
+
+**The real problem was the evidence.** Every reading that condemned these
+switches was taken at **n=15**, where one seed flipping moves the ending mix by
+a whole point — and taken *before* four fixes that changed the board it was
+measured on (`leadMeasure`, `repeatDiminish`, `occupierFloor`, releasing the
+dead from the diplomacy graph). `sim-suite.mjs --n 45` now extends the pinned
+fifteen deterministically, so a decision that stays set for a long time gets a
+bigger sample than a tuning nudge does. The first fifteen never move.
+
+Re-measured at **n=45** on the current build:
+
+| config | ending mix | median | unresolved | undeclared attacks |
+|---|---|---|---|---|
+| all three dark (baseline) | 16 | 46 | 15 | 24.4 |
+| **`ai.intrigue: 1`** | **17** | **52** | **13** | 24.5 |
+| `attackPrice` at 0.4 | 17 | 45 | 17 | 24.8 |
+| `attackPrice` at 0.6 | 17 | 44 | 16 | 23.0 |
+| AI gift on | 15 | 46 | 16 | 25.1 |
+| intrigue + attackPrice | 15 | 52 | 19 | 24.3 |
+| intrigue + gift | 16 | 50 | 18 | 24.8 |
+
+**`ai.intrigue` ships ON.** Best on both governing numbers, it pulls the median
+closer to its band than any other configuration has managed, and it runs **7.2
+ops a game** — the Sway sink the pool has been waiting for since phase 3.
+
+**The other two stay dark, on better evidence than before.** The attack price
+at 0.4 costs two unresolved games and does not reduce undeclared attacks at all
+— inert but not free; at 0.6 it finally bites (24.4 → 23.0) and still costs
+one. The AI gift is the one switch whose original verdict survived a larger
+sample. Both get worse alongside intrigue, which is why the answer is one
+switch and not three.
+
+### What n=45 says about the pinned fifteen
+
+Worth knowing before reading any table in this document: the pinned seeds run
+slightly *favourable*. Unresolved is 27% of games at n=15 and 33% at n=45; the
+ending mix is 40% against 38%. Not badly skewed, but every governing number in
+this file is quoted on the fifteen, and the honest denominator for a close call
+is the larger one.
+
+| | pinned 15 | n=45 | band |
+|---|---|---|---|
+| Ending mix | 6 (40%) | 17 (38%) | ≥ 73% |
+| Median rounds | 54 | 52 | 58–66 |
+| Games unresolved | 4 (27%) | 13 (29%) | 0 |

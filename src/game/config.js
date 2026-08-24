@@ -223,13 +223,43 @@ export const CONFIG = {
     // and the branch stays switchable because the gap it leaves is exactly
     // what phase 6's espionage ops are meant to give the surplus to spend on.
     // Set below 1 to let the AI gift from surplus again.
+    //
+    // RE-MEASURED at n=45 on the current build and it stays off: 15 mix / 46
+    // median / 16 unresolved against a baseline of 16 / 46 / 15, and 16 / 50 /
+    // 18 alongside `intrigue`. This is the one of the three dark switches
+    // whose original verdict survived a bigger sample.
     giftAboveShareOfCap: 1,
-    // §12.3 — whether the AI reaches for the intrigue branch at all. The verbs
-    // are live for the player either way; this is only the AI's policy, and it
-    // ships at 0 for the reason recorded in the scoreboard: exposing the
-    // leader slows the leader, and unresolved games went 4 -> 6 for one point
-    // of ending mix. 1 turns the AI's Expose pass back on.
-    intrigue: 0,
+    // §12.3 — whether the AI reaches for the intrigue branch. The verbs are
+    // live for the player either way; this is only the AI's policy.
+    //
+    // IT SHIPPED AT 0 AND THAT WAS WRONG, on two counts, and both are worth
+    // keeping written down because they are the two ways this project has
+    // fooled itself.
+    //
+    // The first was the EXPLANATION. Three features went dark on one sentence
+    // — "this AI cannot convert political capacity into progress toward
+    // winning" — inferred from three correlated regressions and never tested.
+    // A scripted pacifist that never attacks anybody wins 2 games in 15, so
+    // the sentence is false and the sentence was doing the arguing.
+    //
+    // The second was the SAMPLE. The reading that condemned this switch was
+    // taken at n=15, where one seed flipping moves the ending mix by a whole
+    // point, and it was taken BEFORE four fixes that changed the board it was
+    // measured on (leadMeasure, repeatDiminish, occupierFloor, and releasing
+    // the dead from the diplomacy graph). Re-measured at n=45 on the current
+    // build, against a baseline of 16 mix / 46 median / 15 unresolved:
+    //
+    //   intrigue on           17 / 52 / 13   <- best on both governing numbers
+    //   attackPrice at 0.4    17 / 45 / 17
+    //   AI gift on            15 / 46 / 16
+    //   intrigue + attackPrice 15 / 52 / 19
+    //   intrigue + gift       16 / 50 / 18
+    //
+    // Alone it is the best configuration measured, it drags the median closer
+    // to its band than anything else has, and it runs 7.2 ops a game — which
+    // is the Sway sink the pool has been waiting for since phase 3. Combined
+    // with either of the others it gets worse, so the others stay dark.
+    intrigue: 1,
   },
 
   // §17 Tech Wheel. Research fills a bar; Tech Level is a derived band
@@ -1026,6 +1056,24 @@ export const CONFIG = {
       // about what killing one is worth. 0 restores that (wrong) behaviour.
       unitWorth: 2,
       // 0 switches the whole gate off and restores the old blind behaviour.
+      //
+      // RE-MEASURED at n=45 on the current build, and it stays off — but for a
+      // different reason than the one below, which is now stale. The old table
+      // was taken at n=15 before four fixes changed the board. Now:
+      //
+      //   off (baseline)   16 mix / 46 median / 15 unresolved, 24.4 undeclared
+      //   0.4              17 / 45 / 17, 24.8 undeclared
+      //   0.6              17 / 44 / 16, 23.0 undeclared
+      //
+      // At 0.4 it costs two unresolved games and does not reduce undeclared
+      // attacks at all — inert but not free. At 0.6 it finally bites (24.4 ->
+      // 23.0, a 6% reduction) and still costs one. Alongside `ai.intrigue: 1`
+      // it is worse again (15 / 52 / 19 against intrigue's own 17 / 52 / 13).
+      // The rule is built, fixtured and switchable; it is not yet worth its
+      // price to the AI.
+      //
+      // The original note, kept because the raid-branch finding in it is still
+      // true and still load-bearing:
       //
       // IT SHIPS AT 0, AND THAT IS THE MEASUREMENT TALKING, not a hedge. The
       // rule was built, wired into both attack branches, exempted for defence,
