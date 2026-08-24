@@ -387,7 +387,16 @@ const TECH_NODE_SCORE = {
   "int-entry": () => 1,
   "int-a1": (s, pid) => 1 + (1 - exploredFraction(s, pid)) * 2,
   "int-a2": (s, pid) => 1 + (1 - exploredFraction(s, pid)) * 1.5,
-  "int-b1": (s, pid) => (factionIds(s).length > 2 ? 1.5 : 1),
+  // §12.3 — Spy Ring is no longer just two static readouts. It is the door to
+  // Expose: without it (or a live Listening Post, or A1 with eyes on the
+  // place) a faction has no way of learning what anybody does quietly, and the
+  // whole intrigue branch is closed to it. Measured, every op the AI runs is a
+  // spy-ring op — 8 of 8 across five games — so the node is now load-bearing
+  // rather than flavour, and worth more when there is a political game on.
+  "int-b1": (s, pid) => {
+    const base = factionIds(s).length > 2 ? 1.5 : 1;
+    return base + (CONFIG.ai.intrigue && CONFIG.sway.ops?.enabled ? 1 : 0);
+  },
   "int-b2": (s, pid) => 0.3 + bestHostileLoyalty(s, pid) * 0.3,
 };
 
@@ -585,7 +594,7 @@ function tryIntrigue(state, pid, others) {
   // a runaway is what gives the rest of the board grounds to rise.
   let best = null, bestLead = 0;
   for (const f of others) {
-    if (!exposableStrikes(state, f).length) continue;
+    if (!exposableStrikes(state, f, pid).length) continue;
     const lead = powerLead(state, f);
     if (lead > bestLead || best == null) { bestLead = lead; best = f; }
   }

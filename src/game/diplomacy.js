@@ -30,6 +30,10 @@ import {
 import { recomputeResearch } from "./stats.js";
 import { recomputeVp } from "./victory.js";
 import { recomputeInfluence } from "./influence.js";
+// §12.3 — the intrigue branch reads the Intelligence wheel and the Listening
+// Post network to decide what a faction could plausibly have found out.
+import { hasTechNode } from "./tech.js";
+import { ownedPosts } from "./posts.js";
 
 // --- state ----------------------------------------------------------
 export function ensureDiplomacy(state) {
@@ -3116,7 +3120,45 @@ export function opsEnabled() { return !!OPS().enabled; }
 // `menaceFromAttack` on exactly the case — an attack whose Menace rounded to
 // nothing because nobody saw it — so the op reads the log rather than keeping
 // a second ledger of the same fact.
-export function exposableStrikes(state, target) {
+// HOW `viewer` COULD HAVE FOUND OUT about something that happened at `hex`.
+//
+// Returns the apparatus that learned it, or null. The string is not decoration:
+// the drawer shows it, because "you cannot expose this" is a dead end and
+// "your Spy Ring heard about it" is a reason to have built a Spy Ring.
+//
+// This is the seam between the tech wheel's espionage branch and the diplomacy
+// layer's. Before it they were two systems with the same theme and no contact.
+export function exposureApparatus(state, viewer, hex) {
+  if (!OPS().exposeNeedsApparatus) return "omniscient";
+  if (!viewer) return null;
+  // A standing network hears about it wherever it happened. This is the payoff
+  // for the deepest node on the B-path, which until now revealed two static
+  // numbers and did nothing else.
+  if (hasTechNode(state, viewer, "int-b1")) return "spy-ring";
+  if (!hex) return null;
+  // Local ears. A Listening Post carries an upkeep, a concealment model, a
+  // Strength and a destruction path, and the only reason to build one was map
+  // vision; catching what happens in earshot is what a listening post is FOR.
+  const range = CONFIG.posts?.range ?? 1;
+  for (const post of ownedPosts(state, viewer)) {
+    if (post.dormant) continue; // unpaid: it hears nothing
+    if (post.hex === hex) return "listening-post";
+    if (range > 0 && (state.board?.adjacency?.[post.hex] || []).includes(hex)) return "listening-post";
+  }
+  // …or your own scouts can see the place and piece it together.
+  if (hasTechNode(state, viewer, "int-a1") && isHexVisible(state, viewer, hex)) return "scouts";
+  return null;
+}
+
+// The strikes `viewer` may publish against `target`. `viewer` is required: an
+// unwitnessed strike is by definition one nobody saw, so WHO is asking is the
+// whole question, and the first draft of this function did not ask it.
+// Every quiet strike by `target` still inside the window and not yet sold —
+// before anybody asks whether they could have HEARD of it. Split out because
+// "there is nothing to publish" and "there is something and you are blind to
+// it" are different refusals, and the caller can only tell them apart if it
+// can see both lists.
+function rawStrikes(state, target) {
   if (!opsEnabled()) return [];
   const window = OPS().exposeWindowRounds;
   const out = [];
@@ -3126,6 +3168,18 @@ export function exposableStrikes(state, target) {
     if (state.round - (e.round ?? 0) > window) continue;
     if (state.diplomacy?.exposed?.[`${e.round}|${e.payload.attacker}|${e.payload.victim}`]) continue;
     out.push(e);
+  }
+  return out;
+}
+
+export function exposableStrikes(state, target, viewer = null) {
+  const out = [];
+  for (const e of rawStrikes(state, target)) {
+    // Never your own strike, and never one against you — you were there.
+    if (viewer && (e.payload.attacker === viewer || e.payload.victim === viewer)) continue;
+    const how = exposureApparatus(state, viewer, e.payload.hex);
+    if (!how) continue;
+    out.push({ ...e, apparatus: how });
   }
   return out;
 }
@@ -3168,9 +3222,20 @@ function chargeOp(state, pid) {
 export function expose(state, pid, target) {
   if (!opsEnabled()) return { ok: false, reason: "there is no one to carry it" };
   if (!target || target === pid) return { ok: false, reason: "there is nobody to expose" };
-  const strikes = exposableStrikes(state, target);
+  const strikes = exposableStrikes(state, target, pid);
   if (!strikes.length) {
-    return { ok: false, reason: "there is nothing of theirs the board has not already seen" };
+    // Say WHICH wall you hit. "Nothing to expose" and "something happened but
+    // you have no way of knowing about it" are different sentences, and only
+    // the second one tells the player to go and build something.
+    // Something happened and you are blind to it, versus nothing happened.
+    const blind = rawStrikes(state, target).some(
+      (e) => e.payload.attacker !== pid && e.payload.victim !== pid);
+    return {
+      ok: false,
+      reason: blind
+        ? "if they have done anything quietly, you have no way of knowing it"
+        : "there is nothing of theirs the board has not already seen",
+    };
   }
   const bad = chargeOp(state, pid);
   if (bad) return { ok: false, reason: bad };
@@ -3187,8 +3252,10 @@ export function expose(state, pid, target) {
   const delta = Math.max(1, Math.round(raw * o.exposeWitnessShare));
   adjustMenace(state, attacker, delta, `exposed:${pid}`);
   recordGrievance(state, victim, attacker, "surprise-attack", { at: hex });
-  emit(state, "op_expose", { by: pid, target: attacker, victim, hex, menace: delta });
-  return { ok: true, target: attacker, victim, menace: delta };
+  emit(state, "op_expose", {
+    by: pid, target: attacker, victim, hex, menace: delta, apparatus: e.apparatus,
+  });
+  return { ok: true, target: attacker, victim, menace: delta, apparatus: e.apparatus };
 }
 
 // FORGE — plant evidence that they wronged SOMEBODY ELSE. A lie, so it can be
@@ -4253,6 +4320,8 @@ registerPostureReaders({
   factionIds, atWar, arePacted, vassalLord, coalitionAgainst, mayCourt,
   // §9 — why a board may rise, and how badly one faction wants in.
   coalitionGrounds, coalitionJoinScore,
+  // §12.3 — how an op learned what it publishes.
+  exposureApparatus,
   getStanding, adjustStanding, passesRepGates, grievanceWeight,
   tradingPactBetween, unitsInTerritory,
 });

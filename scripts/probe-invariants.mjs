@@ -165,6 +165,14 @@ const USED = { counter: 0, position: 0, withdraw: 0, expose: 0, forge: 0, fabric
 function playerTurn(state, pid) {
   const others = factionIds(state).filter((f) => f !== pid && state.players[f] && !state.players[f].eliminated);
 
+  // §12.3 — Expose is gated on the Intelligence branch now, so a probe whose
+  // job is to hammer every player verb has to hold the apparatus. Granted
+  // rather than earned: this probe is testing what the verbs DO to a game, not
+  // whether a tech wheel can be filled, and without it the Expose arm silently
+  // stopped being exercised at all (which is exactly what the gate caught).
+  const wheel = state.players[pid].techWheel || (state.players[pid].techWheel = []);
+  if (!wheel.includes("int-b1")) wheel.push("int-entry", "int-b1");
+
   // COUNTER every offer on the table, always haggling for a better price. A
   // counter is an ASK, so if the pestering budget is not charging for it this
   // is where a player farms free negotiation.
@@ -188,16 +196,25 @@ function playerTurn(state, pid) {
   // LIE AND PUBLISH whenever the pool allows. Fabricate is the one that buys a
   // war, so it is the one worth cycling: fabricate, let it lapse, fabricate
   // again is a free casus belli generator if the window is not doing its job.
-  if (swayOf(state, pid) >= CONFIG.sway.opCost) {
-    const pub = others.find((f) => exposableStrikes(state, f).length);
-    if (pub && performDiplomacy(state, pid, "expose", { faction: pub }).ok) USED.expose += 1;
-  }
-  if (swayOf(state, pid) >= CONFIG.sway.opCost && others.length >= 2) {
-    if (performDiplomacy(state, pid, "forge", { faction: others[0], against: others[1] }).ok) USED.forge += 1;
-  }
-  if (swayOf(state, pid) >= CONFIG.sway.opCost) {
-    const t = others.find((f) => !atWar(state, pid, f));
-    if (t && performDiplomacy(state, pid, "fabricate", { faction: t }).ok) USED.fabricate += 1;
+  // LIE AND PUBLISH whenever the pool allows — ROTATING which op goes first.
+  //
+  // The first draft tried them in a fixed order and each costs the same 20
+  // Sway, so the last one in the list never saw a pool and silently stopped
+  // being exercised. A probe whose job is to reach every verb cannot have a
+  // starvation order; the gate caught it, which is the gate working.
+  const order = [["expose"], ["forge"], ["fabricate"]];
+  const rotated = order.slice(state.round % 3).concat(order.slice(0, state.round % 3));
+  for (const [op] of rotated) {
+    if (swayOf(state, pid) < CONFIG.sway.opCost) break;
+    if (op === "expose") {
+      const pub = others.find((f) => exposableStrikes(state, f, pid).length);
+      if (pub && performDiplomacy(state, pid, "expose", { faction: pub }).ok) USED.expose += 1;
+    } else if (op === "forge" && others.length >= 2) {
+      if (performDiplomacy(state, pid, "forge", { faction: others[0], against: others[1] }).ok) USED.forge += 1;
+    } else if (op === "fabricate") {
+      const t = others.find((f) => !atWar(state, pid, f));
+      if (t && performDiplomacy(state, pid, "fabricate", { faction: t }).ok) USED.fabricate += 1;
+    }
   }
 
   // HIRE — pay somebody into a war of ours. The engine enacts `joinWar` by

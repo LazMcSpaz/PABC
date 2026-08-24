@@ -671,6 +671,26 @@ export const CONFIG = {
       // An unwitnessed strike stays exposable this long. Beyond it the board
       // has moved on and the op would be archaeology, not news.
       exposeWindowRounds: 6,
+      // …AND YOU HAVE TO HAVE FOUND OUT SOMEHOW.
+      //
+      // The first draft of Expose read `attack_unwitnessed` straight out of the
+      // log with no visibility check at all, so any faction anywhere could
+      // publish a strike that BY DEFINITION nobody witnessed. That is the only
+      // place in the diplomacy layer where fog did not apply, and it was in the
+      // one verb whose entire subject is a thing nobody saw.
+      //
+      // Three ways to have learned of it, and they are the Intelligence branch
+      // top to bottom — which is the point. Until now the tech wheel's
+      // espionage half (Spy Ring, Saboteurs, Listening Posts) and the diplomacy
+      // layer's espionage half (Expose, Forge, Fabricate) were two systems with
+      // the same theme that never touched:
+      //
+      //   int-b1 Spy Ring   a standing network — hears about it wherever it was
+      //   a Listening Post  local ears, within `posts.range` of the hex
+      //   int-a1 + sight    your scouts can see the place now and piece it together
+      //
+      // 0 restores the omniscient reading, and the harness pins both halves.
+      exposeNeedsApparatus: 1,
       // Expose is TRUE, so it charges the Menace the strike escaped at full
       // public rate — that is the whole point, and it is why Expose is the one
       // op that cannot rebound on the caster.

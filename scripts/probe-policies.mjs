@@ -175,9 +175,9 @@ function spendPolitically(state, pid) {
     }
     // 2. Run an op if there is a true one to publish.
     if (free >= cfg.opCost) {
-      const target = others.find((f) => exposableStrikes(state, f).length);
+      const target = others.find((f) => exposableStrikes(state, f, pid).length);
       if (target && performDiplomacy(state, pid, "expose", { faction: target }).ok) { spent = true; continue; }
-    } else if (others.some((f) => exposableStrikes(state, f).length)) {
+    } else if (others.some((f) => exposableStrikes(state, f, pid).length)) {
       REFUSALS.op += 1; REFUSALS.wanted += 1;
     }
     // 3. Gift the surplus at whoever is nearest the pact bar, keeping a full

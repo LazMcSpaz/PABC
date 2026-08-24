@@ -21,7 +21,7 @@ import {
 import { recruitCapBonus } from "../game/actions.js";
 import { blockadeAt, blockadesOn, supplyStatus, blockadeSlotsUsed, blockadeIncome } from "../game/blockades.js";
 import { supplyCutter } from "../game/movement.js";
-import { postAt, isPostVisibleTo } from "../game/posts.js";
+import { postAt, isPostVisibleTo, ownedPosts } from "../game/posts.js";
 import { isUnitVisibleTo } from "../game/visibility.js";
 import { factionDef } from "../game/content.js";
 import {
@@ -41,7 +41,7 @@ import {
   // §5/§6 — posture and political capacity.
   postureOf, conditionText, isCourting, mayBeginCourtship, courtingList,
   positionsOf, positionText, positionKinds, citablePositions, positionBlocker,
-  opsEnabled, exposableStrikes, lieDetectionChance,
+  opsEnabled, exposableStrikes, lieDetectionChance, exposureApparatus,
   swayIncome, swayOf, swayLedger, canSustainCourtship,
 } from "../game/diplomacy.js";
 import { hasTechNode } from "../game/tech.js";
@@ -1159,16 +1159,29 @@ function adaptDiplomacy(state, viewer) {
       const cost = CONFIG.sway.opCost;
       const caught = lieDetectionChance(state, viewer);
       const o = CONFIG.sway.ops;
+      // Do you have ANY way of learning what happens quietly? The card says so
+      // once, at the top, rather than leaving the player to infer it from a row
+      // of greyed-out names.
+      const apparatus = exposureApparatus(state, viewer, null)
+        || (ownedPosts(state, viewer).some((p) => !p.dormant) ? "listening-post" : null)
+        || (hasTechNode(state, viewer, "int-a1") ? "scouts" : null);
       return {
         cost,
         affordable: swayOf(state, viewer) >= cost,
+        // null means blind: no Spy Ring, no live post, no detection.
+        apparatus,
+        apparatusText: apparatus === "spy-ring" ? "Your Spy Ring hears what happens quietly."
+          : apparatus === "listening-post" ? "Your listening posts hear what happens in earshot."
+          : apparatus === "scouts" ? "Your scouts can piece together what they can see."
+          : "You have no way of learning what anyone does quietly — Intelligence B1, "
+            + "a listening post, or Intelligence A1 with eyes on the place.",
         // Rounded for display only; the engine rolls the exact number.
         caughtPercent: Math.round(caught * 100),
         caughtHonorLoss: o.caughtHonorLoss,
         caughtMenace: o.caughtMenace,
         lastsRounds: o.lieDecaysAfterRounds,
         targets: factionIds(state).filter((f) => f !== viewer && state.players[f]).map((f) => {
-          const strikes = exposableStrikes(state, f);
+          const strikes = exposableStrikes(state, f, viewer);
           return {
             id: f,
             name: factionDef(f)?.name || f,
@@ -1178,6 +1191,11 @@ function adaptDiplomacy(state, viewer) {
             exposeAgainst: strikes[0]?.payload?.victim
               ? (factionDef(strikes[0].payload.victim)?.name || strikes[0].payload.victim)
               : null,
+            // WHICH EAR HEARD IT. Not decoration: the whole point of gating
+            // Expose on the Intelligence branch is that the branch becomes
+            // visibly worth taking, and a player who is never told their Spy
+            // Ring is what made this possible has not learned that.
+            exposeVia: strikes[0]?.apparatus || null,
             canFabricate: grievanceWeight(state, viewer, f) === 0,
             fabricateWhy: grievanceWeight(state, viewer, f) > 0
               ? "you already have something real to hold against them" : null,

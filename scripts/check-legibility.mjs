@@ -357,11 +357,27 @@ const mk = () => createGame({
     emit(g, "attack_unwitnessed", { attacker: them, victim: "goldgrass", hex: null });
     const a2 = adaptState(g, "versari").diplomacy;
     const t2 = a2.intrigue.targets.find((t) => t.id === them);
-    check("44. …and appears the moment there is something true to publish",
-      t2.canExpose === true && !!t2.exposeAgainst);
+    // The strike really happened — the event is in the log — and it is STILL
+    // invisible, because §12.3 now asks how you would have heard about it.
+    check("44. …and a real strike stays invisible without ears",
+      g.log.some((e) => e.name === "attack_unwitnessed" && e.payload.attacker === them)
+      && t2.canExpose === false);
+    // §12.3 — Expose is gated on the Intelligence branch, so the card has to
+    // say whether you have ears at all. Without that, a player with no
+    // apparatus sees a row of greyed names and no reason why.
+    check("45. …and the card says whether you can hear anything at all",
+      a2.intrigue.apparatus === null && /no way of learning/.test(a2.intrigue.apparatusText),
+      `apparatus ${a2.intrigue.apparatus}`);
+    check("46. …so with no apparatus, nothing is exposable",
+      t2.canExpose === false);
+    g.players.versari.techWheel = ["int-entry", "int-b1"];
+    const a3 = adaptState(g, "versari").diplomacy;
+    const t3 = a3.intrigue.targets.find((t) => t.id === them);
+    check("47. …and a Spy Ring both opens it and says it was the Spy Ring",
+      a3.intrigue.apparatus === "spy-ring" && t3.canExpose && t3.exposeVia === "spy-ring");
     const res = performDiplomacy(g, "versari", "expose", { faction: them });
-    check("45. …and the verb the button calls actually runs", res.ok, res.reason);
-    check("46. …and it charges the Sway the card quoted",
+    check("48. …and the verb the button calls actually runs", res.ok, res.reason);
+    check("49. …and it charges the Sway the card quoted",
       g.players.versari.sway === 500 - CONFIG.sway.opCost);
   }
 }
@@ -379,10 +395,10 @@ const mk = () => createGame({
   declareWar(g, "versari", "lakers", "test");
   const a = adaptState(g, "versari").diplomacy;
   const gg = a.factions.find((x) => x.id === "goldgrass");
-  check("47. a third party you could hire against your enemy is offered",
+  check("50. a third party you could hire against your enemy is offered",
     (gg?.couldHireAgainst || []).some((t) => t.id === "lakers"),
     JSON.stringify(gg?.couldHireAgainst));
-  check("48. …and the mirror — a war of theirs you could join — is offered too", (() => {
+  check("51. …and the mirror — a war of theirs you could join — is offered too", (() => {
     const g2 = mk(); startTurn(g2); ensureDiplomacy(g2);
     declareWar(g2, "goldgrass", "plainers", "test");
     const a2 = adaptState(g2, "versari").diplomacy;
@@ -397,7 +413,7 @@ const mk = () => createGame({
   formPact(g3, "goldgrass", "lakers", "test");
   const a3 = adaptState(g3, "versari").diplomacy;
   const gg3 = a3.factions.find((x) => x.id === "goldgrass");
-  check("49. …and never against somebody they are allied to",
+  check("52. …and never against somebody they are allied to",
     !(gg3?.couldHireAgainst || []).some((t) => t.id === "lakers"));
   // The term the composer emits is the one the engine enacts.
   const res = performDiplomacy(g, "versari", "propose-deal", {
@@ -405,7 +421,7 @@ const mk = () => createGame({
     give: [{ resource: { resource: "scrap", amount: 40 } }],
     get: [{ promise: { kind: "joinWar", target: "lakers" } }],
   });
-  check("50. …and a hire the engine accepts opens the war it names",
+  check("53. …and a hire the engine accepts opens the war it names",
     !res.accepted || atWarEngine(g, "goldgrass", "lakers"),
     `accepted ${res.accepted}, at war ${atWarEngine(g, "goldgrass", "lakers")}`);
 }

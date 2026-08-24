@@ -4534,7 +4534,27 @@ line("\n  [§12.3] what Sway buys when the courtships are paid for");
   // nothing because nobody saw it. `menaceFromAttack` emits it; the op does
   // not keep a second ledger of the same fact.
   emit(g, "attack_unwitnessed", { attacker: them, victim: third, hex: null });
-  check("an unwitnessed strike is exposable", exposableStrikes(g, them).length === 1);
+
+  // …AND YOU HAVE TO HAVE FOUND OUT SOMEHOW. The first draft read the log
+  // omnisciently, so any faction anywhere could publish a strike that by
+  // definition nobody witnessed — the one place in the diplomacy layer where
+  // fog did not apply, in the one verb whose whole subject is a thing nobody
+  // saw. The apparatus is the Intelligence branch, which until now had no
+  // contact with the intrigue verbs at all.
+  check("with no intelligence apparatus, there is nothing you can publish",
+    exposableStrikes(g, them, me).length === 0);
+  const blind = performDiplomacy(g, me, "expose", { faction: them });
+  check("…and the refusal says WHICH wall you hit",
+    !blind.ok && /no way of knowing/.test(blind.reason || ""), blind.reason);
+  check("…and it costs nothing to be told", g.players[me].sway === 500);
+
+  // Spy Ring: a standing network. Set directly, as the surrounding fixtures do
+  // — this is about what the node BUYS, not about earning it.
+  g.players[me].techWheel = ["int-entry", "int-b1"];
+  check("a Spy Ring hears about it wherever it happened",
+    exposableStrikes(g, them, me).length === 1);
+  check("…and says so", exposableStrikes(g, them, me)[0].apparatus === "spy-ring");
+  check("an unwitnessed strike is exposable", exposableStrikes(g, them, me).length === 1);
   const m0 = menaceOf(g, them), h0 = honorOf(g, me);
   const res = performDiplomacy(g, me, "expose", { faction: them });
   check("…and publishing it works", res.ok);
@@ -4544,8 +4564,65 @@ line("\n  [§12.3] what Sway buys when the courtships are paid for");
   check("…the truth costs the teller no Honor", honorOf(g, me) === h0);
   check("…and it costs Sway", g.players[me].sway === 500 - CONFIG.sway.opCost);
   check("…and the same strike cannot be sold twice",
-    exposableStrikes(g, them).length === 0
+    exposableStrikes(g, them, me).length === 0
     && !performDiplomacy(g, me, "expose", { faction: them }).ok);
+
+  // You are never a source on your own business — you were there.
+  const g2 = createGame({ seed }); ensureDiplomacy(g2);
+  g2.players[me].sway = 500;
+  g2.players[me].techWheel = ["int-entry", "int-b1"];
+  emit(g2, "attack_unwitnessed", { attacker: me, victim: them, hex: null });
+  emit(g2, "attack_unwitnessed", { attacker: them, victim: me, hex: null });
+  check("you cannot publish your own quiet strike",
+    exposableStrikes(g2, me, me).length === 0);
+  check("…nor one against you, which you did not need telling about",
+    exposableStrikes(g2, them, me).length === 0);
+
+  // The other two doors, because a gate only one node opens is that node's
+  // gate rather than the branch's. A Listening Post is the A-path payoff: it
+  // has carried an upkeep, a concealment model, a Strength and a destruction
+  // path since it shipped, and the only reason to build one was map vision.
+  {
+    const gp = createGame({ seed }); ensureDiplomacy(gp);
+    gp.players[me].sway = 500;
+    const hex = Object.keys(gp.board.hexes)[0];
+    const near = (gp.board.adjacency[hex] || [])[0];
+    emit(gp, "attack_unwitnessed", { attacker: them, victim: third, hex });
+    check("no post, no ears", exposableStrikes(gp, them, me).length === 0);
+    gp.world.listeningPosts = gp.world.listeningPosts || {};
+    gp.world.listeningPosts[near] = { hex: near, owner: me, strength: 5, revealedTo: [] };
+    check("a Listening Post in earshot hears it",
+      exposableStrikes(gp, them, me)[0]?.apparatus === "listening-post");
+    // …and an unpaid one hears nothing, which is what dormancy MEANS.
+    gp.world.listeningPosts[near].dormant = true;
+    check("…and a dormant post hears nothing", exposableStrikes(gp, them, me).length === 0);
+  }
+  {
+    // Scouts: int-a1 plus eyes on the place now.
+    const gs = createGame({ seed }); ensureDiplomacy(gs);
+    gs.players[me].sway = 500;
+    const hex = Object.keys(gs.board.hexes)[0];
+    emit(gs, "attack_unwitnessed", { attacker: them, victim: third, hex });
+    gs.players[me].techWheel = ["int-entry", "int-a1"];
+    gs.visibility = gs.visibility || {};
+    gs.visibility[me] = { visible: new Set(), explored: new Set() };
+    check("Intelligence A1 alone, with the place out of sight, learns nothing",
+      exposableStrikes(gs, them, me).length === 0);
+    gs.visibility[me].visible.add(hex);
+    check("…and with eyes on it, the scouts piece it together",
+      exposableStrikes(gs, them, me)[0]?.apparatus === "scouts");
+  }
+
+  // The no-op, per the plan's rule 1.4.
+  const O = CONFIG.sway.ops;
+  const wasNeed = O.exposeNeedsApparatus;
+  try {
+    O.exposeNeedsApparatus = 0;
+    const g3 = createGame({ seed }); ensureDiplomacy(g3);
+    emit(g3, "attack_unwitnessed", { attacker: them, victim: third, hex: null });
+    check("exposeNeedsApparatus 0 restores the omniscient reading",
+      exposableStrikes(g3, them, me).length === 1);
+  } finally { O.exposeNeedsApparatus = wasNeed; }
 }
 {
   // A lie is seen through on a roll against the LIAR's Honor. High Honor is

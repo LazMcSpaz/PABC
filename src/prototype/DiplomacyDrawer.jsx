@@ -688,6 +688,15 @@ function UltimatumCard({ u, dip, onAction }) {
 // TRUE and cannot rebound; Forge and Fabricate are lies and can be seen
 // through. A lie whose chance of being caught the player cannot read is a coin
 // flip, not a decision — so the percentage is on the button.
+// Which ear heard it. Named on the row, because "you can expose this" is a
+// button and "your Spy Ring heard about it" is a reason to have built one.
+const VIA = {
+  "spy-ring": "your Spy Ring heard",
+  "listening-post": "a listening post caught it",
+  scouts: "your scouts pieced it together",
+  omniscient: "word got around",
+};
+
 function IntrigueCard({ intrigue, factions, onAction }) {
   const [mode, setMode] = useState(null); // null | "expose" | "forge" | "fabricate"
   const [forgeAgainst, setForgeAgainst] = useState(null);
@@ -737,6 +746,18 @@ function IntrigueCard({ intrigue, factions, onAction }) {
         Sway buys what the board <i>believes</i>. Each of these costs{" "}
         <b style={{ color: affordable ? C.holoHi : "#ffb4ae" }}>{cost} Sway</b>.
       </div>
+      {/* §12.3 — WHAT YOUR EARS ARE. Expose publishes a strike nobody saw, so
+          the first question is how you would know about it, and the answer is
+          the Intelligence branch. Said once at the top rather than left to be
+          inferred from a row of greyed-out names. */}
+      <div className="pc-prose" style={{
+        fontSize: 11.5, lineHeight: 1.45, marginBottom: 7, padding: "5px 8px",
+        borderRadius: 3, border: `1px solid ${intrigue.apparatus ? "rgba(168,120,200,0.3)" : "rgba(210,69,63,0.35)"}`,
+        background: intrigue.apparatus ? "rgba(168,120,200,0.06)" : "rgba(210,69,63,0.06)",
+        color: intrigue.apparatus ? "#f4efe2" : "#ffb4ae",
+      }}>
+        {intrigue.apparatusText}
+      </div>
       <div style={{ display: "flex", gap: 5, marginBottom: 7 }}>
         {pill("Expose", mode === "expose", () => setMode(mode === "expose" ? null : "expose"),
           !affordable, "Publish a strike they got away with. True, so it cannot rebound on you.")}
@@ -749,7 +770,10 @@ function IntrigueCard({ intrigue, factions, onAction }) {
         <div>
           <div style={{ ...dim, marginBottom: 5 }}>THE TRUTH COSTS YOU NOTHING BUT THE SWAY.</div>
           {targets.map((t) => row(t, "expose", t.canExpose,
-            t.canExpose ? `struck ${t.exposeAgainst} unseen` : "nothing the board has not seen",
+            t.canExpose
+              ? `struck ${t.exposeAgainst} unseen — ${VIA[t.exposeVia] || "you heard"}`
+              : intrigue.apparatus ? "nothing you have heard of"
+                : "you have no way of knowing",
             () => { setMode(null); onAction("expose", { faction: t.id }); }))}
         </div>
       )}

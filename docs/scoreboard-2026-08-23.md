@@ -1033,3 +1033,63 @@ is the larger one.
 | Ending mix | 6 (40%) | 17 (38%) | ≥ 73% |
 | Median rounds | 54 | 52 | 58–66 |
 | Games unresolved | 4 (27%) | 13 (29%) | 0 |
+
+---
+
+## Expose needs ears: wiring the Intelligence branch to the intrigue verbs
+
+**The bug.** `exposableStrikes` read `attack_unwitnessed` straight out of the
+log with no visibility check, so any faction anywhere — with no intelligence
+apparatus, on the far side of the map — could publish a strike that *by
+definition nobody witnessed*. That was the only place in the diplomacy layer
+where fog did not apply, and it was in the one verb whose entire subject is a
+thing nobody saw.
+
+**The synergy.** The tech wheel has an espionage branch (Spy Ring, Saboteurs,
+Listening Posts) and §12.3 has an espionage layer (Expose, Forge, Fabricate),
+and the two never touched. Fixing the fog hole is the same move as connecting
+them: **you can only publish what your apparatus could have learned.**
+
+| how you found out | node |
+|---|---|
+| `spy-ring` — a standing network, hears about it wherever it happened | `int-b1` |
+| `listening-post` — local ears, within `posts.range`, and a **dormant post hears nothing** | `int-a2` builds them |
+| `scouts` — eyes on the place now, plus detection | `int-a1` |
+
+Two guards worth naming: you can never publish **your own** quiet strike, nor
+one **against you** — you were there, and neither needed telling. And
+`exposeNeedsApparatus: 0` restores the omniscient reading, with the harness
+pinning both halves.
+
+**It makes the branch load-bearing.** `int-b1` revealed two static numbers and
+did nothing else; it is now the door to a whole verb. Measured across five
+games, **every op the AI runs is a spy-ring op — 8 of 8** — so the AI's
+valuation was repriced to match (`+1` while `ai.intrigue` and `ops.enabled` are
+both on). And Listening Posts, which have carried an upkeep, a concealment
+model, a Strength and a destruction path since they shipped with map vision as
+their only purpose, now catch what happens in earshot — which is what a
+listening post is *for*.
+
+**And it made the game better, not just more correct.** The gate cuts the AI's
+op rate by 76% — it only exposes what it has genuinely earned — and every
+governing number improved (n=45):
+
+| | intrigue on, no gate | + apparatus gate | + Spy Ring repriced |
+|---|---|---|---|
+| **Ending mix** | 17 | 19 | **20** |
+| Median rounds | 52 | 49.5 | **49** |
+| **Games unresolved** | 13 | 13 | **12** |
+| Intrigue ops per game | 7.18 | 1.73 | 1.73 |
+
+Both are the best readings the project has produced at n=45. Intrigue on
+against off is now 20 / 49 / 12 versus 16 / 46 / 15 — a wider margin than the
+one that justified switching it on.
+
+**Two probe flaws the gates caught**, both worth recording because they are the
+same mistake in different clothes — a test that quietly stops testing:
+
+- The invariant probe's player had no apparatus, so its Expose arm silently
+  went dead. A player who wants to Expose takes the node; the probe now does.
+- The probe tried the three ops in a **fixed order**, each costing the same 20
+  Sway, so the last one never saw a pool. `fabricate` had been firing twice per
+  ten games and then zero. The order now rotates by round.
