@@ -22,6 +22,7 @@ import { recruitCapBonus } from "../game/actions.js";
 import { blockadeAt, blockadesOn, supplyStatus, blockadeSlotsUsed, blockadeIncome } from "../game/blockades.js";
 import { supplyCutter } from "../game/movement.js";
 import { postAt, isPostVisibleTo, ownedPosts } from "../game/posts.js";
+import { readRivalIntel } from "../game/intel.js";
 import { isUnitVisibleTo } from "../game/visibility.js";
 import { factionDef } from "../game/content.js";
 import {
@@ -926,6 +927,25 @@ function adaptDiplomacy(state, viewer) {
       thirdParty: spyRing ? thirdPartySummary(state, f, viewer) : null,
       // Their tech-wheel — also gated by Spy Ring.
       theirTechWheel: spyRing ? (state.players[f]?.techWheel || []) : null,
+      // §17.5 B1 — and the POLITICAL layer, which a Spy Ring holder could not
+      // see at all until now: it read tolerance and trustFloor, both quantities
+      // that predate the diplomacy rework. Under Dominion, knowing what a
+      // faction wants is knowing how to ally it, so their derived wants are
+      // the highest-value thing espionage can tell you.
+      theirIntel: spyRing ? (() => {
+        const r = readRivalIntel(state, viewer, f);
+        if (!r) return null;
+        return {
+          interests: r.interests.map((w) => ({
+            kind: w.kind,
+            subject: w.subject,
+            subjectName: w.subject ? (factionDef(w.subject)?.name || w.subject) : null,
+            weight: w.weight,
+          })),
+          positions: r.positions,
+          sway: r.sway,
+        };
+      })() : null,
       // Available verbs against this faction, with reasons + outcome hints.
       verbs: availableVerbsAgainst(state, viewer, f),
       // Inbox + capital (for map binding).

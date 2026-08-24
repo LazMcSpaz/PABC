@@ -1040,6 +1040,13 @@ export function LocationWindow({ view, onClose, onActivate, onContest, onRecruit
             <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 6 }}>
               <p className="pc-prose" style={{ margin: 0, fontSize: 12.5, lineHeight: 1.5, color: C.textDim, flex: 1 }}>
                 Work against {v.sabotage.targetName} from the inside — {v.sabotage.effect}.
+                {v.sabotage.caughtPercent > 0 && (
+                  <span style={{ color: "#d2913c" }}>
+                    {" "}Traced {v.sabotage.caughtPercent}% of the time
+                    {" "}(−{v.sabotage.caughtHonorLoss} Honor, +{v.sabotage.caughtMenace} Menace,
+                    {" "}and they hold it against you).
+                  </span>
+                )}
                 Costs no Action and no scrap; your saboteurs can only be in one
                 place a round.
                 {v.sabotage.reason && (

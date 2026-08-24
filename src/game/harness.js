@@ -41,6 +41,7 @@ import {
   declarePosition, withdrawPosition, positionsOf, positionHeld, citablePositions, positionText, menaceOf,
   // §12.3 the intrigue branch
   expose, forge, fabricate, exposableStrikes, lieDetectionChance, sweepForgeries, opsEnabled,
+  covertDetection, counterIntelligence, sabotageCaught,
   // the one win condition
   dominionStanding, dominionMet, checkDominion, dominionCountdown, releaseVassal, aiAcceptsPact,
   // §3.2 Locations as deal items — ceding ground
@@ -4625,18 +4626,92 @@ line("\n  [§12.3] what Sway buys when the courtships are paid for");
   } finally { O.exposeNeedsApparatus = wasNeed; }
 }
 {
-  // A lie is seen through on a roll against the LIAR's Honor. High Honor is
-  // cover — the interesting reason to keep it, and to spend it.
+  // A covert act is seen through on a roll with TWO sides. The caster's Honor
+  // is cover — the interesting reason to keep it, and to spend it.
   const g = createGame({ seed }); ensureDiplomacy(g);
-  const me = "versari";
+  const me = "versari", them = "lakers";
   g.players[me].honor = 0;
-  const dishonest = lieDetectionChance(g, me);
+  const dishonest = covertDetection(g, me, null);
   g.players[me].honor = 12;
-  check("a spotless name is cover for a lie", lieDetectionChance(g, me) < dishonest);
+  check("a spotless name is cover for a lie", covertDetection(g, me, null) < dishonest);
   const o = CONFIG.sway.ops;
   check("…within bounds either way",
-    lieDetectionChance(g, me) >= o.lieDetectionMin
+    covertDetection(g, me, null) >= o.lieDetectionMin
     && dishonest <= o.lieDetectionMax);
+
+  // …and the VICTIM's apparatus is the counter. This half was missing, and its
+  // absence made `int-b1` — a node called SPY RING — do nothing whatever to
+  // help its holder catch somebody lying about them.
+  check("a faction with nothing counts for nothing", counterIntelligence(g, them) === 0);
+  const bare = covertDetection(g, me, them);
+  g.players[them].techWheel = ["int-entry", "int-b1"];
+  check("a Spy Ring makes you harder to lie about", covertDetection(g, me, them) > bare);
+  check("…and it is the Spy Ring doing it, not the roll drifting",
+    counterIntelligence(g, them) === o.counterSpyRing);
+  const g2 = createGame({ seed }); ensureDiplomacy(g2);
+  g2.world.listeningPosts = {};
+  for (const hex of Object.keys(g2.board.hexes).slice(0, 12)) {
+    g2.world.listeningPosts[hex] = { hex, owner: them, strength: 5, revealedTo: [] };
+  }
+  check("…and a wall of listening posts is capped, not cumulative",
+    counterIntelligence(g2, them) === o.counterPostCap);
+}
+{
+  // SABOTAGE IS A COVERT ACT TOO, and it was the only one in the game with no
+  // risk at all: Forge and Fabricate roll against Honor and backfire hard,
+  // while Saboteurs lowered a rival's Loyalty for free, anonymously, with no
+  // Menace and no grievance. The diplomatic lie risked everything and the
+  // physical one risked nothing.
+  const o = CONFIG.sway.ops;
+  const was = [o.lieBaseDetection, o.lieDetectionMin, o.lieDetectionMax];
+  const me = "versari", them = "lakers";
+  try {
+    o.lieBaseDetection = 1; o.lieDetectionMin = 1; o.lieDetectionMax = 1;
+    const g = createGame({ seed }); ensureDiplomacy(g);
+    const h0 = honorOf(g, me), m0 = menaceOf(g, me);
+    check("a saboteur can be traced", sabotageCaught(g, me, them) === true);
+    check("…and it costs Honor, but less than a forgery does",
+      honorOf(g, me) === h0 - o.sabotageCaughtHonorLoss
+      && o.sabotageCaughtHonorLoss < o.caughtHonorLoss);
+    check("…and Menace", menaceOf(g, me) === m0 + o.sabotageCaughtMenace);
+    check("…and the victim holds it against them, by name",
+      grievancesAgainst(g, them, me).length > 0);
+
+    o.lieBaseDetection = 0; o.lieDetectionMin = 0; o.lieDetectionMax = 0;
+    const g3 = createGame({ seed }); ensureDiplomacy(g3);
+    const h1 = honorOf(g3, me);
+    check("…and an unseen saboteur pays nothing",
+      sabotageCaught(g3, me, them) === false && honorOf(g3, me) === h1);
+  } finally {
+    [o.lieBaseDetection, o.lieDetectionMin, o.lieDetectionMax] = was;
+  }
+  const wasCatch = o.sabotageCanBeCaught;
+  try {
+    o.sabotageCanBeCaught = 0;
+    const g4 = createGame({ seed }); ensureDiplomacy(g4);
+    check("sabotageCanBeCaught 0 restores the free, anonymous sabotage",
+      sabotageCaught(g4, me, them) === false);
+  } finally { o.sabotageCanBeCaught = wasCatch; }
+}
+{
+  // §17.5 B1 — a Spy Ring reads the POLITICAL layer now, not just two numbers
+  // that both predate the diplomacy rework.
+  const g = createGame({ seed }); ensureDiplomacy(g);
+  const me = "versari", them = "lakers";
+  check("without a Spy Ring you learn nothing", readRivalIntel(g, me, them) === null);
+  g.players[me].techWheel = ["int-entry", "int-b1"];
+  const r = readRivalIntel(g, me, them);
+  check("with one, you learn what they are AFTER", Array.isArray(r.interests));
+  check("…and what they can afford to do about it",
+    typeof r.sway.pool === "number" && typeof r.sway.income === "number");
+  performDiplomacy(g, them, "declare-position", { kind: "noVassals" });
+  const r2 = readRivalIntel(g, me, them);
+  check("…and what they have sworn in public",
+    r2.positions.some((p) => p.kind === "noVassals"));
+  check("…in words", /vassal/i.test(r2.positions[0].text));
+  r.techWheel.push("__probe");
+  check("…and the report is a copy, not a handle on the engine",
+    !g.players[them].techWheel.includes("__probe"));
 }
 {
   // Forge, forced to succeed and forced to fail, so both halves are pinned.

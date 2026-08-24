@@ -1093,3 +1093,77 @@ same mistake in different clothes — a test that quietly stops testing:
 - The probe tried the three ops in a **fixed order**, each costing the same 20
   Sway, so the last one never saw a pool. `fabricate` had been firing twice per
   ten games and then zero. The order now rotates by round.
+
+---
+
+## The Intelligence branch, both directions
+
+Two changes finishing the connection between the tech wheel's espionage branch
+and the diplomacy layer's.
+
+### Covert acts are symmetric now
+
+The two halves were backwards. Forge and Fabricate rolled against the caster's
+Honor and backfired hard when caught. **Sabotage — the physical covert act —
+had no roll, no Menace, no grievance, and did not even name the attacker.** The
+diplomatic lie risked everything; the raid risked nothing.
+
+And the roll had only one side: the caster's Honor as cover. The victim's
+counter-intelligence contributed nothing, so **`int-b1` — a node called Spy
+Ring — did nothing whatever to help its holder catch somebody lying about
+them.**
+
+One reader now serves every covert act in the game:
+
+```
+covertDetection(caster, victim)
+  = base
+  + perHonor × caster's Honor        cover: a spotless name is hard to disbelieve
+  + counterIntelligence(victim)      the counter: b1 0.25, a1 0.10,
+                                     posts 0.05 each capped at 0.15
+```
+
+Two implementations of "were you caught" is exactly how the halves drifted
+apart, so sabotage goes through the same roll rather than getting its own.
+Being traced costs 3 Honor against a forgery's 7 — *a raid is an act of war,
+not a lie about somebody's character* — plus Menace and a grievance the victim
+holds **by name**. `sabotageCanBeCaught: 0` restores the free, anonymous
+version.
+
+For a lie, the counter-intelligence that matters is the party being **framed**,
+not the party being told: they have both the motive and the apparatus to
+produce the counter-evidence.
+
+### Spy Ring reads the political layer
+
+It revealed a tech wheel and a Standing row — both quantities that predate the
+whole rework. A holder could not see a single thing the last six phases added.
+It now also reads the rival's **derived interests**, their **declared
+positions**, and their **Sway pool, income and courtship count**.
+
+Under Dominion, knowing what a faction wants is knowing how to ally it, so
+`interests` is the highest-value reveal in the game. Deliberately the *derived
+wants* rather than the ledgers behind them — espionage tells you what somebody
+is after, not their internal arithmetic. `intel.js` stays a leaf module and
+gets its readers registered by `diplomacy.js`, so no cycle runs through the
+middle of the political layer.
+
+### Measured (n=45)
+
+| | before | after |
+|---|---|---|
+| Ending mix | 20 | 19 |
+| Median rounds | 49 | 49 |
+| **Games unresolved** | 12 | **11** |
+| Diplomacy endings | 8 | **10** |
+| Covert acts seen through | 0 | **2.16** |
+
+Unresolved 11 is the best reading the project has produced. The 2.16 are all
+**traced saboteurs** — the AI runs no lies, so every one is `int-b2` paying a
+price it never paid before. The suite metric was renamed from
+`intrigueOpsBackfired` to `covertActsSeenThrough` plus `sabotageTracedPerGame`,
+because a name that still said "intrigue ops" would have quietly mis-attributed
+sabotage to the branch it started in.
+
+Ending mix down one is inside the noise established earlier in this document;
+diplomacy endings up two is the same board read from the other side.

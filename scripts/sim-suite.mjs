@@ -210,7 +210,12 @@ function summarise(g, { aiTurns, snapshot, seed }) {
   const courtOpened = evName(g, "posture_changed").filter((e) => e.payload.to === "Courting").length;
   const opsRun = evName(g, "op_expose").length + evName(g, "op_forge").length
     + evName(g, "op_fabricate").length;
+  // `op_backfired` covers every covert act that was seen through, which since
+  // §17.5 includes SABOTAGE — the AI runs no lies, so anything counted here is
+  // a saboteur being traced. Named for what it measures rather than for the
+  // branch it started in.
   const opsBackfired = evName(g, "op_backfired").length;
+  const sabotageTraced = evName(g, "sabotage_traced").length;
 
   // --- minors: allied or vassalised RATHER THAN killed. The brief's row.
   //
@@ -268,7 +273,7 @@ function summarise(g, { aiTurns, snapshot, seed }) {
     denounceShare: acts ? denouncements / acts : 0,
     wars: wars.length,
     surpriseOpenings: surprises,
-    opsRun, opsBackfired, courtOpened,
+    opsRun, opsBackfired, sabotageTraced, courtOpened,
     coalitions: evName(g, "coalition_formed").length,
     minors: {
       allied: minorsAllied, vassal: minorsVassal, dead: minorsDead,
@@ -346,7 +351,8 @@ const report = {
     coalitionsPerGame: r2(mean(ok.map((g) => g.coalitions))),
     courtshipsOpenedPerGame: r2(mean(ok.map((g) => g.courtOpened))),
     intrigueOpsPerGame: r2(mean(ok.map((g) => g.opsRun))),
-    intrigueOpsBackfired: r2(mean(ok.map((g) => g.opsBackfired))),
+    covertActsSeenThrough: r2(mean(ok.map((g) => g.opsBackfired))),
+    sabotageTracedPerGame: r2(mean(ok.map((g) => g.sabotageTraced))),
     // At the final board — a snapshot, and confounded by the war rate.
     minorsAlliedOrVassalisedAtEnd: r2(mean(ok.map((g) => g.minors.allied + g.minors.vassal))),
     // Ever, from the log. THIS is §15's row: was the faction reachable by

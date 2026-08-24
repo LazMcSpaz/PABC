@@ -695,13 +695,26 @@ export const CONFIG = {
       // public rate — that is the whole point, and it is why Expose is the one
       // op that cannot rebound on the caster.
       exposeWitnessShare: 1,
-      // A lie is seen through on a roll against the liar's Honor. High Honor
-      // is not just a reputation, it is cover — which is the interesting
-      // reason to keep it, and the interesting reason to spend it.
+      // A covert act is seen through on a roll with TWO sides to it.
+      //
+      // The caster's Honor is COVER — a spotless name is hard to disbelieve,
+      // which is the interesting reason to keep Honor and the interesting
+      // reason to spend it. That half shipped first.
+      //
+      // The other half was missing, and its absence made the Intelligence
+      // branch strictly worse than it reads: `int-b1` is called SPY RING and
+      // did nothing whatever to help its holder catch somebody lying about
+      // them. Counter-intelligence is now the defensive term, so the branch
+      // has a reason to exist on both sides of the table.
       lieBaseDetection: 0.45,
-      lieDetectionPerHonor: -0.03, // per point of the caster's Honor
+      lieDetectionPerHonor: -0.03, // per point of the CASTER's Honor — cover
       lieDetectionMin: 0.1,
       lieDetectionMax: 0.85,
+      // …and what the VICTIM's apparatus adds to their chance of seeing it.
+      counterSpyRing: 0.25,   // int-b1 — a network that checks stories
+      counterDetection: 0.1,  // int-a1 — sharper eyes
+      counterPerPost: 0.05,   // each live Listening Post
+      counterPostCap: 0.15,   // …up to here; a wall of posts is not a spy ring
       // Caught in one: the Menace, the Honor, and a grievance for everybody
       // the lie was told to or about. Deliberately steeper than the ordinary
       // promise-break, because this was premeditated.
@@ -709,6 +722,18 @@ export const CONFIG = {
       caughtMenace: 3,
       // A fabricated grievance is real while it lasts and then evaporates.
       lieDecaysAfterRounds: 8,
+      // SABOTAGE IS A COVERT ACT TOO, and until now it was the only one with
+      // no risk attached: Forge and Fabricate roll against Honor and backfire
+      // hard, while `int-b2` lowered a rival's Loyalty for free, anonymously,
+      // with no Menace and no grievance. The diplomatic lie risked everything
+      // and the physical one risked nothing, which is backwards.
+      //
+      // Cheaper than being caught in a forgery — a raid is an act of war, not
+      // a lie about somebody's character — but no longer free.
+      sabotageCaughtHonorLoss: 3,
+      sabotageCaughtMenace: 2,
+      // 0 restores the free, anonymous sabotage.
+      sabotageCanBeCaught: 1,
       // 0 removes the whole branch; every verb refuses and nothing else reads it.
       enabled: 1,
     },

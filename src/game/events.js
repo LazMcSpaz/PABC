@@ -92,6 +92,7 @@ export const EVENT_NAMES = new Set([
   "op_forge",
   "op_fabricate",
   "op_backfired",
+  "sabotage_traced",
   "forgeries_lapsed",
   "trading_pact_formed", "trading_pact_suspended", "trading_pact_resumed", "trading_pact_dissolved",
   "vassal_freed",

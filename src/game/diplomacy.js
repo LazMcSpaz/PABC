@@ -34,6 +34,7 @@ import { recomputeInfluence } from "./influence.js";
 // Post network to decide what a faction could plausibly have found out.
 import { hasTechNode } from "./tech.js";
 import { ownedPosts } from "./posts.js";
+import { registerIntelReaders } from "./intel.js";
 
 // --- state ----------------------------------------------------------
 export function ensureDiplomacy(state) {
@@ -3184,25 +3185,52 @@ export function exposableStrikes(state, target, viewer = null) {
   return out;
 }
 
-// Is the lie seen through? Rolled once, at cast time, against the caster's
-// Honor — so a faction with a spotless name has cover, which is the
-// interesting reason to keep Honor and the interesting reason to spend it.
-export function lieDetectionChance(state, pid) {
+// What `victim`'s intelligence apparatus adds to their chance of seeing
+// through something done to them. The DEFENSIVE half of the branch, and the
+// half that was missing: `int-b1` is called Spy Ring and did nothing whatever
+// to help its holder catch somebody lying about them.
+export function counterIntelligence(state, victim) {
   const o = OPS();
-  const p = o.lieBaseDetection + o.lieDetectionPerHonor * honorOf(state, pid);
+  if (!victim) return 0;
+  let n = 0;
+  if (hasTechNode(state, victim, "int-b1")) n += o.counterSpyRing;
+  if (hasTechNode(state, victim, "int-a1")) n += o.counterDetection;
+  const posts = ownedPosts(state, victim).filter((p) => !p.dormant).length;
+  n += Math.min(o.counterPostCap, posts * o.counterPerPost);
+  return n;
+}
+
+// Is a covert act seen through? Rolled once, at the moment it is done, and it
+// has TWO sides: the caster's Honor is cover, the victim's apparatus is the
+// counter. One reader for every covert act in the game — the lies AND the
+// sabotage — because two implementations of "were you caught" is how the two
+// halves drifted apart in the first place.
+export function covertDetection(state, caster, victim = null) {
+  const o = OPS();
+  const p = o.lieBaseDetection
+    + o.lieDetectionPerHonor * honorOf(state, caster)
+    + counterIntelligence(state, victim);
   return Math.max(o.lieDetectionMin, Math.min(o.lieDetectionMax, p));
+}
+
+// Kept as the name the lie-specific callers read, so a forgery still says it
+// is a forgery at the call site.
+export function lieDetectionChance(state, pid, victim = null) {
+  return covertDetection(state, pid, victim);
 }
 
 // Caught. Steeper than an ordinary promise-break, because a promise is broken
 // under pressure and a forgery is premeditated — and everyone the lie was told
 // to or about is entitled to hold it against you.
-function opBackfires(state, pid, kind, wronged) {
+function opBackfires(state, pid, kind, wronged, magnitude = null) {
   const o = OPS();
-  if (state.players[pid]) adjustHonor(state, pid, -o.caughtHonorLoss, `${kind}-exposed`);
-  adjustMenace(state, pid, o.caughtMenace, `${kind}-exposed`);
+  const honorLoss = magnitude?.honorLoss ?? o.caughtHonorLoss;
+  const menace = magnitude?.menace ?? o.caughtMenace;
+  if (state.players[pid]) adjustHonor(state, pid, -honorLoss, `${kind}-exposed`);
+  adjustMenace(state, pid, menace, `${kind}-exposed`);
   for (const w of new Set(wronged.filter(Boolean))) {
     if (w === pid || !state.players[w]) continue;
-    recordGrievance(state, w, pid, "position-broken", { severity: o.caughtMenace });
+    recordGrievance(state, w, pid, "position-broken", { severity: menace });
   }
   emit(state, "op_backfired", { by: pid, kind, wronged: [...new Set(wronged.filter(Boolean))] });
 }
@@ -3270,7 +3298,10 @@ export function forge(state, pid, target, against) {
   if (!state.players[against]) return { ok: false, reason: "they are not on the board" };
   const bad = chargeOp(state, pid);
   if (bad) return { ok: false, reason: bad };
-  if (state.rng.next() < lieDetectionChance(state, pid)) {
+  // The party being FRAMED is the one with both the motive and the apparatus
+  // to produce the counter-evidence, so theirs is the counter-intelligence
+  // that matters — not the party being told the story.
+  if (state.rng.next() < covertDetection(state, pid, target)) {
     opBackfires(state, pid, "forge", [target, against]);
     return { ok: true, caught: true };
   }
@@ -3295,7 +3326,7 @@ export function fabricate(state, pid, target) {
   }
   const bad = chargeOp(state, pid);
   if (bad) return { ok: false, reason: bad };
-  if (state.rng.next() < lieDetectionChance(state, pid)) {
+  if (state.rng.next() < covertDetection(state, pid, target)) {
     opBackfires(state, pid, "fabricate", [target]);
     return { ok: true, caught: true };
   }
@@ -3303,6 +3334,23 @@ export function fabricate(state, pid, target) {
   if (entry) entry.forged = { by: pid, until: state.round + OPS().lieDecaysAfterRounds };
   emit(state, "op_fabricate", { by: pid, target });
   return { ok: true, caught: false };
+}
+
+// §12.3 — SABOTAGE IS A COVERT ACT TOO. `actions.js` owns the deed; this owns
+// what it costs when the deed is seen. Exported rather than inlined there so
+// every covert act in the game is caught by the same reader — the split is
+// what let sabotage stay free and anonymous while the lies risked everything.
+//
+// Returns true if the saboteur was caught.
+export function sabotageCaught(state, pid, victim) {
+  const o = OPS();
+  if (!opsEnabled() || !o.sabotageCanBeCaught || !victim || victim === pid) return false;
+  if (state.rng.next() >= covertDetection(state, pid, victim)) return false;
+  opBackfires(state, pid, "sabotage", [victim], {
+    honorLoss: o.sabotageCaughtHonorLoss,
+    menace: o.sabotageCaughtMenace,
+  });
+  return true;
 }
 
 // A lie is real while it lasts and then evaporates. Swept on the round tick so
@@ -4312,6 +4360,12 @@ registerInterestReaders({
   factionIds, occupationsBy, worstGrievance, grievanceWeight, atWar, warExhaustion,
   mayCourt, tradingPactBetween, tradeRouteOpen, unitsInTerritory, threatScore,
 });
+// §17.5 B1 — what a Spy Ring can see of the political layer. Registered rather
+// than imported, so `intel.js` stays a leaf.
+registerIntelReaders({
+  interestsOf, positionsOf, positionText, swayOf, swayIncome, courtingList,
+});
+
 registerSwayReaders({
   factionIds, agreementCount, chargeSwayUpkeep,
   courtingCount: (state, pid) => courtingList(state, pid).length,
@@ -4320,8 +4374,8 @@ registerPostureReaders({
   factionIds, atWar, arePacted, vassalLord, coalitionAgainst, mayCourt,
   // §9 — why a board may rise, and how badly one faction wants in.
   coalitionGrounds, coalitionJoinScore,
-  // §12.3 — how an op learned what it publishes.
-  exposureApparatus,
+  // §12.3 — how an op learned what it publishes, and who might see through it.
+  exposureApparatus, counterIntelligence, covertDetection, sabotageCaught,
   getStanding, adjustStanding, passesRepGates, grievanceWeight,
   tradingPactBetween, unitsInTerritory,
 });

@@ -40,7 +40,7 @@ import { adaptState, reinforcePreview, engineChipIdToUi, previewLocationContest,
 import { resolveSalvage } from "../game/contest.js";
 import { assignTechNode } from "../game/stats.js";
 import { hasTechNode } from "../game/tech.js";
-import { performDiplomacy, trespassPreview } from "../game/diplomacy.js";
+import { performDiplomacy, trespassPreview, covertDetection } from "../game/diplomacy.js";
 import { isUnitVisibleTo } from "../game/visibility.js";
 import DiplomacyDrawer from "./DiplomacyDrawer.jsx";
 import EncounterModal from "./EncounterModal.jsx";
@@ -310,6 +310,15 @@ function sabotageOffer(state, hex, isYourTurn) {
     // Sabotage costs no Action and no scrap — the cost is the once-per-round
     // limit, and the Loyalty it takes off a place is the point.
     effect: "Loyalty −1",
+    // §12.3 — …AND IT CAN BE TRACED NOW. Sabotage used to be the only covert
+    // act in the game with no risk at all, which made it strictly safer than
+    // lying about somebody. The chance is quoted before the press for the same
+    // reason Forge and Fabricate quote theirs: a risk the player cannot read
+    // is a coin flip, not a decision.
+    caughtPercent: CONFIG.sway.ops?.sabotageCanBeCaught
+      ? Math.round(covertDetection(g, youId, ctrl) * 100) : 0,
+    caughtHonorLoss: CONFIG.sway.ops?.sabotageCaughtHonorLoss ?? 0,
+    caughtMenace: CONFIG.sway.ops?.sabotageCaughtMenace ?? 0,
   };
 }
 
@@ -1025,7 +1034,17 @@ export default function Prototype({ config, onNewGame }) {
   // branch and the AI has used it every round since; this is the first time
   // the human has been able to.
   function onSabotage(hexId) {
-    return runAction("sabotage", { at: hexId }, null, "Saboteurs went to work.");
+    // The result has to say whether they were seen — being traced costs Honor,
+    // Menace and a grievance, and a player told only "Saboteurs went to work"
+    // would learn about it from the ledger.
+    const r = runAction("sabotage", { at: hexId }, null, "Saboteurs went to work.");
+    if (r?.ok && r.caught) {
+      setDiploResult({
+        ...r,
+        msg: "Your saboteurs were traced. They know it was you.",
+      });
+    }
+    return r;
   }
   function onReinforce(unitUid, mode) {
     const msg = mode === "instant" ? "Unit reinforced." : "Reinforcements dispatched.";

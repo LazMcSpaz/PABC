@@ -19,6 +19,7 @@ import { performAction } from "../src/game/actions.js";
 import {
   performDiplomacy, adjustStanding, standingReceipts, trespassPreview, ensureDiplomacy,
   tableOffer, positionBlocker, declareWar, formPact, atWar as atWarEngine,
+  covertDetection,
 } from "../src/game/diplomacy.js";
 import { emit } from "../src/game/events.js";
 
@@ -426,7 +427,51 @@ const mk = () => createGame({
     `accepted ${res.accepted}, at war ${atWarEngine(g, "goldgrass", "lakers")}`);
 }
 
+// --- 13. §12.3/§17.5 — the covert acts read their own risk, both ways -------
+//
+// Sabotage was the only covert act with no risk at all, and Spy Ring — a node
+// whose whole identity is counter-intelligence — did nothing to help its
+// holder catch somebody lying about them. Both now go through one roll, and
+// both halves have to be READABLE or the player is flipping a coin.
+{
+  const g = mk();
+  startTurn(g);
+  ensureDiplomacy(g);
+  const bare = covertDetection(g, "versari", "lakers");
+  g.players.lakers.techWheel = ["int-entry", "int-b1"];
+  check("54. a victim's Spy Ring raises the chance a lie about them is seen through",
+    covertDetection(g, "versari", "lakers") > bare,
+    `${bare} -> ${covertDetection(g, "versari", "lakers")}`);
+
+  // …and the Saboteurs button quotes what being traced costs, before the press.
+  g.players.versari.techWheel = ["int-entry", "int-b1", "int-b2"];
+  const target = Object.values(g.locations).find((l) => l.controller && l.controller !== "versari");
+  const before = g.players.versari.honor;
+  const res = performAction(g, "sabotage", { at: target.hexId });
+  check("55. sabotage still runs", res.ok, res.reason);
+  check("56. …and reports whether it was traced", typeof res.caught === "boolean");
+  check("57. …and being traced is what costs Honor, not the sabotage itself",
+    res.caught ? g.players.versari.honor < before : g.players.versari.honor === before);
+}
+{
+  // §17.5 B1 — the political reveal reaches the drawer.
+  const g = mk();
+  startTurn(g);
+  ensureDiplomacy(g);
+  const blind = adaptState(g, "versari").diplomacy.factions.find((f) => f.id === "lakers");
+  check("58. without a Spy Ring the political intel is withheld", blind.theirIntel === null);
+  g.players.versari.techWheel = ["int-entry", "int-b1"];
+  const seen = adaptState(g, "versari").diplomacy.factions.find((f) => f.id === "lakers");
+  check("59. with one, what they are after reaches the drawer",
+    !!seen.theirIntel && Array.isArray(seen.theirIntel.interests));
+  check("60. …with their names resolved, not raw ids",
+    seen.theirIntel.interests.every((w) => !w.subject || !!w.subjectName));
+  check("61. …and what they can afford",
+    typeof seen.theirIntel.sway.pool === "number");
+}
+
 console.log(`\n${fail ? `${fail} FAILED` : "all checks passed"}`);
+
 
 
 

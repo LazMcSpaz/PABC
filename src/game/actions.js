@@ -17,6 +17,9 @@ import { drawFieldEncounter, resolveMarkerOnHex } from "./encounters.js";
 import { makeUnit, nextMusterIndex } from "./setup.js";
 import { hasTechNode } from "./tech.js";
 import { postAt, buildPost, revealPost } from "./posts.js";
+// §12.3 — what a covert act costs when it is seen. One reader for every one of
+// them; see the note in `runSabotage`.
+import { sabotageCaught } from "./diplomacy.js";
 import {
   blockadeAt, startBlockade, supplyStatus, blockadeSlotsUsed,
   blockadesOn, freeRoadEdges, roadEdgesOf, blockadeCapacity,
@@ -834,13 +837,24 @@ function validateSabotage(state, { pid, params }) {
 
 function runSabotage(state, { pid, params }) {
   const loc = state.locations[params.at];
+  const victim = loc.controller;
   loc.loyalty = Math.max(0, (loc.loyalty ?? 0) - 1);
   state.players[pid].sabotageUsedRound = state.round;
   emit(state, "loyalty_changed", {
     hex: loc.hexId, owner: loc.controller, loyalty: loc.loyalty, cause: "sabotage",
   });
   recomputeInfluence(state); // §18.3 — Loyalty feeds the Influence field / ZoC
-  return { hex: loc.hexId, loyalty: loc.loyalty };
+  // §12.3 — AND SOMEBODY MIGHT SEE YOU. Sabotage was the only covert act in
+  // the game with no risk: Forge and Fabricate roll against Honor and backfire
+  // hard, while this lowered a rival's Loyalty for free and anonymously. The
+  // roll is the same one the lies take, so the two halves cannot drift apart
+  // again — and it reads the VICTIM's counter-intelligence, which is what
+  // finally gives `int-b1` a defensive meaning.
+  const caught = sabotageCaught(state, pid, victim);
+  if (caught) {
+    emit(state, "sabotage_traced", { saboteur: pid, victim, hex: loc.hexId });
+  }
+  return { hex: loc.hexId, loyalty: loc.loyalty, caught };
 }
 
 // --- dispatch --------------------------------------------------------

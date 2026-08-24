@@ -688,6 +688,16 @@ function UltimatumCard({ u, dip, onAction }) {
 // TRUE and cannot rebound; Forge and Fabricate are lies and can be seen
 // through. A lie whose chance of being caught the player cannot read is a coin
 // flip, not a decision — so the percentage is on the button.
+// The six derived wants, in the words the courtship conditions already use.
+const WANT_TEXT = {
+  reclaim: "a homeland of theirs somebody else holds",
+  redress: "amends for something done to them",
+  warHelp: "help in a war they are losing",
+  routes: "a trade route",
+  quiet: "your columns off their ground",
+  isolate: "somebody's lead cut down",
+};
+
 // Which ear heard it. Named on the row, because "you can expose this" is a
 // button and "your Spy Ring heard about it" is a reason to have built one.
 const VIA = {
@@ -1923,6 +1933,48 @@ function FactionDetailView({ f, dip, onBack, onClose, onVerb, onOpenPane, onConf
             {f.wants}
           </div>
         </Card>
+
+        {/* §17.5 B1 — what a Spy Ring learns about the POLITICAL layer. It
+            used to reveal a tech wheel and two derived numbers, both of which
+            predate the diplomacy rework; a holder could not see what a rival
+            WANTED, what they had publicly sworn, or what they could afford.
+            Under Dominion, knowing what a faction wants is knowing how to ally
+            it, so this is the reveal that pays for the node. */}
+        {dip.spyRing && f.theirIntel && (
+          <>
+            <SectionRule index={4} label="What they are after" color="#c9a0e0" />
+            <Card accent="#a878c8">
+              {f.theirIntel.interests.length ? (
+                <div className="pc-prose" style={{ fontSize: 12, lineHeight: 1.6 }}>
+                  {f.theirIntel.interests.slice(0, 4).map((w, i) => (
+                    <div key={i}>
+                      <b style={{ color: "#c9a0e0" }}>{WANT_TEXT[w.kind] || w.kind}</b>
+                      {w.subjectName ? <> — {w.subjectName}</> : null}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="pc-prose" style={{ fontSize: 12, opacity: 0.7 }}>
+                  Your people can find nothing they particularly want.
+                </div>
+              )}
+              {f.theirIntel.positions.length > 0 && (
+                <div className="pc-prose" style={{ fontSize: 12, lineHeight: 1.5, marginTop: 7 }}>
+                  They have sworn, in public: {f.theirIntel.positions.map((p) => p.text).join("; ")}.
+                </div>
+              )}
+              <div style={{
+                fontFamily: C.font, fontSize: 8.5, letterSpacing: 0.5, marginTop: 7,
+                color: "rgba(143,246,234,0.55)", textTransform: "uppercase",
+              }}>
+                {`SWAY ${f.theirIntel.sway.pool} · INCOME ${f.theirIntel.sway.income} · `}
+                {f.theirIntel.sway.courting
+                  ? `COURTING ${f.theirIntel.sway.courting}`
+                  : "COURTING NOBODY"}
+              </div>
+            </Card>
+          </>
+        )}
 
         <SectionRule index={4} label="Tech Wheel" color={C.holo} />
         {dip.spyRing ? (
