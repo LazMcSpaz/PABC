@@ -537,54 +537,59 @@ function GiftPane({ f, dip, onBack, onSubmit }) {
   const cost = want * rate;
   const canSend = affordable >= 1 && cost <= sway.pool;
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      <SectionLabel term="r-gift-diplomacy">Send Word to {f.name}</SectionLabel>
-      <div className="pc-prose" style={{ fontSize: 12, lineHeight: 1.5, color: C.textDim }}>
-        Envoys, favours, a hearing at the right table. Costs{" "}
-        <b style={{ color: C.holoHi }}>{rate} Sway</b> per point of their regard —
-        political capacity, not scrap. Lean on them too often and each gift
-        buys less than the last.
-      </div>
-      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <button className="hud-int" onClick={() => setWant((v) => Math.max(1, v - 1))}
-          style={{ ...paneBtn, opacity: want > 1 ? 1 : 0.4 }}>−</button>
-        <div style={{ minWidth: 120, textAlign: "center" }}>
-          <div style={{ fontFamily: C.font, fontSize: 22, fontWeight: 700, color: C.holoHi, lineHeight: 1 }}>
-            +{want}
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
+      <PaneHeader title="Send word" f={f} onBack={onBack} term="r-gift-diplomacy" />
+      <div className="pc-scroll" style={{
+        flex: 1, overflowY: "auto", padding: "12px 16px",
+        display: "flex", flexDirection: "column", gap: 10,
+      }}>
+        <div className="pc-prose" style={{ fontSize: 12, lineHeight: 1.5, color: C.textDim }}>
+          Envoys, favours, a hearing at the right table. Costs{" "}
+          <b style={{ color: C.holoHi }}>{rate} Sway</b> per point of their regard —
+          political capacity, not scrap. Lean on them too often and each gift
+          buys less than the last.
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <button className="hud-int" onClick={() => setWant((v) => Math.max(1, v - 1))}
+            style={{ ...paneBtn, opacity: want > 1 ? 1 : 0.4 }}>−</button>
+          <div style={{ minWidth: 88, flex: "0 1 auto", textAlign: "center" }}>
+            <div style={{ fontFamily: C.font, fontSize: 22, fontWeight: 700, color: C.holoHi, lineHeight: 1 }}>
+              +{want}
+            </div>
+            <div style={{ fontFamily: C.font, fontSize: 9, letterSpacing: 1.2, textTransform: "uppercase", color: C.textFaint }}>
+              regard
+            </div>
           </div>
-          <div style={{ fontFamily: C.font, fontSize: 9, letterSpacing: 1.2, textTransform: "uppercase", color: C.textFaint }}>
-            regard
+          <button className="hud-int" onClick={() => setWant((v) => Math.min(Math.max(1, affordable), v + 1))}
+            style={{ ...paneBtn, opacity: want < affordable ? 1 : 0.4 }}>+</button>
+          <div style={{ flex: 1, minWidth: 0, textAlign: "right" }}>
+            <div style={{ fontFamily: C.font, fontSize: 13, fontWeight: 700, color: cost > sway.pool ? "#d2453f" : C.holoHi }}>
+              {cost} Sway
+            </div>
+            <div style={{ fontFamily: C.font, fontSize: 9, letterSpacing: 0.8, color: C.textFaint }}>
+              of {sway.pool} held
+            </div>
           </div>
         </div>
-        <button className="hud-int" onClick={() => setWant((v) => Math.min(Math.max(1, affordable), v + 1))}
-          style={{ ...paneBtn, opacity: want < affordable ? 1 : 0.4 }}>+</button>
-        <div style={{ flex: 1, textAlign: "right" }}>
-          <div style={{ fontFamily: C.font, fontSize: 13, fontWeight: 700, color: cost > sway.pool ? "#d2453f" : C.holoHi }}>
-            {cost} Sway
-          </div>
-          <div style={{ fontFamily: C.font, fontSize: 9, letterSpacing: 0.8, color: C.textFaint }}>
-            of {sway.pool} held
-          </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button className="hud-int" onClick={onBack} style={{ ...paneBtn, flex: 1 }}>Back</button>
+          <button className="hud-int" disabled={!canSend}
+            onClick={canSend ? () => onSubmit(want) : undefined}
+            style={{
+              ...paneBtn, flex: 2,
+              color: "#08100f",
+              background: `linear-gradient(180deg, ${C.holoHi}, ${C.holo})`,
+              opacity: canSend ? 1 : 0.4,
+              cursor: canSend ? "pointer" : "not-allowed",
+            }}>Send</button>
         </div>
+        {!canSend && (
+          <div style={{ fontFamily: C.font, fontSize: 9.5, letterSpacing: 0.5, color: "#d2913c" }}>
+            Not enough Sway. It comes from the floor every faction gets, the ground
+            you dominate, and the agreements you already hold — not from your purse.
+          </div>
+        )}
       </div>
-      <div style={{ display: "flex", gap: 8 }}>
-        <button className="hud-int" onClick={onBack} style={{ ...paneBtn, flex: 1 }}>Back</button>
-        <button className="hud-int" disabled={!canSend}
-          onClick={canSend ? () => onSubmit(want) : undefined}
-          style={{
-            ...paneBtn, flex: 2,
-            color: "#08100f",
-            background: `linear-gradient(180deg, ${C.holoHi}, ${C.holo})`,
-            opacity: canSend ? 1 : 0.4,
-            cursor: canSend ? "pointer" : "not-allowed",
-          }}>Send</button>
-      </div>
-      {!canSend && (
-        <div style={{ fontFamily: C.font, fontSize: 9.5, letterSpacing: 0.5, color: "#d2913c" }}>
-          Not enough Sway. It comes from the floor every faction gets, the ground
-          you dominate, and the agreements you already hold — not from your purse.
-        </div>
-      )}
     </div>
   );
 }
@@ -2641,7 +2646,7 @@ function PactCallPane({ f, dip, onBack, onSubmit }) {
   );
 }
 
-function PaneHeader({ title, f, onBack }) {
+function PaneHeader({ title, f, onBack, term }) {
   return (
     <div style={{
       padding: "12px 16px",
@@ -2667,7 +2672,7 @@ function PaneHeader({ title, f, onBack }) {
           fontFamily: C.font, fontSize: 14, fontWeight: 700,
           letterSpacing: 1.2, textTransform: "uppercase", color: C.holoHi,
           textShadow: `0 0 8px ${C.holo}66`,
-        }}>{title}</div>
+        }}>{term ? <Term id={term}>{title}</Term> : title}</div>
         {f && (
           <div style={{
             fontFamily: C.font, fontSize: 9.5, letterSpacing: 1.4,
