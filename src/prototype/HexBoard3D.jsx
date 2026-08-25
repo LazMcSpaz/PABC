@@ -34,6 +34,7 @@ import BlockadeSprites from "./BlockadeSprites.jsx";
 import BoardTokens from "./BoardTokens.jsx";
 import InfluenceOverlay from "./InfluenceOverlay.jsx";
 import PostMark from "./PostMark.jsx";
+import SiteMark from "./SiteMark.jsx";
 import { LOD_FLAT, useBoardLod } from "./boardLod.js";
 import { buildHexGeometry, eastRimHexes, paintOrder, topFacePolygon } from "./hexProjection.js";
 
@@ -151,6 +152,27 @@ export default function HexBoard3D({
           return (
             <div key={hexId} style={{ position: "absolute", left: c.x - 10, top: c.y - 26 }}>
               <PostMark post={hex.post} size={20} />
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Quest sites you have been told about. Its own pass rather than a
+          branch inside the post pass: a hex can carry both, and offsetting
+          the two by a few pixels is the whole difference between "two things
+          are standing here" and one silently drawing over the other.
+          zIndex alongside the posts, for the same reason: the first version
+          had none and the tile art drew straight over it — the mark was on
+          the board and invisible, which is the exact bug this whole feature
+          exists to fix. */}
+      <div style={{ position: "absolute", inset: 0, zIndex: 8905, pointerEvents: "none" }}>
+        {order.map((hexId) => {
+          const hex = state.hexes[hexId];
+          const c = geom.centers[hexId];
+          if (!hex?.site || !c) return null;
+          return (
+            <div key={hexId} style={{ position: "absolute", left: c.x + 8, top: c.y - 28 }}>
+              <SiteMark site={hex.site} size={22} />
             </div>
           );
         })}

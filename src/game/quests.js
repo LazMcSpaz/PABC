@@ -264,12 +264,39 @@ function deliverBeat(state, quest, beat, aq, ctx) {
 
   aq.deliveredBeats.push(beat.id);
   if (placing) {
-    return deliverEncounterDef(state, enc, { mode: "placement", hexFilter: beat.placementFilter }, beatCtx);
+    return deliverEncounterDef(state, enc, {
+      mode: "placement",
+      hexFilter: beat.placementFilter,
+      knownTo: siteIsKnown(quest, beat) && aq.claimant ? [aq.claimant] : [],
+    }, beatCtx);
   }
   // Delivered where it is set, so `encounter-hex` and the prose agree about
   // which town this is.
   return deliverEncounterDef(state, enc, { recipient: beat.recipient },
     home ? { ...beatCtx, sourceHex: home } : beatCtx);
+}
+
+// Would this faction have any reason to know where this site is?
+//
+// The rule is the fiction's, not the system's. A quest's OPENER is a thing
+// that has not happened to you yet — nobody has mentioned the ruin, the debt
+// or the woman with the wire, so there is nothing on your map and finding it
+// is finding it. Every LATER beat is the trail continuing from a scene you
+// just played: somebody told you where to go next, drew you a map, or you
+// are simply walking the road you were pointed down. That one you know.
+//
+// It is deliberately a default and not a law. `revealSite` on the beat
+// overrides it in either direction, which is how content says "the reader
+// tells you exactly where" on an opener, or "you were given a name, not a
+// place" on a middle beat. The inference exists because the corpus as
+// authored carries no such field on any of its 131 beats, and waiting for
+// all of them to be annotated would mean shipping nothing.
+// Exported as a test seam: the rule is a judgement about the fiction, and
+// scripts/check-legibility.mjs asserts it directly rather than inferring it
+// from whether a marker happened to be drawn three layers later.
+export function siteIsKnown(quest, beat) {
+  if (typeof beat?.revealSite === "boolean") return beat.revealSite;
+  return openerOf(quest)?.id !== beat.id;
 }
 
 // Deliver whatever should come next for this quest.

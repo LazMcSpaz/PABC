@@ -512,6 +512,41 @@ function captureLocation(state, loc, victor) {
   onLocationCaptured(state, loc.hexId, victor, from);
 }
 
+// Absorbing an unclaimed place — the peaceful sibling of `captureLocation`,
+// called from the Upkeep drift in turn.js when influence finishes claiming
+// the last neutral section.
+//
+// It is a SUBSET of capture on purpose, and the omissions are the point.
+// Capture sacks: it destroys a chip off the top of the stack, razes a
+// Capital, forfeits the build in progress, breaks a `handsOff` position, and
+// strands the supply column that was feeding the place. None of that happens
+// when a town drifts into your country over three turns — there is nobody to
+// take it from, nothing is stormed, and no promise about seizing ground is
+// broken by a town deciding it is yours. What IS shared is every piece of
+// bookkeeping that answers "who holds this now": the control flags, the
+// Loyalty a new holder starts on, the control-history entry `control_duration`
+// reads, and the four recomputes that keep Research, Influence, Vision and VP
+// honest about it.
+//
+// Loyalty opens at `influence.claim.startingLoyalty` rather than
+// `loyalty.start`, so absorbing and storming can be priced differently — an
+// absorbed town arrives already half-persuaded, and the config says by how
+// much without either number moving the other.
+export function absorbLocation(state, loc, claimant) {
+  loc.controller = claimant;
+  loc.loyaltyOwner = claimant;
+  loc.loyalty = CONFIG.influence.claim?.startingLoyalty ?? CONFIG.loyalty.start;
+  loc.buildSlider = CONFIG.economy.defaultSlider;
+  loc.buildPriority = "blockade";
+  loc.poolTarget = null;
+  emit(state, "location_claimed", { hex: loc.hexId, controller: claimant });
+  syncControlHistory(state);
+  recomputeResearch(state);
+  recomputeInfluence(state);
+  recomputeVisibilityFor(state, [claimant], { emitEvents: false });
+  recomputeVp(state);
+}
+
 // §16.5 — strand in-transit reinforcements whose origin Location was just
 // captured, converting each to a new chip-less unit at the reinforced
 // unit's node (cap 4).

@@ -249,6 +249,36 @@ export function pressureSource(state, loc, pid) {
   return bestFid;
 }
 
+// What one faction is projecting onto a hex, for the Upkeep claim drift in
+// turn.js. Same reading as the soft-power siege — Locations plus units, never
+// the ZoC map — because the question is the same one: how much of this place
+// is under your influence, regardless of whose name the border has on it.
+//
+// Its own export rather than a `pressureSource` call because the claim asks a
+// different question. `pressureSource` answers "is somebody ELSE squeezing
+// this?", which is inverted and pre-thresholded at the ZoC bar; the claim
+// needs the raw magnitudes on both sides so it can apply its own, higher bar.
+export function claimStrength(state, fid, hex) {
+  return pressureAt(state, fid, hex);
+}
+
+// The best any rival is projecting onto the same hex. A tie stalls the claim:
+// two factions pulling equally at one town leaves it where it is, which is the
+// honest answer and not a stalemate to be broken by turn order.
+export function strongestRivalAt(state, fid, hex) {
+  const contenders = new Set([
+    ...Object.keys(state.world?.influence || {}),
+    ...Object.keys(state.world?.unitPressure || {}),
+  ]);
+  let best = 0;
+  for (const other of contenders) {
+    if (other === fid) continue;
+    if (state.players[other]?.eliminated) continue;
+    best = Math.max(best, pressureAt(state, other, hex));
+  }
+  return best;
+}
+
 // Encounter-reveal `condition` hook: "recipient's ZoC contains this hex".
 export function inZoC(state, fid, hex) {
   return zocOwner(state, hex) === fid;

@@ -21,8 +21,9 @@ import {
   checkDominion, dominionStanding,
 } from "./diplomacy.js";
 import { holdsLocation, syncControlHistory } from "./control.js";
+import { absorbLocation } from "./contest.js";
 import { adjustStanding } from "./standing.js";
-import { pressureSource } from "./influence.js";
+import { pressureSource, claimStrength, strongestRivalAt } from "./influence.js";
 import { hasTechNode } from "./tech.js";
 import { chargePostUpkeep } from "./posts.js";
 import { chargeBlockadeUpkeep } from "./blockades.js";
@@ -167,9 +168,70 @@ export function tickLoyalty(state, pid) {
   // §18.3 — Loyalty rises/decays and any peel shift this faction's
   // Influence; recompute the field + ZoC once after the tick.
   recomputeInfluence(state);
+  // The drift the other way, run AFTER the recompute above so it reads the
+  // field this Upkeep's peels and Loyalty moves actually produced.
+  tickClaims(state, pid);
   // §19 — Location sight scales with Loyalty and a peel can drop a source,
   // so refresh this faction's fog after the tick (and the ZoC it draws on).
   recomputeVisibility(state, pid, { emitEvents: false });
+}
+
+// Unclaimed ground drifts toward whoever surrounds it.
+//
+// `tickLoyalty` above cannot do this: it iterates `loc.loyaltyOwner === pid`,
+// and a fully-neutral Location has no loyaltyOwner at all — which is exactly
+// why a place that peeled to neutral then sat there for the rest of the game.
+// Peeling to neutral is right for ground taken FROM somebody: soft power can
+// hollow a rival's city out, but you do not inherit it by squeezing. What was
+// missing is the second half — once nobody holds it, the same influence that
+// hollowed it out starts filling it in.
+//
+// FOUR THINGS STOP THE DRIFT, and each is a different kind of "not yours":
+//
+//   · A rival holds a section here. Then this is contested ground and the
+//     contest is how it changes hands — influence never takes a section off
+//     a faction that is still standing in the town.
+//   · A rival column is on the hex. A garrison in the square is a fact on the
+//     ground that outranks the border on the map.
+//   · You do not dominate the hex, or you do but below `claim.threshold`.
+//     Two factions pulling at the same town cancel out and it stays neutral —
+//     which is the honest outcome, not a stalled one.
+//   · The Location is nobody's to take because you already hold it all.
+//
+// One section per Upkeep, so absorbing a place outright takes three turns and
+// a rival has three chances to walk in, out-project you, or contest it.
+export function tickClaims(state, pid) {
+  const cfg = CONFIG.influence?.claim;
+  if (!cfg?.enabled || !pid || !state.players[pid] || state.players[pid].eliminated) return;
+  let claimed = 0;
+  for (const loc of Object.values(state.locations)) {
+    if (claimed >= (cfg.sectionsPerUpkeep ?? 1)) break;
+    if (!loc.sections?.includes("neutral")) continue;
+    // Contested ground is the contest's business.
+    if (loc.sections.some((sec) => sec && sec !== "neutral" && sec !== pid)) continue;
+    if (cfg.blockedByRivalUnit && Object.values(state.units).some(
+      (u) => u.node === loc.hexId && u.owner !== pid)) {
+      emit(state, "claim_stalled", { hex: loc.hexId, by: pid, reason: "rival-unit" });
+      continue;
+    }
+    // `pressureSource` answers "who dominates this hex, other than pid" — so
+    // ask it as each RIVAL would see it, which is the same question inverted:
+    // pid may claim only when nobody out-projects them here and their own
+    // reading clears the bar.
+    const mine = claimStrength(state, pid, loc.hexId);
+    if (mine < (cfg.threshold ?? 5)) continue;
+    if (strongestRivalAt(state, pid, loc.hexId) >= mine) {
+      emit(state, "claim_stalled", { hex: loc.hexId, by: pid, reason: "contested-field" });
+      continue;
+    }
+    const idx = loc.sections.indexOf("neutral");
+    loc.sections[idx] = pid;
+    claimed += 1;
+    emit(state, "control_claimed", { hex: loc.hexId, to: pid });
+    emit(state, "section_flipped", { hex: loc.hexId, to: pid, cause: "influence" });
+    if (loc.sections.every((sec) => sec === pid)) absorbLocation(state, loc, pid);
+  }
+  if (claimed) recomputeInfluence(state);
 }
 
 // The repeatable VP faucet, awarded at the player's Upkeep.

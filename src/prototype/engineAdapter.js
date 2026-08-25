@@ -488,6 +488,38 @@ export function adaptState(state) {
       };
     }
 
+    // A quest site somebody has a reason to know about (engine:
+    // encounters.js `knownTo`, quests.js `siteIsKnown`). Every `discovered`
+    // beat drops a marker and the board drew NONE of them, so a playtest put
+    // about twenty invisible sites on a fifty-nine-hex map and the player
+    // found four by walking over them.
+    //
+    // Only known ones are exposed, and only to the player who knows: the
+    // engine decides who has a reason — the trail a scene pointed you down —
+    // and the map is not a to-do list of every quest that exists.
+    //
+    // DELIBERATELY NOT FOG-GATED. The first draft hid sites on unexplored
+    // ground, which sounds cautious and is exactly backwards: being told where
+    // something is IS knowing where it is. A reader who reads you the road and
+    // a map you pull out of a wreck are both, precisely, information about
+    // somewhere you have never been — gating them behind having already been
+    // there leaves the feature marking only places you had found anyway. The
+    // tile underneath still renders unexplored; the mark sits on it, which is
+    // what an X on a map has always looked like.
+    //
+    // Not `live`-gated either, and for the same reason the listening post is
+    // not: `live` means "you can see this hex right now", which is the right
+    // test for a blockade that could be torn down behind your back. Knowing
+    // where a place is is not an observation, it is something you were told,
+    // and it does not lapse when you look away.
+    const sites = viewer
+      ? (state.world?.encounterMarkers?.[h.id] || []).filter(
+          (mk) => (mk.knownTo || []).includes(viewer))
+      : [];
+    if (sites.length) {
+      hex.site = { count: sites.length, questId: sites[0].questId ?? null };
+    }
+
     const bls = live ? blockadesOn(state, h.id) : [];
     if (bls.length) {
       hex.blockades = bls.map((bl) => ({

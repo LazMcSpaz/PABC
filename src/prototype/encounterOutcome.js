@@ -161,9 +161,23 @@ export function summarizeResolution(events, state, youId) {
       // A "discovered" beat is placed on the map rather than delivered, so
       // without this the trail simply goes quiet: the quest continues, and
       // nothing on screen says where.
-      case "location_spawned":
+      //
+      // "Where" is the whole point, and this line used not to say it — which
+      // was fair enough while the board drew no marker, and useless once it
+      // did. Now it names the hex when the player has a reason to know, and
+      // says nothing at all when they do not: a site nobody has mentioned to
+      // you is not news, and announcing it would give away by implication
+      // exactly what the marker rule is there to withhold.
+      case "location_spawned": {
         if (p.kind !== "encounter-marker") break;
-        push("flat", "The trail leads on — a new site is marked");
+        if (!(p.knownTo || []).includes(youId)) break;
+        push("flat", `The trail leads on — ${place(p.hex)} is marked on your map`);
+        break;
+      }
+      // Somebody drew you a map, named a place, or read you the road.
+      case "site_revealed":
+        if (p.player !== youId) break;
+        push("good", `You know where to find ${place(p.hex)} now`);
         break;
       case "deferred_resolved":
         push("flat", "Something set in motion earlier came due");

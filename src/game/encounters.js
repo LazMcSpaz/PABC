@@ -369,6 +369,21 @@ function placeEncounterMarker(state, enc, options, ctx) {
   const queue = markerQueue(state, hex);
   queue.push({
     encounterId: enc.id,
+    // WHO HAS A REASON TO KNOW THIS IS HERE.
+    //
+    // Every `discovered` beat drops a marker, and the board used to draw none
+    // of them — so a nine-round playtest put about twenty invisible sites on a
+    // fifty-nine-hex map and the player found four, by walking over them. The
+    // fix is NOT to draw them all. A marker on every available site turns the
+    // map into a to-do list and answers a question the fiction never asked:
+    // how would you know to go there?
+    //
+    // So a marker is drawn only for players with a reason. The trail a scene
+    // just pointed you down is a reason; a quest you have never heard of is
+    // not. `placeEncounterMarker` does not decide that — its caller does, and
+    // passes the answer in. An empty list means the site is real, reachable
+    // and on the map, and nobody can see it yet.
+    knownTo: options.knownTo ? [...options.knownTo] : [],
     // Quest beats are encounter-SHAPED but live in the quest registry, not
     // in WORLD/FIELD — so `getEncounter(id)` cannot find one and a marker
     // that stored only an id could never be resolved. Every "discovered"
@@ -382,7 +397,13 @@ function placeEncounterMarker(state, enc, options, ctx) {
     expiresAt: expiresIn != null ? state.round + expiresIn : null,
     placedAt: state.round,
   });
-  emit(state, "location_spawned", { hex, kind: "encounter-marker", encounterId: enc.id });
+  emit(state, "location_spawned", {
+    hex, kind: "encounter-marker", encounterId: enc.id,
+    // The feed line differs by this: "a new site is marked" is only true if
+    // somebody can see it. Carrying the audience means the feed can say where
+    // when it is known, and stay silent when it is not.
+    knownTo: options.knownTo ? [...options.knownTo] : [],
+  });
   return { placedAt: hex };
 }
 

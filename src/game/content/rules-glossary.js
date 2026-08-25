@@ -701,7 +701,30 @@ WHAT MOVES IT
 · Paying a settlement's upkeep raises it, about ${CONFIG.loyalty.risePerUpkeep} a round. Not paying it lowers it by the same.
 · It falls when you take a place by force and rises as you hold it.
 · Ceding territory in a deal hands the receiving faction a little loyalty with it — land given is held better than land taken.
-· BE WARNED THAT LOYALTY DOES NOT PAY OFF SMOOTHLY. See [[r-influence|Influence]] for why a point can be worth nothing or worth twelve hexes.`,
+· BE WARNED THAT LOYALTY DOES NOT PAY OFF SMOOTHLY. See [[r-influence|Influence]] for why a point can be worth nothing or worth twelve hexes.
+· A place you neglect all the way to 0 does not merely go quiet — it starts shedding sections to nobody, and once it belongs to nobody a neighbour can [[r-claim|absorb]] it without a fight.`,
+  },
+
+  "r-claim": {
+    id: "r-claim",
+    term: "Absorbing a Place",
+    aliases: ["absorb", "absorbed", "claiming ground"],
+    category: GROUND,
+    imagePath: null,
+    body: `A settlement nobody holds does not stay nobody's. It drifts toward whichever faction surrounds it — by the ordinary business of trading with them, marrying into them and answering to their courts — until it is simply theirs.
+
+This is the third way onto the map, beside conquest and diplomacy, and the only one that costs neither soldiers nor [[r-sway|Sway]]. It costs patience and a border.
+
+WHAT IT AFFECTS
+· A place with no holder and one faction's [[r-influence|influence]] over it gives up one of its three sections each round, and after three rounds it belongs to them outright — with all the Victory Points, income and [[r-actions|Actions]] any other holding brings.
+· A place absorbed this way is not sacked. Nothing in it is destroyed, no promise about seizing ground is broken, and it opens at low [[r-loyalty|Loyalty]] like anywhere newly held.
+· It is how a rival you hollowed out stops being a hole in the map. Bleeding somebody's city to nothing turns it neutral, not yours — this is the part that finishes the job.
+
+WHAT MOVES IT
+· You must ENCLOSE the place, not merely border it. The bar is high enough that one neighbouring town is not sufficient — it takes two, or one and a garrison on the ground.
+· A rival column standing in the town stops it dead, however strong your influence. A garrison in the square outranks the border on the map.
+· A rival holding even one section stops it too. Ground somebody is standing on changes hands by fighting for it, not by drifting.
+· Two factions pulling at the same town cancel out and it stays where it is. That is a real outcome, not a stalemate — out-project them and it starts moving again.`,
   },
 
   "r-influence": {
@@ -719,6 +742,7 @@ THE ONE THING TO UNDERSTAND: IT IS A STEP FUNCTION, NOT A SLOPE. A settlement's 
 WHAT IT AFFECTS
 · Territory dominated is what pays [[r-sway|Sway]], and what your [[r-zone-of-control|Zone of Control]] is made of.
 · Influence pressing on somebody else's ground bleeds their hold on it and costs you [[r-standing|Standing]] with them for the pressure.
+· Press hard enough on unclaimed ground and it becomes yours — see [[r-claim|Absorbing a Place]]. This is the slow road onto the map that costs no soldiers.
 
 WHAT MOVES IT
 · Loyalty in the settlement, chiefly. Units in the field project a little of their own.

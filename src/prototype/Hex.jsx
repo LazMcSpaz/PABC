@@ -6,6 +6,7 @@ import GarrisonValue from "./GarrisonValue.jsx";
 import { HEX_W, HEX_H } from "./hexDims.js";
 import { influenceFill, INFLUENCE_EDGE } from "./InfluenceOverlay.jsx";
 import PostMark from "./PostMark.jsx";
+import SiteMark from "./SiteMark.jsx";
 
 export { HEX_W, HEX_H };
 
@@ -213,6 +214,17 @@ export default function Hex({ hex, units, selected, reachable, selectedUnitId, d
         {hex.post && !isUnexplored && (
           <div style={{ marginBottom: 2 }}>
             <PostMark post={hex.post} size={20} />
+          </div>
+        )}
+        {/* A place somebody told you about. Beside the post rather than in
+            place of it: both are things standing on the ground, and a hex can
+            hold either, both, or neither.
+            Not gated on exploration — see engineAdapter.js. Being told where
+            something is is how you know about ground you have never walked,
+            and a mark on an unexplored tile is what a map has always been. */}
+        {hex.site && (
+          <div style={{ marginBottom: 2 }}>
+            <SiteMark site={hex.site} size={20} />
           </div>
         )}
         {hex.type === "terrain" && !isUnexplored && (

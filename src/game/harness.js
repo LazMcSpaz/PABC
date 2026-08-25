@@ -2,12 +2,12 @@
 // runs the turn loop, and exercises the effect library so each engine
 // layer can be verified without the UI.
 import { createGame } from "./setup.js";
-import { startTurn, endTurn, tickLoyalty, locationActionCapacity } from "./turn.js";
+import { startTurn, endTurn, tickLoyalty, tickClaims, locationActionCapacity } from "./turn.js";
 import { performAction, recruitCostAt } from "./actions.js";
 import { applyEffect } from "./effects.js";
 import { emit } from "./events.js";
 import { recomputeStats, recomputeResearch, assignTechNode, effectiveVeteran } from "./stats.js";
-import { recomputeInfluence, zocOwner, inZoC } from "./influence.js";
+import { recomputeInfluence, zocOwner, inZoC, claimStrength, strongestRivalAt } from "./influence.js";
 import { reinforcementRoute, bfsDistances, movementField, movementRoute } from "./board.js";
 import { passesFreely, movementBlockers, unitReach, unitIgnoresTerrain, supplyCutter, unitRailEdges } from "./movement.js";
 import { recomputeVisibility, isUnitVisibleTo, revealRegion, unitVision, isHexVisible, ensureAllVisibility } from "./visibility.js";
@@ -6083,6 +6083,14 @@ line("\n  [Phase 11] text-token resolver");
   // was 77% of all banked VP across 20 games and let a faction win holding no
   // ground at all. An alliance is worth its score while it stands, and worth
   // nothing the moment it doesn't.
+  // The three checks below read `players[dip].vp` as an ABSOLUTE, which only
+  // measures the alliance if nothing else can move VP in the same window. The
+  // Upkeep claim drift can: `cycleTo` runs a full round, and a faction that
+  // dominates a neutral hex absorbs a section of it and scores the territory.
+  // That is real behaviour, not a regression — so isolate the measurement
+  // rather than loosen it, and cover the drift on its own terms below.
+  const claimWas = CONFIG.influence.claim.enabled;
+  CONFIG.influence.claim.enabled = 0;
   const gT = createGame({ seed: 143 });
   startTurn(gT);
   const dip = gT.turnOrder[gT.activeIndex];
@@ -6108,6 +6116,111 @@ line("\n  [Phase 11] text-token resolver");
   recomputeVp(gT);
   check("…and losing the alliance loses the score with it",
     gT.players[dip].vp === base + SC.vassal);
+  CONFIG.influence.claim.enabled = claimWas;
+
+  // -- the claim drift: unclaimed ground never rests at neutral.
+  //
+  // The old rule only peeled TOWARD neutral and stopped there, so a town that
+  // nobody held stayed nobody's for the rest of the game however deep inside
+  // one faction's country it sat. These four cover the rule and the three
+  // things that stop it, because a drift that cannot be stopped is a land
+  // grab rather than a border.
+  {
+    // TWO DIFFERENT THINGS ARE UNDER TEST HERE, and conflating them is what
+    // made the first draft of this block fail the moment the bar was tuned.
+    //
+    // The MECHANISM — one section per Upkeep, three Upkeeps to absorb, and the
+    // three things that stop it — is a rule, and it holds at any threshold.
+    // Those checks run at a bar a fresh map can actually reach, so they are
+    // measuring the rule and not the map generator.
+    //
+    // The BAR ITSELF — 8 — is a tuning number, measured in sim-suite, not
+    // asserted here. The one thing worth asserting about it is the property it
+    // was chosen for: that it is high enough nobody is handed a free town on
+    // round 1 for merely bordering it.
+    const barWas = CONFIG.influence.claim.threshold;
+    CONFIG.influence.claim.threshold = 5; // reachable on a fresh map
+
+    const gC = createGame({ seed: 424242 });
+    recomputeInfluence(gC);
+    const pid = gC.turnOrder[0];
+    const target = Object.values(gC.locations).find(
+      (l) => l.sections.every((x) => x === "neutral")
+        && claimStrength(gC, pid, l.hexId) >= CONFIG.influence.claim.threshold
+        && strongestRivalAt(gC, pid, l.hexId) < claimStrength(gC, pid, l.hexId));
+    check("claim: a neutral hex inside somebody's country is claimable at all", !!target);
+    if (target) {
+      const vpBefore = (recomputeVp(gC), gC.players[pid].vp);
+      tickClaims(gC, pid);
+      check("claim: one section per Upkeep, not the whole place at once",
+        target.sections.filter((x) => x === pid).length === 1);
+      tickClaims(gC, pid); tickClaims(gC, pid);
+      check("claim: three Upkeeps absorb it outright, and Loyalty opens low",
+        target.controller === pid && target.loyalty === CONFIG.influence.claim.startingLoyalty,
+        `controller=${target.controller} loyalty=${target.loyalty}`);
+      recomputeVp(gC);
+      check("claim: an absorbed place is worth its VP like any other ground",
+        gC.players[pid].vp > vpBefore, `${vpBefore} -> ${gC.players[pid].vp}`);
+    }
+
+    // A rival column standing in the town outranks the border on the map.
+    const gB = createGame({ seed: 424242 });
+    recomputeInfluence(gB);
+    const pid2 = gB.turnOrder[0];
+    const blocked = Object.values(gB.locations).find(
+      (l) => l.sections.every((x) => x === "neutral")
+        && claimStrength(gB, pid2, l.hexId) >= CONFIG.influence.claim.threshold);
+    if (blocked) {
+      const rival = Object.values(gB.units).find((u) => u.owner !== pid2);
+      rival.node = blocked.hexId;
+      recomputeInfluence(gB);
+      tickClaims(gB, pid2); tickClaims(gB, pid2); tickClaims(gB, pid2);
+      check("claim: a rival column on the hex stops the drift dead",
+        blocked.sections.every((x) => x === "neutral"), `[${blocked.sections}]`);
+    }
+
+    // Influence never takes a section off a faction still standing there —
+    // that is what a contest is for.
+    const gH = createGame({ seed: 424242 });
+    recomputeInfluence(gH);
+    const pid3 = gH.turnOrder[0];
+    const held = Object.values(gH.locations).find(
+      (l) => l.sections.every((x) => x === "neutral")
+        && claimStrength(gH, pid3, l.hexId) >= CONFIG.influence.claim.threshold);
+    if (held) {
+      const rivalFid = gH.turnOrder.find((f) => f !== pid3);
+      held.sections[0] = rivalFid;
+      tickClaims(gH, pid3); tickClaims(gH, pid3);
+      check("claim: contested ground stays the contest's business",
+        held.sections.filter((x) => x === pid3).length === 0, `[${held.sections}]`);
+    }
+
+    CONFIG.influence.claim.threshold = barWas;
+
+    // The bar as shipped: enclosing, not merely bordering. On a fresh map no
+    // faction can reach it anywhere, even with every city at full Loyalty and
+    // every unit it owns standing on the tile — which is the property that
+    // stopped the rule from handing out the whole neutral map (measured: 7.7
+    // places absorbed per game at 5, 2.0 at 8).
+    const gN = createGame({ seed: 424242 });
+    for (const l of Object.values(gN.locations)) if (l.controller) l.loyalty = CONFIG.loyalty.ceiling;
+    recomputeInfluence(gN);
+    const freebie = Object.values(gN.locations).some(
+      (l) => l.sections.every((x) => x === "neutral")
+        && gN.turnOrder.some((f) => claimStrength(gN, f, l.hexId) >= CONFIG.influence.claim.threshold));
+    check("claim: the shipping bar hands nobody a free town on round 1", !freebie);
+
+    // And the switch is a real no-op.
+    const gO = createGame({ seed: 424242 });
+    recomputeInfluence(gO);
+    const was = CONFIG.influence.claim.enabled;
+    CONFIG.influence.claim.enabled = 0;
+    const off = Object.values(gO.locations).find((l) => l.sections.every((x) => x === "neutral"));
+    for (let i = 0; i < 4; i++) for (const f of gO.turnOrder) tickClaims(gO, f);
+    CONFIG.influence.claim.enabled = was;
+    check("claim: enabled 0 leaves every neutral section neutral",
+      !off || off.sections.every((x) => x === "neutral"));
+  }
 
   // -- elimination: a stripped faction is flagged, skipped, and excluded;
   // last faction standing wins outright.

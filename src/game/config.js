@@ -438,6 +438,46 @@ export const CONFIG = {
     // ends it. Over-exertion is soft hostility: each bleeding Upkeep
     // costs the presser Standing with the owner and raises their Menace.
     pressure: { bleed: 1, standingHit: 1, menaceHit: 1 },
+    // A place with nobody in it drifts toward whoever surrounds it.
+    //
+    // The old rule only ever peeled TOWARD neutral: a neglected Location
+    // shed one section per Upkeep until it was `[neu,neu,neu]`, and then it
+    // sat there forever. That was a misreading of the design. Peeling to
+    // neutral is right for ground taken FROM a faction — you can hollow a
+    // rival's city out with soft power, but you do not inherit it — and
+    // then the drift is supposed to keep going: an unclaimed town inside
+    // one faction's country becomes that faction's town, by the ordinary
+    // fact of trading with them, marrying into them and answering to their
+    // courts. Nothing should rest at neutral.
+    //
+    // So a neutral section is claimed by whoever dominates the hex, ONE per
+    // Upkeep — a third of the control wheel per turn, three turns to absorb
+    // a place outright. Slow enough that a rival can contest it, walk a
+    // column in, or simply out-project you and stall the drift.
+    //
+    // `threshold` sits deliberately ABOVE `dominanceThreshold`. Merely
+    // reaching a hex is enough to draw a border through it; taking a town
+    // off the map is not the same claim, and should need a real,
+    // near-neighbour presence rather than the far edge of somebody's range.
+    // WHERE 8 COMES FROM, and why 5 was wrong. A Location projects
+    // `factionBase + loyalty`, so a maxed-out city is 10 at its own hex, 5 one
+    // hop out and 2.5 at two. A neutral town is never at zero hops from its
+    // own claimant, so the bar is really "how many neighbours does it take".
+    // At 5, ONE adjacent healthy city absorbed everything around it — and
+    // since territory pays Sway, that fed the diplomacy road for free:
+    // measured over 15 seeds it cost 4 points of ending mix and doubled the
+    // unresolved games (9/49/2 with the rule off, 5/51/4 at threshold 5).
+    // At 8 it takes two adjacent cities, or one and a garrison, which is a
+    // faction genuinely enclosing a place rather than merely bordering it —
+    // and the cost mostly goes away (8/45/4). Rebalance here, not in the
+    // rate: the rate is what the fiction asked for.
+    claim: {
+      enabled: 1,
+      threshold: 8,          // influence needed on the hex to claim a section
+      sectionsPerUpkeep: 1,  // one third of the wheel per turn
+      blockedByRivalUnit: 1, // a rival column standing in the town stops the drift
+      startingLoyalty: 2,    // Loyalty a fully-absorbed place opens at
+    },
     // §10.2 — extra movement to ENTER a hex dominated by a faction you do not
     // pass freely with. The most standard ZoC verb in the genre, and it was
     // missing: `movement.js`'s blocker scan never read `state.world.zoc` at

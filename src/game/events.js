@@ -25,6 +25,13 @@ export const EVENT_NAMES = new Set([
   "location_ceded",
   // §18.2 Loyalty
   "loyalty_changed", "loyalty_failing", "control_peeled",
+  // Ground drifting the OTHER way — a neutral section claimed by whoever
+  // dominates the hex, and the moment that finishes and the place is theirs.
+  // Separate names from the contest pair because none of this was fought
+  // over: "Dambar is absorbed" and "Dambar falls" should not read alike.
+  "control_claimed", "location_claimed", "claim_stalled",
+  // A site on the map that somebody now has a reason to know about.
+  "site_revealed",
   // §18.3 Influence & Zone of Control
   "zone_changed",
   "reward_granted",

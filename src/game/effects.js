@@ -438,6 +438,37 @@ const EFFECTS = {
     diplo.adjustStanding(state, fid, pid, e.amount || 0, "encounter");
   },
 
+  // "A reader tells you where to go." Marks sites on the map as known to the
+  // target, so they are drawn.
+  //
+  // The default rule (quests.js `siteIsKnown`) already reveals the trail a
+  // scene points you down, and hides a quest's opener because nobody has
+  // mentioned it yet. This is the authored override for the case the default
+  // cannot infer: an encounter that IS the reason you now know — a map found
+  // in a wreck, a name paid for, a reader who reads the road. Content reaches
+  // for it when the fiction hands the player a location.
+  //
+  // `hex` names one site. Without it, every site the target does not yet know
+  // about is revealed, which is what "she draws you the whole route" means —
+  // use it sparingly, and prefer naming the hex.
+  REVEAL_SITE(state, e, ctx) {
+    const markers = state.world?.encounterMarkers;
+    if (!markers) return;
+    const hexes = e.hex ? [e.hex] : Object.keys(markers);
+    for (const pid of resolveTargets(state, e.target, ctx)) {
+      if (!pid) continue;
+      for (const hex of hexes) {
+        for (const m of markers[hex] || []) {
+          m.knownTo = m.knownTo || [];
+          if (!m.knownTo.includes(pid)) {
+            m.knownTo.push(pid);
+            emit(state, "site_revealed", { hex, player: pid, encounterId: m.encounterId });
+          }
+        }
+      }
+    }
+  },
+
   SET_PLAYER_FLAG(state, e, ctx) {
     // Player-scoped flag store, parallel to §12.5 SET_FLAG which stays
     // entity-scoped (unit / location / chip).

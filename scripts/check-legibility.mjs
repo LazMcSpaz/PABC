@@ -22,6 +22,8 @@ import {
   covertDetection,
 } from "../src/game/diplomacy.js";
 import { emit } from "../src/game/events.js";
+import { applyEffect } from "../src/game/effects.js";
+import { siteIsKnown } from "../src/game/quests.js";
 
 let fail = 0;
 const check = (n, ok, d) => { if (!ok) fail++; console.log(`${ok ? "PASS" : "FAIL"}  ${n}${ok ? "" : "\n        " + (d ?? "")}`); };
@@ -468,6 +470,62 @@ const mk = () => createGame({
     seen.theirIntel.interests.every((w) => !w.subject || !!w.subjectName));
   check("61. …and what they can afford",
     typeof seen.theirIntel.sway.pool === "number");
+}
+
+{
+  // QUEST SITES — the trail you were pointed down is on the map; the quest
+  // nobody has mentioned to you is not.
+  //
+  // Every `discovered` beat drops a marker and the board drew NONE of them, so
+  // a nine-round playtest put roughly twenty invisible sites on a fifty-nine
+  // hex map and the player reached four, by walking over them. The fix is not
+  // to draw them all — a mark on every available site turns the map into a
+  // checklist and answers a question the fiction never asked. So these check
+  // BOTH halves: that a known site reaches the board, and that an unknown one
+  // does not.
+  const g = mk();
+  startTurn(g);
+  g.world = g.world || {};
+  g.world.encounterMarkers = {
+    "h0-3": [{ encounterId: "e_known", questId: "q_test", knownTo: ["versari"] }],
+    "h1-4": [{ encounterId: "e_unknown", questId: "q_test", knownTo: [] }],
+  };
+  recomputeVisibility(g, "versari", { emitEvents: false });
+  // `adaptState` serves exactly one viewer — the human faction — so "does
+  // another faction see it" cannot be asked of it directly. The per-player
+  // property is asked the other way round instead: a site revealed to
+  // SOMEBODY ELSE must not appear on the viewer's board.
+  g.world.encounterMarkers["h2-2"] = [
+    { encounterId: "e_theirs", questId: "q_test", knownTo: ["goldgrass"] },
+  ];
+  const mine = adaptState(g);
+  check("62. a site you have been told about reaches the board",
+    !!mine.hexes["h0-3"]?.site, "hex.site missing on a known marker");
+  check("63. …and a site nobody has mentioned to you does not",
+    !mine.hexes["h1-4"]?.site, "an unknown marker was drawn anyway");
+  check("64. …and one somebody ELSE was told about does not either",
+    !mine.hexes["h2-2"]?.site, "a rival's site was drawn on your board");
+
+  // The default the corpus runs on: a quest OPENER is a thing that has not
+  // happened to you, so its marker is hidden; every later beat is the trail
+  // continuing from a scene you just played, so its marker is known.
+  const opener = { id: "b1", ordinal: 0 };
+  const later = { id: "b2", ordinal: 1, prerequisites: ["b1"] };
+  const quest = { id: "q_x", beats: [opener, later] };
+  check("65. a quest opener is somewhere you have to stumble on",
+    siteIsKnown(quest, opener) === false);
+  check("66. …and the next step is somewhere you were told about",
+    siteIsKnown(quest, later) === true);
+  check("67. …unless the content says otherwise, either way",
+    siteIsKnown(quest, { ...opener, revealSite: true }) === true
+    && siteIsKnown(quest, { ...later, revealSite: false }) === false);
+
+  // REVEAL_SITE — the authored override for "a reader tells you where to go".
+  applyEffect(g, { type: "REVEAL_SITE", target: "active_player", hex: "h1-4" },
+    { asPlayer: "versari", sourcePlayer: "versari" });
+  const after = adaptState(g);
+  check("68. …and being told outright puts it on the map",
+    !!after.hexes["h1-4"]?.site, "REVEAL_SITE did not reveal");
 }
 
 console.log(`\n${fail ? `${fail} FAILED` : "all checks passed"}`);
