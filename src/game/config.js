@@ -392,7 +392,20 @@ export const CONFIG = {
   //   worldPerRound   how many world triggers fire at each round end
   //                   (triggers.js). 0 switches world encounters off without
   //                   removing the content.
-  encounters: { worldPerRound: 2 },
+  encounters: {
+    worldPerRound: 2,
+    // ONE CARD, ONE PLAYER, ONCE. The field deck is shared by every faction,
+    // so the same handful of cards used to cycle past everybody: 28 draws
+    // from a 22-card deck in a nine-round playtest, and the human met four
+    // cards twice. Skipping what a player has already been shown makes the
+    // shared pile do what a shared pile is good at — keeping a card alive for
+    // whoever has not met it — without repeating the road at anyone.
+    //
+    // A faction that has genuinely met every card gets no field encounters.
+    // That is the design's answer, not an oversight; 0 here is the switch
+    // back to repeats.
+    fieldOncePerPlayer: 1,
+  },
 
   // How fast a player picks quests up.
   //

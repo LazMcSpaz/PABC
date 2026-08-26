@@ -8,6 +8,7 @@ import { applyEffect } from "./effects.js";
 import { emit } from "./events.js";
 import { recomputeStats, recomputeResearch, assignTechNode, effectiveVeteran } from "./stats.js";
 import { recomputeInfluence, zocOwner, inZoC, claimStrength, strongestRivalAt } from "./influence.js";
+import { drawFieldEncounter, fieldEncounters } from "./encounters.js";
 import { reinforcementRoute, bfsDistances, movementField, movementRoute } from "./board.js";
 import { passesFreely, movementBlockers, unitReach, unitIgnoresTerrain, supplyCutter, unitRailEdges } from "./movement.js";
 import { recomputeVisibility, isUnitVisibleTo, revealRegion, unitVision, isHexVisible, ensureAllVisibility } from "./visibility.js";
@@ -6281,6 +6282,76 @@ line("\n  [Phase 11] text-token resolver");
       anyUnit.node = held.hexId;
       check("pulse: …and a garrison back in the city stops the warning",
         pendingSectionChange(gG, held) === null);
+    }
+
+    // FIELD DECK — one card, one player, once.
+    //
+    // The deck is shared by every faction, so before this the same handful of
+    // cards cycled past everybody: 28 draws from a 22-card deck in a
+    // nine-round playtest, and the human met four cards twice. These check the
+    // two halves of the fix, which pull in opposite directions and are easy to
+    // get half right: a player never repeats, AND a card one faction burned is
+    // still waiting for a faction that has not met it.
+    {
+      const mkDeck = () => createGame({ seed: 424242 });
+      const drawAll = (g, pid, n) => {
+        const u = Object.values(g.units).find((x) => x.owner === pid);
+        const out = [];
+        for (let i = 0; i < n; i++) {
+          const r = drawFieldEncounter(g, u, {});
+          if (r?.encounterId) out.push(r.encounterId);
+        }
+        return out;
+      };
+      const distinct = Object.keys(fieldEncounters()).length;
+
+      const gD = mkDeck();
+      const mine = drawAll(gD, gD.turnOrder[0], distinct * 3);
+      check("field deck: a faction never meets the same card twice",
+        new Set(mine).size === mine.length, `${mine.length} draws, ${new Set(mine).size} distinct`);
+      check("field deck: …and it can meet every card in the game",
+        mine.length === distinct, `met ${mine.length} of ${distinct}`);
+      check("field deck: …then the road goes quiet rather than repeating",
+        drawFieldEncounter(gD, Object.values(gD.units).find((u) => u.owner === gD.turnOrder[0]), {}) === null);
+
+      // The whole reason the pile stays shared: a card burned by one faction
+      // is still news to one that has not met it.
+      const theirs = drawAll(gD, gD.turnOrder[1], distinct * 3);
+      const burned = new Set(mine);
+      check("field deck: a card one faction burned still reaches another",
+        theirs.length > 0 && theirs.every((id) => burned.has(id)),
+        `${theirs.length} drawn, ${theirs.filter((id) => burned.has(id)).length} of them already burned`);
+      check("field deck: …and that faction does not repeat either",
+        new Set(theirs).size === theirs.length);
+
+      const wasOnce = CONFIG.encounters.fieldOncePerPlayer;
+      CONFIG.encounters.fieldOncePerPlayer = 0;
+      const gR = mkDeck();
+      const rep = drawAll(gR, gR.turnOrder[0], distinct * 3);
+      CONFIG.encounters.fieldOncePerPlayer = wasOnce;
+      check("field deck: the switch really does restore repeats",
+        rep.length > distinct && new Set(rep).size <= distinct,
+        `${rep.length} draws, ${new Set(rep).size} distinct`);
+
+      // The repo seam: hand-authored cards must actually be dealt, and must
+      // keep the shape the seam promises — three doors, two that pay, one
+      // that costs nothing to walk through.
+      const repo = Object.values(fieldEncounters()).filter((e) => e.id.startsWith("fer_"));
+      check("field deck: the repo-authored cards are in the shipped deck",
+        repo.length > 0 && repo.every((e) => mkDeck().encounterDeck.includes(e.id)),
+        `${repo.length} repo cards`);
+      const misshapen = repo.filter((e) => {
+        const ch = e.choices || [];
+        const paying = ch.filter((c) => (c.effects || []).length > 0);
+        return ch.length !== 3 || paying.length !== 2;
+      });
+      check("field deck: …each with three doors, two that pay and one that does not",
+        misshapen.length === 0, misshapen.map((e) => e.id).join(", "));
+      const punished = repo.filter((e) =>
+        (e.choices || []).some((c) => (c.effects || []).some((f) =>
+          (f.amount ?? 0) < 0 && (f.type === "ADJUST_HONOR" || f.type === "ADJUST_MENACE"))));
+      check("field deck: …and walking away is never punished",
+        punished.length === 0, punished.map((e) => e.id).join(", "));
     }
 
     // And the switch is a real no-op.

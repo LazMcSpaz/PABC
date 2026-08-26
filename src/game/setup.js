@@ -2,7 +2,7 @@
 // the board, players, locations, units, and the tiered Market.
 import { CONFIG } from "./config.js";
 import { FACTIONS, MINOR_FACTIONS, LOCATIONS, CAPITAL, ABILITIES, REACTIVES, factionDef } from "./content.js";
-import { FIELD_ENCOUNTERS } from "./content/index.js";
+
 import { makeRng } from "./rng.js";
 import { createIdGen } from "./ids.js";
 import { buildHexGrid, generateLayout, assignTerrainFeatures, assignRoads, assignRails, bfsDistances } from "./board.js";
@@ -10,6 +10,10 @@ import { recomputeInfluence } from "./influence.js";
 import { recomputeVisibility } from "./visibility.js";
 import { ensureDiplomacy, seedStanding, seedSway } from "./diplomacy.js";
 import { recomputeVp } from "./victory.js";
+// The LIVE field registry, not the generated import: the deck has to be built
+// from the same list delivery reads, or a repo-authored (or runtime-injected)
+// card sits in the registry and is never dealt.
+import { fieldEncounters } from "./encounters.js";
 
 // The name a faction's `seq`-th unit musters under. Walks the faction's
 // authored roster (content.js `unitNames`) in order; past the end it wraps
@@ -337,7 +341,7 @@ export function createGame({
   // state, unlike chips).
   const encounterDeck = (() => {
     const seeds = [];
-    for (const def of Object.values(FIELD_ENCOUNTERS)) {
+    for (const def of Object.values(fieldEncounters())) {
       const copies = def.copies || 1;
       for (let i = 0; i < copies; i++) seeds.push(def.id);
     }

@@ -6,7 +6,10 @@
 // Registers the `PLACE_ENCOUNTER` and `DELIVER_ENCOUNTER` handlers onto
 // the existing EFFECTS map at module load, so effects.js stays free of
 // circular imports.
-import { FIELD_ENCOUNTERS, WORLD_ENCOUNTERS } from "./content/index.js";
+import { WORLD_ENCOUNTERS } from "./content/index.js";
+// The merged field deck: the editor's export plus the hand-authored cards in
+// ./content/field-encounters-repo.js, which the exporter never touches.
+import { ALL_FIELD_ENCOUNTERS } from "./content/field-encounters-repo.js";
 import { LOCATIONS } from "./content.js";
 import { normalizeEncounter } from "./content-loader.js";
 import { evalCond } from "./dsl.js";
@@ -19,11 +22,12 @@ import { spendBeat, noteBeatHeld } from "./beatBudget.js";
 import { applyPatchTo, getPatch } from "./contentPatch.js";
 import { pickChoice } from "./choicePolicy.js";
 import { CHIPS } from "./content.js";
+import { CONFIG } from "./config.js";
 
 // One-time normalisation — flatten {type, params} once instead of on
 // every delivery. Editor-added fields (imagePath, outcomeText, …) pass
 // through.
-const FIELD = normalizeAll(FIELD_ENCOUNTERS);
+const FIELD = normalizeAll(ALL_FIELD_ENCOUNTERS);
 const WORLD = normalizeAll(WORLD_ENCOUNTERS);
 
 function normalizeAll(rawMap) {
@@ -58,6 +62,19 @@ export function allEncounterSources() {
  */
 export function worldEncounters() {
   return WORLD;
+}
+
+/**
+ * The live field registry, for setup.js's deck seeding.
+ *
+ * Its own accessor for the same reason `worldEncounters` has one: setup used
+ * to build the deck straight off the generated import, so a card injected by
+ * `registerFieldEncounter` — or added in the repo seam — existed in the
+ * registry and was never dealt. A deck built from a different list than the
+ * one delivery reads is a deck with cards that cannot come up.
+ */
+export function fieldEncounters() {
+  return FIELD;
 }
 
 /**
@@ -312,35 +329,88 @@ export function encounterRedrawBudget(state, pid, unit) {
   return n;
 }
 
+// What this faction has already been shown, so the road stops repeating
+// itself at them. An array rather than a Set because game state is saved,
+// cloned and replayed, and a Set survives none of those.
+function seenBy(state, pid) {
+  state.seenEncounters = state.seenEncounters || {};
+  state.seenEncounters[pid] = state.seenEncounters[pid] || [];
+  return state.seenEncounters[pid];
+}
+
+// Fold the discard pile back into the deck.
+//
+// NOT the old "replace an empty deck with the discards" reshuffle. Once a
+// draw can skip cards, the deck can be non-empty and still hold nothing this
+// player has not already seen — while the discard pile holds three cards the
+// AI drew and they never did. Appending keeps both facts true: the cards
+// still in the deck stay in the deck, and the ones somebody else has already
+// turned over come back round for whoever has not.
+function foldDiscardsBack(state) {
+  const pile = state.discards.encounter;
+  if (!pile?.length) return false;
+  state.encounterDeck = [...(state.encounterDeck || []), ...state.rng.shuffle(pile)];
+  state.discards.encounter = [];
+  return true;
+}
+
+// The index of the next card to offer `pid`, or -1.
+//
+// ONE CARD, ONE PLAYER, ONCE. The deck is shared by every faction, so before
+// this the same eleven cards cycled past everyone: 28 draws from a 22-card
+// deck in a nine-round playtest, and the human saw four cards twice. Skipping
+// what this player has already been shown makes the shared deck do the thing
+// it is good at — keeping a card alive for whoever has not met it — without
+// making the road repeat itself at anyone.
+//
+// A skipped card is NOT consumed. It stays exactly where it is for the
+// factions that have not seen it, which is the whole point of the pile being
+// shared rather than dealt out per player at setup.
+function nextOffer(state, pid) {
+  const deck = state.encounterDeck || [];
+  if (!CONFIG.encounters?.fieldOncePerPlayer) {
+    if (!deck.length && !foldDiscardsBack(state)) return -1;
+    return state.encounterDeck.length ? 0 : -1;
+  }
+  const seen = seenBy(state, pid);
+  const find = () => (state.encounterDeck || []).findIndex((id) => !seen.includes(id));
+  let i = find();
+  if (i < 0 && foldDiscardsBack(state)) i = find();
+  // -1 here means this faction has genuinely met every card in the game. The
+  // road going quiet for them is the honest outcome and the one the design
+  // asked for; `fieldOncePerPlayer: 0` is the switch back to repeats.
+  return i;
+}
+
 export function drawFieldEncounter(state, unit, ctx = {}) {
-  const ensureDeck = () => {
-    if (!state.encounterDeck?.length && state.discards.encounter?.length) {
-      state.encounterDeck = state.rng.shuffle(state.discards.encounter);
-      state.discards.encounter = [];
-    }
-    return (state.encounterDeck?.length || 0) > 0;
-  };
-  if (!ensureDeck()) return null;
+  let offer = nextOffer(state, unit.owner);
+  if (offer < 0) return null;
 
   // §17.5 Intelligence (Recon) + the Recon Team chip each grant one
-  // discard-and-redraw. A discard sends the drawn card to the deck bottom
-  // and draws the next; after the last discard the player is committed.
-  // Headless / AI (no ctx.interact) commit to the first draw, so the
-  // harness stays deterministic.
+  // discard-and-redraw. A discard sends the offered card to the deck bottom
+  // and offers the next one this player has not seen; after the last discard
+  // the player is committed. Headless / AI (no ctx.interact) commit to the
+  // first offer, so the harness stays deterministic.
   let redraws = encounterRedrawBudget(state, unit.owner, unit);
   while (redraws > 0 && ctx.interact && state.encounterDeck.length > 1) {
-    const top = state.encounterDeck[0];
     const wantDiscard = ctx.interact({
-      kind: "encounterRedraw", encounter: top, player: unit.owner, remaining: redraws,
+      kind: "encounterRedraw",
+      encounter: state.encounterDeck[offer],
+      player: unit.owner,
+      remaining: redraws,
     });
     if (!wantDiscard) break;
-    state.encounterDeck.push(state.encounterDeck.shift()); // bottom of deck
-    ensureDeck();
+    state.encounterDeck.push(...state.encounterDeck.splice(offer, 1));
+    const next = nextOffer(state, unit.owner);
+    if (next < 0) break; // nothing else unseen — keep what is in hand
+    offer = next;
     redraws -= 1;
   }
 
-  const encounterId = state.encounterDeck.shift();
+  const [encounterId] = state.encounterDeck.splice(offer, 1);
   state.discards.encounter.push(encounterId);
+  const seen = seenBy(state, unit.owner);
+  if (!seen.includes(encounterId)) seen.push(encounterId);
   state.world.encounterHexCooldowns[unit.node] = state.round + FIELD_HEX_COOLDOWN;
   return deliverEncounter(
     state, encounterId,
