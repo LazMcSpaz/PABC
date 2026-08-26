@@ -200,32 +200,109 @@ export function tickLoyalty(state, pid) {
 //
 // One section per Upkeep, so absorbing a place outright takes three turns and
 // a rival has three chances to walk in, out-project you, or contest it.
+// Would `pid` claim a section of `loc` at their next Upkeep, and if not, why?
+//
+// THE POINT OF THIS BEING ITS OWN FUNCTION is that the board draws a pulse on
+// the section about to change, and a preview that reasons about the rule
+// separately from the rule is a preview that will eventually lie. The tick
+// below and the meter both call this, so the wheel cannot promise a flip that
+// does not happen or stay quiet through one that does.
+//
+// `index` is the section that would turn over, or -1. `reason` names the
+// blocker when it is one worth reporting: a rival column and a contested
+// field are things the player did or can undo, and both emit a stall event.
+// "below-bar" and "not-neutral" are just the ordinary state of most of the
+// map and say nothing.
+export function claimOutlook(state, loc, pid) {
+  const cfg = CONFIG.influence?.claim;
+  const no = (reason) => ({ index: -1, reason });
+  if (!cfg?.enabled) return no("off");
+  if (!pid || !state.players[pid] || state.players[pid].eliminated) return no("no-claimant");
+  if (!loc?.sections?.includes("neutral")) return no("not-neutral");
+  // Contested ground is the contest's business.
+  if (loc.sections.some((sec) => sec && sec !== "neutral" && sec !== pid)) return no("rival-section");
+  if (cfg.blockedByRivalUnit && Object.values(state.units).some(
+    (u) => u.node === loc.hexId && u.owner !== pid)) return no("rival-unit");
+  const mine = claimStrength(state, pid, loc.hexId);
+  if (mine < (cfg.threshold ?? 5)) return no("below-bar");
+  if (strongestRivalAt(state, pid, loc.hexId) >= mine) return no("contested-field");
+  return { index: loc.sections.indexOf("neutral"), reason: null };
+}
+
+// Would a section of `loc` peel AWAY from its holder at their next Upkeep?
+//
+// The mirror of the claim, and the one the holder most needs to see. It is
+// deliberately the LAST step of `tickLoyalty`'s ladder and not an
+// approximation of it: Loyalty already at 0, still neglected, nothing holding
+// it up. A city at Loyalty 1 is bleeding but does not peel next Upkeep — it
+// reaches 0 next Upkeep and peels the one after — and a wheel that pulsed for
+// both would cry wolf every time a garrison stepped out for a turn.
+export function peelOutlook(state, loc) {
+  const cfg = CONFIG.loyalty;
+  const pid = loc?.loyaltyOwner;
+  if (!pid || (loc.loyalty ?? null) !== 0) return { index: -1 };
+  if (loc.chips?.some((u) => state.chips[u]?.chipId === "capital")) return { index: -1 };
+  if (Object.values(state.units).some((u) => u.owner === pid && u.node === loc.hexId)) return { index: -1 };
+  if (loc.chips?.some((c) => !state.chips[c]?.disabled
+    && CHIPS[state.chips[c]?.chipId]?.noLoyaltyDecay)) return { index: -1 };
+  if (!cfg?.peelPerUpkeep) return { index: -1 };
+  return { index: loc.sections.indexOf(pid), from: pid };
+}
+
+// What the control wheel should pulse: the one section of this Location that
+// turns over at somebody's next Upkeep, whoever's it is.
+//
+// Losing ground is checked FIRST and wins a tie, because the two can only
+// collide on a Location that is both shedding sections and being absorbed,
+// and of the two facts "you are about to lose a piece of this" is the one a
+// player needs a turn's warning about.
+export function pendingSectionChange(state, loc) {
+  const peel = peelOutlook(state, loc);
+  if (peel.index >= 0) {
+    return { index: peel.index, from: peel.from, to: null, cause: "loyalty" };
+  }
+  for (const pid of factionIdsOf(state)) {
+    const out = claimOutlook(state, loc, pid);
+    if (out.index >= 0) return { index: out.index, from: null, to: pid, cause: "influence" };
+  }
+  return null;
+}
+
+const factionIdsOf = (state) => state.turnOrder
+  || Object.keys(state.players || {});
+
+// Unclaimed ground drifts toward whoever surrounds it.
+//
+// `tickLoyalty` above cannot do this: it iterates `loc.loyaltyOwner === pid`,
+// and a fully-neutral Location has no loyaltyOwner at all — which is exactly
+// why a place that peeled to neutral then sat there for the rest of the game.
+// Peeling to neutral is right for ground taken FROM somebody: soft power can
+// hollow a rival's city out, but you do not inherit it by squeezing. What was
+// missing is the second half — once nobody holds it, the same influence that
+// hollowed it out starts filling it in.
+//
+// The decision itself lives in `claimOutlook` above, shared with the board's
+// pulse. What is left here is the bookkeeping: the per-Upkeep budget, the
+// stall events worth reporting, and finishing the absorption.
+//
+// One section per Upkeep, so absorbing a place outright takes three turns and
+// a rival has three chances to walk in, out-project you, or contest it.
 export function tickClaims(state, pid) {
   const cfg = CONFIG.influence?.claim;
   if (!cfg?.enabled || !pid || !state.players[pid] || state.players[pid].eliminated) return;
   let claimed = 0;
   for (const loc of Object.values(state.locations)) {
     if (claimed >= (cfg.sectionsPerUpkeep ?? 1)) break;
-    if (!loc.sections?.includes("neutral")) continue;
-    // Contested ground is the contest's business.
-    if (loc.sections.some((sec) => sec && sec !== "neutral" && sec !== pid)) continue;
-    if (cfg.blockedByRivalUnit && Object.values(state.units).some(
-      (u) => u.node === loc.hexId && u.owner !== pid)) {
-      emit(state, "claim_stalled", { hex: loc.hexId, by: pid, reason: "rival-unit" });
+    const { index, reason } = claimOutlook(state, loc, pid);
+    if (index < 0) {
+      // Only the blockers the player can act on are worth a line. "Most of the
+      // map is not neutral" is not news.
+      if (reason === "rival-unit" || reason === "contested-field") {
+        emit(state, "claim_stalled", { hex: loc.hexId, by: pid, reason });
+      }
       continue;
     }
-    // `pressureSource` answers "who dominates this hex, other than pid" — so
-    // ask it as each RIVAL would see it, which is the same question inverted:
-    // pid may claim only when nobody out-projects them here and their own
-    // reading clears the bar.
-    const mine = claimStrength(state, pid, loc.hexId);
-    if (mine < (cfg.threshold ?? 5)) continue;
-    if (strongestRivalAt(state, pid, loc.hexId) >= mine) {
-      emit(state, "claim_stalled", { hex: loc.hexId, by: pid, reason: "contested-field" });
-      continue;
-    }
-    const idx = loc.sections.indexOf("neutral");
-    loc.sections[idx] = pid;
+    loc.sections[index] = pid;
     claimed += 1;
     emit(state, "control_claimed", { hex: loc.hexId, to: pid });
     emit(state, "section_flipped", { hex: loc.hexId, to: pid, cause: "influence" });

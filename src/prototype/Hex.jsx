@@ -196,6 +196,7 @@ export default function Hex({ hex, units, selected, reachable, selectedUnitId, d
               loyalty={hex.control.loyalty}
               danger={hex.control.loyaltyDanger}
               pressureBy={hex.control.pressureBy}
+              pending={hex.control.pending}
               size={54}
             />
             <GarrisonValue

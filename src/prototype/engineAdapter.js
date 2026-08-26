@@ -5,7 +5,7 @@
 // shape-agnostic.
 
 import { CONFIG } from "../game/config.js";
-import { locationActionCapacity } from "../game/turn.js";
+import { locationActionCapacity, pendingSectionChange } from "../game/turn.js";
 import { reinforcementRoute } from "../game/board.js";
 import { takeAITurn } from "../game/ai.js";
 import {
@@ -553,6 +553,16 @@ export function adaptState(state) {
           // only signal was one line of feed text. A city being hollowed out
           // should say so on the city.
           pressureBy: pressureSource(state, loc, loc.controller || holderOf(loc)) || null,
+          // WHICH THIRD OF THE WHEEL TURNS OVER NEXT UPKEEP, so the meter can
+          // pulse it. Influence that is about to take a section, or Loyalty
+          // that is about to lose one, was a thing you could only find out by
+          // ending your turn and reading the feed afterwards — which is a
+          // warning arriving after the event it was warning about.
+          //
+          // Straight from `pendingSectionChange`, which the Upkeep tick itself
+          // calls: a preview that reasoned about the rule separately would
+          // eventually promise a flip that did not happen.
+          pending: pendingSectionChange(state, loc),
           chips: adaptChips(state, loc.chips),
           chipUids: [...loc.chips],
           chipSlots: loc.chipSlots,

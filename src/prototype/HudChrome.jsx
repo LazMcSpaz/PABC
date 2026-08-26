@@ -949,7 +949,7 @@ export function LocationWindow({ view, onClose, onActivate, onContest, onRecruit
           </div>
           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3 }}>
             <div style={{ filter: `drop-shadow(0 0 8px ${C.holo}55)` }}>
-              <ControlMeter sections={v.sections} loyalty={v.loyalty} danger={v.loyaltyDanger} pressureBy={v.pressureBy} size={56} />
+              <ControlMeter sections={v.sections} loyalty={v.loyalty} danger={v.loyaltyDanger} pressureBy={v.pressureBy} pending={v.pending} size={56} />
             </div>
             <SectionLabel color={C.textDim}>Control</SectionLabel>
           </div>

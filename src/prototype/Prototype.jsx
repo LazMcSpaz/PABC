@@ -258,6 +258,9 @@ function buildLocView(state, hex, isYourTurn) {
     // §11 — who is squeezing the place. The window is where a player decides
     // what to do about it, so it is where the arrow has to be nameable.
     pressureBy: control.pressureBy || null,
+    // …and which third of the wheel turns over next Upkeep, for the same
+    // reason: the holding window is where you decide what to do about it.
+    pending: control.pending || null,
     garrison: hex.garrison,
     production: hex.production,
     chipSlots: control.chipSlots,

@@ -702,7 +702,8 @@ WHAT MOVES IT
 · It falls when you take a place by force and rises as you hold it.
 · Ceding territory in a deal hands the receiving faction a little loyalty with it — land given is held better than land taken.
 · BE WARNED THAT LOYALTY DOES NOT PAY OFF SMOOTHLY. See [[r-influence|Influence]] for why a point can be worth nothing or worth twelve hexes.
-· A place you neglect all the way to 0 does not merely go quiet — it starts shedding sections to nobody, and once it belongs to nobody a neighbour can [[r-claim|absorb]] it without a fight.`,
+· A place you neglect all the way to 0 does not merely go quiet — it starts shedding sections to nobody, and once it belongs to nobody a neighbour can [[r-claim|absorb]] it without a fight.
+· The control wheel pulses the third that will peel at your next Upkeep, so the loss is visible a turn before it lands. Walking a column back in cancels it.`,
   },
 
   "r-claim": {
@@ -724,7 +725,8 @@ WHAT MOVES IT
 · You must ENCLOSE the place, not merely border it. The bar is high enough that one neighbouring town is not sufficient — it takes two, or one and a garrison on the ground.
 · A rival column standing in the town stops it dead, however strong your influence. A garrison in the square outranks the border on the map.
 · A rival holding even one section stops it too. Ground somebody is standing on changes hands by fighting for it, not by drifting.
-· Two factions pulling at the same town cancel out and it stays where it is. That is a real outcome, not a stalemate — out-project them and it starts moving again.`,
+· Two factions pulling at the same town cancel out and it stays where it is. That is a real outcome, not a stalemate — out-project them and it starts moving again.
+· YOU GET A TURN'S WARNING. The control wheel on a place pulses the third that is about to change hands, in the colour it is turning — so a town coming to you, or one about to slip out of your hands, says so before it happens rather than in the log afterwards.`,
   },
 
   "r-influence": {

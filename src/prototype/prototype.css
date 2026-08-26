@@ -325,6 +325,31 @@
   .tech-pulse { animation: none; }
 }
 
+/* Control wheel — the third that turns over at the next Upkeep.
+ *
+ * Influence taking a section, or Loyalty losing one, used to be findable only
+ * by ending your turn and reading the feed afterwards: a warning that arrived
+ * after the thing it was warning about. The wheel now says it a turn early.
+ *
+ * Two beats, because the two directions are not the same news. Ground coming
+ * TO you swells — it fills in. Ground about to be lost blinks harder and
+ * brighter, because you have exactly one turn to walk a column back in.
+ */
+@keyframes pc-wheel-gaining {
+  0%, 100% { opacity: 0.45; }
+  50% { opacity: 1; }
+}
+@keyframes pc-wheel-losing {
+  0%, 100% { opacity: 0.25; }
+  45% { opacity: 1; }
+  60% { opacity: 0.6; }
+}
+.pc-wheel-gaining { animation: pc-wheel-gaining 1.6s ease-in-out infinite; }
+.pc-wheel-losing  { animation: pc-wheel-losing 1.15s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .pc-wheel-gaining, .pc-wheel-losing { animation: none; opacity: 0.85; }
+}
+
 /* Faction-select portrait — a slow, subtle "living portrait" breathe on
  * the currently-picked faction card so the setup screen isn't static.
  * The portrait is positioned with `inset: 0` (not a translate-based

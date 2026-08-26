@@ -2,7 +2,7 @@
 // runs the turn loop, and exercises the effect library so each engine
 // layer can be verified without the UI.
 import { createGame } from "./setup.js";
-import { startTurn, endTurn, tickLoyalty, tickClaims, locationActionCapacity } from "./turn.js";
+import { startTurn, endTurn, tickLoyalty, tickClaims, pendingSectionChange, locationActionCapacity } from "./turn.js";
 import { performAction, recruitCostAt } from "./actions.js";
 import { applyEffect } from "./effects.js";
 import { emit } from "./events.js";
@@ -6209,6 +6209,79 @@ line("\n  [Phase 11] text-token resolver");
       (l) => l.sections.every((x) => x === "neutral")
         && gN.turnOrder.some((f) => claimStrength(gN, f, l.hexId) >= CONFIG.influence.claim.threshold));
     check("claim: the shipping bar hands nobody a free town on round 1", !freebie);
+
+    // THE PULSE MUST NOT LIE. The wheel now pre-announces the third that
+    // turns over next Upkeep, and a forecast derived separately from the rule
+    // is a forecast that eventually promises a flip that does not happen. So
+    // these check the prediction against what the tick actually does, in both
+    // directions, rather than checking that the predicate returns something.
+    {
+      const barWas2 = CONFIG.influence.claim.threshold;
+      CONFIG.influence.claim.threshold = 5;
+      const gP = createGame({ seed: 424242 });
+      recomputeInfluence(gP);
+      const who = gP.turnOrder[0];
+      const loc = Object.values(gP.locations).find(
+        (l) => l.sections.every((x) => x === "neutral")
+          && claimStrength(gP, who, l.hexId) >= CONFIG.influence.claim.threshold
+          && strongestRivalAt(gP, who, l.hexId) < claimStrength(gP, who, l.hexId));
+      const forecast = loc ? pendingSectionChange(gP, loc) : null;
+      check("pulse: a section about to be claimed is flagged before it happens",
+        !!forecast && forecast.cause === "influence" && forecast.to === who,
+        JSON.stringify(forecast));
+      if (loc && forecast) {
+        tickClaims(gP, who);
+        check("pulse: …and it is the section the Upkeep actually turned over",
+          loc.sections[forecast.index] === who, `[${loc.sections}] idx ${forecast.index}`);
+      }
+      // A hex nobody is close to says nothing — the wheel is quiet by default.
+      const quiet = Object.values(gP.locations).find(
+        (l) => l.sections.every((x) => x === "neutral")
+          && gP.turnOrder.every((f) => claimStrength(gP, f, l.hexId) < CONFIG.influence.claim.threshold));
+      check("pulse: …and a place nobody is close to does not pulse",
+        !quiet || pendingSectionChange(gP, quiet) === null);
+      CONFIG.influence.claim.threshold = barWas2;
+
+      // The other direction: a neglected city at Loyalty 0 sheds a section at
+      // its holder's next Upkeep, and the holder gets a turn's warning.
+      // Every Location a faction holds at round 1 is its CAPITAL, and a
+      // Capital is inert by design — locked at full Loyalty, it never peels.
+      // So the neglected city has to be built: take a neutral one, hand it
+      // over, then walk everybody out and let it go cold. (The first draft
+      // grabbed the first controlled Location it found, which was a capital,
+      // and read the correct answer as a failure.)
+      const neglect = (g, pid) => {
+        const l = Object.values(g.locations).find((x) => x.sections.every((sec) => sec === "neutral"));
+        if (!l) return null;
+        l.sections = l.sections.map(() => pid);
+        l.controller = pid;
+        l.loyaltyOwner = pid;
+        l.loyalty = 0;
+        for (const u of Object.values(g.units)) if (u.node === l.hexId) u.node = null;
+        return l;
+      };
+      const gL = createGame({ seed: 424242 });
+      const holder = gL.turnOrder[0];
+      const mine = neglect(gL, holder);
+      recomputeInfluence(gL);
+      const losing = pendingSectionChange(gL, mine);
+      check("pulse: a section about to peel away is flagged too",
+        !!losing && losing.cause === "loyalty" && losing.from === holder,
+        JSON.stringify(losing));
+      if (losing) {
+        tickLoyalty(gL, holder);
+        check("pulse: …and that is the section the Upkeep actually peeled",
+          mine.sections[losing.index] === "neutral", `[${mine.sections}] idx ${losing.index}`);
+      }
+      // A garrison walking back in is exactly what cancels it, and the wheel
+      // has to stop promising the loss the moment it does.
+      const gG = createGame({ seed: 424242 });
+      const held = neglect(gG, gG.turnOrder[0]);
+      const anyUnit = Object.values(gG.units).find((u) => u.owner === held.controller);
+      anyUnit.node = held.hexId;
+      check("pulse: …and a garrison back in the city stops the warning",
+        pendingSectionChange(gG, held) === null);
+    }
 
     // And the switch is a real no-op.
     const gO = createGame({ seed: 424242 });
