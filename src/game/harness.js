@@ -74,7 +74,7 @@ import { evalCond, evalStrength } from "./dsl.js";
 import { registerQuest } from "./quests.js";
 import { CONFIG } from "./config.js";
 import { takeAITurn, maybeAssignTech, warPeaceTerms } from "./ai.js";
-import { enforceLoyaltySlotCap, chargeChipUpkeep, slotCapacity, effectiveBuildCost, buildableChips, applyOutputAndBuilds, locationOutput, unitUpkeepFor, chargeUnitUpkeep, chipsHeldBy, chipUpkeepFor } from "./economy.js";
+import { enforceLoyaltySlotCap, chargeChipUpkeep, slotCapacity, effectiveBuildCost, buildableChips, applyOutputAndBuilds, locationOutput, unitUpkeepFor, chargeUnitUpkeep, chipsHeldBy, chipUpkeepFor, slotExpansionCost, completeBuildIfDone } from "./economy.js";
 
 const seed = Number(process.argv[2]) || 42;
 const line = (s = "") => console.log(s);
@@ -6282,6 +6282,77 @@ line("\n  [Phase 11] text-token resolver");
       anyUnit.node = held.hexId;
       check("pulse: …and a garrison back in the city stops the warning",
         pendingSectionChange(gG, held) === null);
+    }
+
+    // BUYING ROOM TO BUILD.
+    //
+    // The probe says the binding ceiling is slots, not money: 58% of
+    // faction-rounds have every city full against 10% where scrap could not
+    // buy anything. This sells the ceiling. What has to hold is that it is a
+    // BUILD and not a purchase — it takes the queue and accrues from Output,
+    // so the price is the chip that did not go up — and that it is capped,
+    // permanent, and rides with the Location through a capture.
+    {
+      const gX = createGame({ seed: 424242 });
+      startTurn(gX);
+      const owner = gX.turnOrder[gX.activeIndex];
+      const city = Object.values(gX.locations).find((l) => l.controller === owner);
+      const before = slotCapacity(city, gX);
+      const cost = slotExpansionCost(city);
+      check("room: a held city can buy another slot, at the published price",
+        cost === CONFIG.economy.slotExpansion.cost[0], `cost ${cost}`);
+
+      const actionsBefore = gX.players[owner].actions.remaining;
+      const r = performAction(gX, "expand-slots", { at: city.hexId });
+      check("room: …queued like a build rather than paid for outright",
+        r.ok && city.activeBuild?.kind === "slot" && city.activeBuild.cost === cost,
+        JSON.stringify(city.activeBuild));
+      check("room: …and costs no Action, exactly as queuing a chip does not",
+        gX.players[owner].actions.remaining === actionsBefore);
+      check("room: …so nothing widens until the work is paid for",
+        slotCapacity(city, gX) === before);
+
+      city.buildProgress = cost;
+      completeBuildIfDone(gX, city);
+      check("room: …and the slot lands when it is",
+        slotCapacity(city, gX) === before + 1, `${before} -> ${slotCapacity(city, gX)}`);
+      check("room: …the next one costs more",
+        slotExpansionCost(city) === CONFIG.economy.slotExpansion.cost[1]);
+
+      performAction(gX, "expand-slots", { at: city.hexId });
+      city.buildProgress = city.activeBuild.cost;
+      completeBuildIfDone(gX, city);
+      check("room: …and the cap holds",
+        slotExpansionCost(city) === null
+        && performAction(gX, "expand-slots", { at: city.hexId }).ok === false,
+        `bought ${city.boughtSlots}`);
+      check("room: …at exactly maxPerLocation over where it started",
+        slotCapacity(city, gX) === before + CONFIG.economy.slotExpansion.maxPerLocation);
+
+      // Permanent, and attached to the PLACE. A city taken from somebody who
+      // built it out arrives with the room they paid for — which is what ties
+      // conquest to the economy rather than leaving them in separate rooms.
+      const rival = gX.turnOrder.find((f) => f !== owner);
+      city.sections = city.sections.map(() => rival);
+      city.controller = rival;
+      check("room: bought slots ride with the city through a capture",
+        slotCapacity(city, gX) === before + CONFIG.economy.slotExpansion.maxPerLocation,
+        `capacity ${slotCapacity(city, gX)} under ${rival}`);
+
+      // And the switch is a real no-op.
+      const wasX = CONFIG.economy.slotExpansion.enabled;
+      CONFIG.economy.slotExpansion.enabled = 0;
+      const gO2 = createGame({ seed: 424242 });
+      startTurn(gO2);
+      const c2 = Object.values(gO2.locations).find((l) => l.controller === gO2.turnOrder[gO2.activeIndex]);
+      const off = performAction(gO2, "expand-slots", { at: c2.hexId });
+      // Read the price while the switch is still off — restoring first and
+      // then asking is asking the wrong question, which is what the first
+      // draft of this check did.
+      const offCost = slotExpansionCost(c2);
+      CONFIG.economy.slotExpansion.enabled = wasX;
+      check("room: enabled 0 refuses it and leaves capacity alone",
+        !off.ok && offCost === null, `${JSON.stringify(off)} cost ${offCost}`);
     }
 
     // HEX FILTERS — a key the matcher does not implement is a filter that

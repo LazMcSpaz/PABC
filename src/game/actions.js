@@ -27,6 +27,7 @@ import {
 import {
   meetsTech, meetsLoyalty, slotCapacity, slotsUsed, stationedUnitWithBay,
   techReqFor, upgradeOption, completeBuildIfDone, bankBuildSurplus, effectiveBuildCost,
+  slotExpansionCost,
   canRebuildCapital,
   supplyVerdict, queueDelivery,
 } from "./economy.js";
@@ -372,6 +373,33 @@ function runBuild(state, { params }) {
   // scrap rather than a pile sitting on the Location.
   bankBuildSurplus(state, loc.controller, completeBuildIfDone(state, loc));
   return { hex: loc.hexId, chipId: def.id };
+}
+
+// Buy this Location another chip slot.
+//
+// Queued through the ordinary build pipeline rather than paid for outright,
+// which is the whole design: it costs no Action — queuing a build never has —
+// but it takes the Location's ONE build queue and accrues from its own Output,
+// so the real price is the chips that did not go up while it did. A rich
+// faction still waits; a productive one waits less.
+function validateExpandSlots(state, { pid, params }) {
+  const loc = state.locations[params.at];
+  if (!loc) return fail("no such location");
+  if (loc.controller !== pid) return fail("you do not fully control that location");
+  if (!CONFIG.economy.slotExpansion?.enabled) return fail("expanding is not available");
+  const cost = slotExpansionCost(loc);
+  if (cost == null) return fail("this location is already as wide as it goes");
+  return { ok: true };
+}
+
+function runExpandSlots(state, { params }) {
+  const loc = state.locations[params.at];
+  const cost = slotExpansionCost(loc);
+  loc.activeBuild = { kind: "slot", cost };
+  emit(state, "build_started", { hex: loc.hexId, kind: "slot", cost });
+  // Carried-over progress may finish it at once, exactly as for a chip.
+  bankBuildSurplus(state, loc.controller, completeBuildIfDone(state, loc));
+  return { hex: loc.hexId, cost };
 }
 
 // §20.5 — upgrade an installed chip in place to its next tier. Always offered
@@ -870,6 +898,8 @@ const ACTIONS = {
   // since it actively converts banked scrap into immediate construction.
   build: { validate: validateBuild, run: runBuild },
   upgrade: { validate: validateUpgrade, run: runUpgrade },
+  // Buying room is queued like a build and, like a build, costs no Action.
+  "expand-slots": { validate: validateExpandSlots, run: runExpandSlots },
   // Rushing is an active push of banked scrap into construction — it costs 1
   // Action (and scrap). Queuing a build/upgrade and the slider stay free.
   rush: { payer: payLoc("at"), validate: validateRush, run: runRush },

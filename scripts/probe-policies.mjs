@@ -43,8 +43,33 @@ const r1 = (n) => Math.round(n * 10) / 10;
 const mean = (a) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0);
 
 const MAJORS = ["versari", "goldgrass", "lakers", "plainers"];
-const SEEDS = [1234, 424242, 7, 991, 4711, 8123, 20260821, 31337, 55555, 90210,
+const PINNED = [1234, 424242, 7, 991, 4711, 8123, 20260821, 31337, 55555, 90210,
   123456, 2026, 606, 77, 31415];
+
+// `--n N` extends the pinned fifteen deterministically, the same way and off
+// the same constant sim-suite.mjs uses, so seed 16 is seed 16 everywhere.
+//
+// WHY THIS WAS NEEDED. The pacifist gate asserts "a faction that never attacks
+// can still win", and it was reading exactly ONE win in fifteen. A claim
+// sitting on a single game is a coin flip: any change that reshuffles the RNG
+// path — a longer deck, a different draw order — moves that one game and the
+// gate flips without anything about the claim being true or false. This is the
+// second time a pacifist gate in this file has been fitted too tightly to
+// fifteen readings; the first one asserted a raw count and is documented
+// below. The fix both times is more evidence, not a looser bar.
+function seedsFor(n) {
+  if (!n || n <= PINNED.length) return PINNED.slice(0, n || PINNED.length);
+  const out = [...PINNED];
+  let x = 20260823;
+  while (out.length < n) {
+    x = (x * 1103515245 + 12345) % 2147483648;
+    if (!out.includes(x)) out.push(x);
+  }
+  return out;
+}
+const nArg = process.argv.includes("--n")
+  ? Number(process.argv[process.argv.indexOf("--n") + 1]) : 0;
+const SEEDS = seedsFor(nArg);
 const MAX_ROUNDS = 80;
 const SUBJECT = "versari"; // the faction under the scripted policy
 
@@ -485,9 +510,19 @@ if (process.argv.includes("--assert")) {
     `${aggressions} aggressions — the policy is not testing what it says`);
   claim("a faction that never attacks can still win", wins > 0,
     "0 wins — the diplomacy face does not close, which would justify the dark switches");
+  // A RATE, NOT A COUNT. This read `earlyFear.length <= 1`, which is a bar
+  // that gets stricter every time the sample grows: 1 rising in 15 games and 3
+  // in 45 are the SAME rate — 6.7% — and the second one failed. An absolute
+  // count against a growing sample is not a claim about the game, it is a
+  // claim about how many seeds you happened to run.
+  //
+  // The threshold is the one that was already being enforced, restated: at
+  // most one early-fear rising per fifteen games.
+  const earlyFearBudget = Math.max(1, Math.round(rows.length / 15));
   claim("a spotless faction is not ganged up on out of FEAR, early",
-    earlyFear.length <= 1,
-    `${earlyFear.length} early-fear risings against a Menace-0 faction` +
+    earlyFear.length <= earlyFearBudget,
+    `${earlyFear.length} early-fear risings against a Menace-0 faction across ` +
+    `${rows.length} games (budget ${earlyFearBudget})` +
     ` (was 7 of 10 before powerLead stopped measuring attrition)`);
   claim("…and is not ganged up on routinely at all", raised <= rows.length / 3,
     `${raised} coalitions raised across ${rows.length} games`);

@@ -241,6 +241,10 @@ export function createGame({
       // full Loyalty; neutral Locations have no Loyalty until captured.
       loyalty: controller ? CONFIG.loyalty.ceiling : null,
       chipSlots,
+      // Room the holder has paid to add (economy.slotExpansion). On the
+      // Location rather than on the player, because it is permanent and rides
+      // with the place through a capture.
+      boughtSlots: 0,
       // Economy §6.5 — WHO STARTED HERE. `occupationsBy` compares a Location's
       // authored `affiliation` against its current controller, which cannot
       // tell "I conquered this from them" from "the setup dealt it to me" —

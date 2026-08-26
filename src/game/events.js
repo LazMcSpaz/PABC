@@ -25,6 +25,8 @@ export const EVENT_NAMES = new Set([
   "location_ceded",
   // §18.2 Loyalty
   "loyalty_changed", "loyalty_failing", "control_peeled",
+  // A Location whose holder paid to widen it.
+  "slot_expanded",
   // Ground drifting the OTHER way — a neutral section claimed by whoever
   // dominates the hex, and the moment that finishes and the place is theirs.
   // Separate names from the contest pair because none of this was fought

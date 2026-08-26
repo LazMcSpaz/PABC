@@ -46,6 +46,7 @@ const BASE_COSTS = Object.fromEntries(
 const BASE_FREE = CONFIG.economy.freeChips;
 const BASE_PER = CONFIG.economy.perExtraChip;
 const BASE_CAP = CONFIG.capital.productionBonus;
+const BASE_EXPAND = CONFIG.economy.slotExpansion.enabled;
 
 function reset() {
   for (const [id, cost] of Object.entries(BASE_COSTS)) {
@@ -55,6 +56,7 @@ function reset() {
   CONFIG.economy.freeChips = BASE_FREE;
   CONFIG.economy.perExtraChip = BASE_PER;
   CONFIG.capital.productionBonus = BASE_CAP;
+  CONFIG.economy.slotExpansion.enabled = BASE_EXPAND;
 }
 function scaleCosts(fn) {
   for (const [id, cost] of Object.entries(BASE_COSTS)) {
@@ -67,6 +69,9 @@ function scaleCosts(fn) {
 
 const SCENARIOS = [
   { key: "baseline", label: "as shipped", apply: () => {} },
+  // The control for the slot-buying change: what the game was before room
+  // could be bought at all.
+  { key: "no-expand", label: "slot buying OFF", apply: () => { CONFIG.economy.slotExpansion.enabled = 0; } },
   { key: "x1.5", label: "costs x1.5", apply: () => scaleCosts((c) => c * 1.5) },
   { key: "x2", label: "costs x2", apply: () => scaleCosts((c) => c * 2) },
   { key: "free2", label: "freeChips 6->2", apply: () => { CONFIG.economy.freeChips = 2; } },
@@ -79,6 +84,11 @@ const SCENARIOS = [
   // and unlike a price it keeps tightening as the game goes on, because it is
   // income rather than a one-off.
   { key: "cap-1", label: "capital bonus -1", apply: () => { CONFIG.capital.productionBonus -= 1; } },
+  // Slot buying answers the mid-game (idle cash, the slot wall) and leaves the
+  // opening exactly as it was. This pairs it with the one lever that tightens
+  // the opening without touching a price.
+  { key: "expand+cap-1", label: "slots + capital -1", apply: () => { CONFIG.capital.productionBonus -= 1; } },
+  { key: "expand+free1", label: "slots + freeChips 1", apply: () => { CONFIG.economy.freeChips = 1; } },
 ];
 
 // The question every sample asks: with the money this faction is holding, in

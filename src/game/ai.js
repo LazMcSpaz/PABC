@@ -11,7 +11,7 @@ import { bfsDistances } from "./board.js";
 import { unitReach } from "./movement.js";
 import { LOCATIONS, CHIPS } from "./content.js";
 import { CONFIG } from "./config.js";
-import { buildableChips, slotCapacity, slotsUsed, stationedUnitWithBay, upgradeOption, effectiveBuildCost, chipsHeldBy } from "./economy.js";
+import { buildableChips, slotCapacity, slotsUsed, stationedUnitWithBay, upgradeOption, effectiveBuildCost, chipsHeldBy, slotExpansionCost } from "./economy.js";
 import { chipValue, upgradeValue } from "./chipValue.js";
 import { isUnitVisibleTo } from "./visibility.js";
 import { previewAttackerStrength, previewLocationContest } from "./contest.js";
@@ -1186,6 +1186,30 @@ function pickBuild(state, pid, loc) {
   if (unitFits.length) {
     return performAction(state, "build", { at: loc.hexId, chipId: unitFits[0].chipId }).ok;
   }
+  // NOTHING FITS BECAUSE THERE IS NOWHERE TO PUT IT — buy room.
+  //
+  // This is the state the probe measures as slot-bound, and it is 58% of
+  // faction-rounds: the city is full, so no price and no valuation matters.
+  // Reached only after the build and upgrade paths have both declined, so
+  // widening is what the AI does when it has run out of ways to use what it
+  // has, rather than a thing it races to.
+  //
+  // Two guards, and both are about not buying room it cannot fill. The wall
+  // has to be SLOTS and not the chip list — a city with nothing worth building
+  // gains nothing from another slot — and the faction has to be able to pay
+  // for the room and still have something left to put in it.
+  const wall = options.some((o) => o.def.kind === "location");
+  const cost = slotExpansionCost(loc);
+  if (wall && cost != null && !locFits.length) {
+    const cheapest = Math.min(...options
+      .filter((o) => o.def.kind === "location")
+      .map((o) => o.def.buildCost ?? o.def.cost ?? 0));
+    if (state.players[pid].resource >= cost + cheapest) {
+      const r = performAction(state, "expand-slots", { at: loc.hexId });
+      if (r.ok) return true;
+    }
+  }
+
   // Nothing fits and nothing upgrades: fall back to the best chip going, even
   // one the table scores at zero. An empty slot earns nothing at all, and the
   // old loop reached this state and simply stopped.

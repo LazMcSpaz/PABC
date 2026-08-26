@@ -140,12 +140,30 @@ export function meetsLoyalty(loc, def) {
 export function slotCapacity(loc, state) {
   const loy = loc.loyalty == null ? CONFIG.loyalty.ceiling : loc.loyalty;
   let cap = loc.chipSlots + (loy >= CONFIG.economy.bonusSlotLoyalty ? 1 : 0);
+  // Room the holder paid to add. Permanent and attached to the PLACE, not to
+  // whoever holds it — so a city taken from somebody who built it out arrives
+  // with the room they paid for.
+  cap += loc.boughtSlots || 0;
   // §17.5 Economy B2 (Capital Works): +1 chip slot at the holder's Capital.
   if (state && loc.controller && hasTechNode(state, loc.controller, "eco-b2") &&
       loc.chips.some((c) => state.chips[c]?.chipId === "capital")) {
     cap += 1;
   }
   return cap;
+}
+
+// What the next bought slot costs at this Location, or null when it has run
+// out of room to buy. Escalating, so the second one is a decision rather than
+// a formality — and read from the array's end once past it, so a config that
+// raises `maxPerLocation` without lengthening `cost` degrades to "the last
+// price, repeated" instead of to `undefined`.
+export function slotExpansionCost(loc) {
+  const cfg = CONFIG.economy.slotExpansion;
+  if (!cfg?.enabled) return null;
+  const bought = loc.boughtSlots || 0;
+  if (bought >= (cfg.maxPerLocation ?? 0)) return null;
+  const prices = cfg.cost || [];
+  return prices[Math.min(bought, prices.length - 1)] ?? null;
 }
 
 // §17.5 Economy B1 (Production Lines): a holder's chips cost 1 less to build
@@ -411,6 +429,20 @@ export function completeBuildIfDone(state, loc) {
   if ((loc.buildProgress || 0) < ab.cost) return 0;
 
   const overflow = (loc.buildProgress || 0) - ab.cost;
+
+  // Room, rather than a thing to put in it. Handled before the chip lookup
+  // because a slot build names no chip, and `CHIPS[undefined]` would read as
+  // an unknown chip rather than as the different kind of build it is.
+  if (ab.kind === "slot") {
+    loc.boughtSlots = (loc.boughtSlots || 0) + 1;
+    loc.activeBuild = null;
+    loc.buildProgress = 0;
+    emit(state, "slot_expanded", {
+      hex: loc.hexId, controller: loc.controller, bought: loc.boughtSlots,
+    });
+    return overflow;
+  }
+
   const def = CHIPS[ab.chipId];
 
   if (ab.kind === "upgrade") {

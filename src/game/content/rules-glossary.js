@@ -694,7 +694,7 @@ WHAT MOVES IT
 
 WHAT IT AFFECTS
 · It is the main input to [[r-influence|influence]], which is what projects your control outward onto the map. This is the chain that matters: LOYALTY MAKES INFLUENCE, INFLUENCE MAKES TERRITORY, TERRITORY MAKES [[r-sway|SWAY]] AND [[r-actions|ACTIONS]].
-· Above about ${CONFIG.economy.bonusSlotLoyalty} it unlocks an extra building slot.
+· Above about ${CONFIG.economy.bonusSlotLoyalty} it unlocks an extra building slot — and you can [[r-room|pay for more]] beyond that.
 · Low loyalty makes a place vulnerable — below the danger line, neighbours can peel it away from you.
 
 WHAT MOVES IT
@@ -727,6 +727,26 @@ WHAT MOVES IT
 · A rival holding even one section stops it too. Ground somebody is standing on changes hands by fighting for it, not by drifting.
 · Two factions pulling at the same town cancel out and it stays where it is. That is a real outcome, not a stalemate — out-project them and it starts moving again.
 · YOU GET A TURN'S WARNING. The control wheel on a place pulses the third that is about to change hands, in the colour it is turning — so a town coming to you, or one about to slip out of your hands, says so before it happens rather than in the log afterwards.`,
+  },
+
+  "r-room": {
+    id: "r-room",
+    term: "Buying Room",
+    aliases: ["chip slots", "widening a city", "slot expansion"],
+    category: GROUND,
+    imagePath: null,
+    body: `A settlement holds only so many buildings. You can pay to make it hold more — up to ${CONFIG.economy.slotExpansion.maxPerLocation} more, and no further.
+
+This exists because room, not money, is usually what you actually run out of. A city fills up long before your purse empties, and once it is full no amount of scrap buys anything at all. Widening it is the way past that.
+
+WHAT IT AFFECTS
+· The place holds one more building, permanently.
+· It is PERMANENT AND IT BELONGS TO THE PLACE. Take a city somebody widened and you inherit the room they paid for; lose one you widened and they inherit yours. A built-out city is worth more to take than a bare one.
+
+WHAT MOVES IT
+· It is BUILT, not bought. Queuing it costs no Action — queuing a building never has — but it takes the settlement's one build queue and is paid off out of that settlement's own output, the same way a building is. The real price is the building that did not go up while it went up.
+· The second one costs noticeably more than the first, so widening twice is a decision rather than a formality.
+· A rich faction still waits for it. A productive one waits less. That is the difference between having scrap and having a place worth spending it on.`,
   },
 
   "r-influence": {

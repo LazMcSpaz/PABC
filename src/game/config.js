@@ -593,6 +593,34 @@ export const CONFIG = {
     // carries a real premium over organic building, so it's an emergency
     // lever, not a strictly-dominant default (docs/chip-economy-handoff.md).
     rushScrapPerPoint: 2,
+    // BUYING ROOM TO BUILD.
+    //
+    // Measured over 8 seeds x 30 rounds x 4 majors, the binding ceiling in
+    // this game is not money: 58% of faction-rounds have every city full,
+    // against 10% where held scrap could not buy anything. Raising prices
+    // does not tighten that — it swaps which wall you hit, because a faction
+    // that builds less never fills its cities (costs x1.5 halves the
+    // slot-bound share and leaves idle cash almost unmoved).
+    //
+    // So the room itself is for sale. This turns the ceiling that IS binding
+    // into something scrap can move, which is what makes scrap matter without
+    // touching a single price.
+    //
+    // Three deliberate shapes:
+    //   · ESCALATING, so the second one is a real decision and not a formality.
+    //   · Bought through the BUILD PIPELINE, not paid for outright. It costs no
+    //     Action — queuing a build never has — but it occupies the Location's
+    //     one build queue and accrues from its own Output, so the cost is the
+    //     chips you did not build while it went up.
+    //   · PERMANENT, and it rides with the Location. A built-out city is worth
+    //     more to take than a bare one, which ties conquest to the economy
+    //     instead of leaving them in separate rooms.
+    slotExpansion: {
+      enabled: 1,
+      maxPerLocation: 2,
+      // Indexed by how many this Location has already bought.
+      cost: [8, 14],
+    },
 
     // Economy brief §7.1 — SCRAP GETS A PLACE, as DELAY rather than refusal.
     //

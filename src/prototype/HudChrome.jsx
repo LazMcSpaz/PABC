@@ -889,7 +889,7 @@ export function EconomyLedger({ report, onOpenHex, onOpenUnit }) {
   );
 }
 
-export function LocationWindow({ view, onClose, onActivate, onContest, onRecruit, onSabotage, onBuild, onUpgrade, onRush, onSetSlider, onSetPoolTarget, onSetBuildPriority }) {
+export function LocationWindow({ view, onClose, onActivate, onContest, onRecruit, onSabotage, onBuild, onUpgrade, onRush, onExpandSlots, onSetSlider, onSetPoolTarget, onSetBuildPriority }) {
   const v = view;
   // On desktop a city is a panel you consult while still working the map, not a
   // modal that takes the screen hostage. On a phone it fills the screen either
@@ -998,7 +998,7 @@ export function LocationWindow({ view, onClose, onActivate, onContest, onRecruit
         )}
 
         {v.economy && (
-          <EconomyPanel hexId={v.hexId} eco={v.economy} onBuild={onBuild} onUpgrade={onUpgrade} onRush={onRush} onSetSlider={onSetSlider} onSetPoolTarget={onSetPoolTarget} onSetBuildPriority={onSetBuildPriority} />
+          <EconomyPanel hexId={v.hexId} eco={v.economy} onBuild={onBuild} onUpgrade={onUpgrade} onRush={onRush} onExpandSlots={onExpandSlots} onSetSlider={onSetSlider} onSetPoolTarget={onSetPoolTarget} onSetBuildPriority={onSetBuildPriority} />
         )}
 
         {v.ability && (
@@ -1139,7 +1139,7 @@ function BuildList({ items, can, empty, onPick }) {
   );
 }
 
-function EconomyPanel({ hexId, eco, onBuild, onUpgrade, onRush, onSetSlider, onSetPoolTarget, onSetBuildPriority }) {
+function EconomyPanel({ hexId, eco, onBuild, onUpgrade, onRush, onExpandSlots, onSetSlider, onSetPoolTarget, onSetBuildPriority }) {
   const [open, setOpen] = useState(null); // null | "build" | { upgrade: chipUid }
   const can = eco.canManage;
   // One pill button, shared by the guns/butter slider, the pooling picker and
@@ -1223,10 +1223,30 @@ function EconomyPanel({ hexId, eco, onBuild, onUpgrade, onRush, onSetSlider, onS
             + Build
           </button>
         ))}
-        {emptySlots === 0 && (
+        {emptySlots === 0 && !eco.expand && (
           <div style={{ fontSize: 10, color: C.textFaint, alignSelf: "center" }}>
             All city slots full.
           </div>
+        )}
+        {/* ROOM FOR SALE. Sits in the slot grid rather than in a menu because
+            it is the same decision as the slots beside it — what this city can
+            hold — and because a full city is exactly where a player goes
+            looking for a way out. Offered whether or not the grid is full: a
+            city one slot from full is the moment to start paying for the next
+            one, since it goes up through the build queue and takes time. */}
+        {eco.expand && (
+          <button className="hud-int" disabled={!can}
+            title={`Widen this city: ${eco.expand.cost} build points, and it takes the build queue while it goes up. ` +
+              `${eco.expand.bought} of ${eco.expand.max} bought. Permanent — it stays with the city if you lose it.`}
+            onClick={can ? () => onExpandSlots?.(hexId) : undefined}
+            style={{
+              fontFamily: C.font, fontSize: 11, fontWeight: 700, padding: "6px 12px",
+              borderRadius: 6, border: `1px dashed ${C.gold}88`,
+              background: "rgba(232,181,63,0.08)", color: C.gold,
+              cursor: can ? "pointer" : "default",
+            }}>
+            + Room ({eco.expand.cost})
+          </button>
         )}
       </div>
 

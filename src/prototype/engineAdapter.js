@@ -16,6 +16,7 @@ import {
 } from "../game/content.js";
 import {
   buildableChips, upgradeOption, slotCapacity, slotsUsed, locationOutput, meetsTech,
+  slotExpansionCost,
   unitUpkeepFor, chipUpkeepFor, chipsHeldBy,
 } from "../game/economy.js";
 import { recruitCapBonus } from "../game/actions.js";
@@ -727,6 +728,16 @@ function adaptEconomy(state, loc) {
   const used = slotsUsed(state, loc.chips);
   const ab = loc.activeBuild;
 
+  // Room for sale. Null once the Location has bought all it may, or when the
+  // rule is off — the window then reads exactly as it did before, rather than
+  // showing a control that always refuses.
+  const expandCost = slotExpansionCost(loc);
+  const expand = expandCost == null ? null : {
+    cost: expandCost,
+    bought: loc.boughtSlots || 0,
+    max: CONFIG.economy.slotExpansion.maxPerLocation,
+  };
+
   const buildMenu = buildableChips(state, loc).map((o) => {
     const fits = o.def.kind === "unit"
       ? hasStationedUnitWithBay(state, loc, o.def.slots || 1)
@@ -838,6 +849,7 @@ function adaptEconomy(state, loc) {
     slider: loc.buildSlider ?? 0,
     progress: loc.buildProgress || 0,
     slotCapacity: cap,
+    expand,
     slotsUsed: used,
     // Pooling (§2.2) + funding priority (§3.4) — engine actions that had no
     // control anywhere in the UI until now.

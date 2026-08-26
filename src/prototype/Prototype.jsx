@@ -221,6 +221,10 @@ function buildLocView(state, hex, isYourTurn) {
       progress: e.progress,
       slotCapacity: e.slotCapacity,
       slotsUsed: e.slotsUsed,
+      // Room for sale, or null once this city has bought all it may. This
+      // viewmodel copies fields by name rather than spreading, so a new one on
+      // the adapter reaches the window only when it is listed here.
+      expand: e.expand,
       activeBuild: e.activeBuild,
       buildMenu: e.buildMenu,
       chips: chipDefs,
@@ -1098,6 +1102,24 @@ export default function Prototype({ config, onNewGame }) {
     }
     return runAction("rush", { at: hexId }, null, "Build rushed.");
   }
+  // Buying room is a BUILD, not a purchase — it takes the city's build queue
+  // and accrues from its own Output. So the confirm names the thing a player
+  // is actually giving up, which is the chip that is not going up meanwhile.
+  function onExpandSlots(hexId) {
+    const loc = gameRef.current?.locations?.[hexId];
+    if (loc?.activeBuild && !isPromptDismissed("expand-replaces-build")) {
+      setConfirmPrompt({
+        title: "This city is already building",
+        body: "Widening the city takes the build queue. The progress already sunk carries over, "
+          + "but whatever is queued now stops being what this city is working on.",
+        confirmLabel: "Widen it anyway",
+        dontShowKey: "expand-replaces-build",
+        onConfirm: () => runAction("expand-slots", { at: hexId }, null, "The city is being widened."),
+      });
+      return { ok: true, pending: true };
+    }
+    return runAction("expand-slots", { at: hexId }, null, "The city is being widened.");
+  }
   function onSetSlider(hexId, value) {
     return runAction("set-slider", { at: hexId, value });
   }
@@ -1468,6 +1490,7 @@ export default function Prototype({ config, onNewGame }) {
             onBuild={onBuild}
             onUpgrade={onUpgrade}
             onRush={onRush}
+            onExpandSlots={onExpandSlots}
             onSetSlider={onSetSlider}
             onSetPoolTarget={onSetPoolTarget}
             onSetBuildPriority={onSetBuildPriority}
