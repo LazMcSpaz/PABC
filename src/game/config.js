@@ -401,10 +401,20 @@ export const CONFIG = {
     // shared pile do what a shared pile is good at — keeping a card alive for
     // whoever has not met it — without repeating the road at anyone.
     //
-    // A faction that has genuinely met every card gets no field encounters.
-    // That is the design's answer, not an oversight; 0 here is the switch
-    // back to repeats.
     fieldOncePerPlayer: 1,
+    // …but the road does not go SILENT once a faction has met every card.
+    //
+    // Shipping it that way was a mistake and the suite caught it: field
+    // encounters are a faucet as well as a story, and cutting the most
+    // mobile factions off around the mid-game took scrap and events out of
+    // the late game. Measured over 15 seeds, unresolved games went from 4 to
+    // 8 — half the regression traceable to this alone.
+    //
+    // "Fire once and do not repeat" is about not being shown the same card
+    // while unseen ones exist. It was never about the road going quiet. So
+    // novelty comes first and repeats resume only when there is genuinely
+    // nothing new left. 0 restores the silence.
+    fieldRepeatWhenExhausted: 1,
   },
 
   // How fast a player picks quests up.

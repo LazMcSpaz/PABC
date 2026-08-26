@@ -6335,33 +6335,52 @@ line("\n  [Phase 11] text-token resolver");
       };
       const distinct = Object.keys(fieldEncounters()).length;
 
+      // NOVELTY FIRST, AND ONLY THEN REPEATS. The first draft of this block
+      // asserted "never repeats, then goes quiet", which is what the code did
+      // and what the suite then caught as a regression: a faction cut off
+      // after its last unseen card stops receiving a faucet as well as a
+      // story, and unresolved games went from 4 to 8 over 15 seeds. So the
+      // property is not "no repeats ever" — it is "no repeat while anything
+      // unseen is left", which is what the design actually asked for.
       const gD = mkDeck();
-      const mine = drawAll(gD, gD.turnOrder[0], distinct * 3);
-      check("field deck: a faction never meets the same card twice",
-        new Set(mine).size === mine.length, `${mine.length} draws, ${new Set(mine).size} distinct`);
-      check("field deck: …and it can meet every card in the game",
-        mine.length === distinct, `met ${mine.length} of ${distinct}`);
-      check("field deck: …then the road goes quiet rather than repeating",
-        drawFieldEncounter(gD, Object.values(gD.units).find((u) => u.owner === gD.turnOrder[0]), {}) === null);
+      const firstPass = drawAll(gD, gD.turnOrder[0], distinct);
+      check("field deck: a faction meets every card before it meets any twice",
+        new Set(firstPass).size === firstPass.length && firstPass.length === distinct,
+        `${firstPass.length} draws, ${new Set(firstPass).size} distinct, ${distinct} exist`);
+      const afterwards = drawAll(gD, gD.turnOrder[0], 5);
+      check("field deck: …and then the road keeps happening rather than going quiet",
+        afterwards.length === 5, `${afterwards.length} of 5 draws returned a card`);
 
       // The whole reason the pile stays shared: a card burned by one faction
       // is still news to one that has not met it.
-      const theirs = drawAll(gD, gD.turnOrder[1], distinct * 3);
+      const gS = mkDeck();
+      const mine = drawAll(gS, gS.turnOrder[0], distinct);
+      const theirs = drawAll(gS, gS.turnOrder[1], distinct);
       const burned = new Set(mine);
       check("field deck: a card one faction burned still reaches another",
         theirs.length > 0 && theirs.every((id) => burned.has(id)),
         `${theirs.length} drawn, ${theirs.filter((id) => burned.has(id)).length} of them already burned`);
-      check("field deck: …and that faction does not repeat either",
-        new Set(theirs).size === theirs.length);
+      check("field deck: …and that faction meets them all before repeating either",
+        new Set(theirs).size === theirs.length && theirs.length === distinct);
 
       const wasOnce = CONFIG.encounters.fieldOncePerPlayer;
       CONFIG.encounters.fieldOncePerPlayer = 0;
       const gR = mkDeck();
       const rep = drawAll(gR, gR.turnOrder[0], distinct * 3);
       CONFIG.encounters.fieldOncePerPlayer = wasOnce;
-      check("field deck: the switch really does restore repeats",
+      check("field deck: the switch really does restore repeats from the start",
         rep.length > distinct && new Set(rep).size <= distinct,
         `${rep.length} draws, ${new Set(rep).size} distinct`);
+
+      // …and the OTHER switch really does restore the silence, so the
+      // regression this replaced stays reachable rather than merely deleted.
+      const wasRepeat = CONFIG.encounters.fieldRepeatWhenExhausted;
+      CONFIG.encounters.fieldRepeatWhenExhausted = 0;
+      const gQ = mkDeck();
+      const quiet = drawAll(gQ, gQ.turnOrder[0], distinct * 2);
+      CONFIG.encounters.fieldRepeatWhenExhausted = wasRepeat;
+      check("field deck: …and fieldRepeatWhenExhausted 0 lets the road go quiet",
+        quiet.length === distinct, `${quiet.length} draws, ${distinct} exist`);
 
       // The repo seam: hand-authored cards must actually be dealt, and must
       // keep the shape the seam promises — three doors, two that pay, one

@@ -376,10 +376,17 @@ function nextOffer(state, pid) {
   const find = () => (state.encounterDeck || []).findIndex((id) => !seen.includes(id));
   let i = find();
   if (i < 0 && foldDiscardsBack(state)) i = find();
-  // -1 here means this faction has genuinely met every card in the game. The
-  // road going quiet for them is the honest outcome and the one the design
-  // asked for; `fieldOncePerPlayer: 0` is the switch back to repeats.
-  return i;
+  if (i >= 0) return i;
+  // Nothing unseen left. NOVELTY FIRST, BUT NOT SILENCE — the first version
+  // returned -1 here and the road went quiet for that faction forever, which
+  // measured badly: field encounters are a faucet as well as a story, and
+  // cutting the most mobile factions off mid-game took scrap and events out
+  // of the late game (unresolved games 4 -> 8 over 15 seeds). "Fire once and
+  // do not repeat" means do not show me the same card while unseen ones
+  // exist; it never meant the road stops happening.
+  if (!CONFIG.encounters?.fieldRepeatWhenExhausted) return -1;
+  if (!(state.encounterDeck || []).length && !foldDiscardsBack(state)) return -1;
+  return state.encounterDeck.length ? 0 : -1;
 }
 
 export function drawFieldEncounter(state, unit, ctx = {}) {
