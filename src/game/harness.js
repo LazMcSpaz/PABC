@@ -6347,6 +6347,33 @@ line("\n  [Phase 11] text-token resolver");
       });
       check("field deck: …each with three doors, two that pay and one that does not",
         misshapen.length === 0, misshapen.map((e) => e.id).join(", "));
+      // PERMANENT RESEARCH IS PRICED AGAINST THE LAB, NOT AGAINST THE OTHER
+      // CARDS. `permanentResearch` feeds the same sum a Lab's output does
+      // (stats.js), so +1 from a card is a Lab's stream with no chip slot, no
+      // build action and no upkeep — strictly the better deal at any equal
+      // price. Two things therefore have to hold, and the second is the one
+      // that was missing: it costs more than a Lab, AND the cost is gated,
+      // because ADJUST_RESOURCE floors at zero and an ungated "−4 scrap"
+      // charges a faction holding 1 scrap exactly 1 for the same reward.
+      const labCost = CHIPS.labs.buildCost;
+      const researchDoors = repo.flatMap((e) => (e.choices || [])
+        .filter((c) => (c.effects || []).some((f) =>
+          f.type === "ADJUST_RESOURCE" && f.resource === "Research" && (f.amount ?? 0) > 0))
+        .map((c) => ({ card: e.id, choice: c })));
+      check("field deck: permanent Research is rare — at most one door in the set",
+        researchDoors.length <= 1, researchDoors.map((d) => `${d.card}/${d.choice.id}`).join(", "));
+      const underpriced = researchDoors.filter((d) => {
+        const spend = (d.choice.effects || [])
+          .filter((f) => f.type === "ADJUST_RESOURCE" && f.resource === "Resource")
+          .reduce((a, f) => a + (f.amount ?? 0), 0);
+        return -spend <= labCost;
+      });
+      check(`field deck: …and costs more than a Lab (${labCost})`,
+        underpriced.length === 0, underpriced.map((d) => d.card).join(", "));
+      const ungated = researchDoors.filter((d) => !d.choice.condition);
+      check("field deck: …behind a gate, so a broke faction cannot dodge the price",
+        ungated.length === 0, ungated.map((d) => d.card).join(", "));
+
       const punished = repo.filter((e) =>
         (e.choices || []).some((c) => (c.effects || []).some((f) =>
           (f.amount ?? 0) < 0 && (f.type === "ADJUST_HONOR" || f.type === "ADJUST_MENACE"))));

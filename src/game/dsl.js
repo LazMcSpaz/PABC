@@ -429,6 +429,27 @@ export function evalCond(state, cond, ctx = {}) {
         const toward = resolvePlayer(state, s.toward ?? s.player ?? s.faction ?? "active", ctx);
         return observer && toward ? dipTolerance(state, observer, toward) : 0;
       }
+      // What a faction can actually pay.
+      //
+      // The score vocabulary could read every reputation a faction had and
+      // not the one number every player checks first. That was fine while
+      // content only ever GRANTED resources; it stopped being fine the moment
+      // a choice charged for something, because `ADJUST_RESOURCE` floors at
+      // zero — so "costs 4 scrap" charges a player with 1 scrap exactly 1 and
+      // hands them the same reward. A price nobody can fail to meet is not a
+      // price. This is the gate that makes one real.
+      //
+      // `resource` names the pool ("Resource" for scrap, "Research", "VP"),
+      // defaulting to scrap because that is what a cost almost always means.
+      case "resource": {
+        const fid = resolvePlayer(state, s.player ?? s.faction ?? "active", ctx);
+        if (!fid) return 0;
+        const p = state.players[fid];
+        if (!p) return 0;
+        const key = { Resource: "resource", Research: "research", VP: "vp" }[s.resource || "Resource"]
+          || "resource";
+        return p[key] ?? 0;
+      }
       case "trust_floor": {
         const observer = resolvePlayer(state, s.observer ?? s.player ?? s.faction ?? "active", ctx);
         return observer ? dipTrustFloor(state, observer) : 0;

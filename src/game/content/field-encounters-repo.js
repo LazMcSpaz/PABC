@@ -46,23 +46,20 @@ export const REPO_FIELD_ENCOUNTERS = {
     id: "fer_salvage_line",
     title: "The Salvage Line",
     copies: 2,
-    art: "A queue of croppers stripping a half-buried hauler, working in shifts, a foreman with a tally board.",
-    text: `Forty people are taking a freight hauler apart where it went down, and they are doing it in shifts with a tally board, not a scramble. The foreman marks what each shift pulls and what it is owed. Nobody here is in a hurry and nobody is fighting over it.`,
+    art: "A long queue of workers stripping a half-buried hauler in shifts, a foreman with a tally board at the head of it.",
+    text: `Forty people are taking a freight hauler apart, and they are doing it in shifts with a tally board rather than in a scramble. The foreman marks what each shift pulls and what it is owed, and the marks are honoured. Nobody here is in a hurry and nobody is fighting over it, which is not how any of this looked twenty years ago.`,
     choices: [
       {
         id: "ch_sal_work", ordinal: 0, condition: null,
         label: "Put your people on the line for a shift",
-        outcomeText: "Your column works a shift like anyone else's and is paid like anyone else's, in what they pulled out.",
+        outcomeText: "Your column works a shift like anyone else's and is paid like anyone else's, out of what came up.",
         effects: [{ type: "ADJUST_RESOURCE", target: "active", resource: "Resource", amount: 2 }],
       },
       {
-        id: "ch_sal_fittings", ordinal: 1, condition: null,
-        label: "Buy the fittings they cannot use",
-        outcomeText: "They sell you a crate of couplings nobody on the line has a use for. Your smiths spend a week working out how the seals were cut, and then they know.",
-        effects: [
-          { type: "ADJUST_RESOURCE", target: "active", resource: "Resource", amount: -1 },
-          { type: "ADJUST_RESOURCE", target: "active", resource: "Research", amount: 1 },
-        ],
+        id: "ch_sal_board", ordinal: 1, condition: null,
+        label: "Buy a look at the foreman's board",
+        outcomeText: "Every wreck this crew has stripped, in order, with the ones still buried marked and the ones not worth the digging crossed out. It is the best map of this country anybody has made since the shift.",
+        effects: [{ type: "REVEAL_REGION", target: "active", radius: 2 }],
       },
       walkAway("ch_sal_on", "Leave them to it",
         "You go around. The tally board is still going when you lose sight of it."),
@@ -73,13 +70,13 @@ export const REPO_FIELD_ENCOUNTERS = {
     id: "fer_waystation_ledger",
     title: "The Waystation Ledger",
     copies: 2,
-    art: "A bound ledger on a chain at a waystation counter, columns of names and hatch marks, a keeper who does not look up.",
-    text: `The keeper's ledger is chained to the counter and open at the current page. Water, shelter, and feed are all on credit here, and the column of names runs back further than the waystation looks old. Two of the names have been open a long time.`,
+    art: "A bound ledger chained to a waystation counter, columns of names and hatch marks, a keeper who does not look up.",
+    text: `The keeper's ledger is chained to the counter and open at the current page. Water, shelter and feed are all on credit here, and the column of names runs back further than the waystation looks old. Two of the names have been open a long time. Nobody has crossed them out and nobody has closed the book.`,
     choices: [
       {
         id: "ch_way_settle", ordinal: 0, condition: null,
         label: "Settle the oldest open name",
-        outcomeText: "You pay off a debt belonging to somebody you will never meet. The keeper writes your name beside the crossing-out, which is the whole point of a ledger that stays chained to the counter.",
+        outcomeText: "You pay off a debt belonging to somebody you will never meet. The keeper writes your name beside the crossing-out, which is the entire reason a ledger stays chained to a counter.",
         effects: [
           { type: "ADJUST_RESOURCE", target: "active", resource: "Resource", amount: -1 },
           { type: "ADJUST_HONOR", target: "active", amount: 1, cause: "encounter" },
@@ -88,7 +85,7 @@ export const REPO_FIELD_ENCOUNTERS = {
       {
         id: "ch_way_read", ordinal: 1, condition: null,
         label: "Read it back a few pages",
-        outcomeText: "Who came through, in what order, and who they were travelling with. The road ahead is a known quantity for a while.",
+        outcomeText: "Who came through, in what order, and who they were travelling with. The road ahead stops being a guess for a while.",
         effects: [{ type: "PEEK", target: "active", scope: "field", count: 2, reorder: false }],
       },
       walkAway("ch_way_on", "Take your water and go",
@@ -100,19 +97,19 @@ export const REPO_FIELD_ENCOUNTERS = {
     id: "fer_dry_cistern",
     title: "The Dry Cistern",
     copies: 2,
-    art: "A capped stone cistern in open country, its inspection plate rusted shut, dry grass all round it.",
-    text: `An old-world cistern, capped and sealed, sitting in country that has not held water since anyone here was born. The plate is rusted but not broken. Whatever is under it has been under it a long time.`,
+    art: "A capped stone cistern standing alone in open country, its inspection plate rusted shut, dry grass all round it.",
+    text: `An old-world cistern, capped and sealed, sitting in country that has not held standing water since anyone alive was born. The plate is rusted but not broken and the seal is intact. Whatever is under it has been under it for two hundred years, and whoever set it there expected somebody to come back.`,
     choices: [
       {
-        id: "ch_cis_read", ordinal: 0, condition: null,
-        label: "Have your reader sound it before you open it",
-        outcomeText: "There is water, and it is clean, and she can say so before a single bolt is turned. Your column drinks properly for the first time in a week.",
+        id: "ch_cis_open", ordinal: 0, condition: null,
+        label: "Open it properly and water the column",
+        outcomeText: "It takes most of a day to do without breaking the seal past mending. The water is clean. Your people drink properly for the first time in a week and it shows in them.",
         effects: [{ type: "ADJUST_BASE_STRENGTH", target: "triggering_unit", amount: 1 }],
       },
       {
         id: "ch_cis_strip", ordinal: 1, condition: null,
-        label: "Strip the plate and the fittings",
-        outcomeText: "The cistern stays sealed. The bronze around its throat does not, and bronze is bronze.",
+        label: "Strip the bronze off its throat",
+        outcomeText: "The cistern stays sealed. The fittings around its neck do not, and bronze is bronze.",
         effects: [{ type: "ADJUST_RESOURCE", target: "active", resource: "Resource", amount: 2 }],
       },
       walkAway("ch_cis_on", "Leave it capped",
@@ -120,57 +117,63 @@ export const REPO_FIELD_ENCOUNTERS = {
     ],
   },
 
-  "fer_sunrunner_wake": {
-    id: "fer_sunrunner_wake",
-    title: "In the Sunrunner's Wake",
+  "fer_sealed_car": {
+    id: "fer_sealed_car",
+    title: "The Sealed Car",
     copies: 2,
-    art: "A landship crossing open ground at distance, the grass laid flat behind it in a long straight lane.",
-    text: `A landship passes half a day out, running east, and lays the grass flat behind it in a lane you could drive a column down. Its crew are not stopping and are not unfriendly about it. Somebody aboard raises a hand.`,
+    art: "A single rail car standing intact on a broken line, doors closed, seals unbroken, the track either side of it gone.",
+    text: `One car, upright and closed, on a stretch of line that stops fifty yards either side of it. The seals are unbroken. Everything about how it is standing says it was shut deliberately rather than abandoned, and every crew that has passed it since has had the same argument about what that means.`,
     choices: [
       {
-        id: "ch_wake_signal", ordinal: 0, condition: null,
-        label: "Signal for a bearing",
-        outcomeText: "They shout down a bearing and two landmarks and are gone before you can thank them. The country ahead stops being a rumour.",
-        effects: [{ type: "REVEAL_REGION", target: "active", radius: 2 }],
-      },
-      {
-        id: "ch_wake_follow", ordinal: 1, condition: null,
-        label: "Follow the lane while it lasts",
-        outcomeText: "Flattened grass is faster than standing grass, and your outriders use the hours they save going wide instead of forward.",
-        effects: [
-          { type: "ADJUST_RESOURCE", target: "active", resource: "Resource", amount: 1 },
-          { type: "REVEAL_REGION", target: "active", radius: 1 },
-        ],
-      },
-      walkAway("ch_wake_on", "Hold your own line",
-        "The lane bends off east and you do not. By evening the grass has started to stand back up."),
-    ],
-  },
-
-  "fer_foundry_seconds": {
-    id: "fer_foundry_seconds",
-    title: "Foundry Seconds",
-    copies: 2,
-    art: "A pallet of cast fittings outside a foundry gate, raised numerals on every piece, the seams left unground.",
-    text: `A pallet of castings outside the gate, every piece marked in raised numerals and every seam left showing, the way a foundry that is willing to be known by its work leaves them. These are the ones that came out wrong. They are still better than most things you could make.`,
-    choices: [
-      {
-        id: "ch_fnd_weight", ordinal: 0, condition: null,
-        label: "Take the pallet at scrap weight",
-        outcomeText: "They are glad to see it go and you are glad to have it. Both of you know it is worth more than weight.",
+        id: "ch_car_cut", ordinal: 0, condition: null,
+        label: "Cut it open and take what is inside",
+        outcomeText: "The doors were the strongest part. What is inside is worth carrying, and whatever the seals were for stops being anybody's business.",
         effects: [{ type: "ADJUST_RESOURCE", target: "active", resource: "Resource", amount: 3 }],
       },
       {
-        id: "ch_fnd_ask", ordinal: 1, condition: null,
-        label: "Ask which mould failed, and why",
-        outcomeText: "The founder walks you along the pallet and shows you the fault in each piece and what it says about the mould. He is not giving anything away. He is showing off, which is better.",
+        // THE ONE RESEARCH DOOR IN THE SET, and it is priced against the Lab
+        // rather than against the other cards. A Lab costs 3 scrap, a chip
+        // slot and a build action for +1 Research a round; this is the same
+        // +1 a round with no slot, no slot cap pressure and nothing to build,
+        // which makes it strictly the better deal at any equal price. So it
+        // costs MORE than the Lab, and the gate is what makes that true —
+        // ADJUST_RESOURCE floors at zero, so without it a faction holding 1
+        // scrap paid 1 and got the same permanent stream.
+        id: "ch_car_specialist", ordinal: 1,
+        condition: { left: { score: { kind: "resource" } }, op: "gte", right: 4 },
+        label: "Send for a specialist before anyone touches it",
+        outcomeText: "She takes four days to arrive and most of your scrap to hire, and she opens it without cutting anything. What she explains while she works about how the seal was made is worth more than the car, and your people do not forget it.",
         effects: [
-          { type: "ADJUST_RESOURCE", target: "active", resource: "Resource", amount: -1 },
+          { type: "ADJUST_RESOURCE", target: "active", resource: "Resource", amount: -4 },
           { type: "ADJUST_RESOURCE", target: "active", resource: "Research", amount: 1 },
         ],
       },
-      walkAway("ch_fnd_on", "Nothing you need today",
-        "You go on past the gate. The pallet is gone by the time anyone comes back this way."),
+      walkAway("ch_car_on", "Leave it standing",
+        "You go on down the line. It was standing there before you and it is standing there after."),
+    ],
+  },
+
+  "fer_the_hollow": {
+    id: "fer_the_hollow",
+    title: "The Hollow",
+    copies: 2,
+    art: "A sheltered depression out of the wind with three separate camps in it, fires apart, nobody watching anybody.",
+    text: `A fold in the ground deep enough to break the wind, with three camps already in it and their fires kept well apart. Nobody here is friendly and nobody here is armed at the fire. The hollow is neutral by custom rather than by any agreement, and the custom holds because everybody needs it to on the way back.`,
+    choices: [
+      {
+        id: "ch_hol_trade", ordinal: 0, condition: null,
+        label: "Trade with whoever else is camped",
+        outcomeText: "Nobody asks whose colours anybody is wearing. Things change hands at prices that would be insulting anywhere with a roof on it, and everybody goes back to their own fire.",
+        effects: [{ type: "ADJUST_RESOURCE", target: "active", resource: "Resource", amount: 2 }],
+      },
+      {
+        id: "ch_hol_watch", ordinal: 1, condition: null,
+        label: "Stand a watch for the whole hollow",
+        outcomeText: "You put two of yours on the rim all night, for everyone in it, and say so. It costs you a night's sleep and it is remembered a long way from here — the custom only holds because somebody keeps holding it.",
+        effects: [{ type: "ADJUST_HONOR", target: "active", amount: 1, cause: "encounter" }],
+      },
+      walkAway("ch_hol_on", "Push on through the dark",
+        "You camp cold and alone two miles further on. It is a worse night and it is nobody's business but yours."),
     ],
   },
 };
