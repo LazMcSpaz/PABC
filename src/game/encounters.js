@@ -640,6 +640,13 @@ function hexMatches(state, hex, f, ctx = {}) {
   if (f.terrain && f.terrain !== "any" && h.terrain !== f.terrain) return false;
   if (f.hasRoad === true && !h.road) return false;
   if (f.hasRoad === false && h.road) return false;
+  // Rail, on the same terms as road. The board has carried a `rail` flag on
+  // every hex since the rail work landed (16 of 61 on a medium map) and the
+  // filter had no way to ask about it — so The Rail Walkers, a quest whose
+  // whole subject is people who live on the line, could only ask for "any
+  // terrain hex" and take whatever it got.
+  if (f.hasRail === true && !h.rail) return false;
+  if (f.hasRail === false && h.rail) return false;
 
   return true;
 }

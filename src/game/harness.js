@@ -6284,6 +6284,36 @@ line("\n  [Phase 11] text-token resolver");
         pendingSectionChange(gG, held) === null);
     }
 
+    // HEX FILTERS — a key the matcher does not implement is a filter that
+    // silently matches everything, and the author never finds out. `hasRail`
+    // was missing while the board has carried a rail flag since the rail work
+    // landed, so a quest about people who live on the line could only ask for
+    // "any terrain hex". These check the pair together, because a one-sided
+    // filter (true works, false does not) is the same silent failure.
+    {
+      const gF = createGame({ seed: 424242 });
+      const reach = (f) => {
+        const seen = new Set();
+        for (let i = 0; i < 2000; i++) {
+          const h = pickHexByFilter(gF, f, { asPlayer: gF.turnOrder[0] });
+          if (h) seen.add(h);
+        }
+        return seen;
+      };
+      const railed = new Set(Object.values(gF.board.hexes).filter((h) => h.rail).map((h) => h.id));
+      const onRail = reach({ hasRail: true });
+      const offRail = reach({ hasRail: false });
+      check("hex filter: hasRail true reaches only hexes that carry rail",
+        onRail.size > 0 && [...onRail].every((h) => railed.has(h)),
+        `${onRail.size} reached, ${[...onRail].filter((h) => !railed.has(h)).length} without rail`);
+      check("hex filter: …and hasRail false reaches only hexes that do not",
+        offRail.size > 0 && [...offRail].every((h) => !railed.has(h)),
+        `${offRail.size} reached, ${[...offRail].filter((h) => railed.has(h)).length} with rail`);
+      check("hex filter: …and the two halves account for the whole board",
+        onRail.size + offRail.size === Object.keys(gF.board.hexes).length,
+        `${onRail.size} + ${offRail.size} vs ${Object.keys(gF.board.hexes).length}`);
+    }
+
     // FIELD DECK — one card, one player, once.
     //
     // The deck is shared by every faction, so before this the same handful of
