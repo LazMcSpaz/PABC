@@ -35,6 +35,69 @@ export const CONFIG = {
     // It only applies while rivals are still ALIVE to break it. Kill everyone
     // and you have won; there is nothing left to hold against.
     holdRounds: 3,
+    // §5 — HOW LONG A FACTION MAY HOLD NO GROUND. When a faction's last
+    // Location goes it has this many rounds to take one back; on expiry its
+    // surviving units are destroyed and the ordinary elimination sweep retires
+    // it. 0 switches the rule off and restores the old behaviour exactly:
+    // elimination wants no Locations AND no units, so a faction reduced to a
+    // few wandering units lived forever.
+    //
+    // The reason this is a rule and not an AI setting is that a landless
+    // faction was immortal and inert at the same time. `baseActions: 0` means
+    // actions come from ground, so it had no actions, no production, no
+    // Research and no Sway income — no way to fight back, court anybody, or
+    // put anything on a table — while `dominionStanding` went on counting it
+    // as a faction somebody had to deal with. Measured at the round limit,
+    // EIGHT of twenty-eight blocked outstanding factions held zero Locations;
+    // in one seed a faction holding SEVEN of the map's eight could not win
+    // because a rival with no ground and five units would not go away.
+    //
+    // The clock is a deadline, not a death sentence: it starts when the last
+    // Location goes, CLEARS the moment one is retaken, and is announced both
+    // ways (`landless_clock_started` / `_cleared`) so the board can see it.
+    //
+    // MEASURED at n=45 (mix / median / unresolved, baseline 21 / 45 / 16):
+    //   grace   mix  median  unresolved   wars/game   minorsKilled
+    //   0 (old)   21   45      16           45.49       3.20
+    //   3         13   36.5     9           35.02       3.71
+    //   5         10   37       8           36.13       3.71
+    //   8         12   42       8           37.89       3.67
+    //   12        16   44      12           41.38       3.49
+    //   16        19   45      12           42.76       3.42
+    //
+    // A clean monotone trade: the shorter the rope, the fewer games run out
+    // the clock and the fewer of them end in submission. 8 IS THE ONLY SETTING
+    // THAT CLEARS BOTH BANDS AT THE BEST AVAILABLE `unresolved` — 5 ties it at
+    // 8 games but drops the ending mix to 10 against a band of 11, and 3 pulls
+    // the median to 36.5 against a band of 41-49. 12 and 16 buy the mix back
+    // and give up four games to the round limit.
+    //
+    // CONFIRMED at n=90, because the last two things measured here shrank when
+    // the sample grew:
+    //
+    //   0:  36 mix / 43   median / 33 unresolved / 51.26 wars
+    //   8:  30 mix / 41.5 median / 22 unresolved / 43.74 wars
+    //
+    // It holds. Unresolved games fall by a THIRD, and the ending mix costs
+    // less than the n=45 reading suggested (40% -> 33% of games, against
+    // 47% -> 27% at n=45). Nothing else measured against this brief moves the
+    // headline defect remotely this far.
+    //
+    // Two second-order effects worth knowing, both good and neither aimed at:
+    // the war rate falls 51.3 -> 43.7, because a faction that can be finished
+    // stops being a permanent open front; and the scripted pacifist — the
+    // instrument that exists because the suite cannot see a player who does
+    // not play like the AI — holds MORE ground, not less: mean Locations held
+    // 0.5 -> 1.2, wars declared on it 11.6 -> 8.4, all four claims still
+    // passing. The rule reads like it should punish the weak and measures the
+    // opposite way, because what it actually removes is the permanently
+    // unfinishable opponent.
+    //
+    // The cost is honest and worth stating plainly: the unresolved games
+    // become CONQUESTS (4 -> 15 at n=45), minors are killed slightly more
+    // often (3.20 -> 3.67) and brought in slightly less (1.60 -> 1.33). This
+    // is the §15 tension, priced. Raise to 12 or 16 to buy the mix back.
+    landlessGraceRounds: 8,
     // Score, purely for the end-of-game standing. Nothing here wins anything.
     // Both are HELD, like territory: you show them while the relationship
     // stands and lose them when it doesn't.

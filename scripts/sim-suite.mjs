@@ -100,6 +100,12 @@ const seeds = argOf("--n")
   ? argOf("--seeds").split(",").map((s) => Number(s.trim()))
   : SEEDS;
 const jsonOut = argOf("--json");
+// `--map large` runs the whole suite on a bigger board. NOT comparable
+// seed-for-seed to another size — a different Location budget means a
+// different `rng.shuffle` deck and therefore a different game per seed — so
+// read size-vs-size as two populations, and keep the one-flag-on-one-build
+// rule for everything else.
+const mapSize = argOf("--map") || "medium";
 const baselinePath = argOf("--baseline");
 const quiet = argv.includes("--quiet");
 
@@ -141,7 +147,7 @@ function runGame(seed) {
     factionIds: ["versari", "goldgrass", "lakers", "plainers"],
     humanFactionId: "versari",
     minors: Object.keys(MINOR_FACTIONS),
-    mapSize: "medium",
+    mapSize,
   });
   for (const p of Object.values(g.players)) p.isAI = true;
   startTurn(g);

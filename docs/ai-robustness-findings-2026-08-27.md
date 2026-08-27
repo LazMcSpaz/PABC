@@ -10,14 +10,25 @@ median rounds to Dominion         45         baseline ±4  PASS
 games unresolved                  16         band 0       FAIL
 ```
 
-**The build in this branch reproduces those three numbers seed-for-seed on all
-45 seeds — same ending, same round, same winner.** Every behavioural change
-here ships behind a switch at its no-op value. That is the honest headline: the
-instrument is better, the diagnosis is much better, and none of the three
-levers built earned its place.
+**Current state of the branch:**
 
-The brief said that was the expected outcome for some of this work. It was the
-outcome for most of it, and the reasons are worth more than the levers.
+```
+ending mix (submission + mixed)   30 of 90   band >= 11   PASS
+median rounds to Dominion         41.5       baseline ±4  PASS
+games unresolved                  22 of 90   band 0       FAIL, down from 33
+```
+
+One rule ships live — the landless clock (§3 of the third pass below), a design
+decision taken by the repo's owner, not an AI tuning lever. It is the only
+thing measured against this brief that moves the headline defect substantially:
+**unresolved games fall by a third and the war rate falls 15%.** Every other
+behavioural change here ships behind a switch at its no-op value, and with the
+clock switched off the build still reproduces `b33d1ee` seed-for-seed on all 45
+seeds.
+
+The brief said measuring worse was the expected outcome for some of this work.
+It was the outcome for eight of the nine levers built, and the reasons are
+worth more than the levers.
 
 ---
 
@@ -440,25 +451,123 @@ ground at all, 4 at war, 4 on reputation, 2 on §15 distance.
 
 ---
 
+## Third pass: the board, and the landless clock
+
+Two things were asked for after the second pass: implement a collapse rule for
+landless factions, and test whether the board is too small for the roster.
+
+### The board is not too small. It is too big.
+
+I recommended this experiment on the theory that every wall in the endgame was
+a scarcity artifact of eight Locations shared between eight factions. **The
+measurement refutes it, and does so decisively.** The AI is untouched between
+these two columns; only the map differs.
+
+| n=45, clock off | medium (8 Locations) | large (14 Locations) |
+|---|---|---|
+| ending mix | **21** | 10 · *below the band* |
+| median rounds | **45** | 60.5 |
+| games unresolved | **16** | **31** |
+| wars per game | **45.5** | **68.2** |
+| minors allied or sworn at end | 1.60 | **2.22** |
+| minors killed per game | 3.20 | **3.11** |
+
+More room does not calm the board. It makes the game a third longer, half again
+as bloody, and **twice as unresolvable**.
+
+The reachability half of my hypothesis was right — with room, minors really do
+get brought in more (1.60 → 2.22) and killed less (3.20 → 3.11), which is
+exactly what §15 wants. It just does not help, and the reason is the shape of
+the win condition rather than the shape of the map. **Dominion requires dealing
+with *every* surviving faction.** Room makes survivors cheap to be and
+expensive to deal with, so every extra Location that keeps somebody alive is
+another signature the winner has to collect. Scarcity was not causing the
+unresolved games; it was the only thing ending them.
+
+Worth stating as a caveat and a correction: a different Location budget is a
+different `rng.shuffle` deck and therefore a different game per seed, so this is
+two populations rather than one flag on one build. The gap is far too large to
+be that, but it is not the clean comparison the rest of this document uses.
+`sim-suite` now takes `--map` so the question can be re-asked cheaply.
+
+### The landless clock
+
+A faction whose last Location falls has **8 rounds** to take one back; on expiry
+its surviving units are destroyed and the ordinary elimination sweep retires it.
+The clock starts when the ground goes, **clears the moment any is retaken**, and
+is announced both ways (`landless_clock_started` / `_cleared`) so the board can
+see it running. `victory.landlessGraceRounds: 0` restores the old behaviour
+exactly.
+
+| grace | mix | median | unresolved | wars/game | minors killed |
+|---|---|---|---|---|---|
+| **0** (old) | 21 | 45 | 16 | 45.49 | 3.20 |
+| 3 | 13 | 36.5 · *below band* | 9 | 35.02 | 3.71 |
+| 5 | 10 · *below band* | 37 | 8 | 36.13 | 3.71 |
+| **8 (shipped)** | **12** | **42** | **8** | **37.89** | 3.67 |
+| 12 | 16 | 44 | 12 | 41.38 | 3.49 |
+| 16 | 19 | 45 | 12 | 42.76 | 3.42 |
+
+A clean monotone trade: the shorter the rope, the fewer games run out the clock
+and the fewer end in submission. **8 is the only setting that clears both bands
+at the best available `unresolved`** — 5 ties it on games but drops the mix to
+10 against a band of 11, and 3 pulls the median to 36.5 against a band of 41–49.
+
+Confirmed at n=90, because the last two things measured here shrank when the
+sample grew:
+
+| n=90 | clock off | clock on (8) |
+|---|---|---|
+| ending mix | 36 | 30 |
+| median rounds | 43 | 41.5 |
+| **games unresolved** | **33** | **22** |
+| wars per game | 51.26 | 43.74 |
+
+It holds. Unresolved games fall by a third, and the ending mix costs *less* than
+the n=45 reading suggested (40% → 33% of games, against 47% → 27% at n=45).
+
+**Two second-order effects, both good and neither aimed at.** The war rate falls
+51.3 → 43.7, because a faction that can be finished stops being a permanent open
+front. And the scripted pacifist — the instrument that exists precisely because
+the suite cannot see a player who does not play like the AI — **holds more
+ground, not less**: mean Locations held **0.5 → 1.2**, wars declared on it
+11.6 → 8.4, all four claims still passing. A rule that reads like it punishes
+the weak measures the opposite way, because what it removes is the permanently
+unfinishable opponent. That is also the first movement anyone has got on
+finding 5's headline number.
+
+**The cost, stated plainly.** The unresolved games become *conquests* (4 → 15 at
+n=45). Minors are killed slightly more (3.20 → 3.67) and brought in slightly
+less (1.60 → 1.33). This is the §15 tension — "the only remaining answer was
+genocide" — priced rather than avoided. Raising the grace to 12 or 16 buys the
+mix back at four games.
+
+Note also that this makes `ai.huntLandlessBlocker` largely redundant: the rule
+removes the blocker the switch existed to chase. It stays dark and stays
+documented.
+
+---
+
 ## Where I would go next, in order
 
-1. **Decide what a landless faction IS**, at the rules level. It is the single
-   biggest hole: eight of 28 endgame blockers, frozen out of the political layer
-   by construction, and unkillable except by hunting. Three shapes worth
-   weighing — a collapse rule (landless for N rounds → eliminated), a floor
-   (a landless faction keeps a minimum Sway income so it can still be talked
-   to), or accepting the hunt and paying the ending mix for it. This is a game
-   decision and it wants the game's owner, not another AI switch.
-2. **Look at the opening, not the endgame.** Eight Locations, eight factions,
-   one each, and five factions eliminated by a mean round of 25.7. Every
-   endgame problem in this document is downstream of a board that has already
-   collapsed to two or three survivors by round 40. Whether the map is too
-   small for the roster is a cheaper question to answer than any of the ones
-   above, and it would move all of them at once.
-3. **Leave the political layer alone for now.** Six of the seven levers here
-   are political and none paid. The measurements keep saying the same thing
-   from different directions: the political layer is not underpowered, it is
-   downstream of a land war that has already decided the game.
+1. **Decide whether 8 is the number you want.** The sweep is above and the
+   trade is legible: 8 halves the unresolved games and costs a third of the
+   ending mix; 12 and 16 give four of those games back and return most of the
+   mix. This is a taste question about how the game should feel, and the
+   numbers are now there to answer it with.
+2. **Ask why a bigger board is worse.** It is the most surprising reading in
+   this document and I only have the shape of an answer: Dominion asks you to
+   deal with every survivor, and room makes survivors cheap. If that is right,
+   the win condition and the map size are coupled in a way nothing currently
+   accounts for, and the large/huge boards need either a different victory
+   threshold or a different faction count. `--map` makes this cheap to chase.
+3. **Re-measure the dark switches on the new board.** Every one of them was
+   condemned on a board where landless factions were immortal and the war rate
+   was 45 a game. It is now 44 and falling, `unresolved` has halved, and the
+   endgame walls have been re-dealt. `ai.dominionWeight` in particular was
+   aimed at a bottleneck (conversion) that this rule partly removes, and
+   `attackPrice` was condemned partly for costing unresolved games there are
+   now fewer of. I would not assume any of those verdicts survived.
 
-I would not spend another run on `courtshipScore`. The pool it ranks is the
-wrong pool, and that is a floor problem, not a scoring one.
+I would still not spend another run on `courtshipScore`. The pool it ranks is
+the wrong pool, and that is a floor problem, not a scoring one.

@@ -7509,6 +7509,68 @@ line("\n  [Phase 11] text-token resolver");
   check("…so it still stands between somebody and Dominion",
     dominionStanding(g5z, "versari").outstanding.includes("goldgrass"));
 
+  // --- §5 — the landless clock -------------------------------------
+  //
+  // The rule the three claims above describe the hole for. A faction with no
+  // Locations has `landlessGraceRounds` to take one back; on expiry its units
+  // are destroyed and the ordinary elimination sweep retires it. Asserted as
+  // the mechanism — the clock starts, holds, clears and expires — rather than
+  // as a round number fitted to one run.
+  const GRACE = CONFIG.victory.landlessGraceRounds;
+  check("the landless clock is on, and a faction may hold no ground for a while",
+    GRACE > 0);
+  // It survives the whole grace window, and the deadline is announced.
+  const g5y = createGame({ seed: 2062 });
+  ensureDiplomacy(g5y);
+  for (const l of Object.values(g5y.locations)) if (l.controller === "goldgrass") l.controller = null;
+  const startRound = g5y.round;
+  endTurn(g5y);
+  check("…and losing its last Location starts a clock, with the deadline stated",
+    g5y.log.some((e) => e.name === "landless_clock_started"
+      && e.payload.player === "goldgrass" && e.payload.deadline === startRound + GRACE));
+  // Hold it there. `state.round` is what the rule reads, so drive rounds
+  // rather than turns and stop one short of the deadline.
+  let spun = 0;
+  // The deadline is the round the clock EXPIRES on, so the last round it is
+  // still alive is the one before.
+  while (g5y.round < startRound + GRACE - 1 && spun++ < 400) endTurn(g5y);
+  check("…and it is still in the game right up to the deadline",
+    g5y.players.goldgrass.eliminated !== true
+    && Object.values(g5y.units).some((u) => u.owner === "goldgrass"));
+  while (g5y.round < startRound + GRACE && spun++ < 400) endTurn(g5y);
+  check("…and past it the units are destroyed and the faction is out",
+    g5y.log.some((e) => e.name === "faction_collapsed" && e.payload.player === "goldgrass")
+    && !Object.values(g5y.units).some((u) => u.owner === "goldgrass")
+    && g5y.players.goldgrass.eliminated === true);
+  // A DEADLINE, NOT A DEATH SENTENCE: taking ground back stops the clock, and
+  // says so. This is the half that makes the rule survivable.
+  const g5w = createGame({ seed: 2063 });
+  ensureDiplomacy(g5w);
+  const hadLoc = Object.values(g5w.locations).find((l) => l.controller === "goldgrass");
+  hadLoc.controller = null;
+  endTurn(g5w);
+  check("a faction that takes ground back clears its clock",
+    g5w.players.goldgrass.landlessSince != null);
+  hadLoc.controller = "goldgrass";
+  endTurn(g5w);
+  check("…and the board is told the clock stopped",
+    g5w.players.goldgrass.landlessSince == null
+    && g5w.log.some((e) => e.name === "landless_clock_cleared" && e.payload.player === "goldgrass"));
+  // …and 0 restores the old behaviour exactly: no clock ever runs.
+  const graceSave = CONFIG.victory.landlessGraceRounds;
+  CONFIG.victory.landlessGraceRounds = 0;
+  const g5v = createGame({ seed: 2064 });
+  ensureDiplomacy(g5v);
+  for (const l of Object.values(g5v.locations)) if (l.controller === "goldgrass") l.controller = null;
+  let spun2 = 0;
+  const until = g5v.round + graceSave + 2;
+  while (g5v.round < until && spun2++ < 400) endTurn(g5v);
+  check("landlessGraceRounds 0 restores the old immortality exactly",
+    g5v.players.goldgrass.eliminated !== true
+    && g5v.players.goldgrass.landlessSince == null
+    && !g5v.log.some((e) => e.name === "landless_clock_started"));
+  CONFIG.victory.landlessGraceRounds = graceSave;
+
   // The targeting hole itself, asserted as the RULE rather than as a hex list:
   // with the switch off the goal set is Locations only, so a landless faction
   // contributes nothing; with it on, its units are goals. `wouldFight` still

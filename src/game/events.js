@@ -66,6 +66,10 @@ export const EVENT_NAMES = new Set([
   "build_started", "build_completed", "chip_upgraded",
   "chip_dormant", "chip_reactivated", "slider_changed", "garrison_erosion",
   "chip_activated", "chip_granted", "chip_removed", "faction_eliminated", "faction_released",
+  // §5 — the landless clock. A faction with no Locations has a deadline to
+  // take one back; `faction_collapsed` is that deadline expiring, and the
+  // ordinary elimination sweep retires it a moment later on its own rule.
+  "landless_clock_started", "landless_clock_cleared", "faction_collapsed",
   "influence_pressure",
   // §19 Exploration, Vision & Fog of War (APPEND-ONLY — distinct keys).
   "hex_explored", "unit_spotted", "unit_lost_sight", "ambush_triggered",
