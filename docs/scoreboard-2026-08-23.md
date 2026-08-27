@@ -1,5 +1,13 @@
 # The scoreboard — baseline, 2026-08-23
 
+> **Superseded numbers, live instructions.** Everything below the "Running it"
+> section is a snapshot of 2026-08-23 and is kept as history — the counts in it
+> (720 harness checks, the 15-game figures) are not current. The commands in
+> "Running it" have been corrected in place, because people follow them.
+> The current baseline is `docs/sim-baseline.json`, taken at **n=45**, and the
+> current reading of the three governing numbers is in
+> `docs/ai-robustness-findings-2026-08-27.md`.
+
 Companion to `diplomacy-brief-2026-08-23.md`, `economy-influence-brief-2026-08-23.md`
 and the implementation plan. Phase 0, method rule 1.1: **build the scoreboard
 before the game changes**, because at least eight proposals across the two
@@ -126,12 +134,23 @@ Four of the briefs' central claims stop being arguments:
 ## Running it
 
 ```
-node src/game/harness.js                       # 720/720
+node src/game/harness.js                       # all checks must pass
 node scripts/audit-diplomacy.mjs               # prints; read it
 node scripts/audit-economy.mjs                 # asserts; exit code gates the PR
-node scripts/sim-suite.mjs                     # ~30s for 15 games
-node scripts/sim-suite.mjs --baseline docs/sim-baseline.json   # the delta
+node scripts/sim-suite.mjs                     # the pinned 15 seeds, ~30s
+node scripts/sim-suite.mjs --n 45              # the sample the bands are graded at
+node scripts/sim-suite.mjs --n 45 --baseline docs/sim-baseline.json   # the delta
 ```
+
+**`--n 45` is not optional for the delta.** `docs/sim-baseline.json` is taken at
+45 seeds, and half the rows in it are counts per suite — comparing a 15-seed run
+against it reports the sample size as if it were a result. The suite now says so
+out loud when the two disagree, but it is easier to just pass the flag.
+
+`--map large|huge` runs the whole thing on a bigger board. That is two
+populations rather than one flag on one build — a different Location budget is
+a different `rng.shuffle` deck, so every seed is a different game — so read
+size-against-size as a comparison of distributions, never as a delta.
 
 Every later PR quotes the delta. Any stage that pushes the three governing
 numbers outside their band gets retuned or reverted **before the next stage

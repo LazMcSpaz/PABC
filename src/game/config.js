@@ -315,6 +315,11 @@ export const CONFIG = {
     // Sway not spent on the ladder, and the ladder is what ends games. The
     // surplus at the ceiling is still real (about a third of all rounds) and
     // still wants a sink that is not this one.
+    //
+    // RE-MEASURED A FOURTH TIME on the post-landless-clock board (baseline
+    // 12 / 0.27 / 42 / 8): 0.8 reads 11 / 0.24 / 42 / 11. Three unresolved
+    // games worse and sitting exactly ON the mix band. The verdict has now
+    // survived four boards.
     giftAboveShareOfCap: 1,
     // How many rounds of every RUNNING courtship's upkeep `giftBudget` sets
     // aside before it will consider a gift at all. This is the real rule the
@@ -376,7 +381,34 @@ export const CONFIG = {
     //   0.5   17   42   18
     //   1     16   46   19
     //
-    // SO IT SHIPS DARK, and the reason is more useful than the reading. The
+    // IT SHIPPED DARK ON THAT READING AND IT SHIPS ON AT 1 NOW. The verdict
+    // flipped, and it flipped because the BOARD changed, not because anything
+    // here did. Re-measured after `victory.landlessGraceRounds` landed, against
+    // the current baseline of 12 mix / 0.27 share / 42 median / 8 unresolved:
+    //
+    //   n=45   0.5   10 / 0.22 / 44 / 10      <- mix now under the band
+    //   n=45   1     12 / 0.27 / 45 /  6
+    //   n=90   0     30 / 0.33 / 41.5 / 22    (baseline)
+    //   n=90   1     29 / 0.32 / 45   / 13    <- unresolved down 41%
+    //
+    // At n=90 it takes unresolved games from 22 to 13 for essentially nothing:
+    // the ending mix moves 0.33 -> 0.32, the war rate is flat (43.7 -> 43.1),
+    // and the median lands at 45 against a band of 41.5 ±4. Nothing else
+    // measured against this brief comes close on the number that is failing.
+    //
+    // WHY THE OLD READING WAS RIGHT AND THE OLD REASON WAS WRONG, which is the
+    // part worth keeping. The note below concluded that the bottleneck is
+    // CONVERSION rather than selection — that `courtshipScore` only ranks
+    // candidates a Standing floor has already filtered, so re-ranking them
+    // moves the AI off the partner it could convert and onto one it cannot.
+    // That was true, and the reason the pool was full of unconvertible
+    // partners was the landless factions: frozen, unreachable by any verb, and
+    // counted by the win condition anyway. Remove them and the pool becomes
+    // worth ranking. The brief called this "the single highest-value change";
+    // it was right about the change and wrong about the order of operations.
+    //
+    // The original reading, kept because it is why this is at 1 and not 0.5,
+    // and because the mechanism in it is still the thing to argue with:
     // brief that asked for this called it "the single highest-value change",
     // on the argument that `courtshipScore` courts whoever it likes most
     // rather than whoever it still has to deal with. The argument is correct
@@ -393,7 +425,11 @@ export const CONFIG = {
     // The bottleneck is CONVERSION, not selection. See `closeOutWithin` for
     // where the measurement went next, and `docs/ai-robustness-findings-
     // 2026-08-27.md` for what the endgame actually looks like.
-    dominionWeight: 0,
+    //
+    // 0.5 is NOT a safe middle: on the current board it reads 0.22 on the mix
+    // share, under the 0.24 band, while 1 clears it. The blend is not monotone
+    // in the weight — set this to 0 or to 1.
+    dominionWeight: 1,
     // §3 — whether the AI calls its OWN allies into its wars. 0 is the no-op:
     // the `pact-call` verb keeps working for the player and the AI→human
     // inbox (`queueHumanPactCalls`) is untouched either way, because that path
@@ -420,6 +456,11 @@ export const CONFIG = {
     // The branch stays because the ASYMMETRY it fixes is real and is worth
     // reaching for again if the war rate ever comes down: an AI that can be
     // called to arms and can never call is a partner in name.
+    //
+    // RE-MEASURED on the post-landless-clock board (baseline 12 / 0.27 / 42 /
+    // 8): 13 / 0.29 / 45 / 10, wars 37.9 -> 43.8. The verdict holds and the
+    // reason holds with it — it is still a machine for starting wars, and the
+    // war rate is still what blocks Dominion.
     pactCall: 0,
     // §2 — HOW CLOSE TO WINNING BEFORE THE AI PLAYS FOR THE WIN. Act when this
     // many factions or fewer are still outstanding; 0 is the no-op and is the
@@ -465,6 +506,12 @@ export const CONFIG = {
     // 4 failing the reputation gates (one pair at Menace 11 against tolerance
     // 9.6 AND Honor -9.5 against a trust floor of 3.1), 2 unreachable under
     // §15. Pull down the Standing wall and the pairs walk into the next one.
+    //
+    // RE-MEASURED on the post-landless-clock board (baseline 12 / 0.27 / 42 /
+    // 8): at 2 it reads 10 / 0.22 / 45.5 / 7 — one unresolved game bought, and
+    // the ending-mix share falls UNDER the 0.24 band to do it. Still dark, and
+    // now largely redundant besides: `ai.dominionWeight: 1` reaches the same
+    // endgame through the branch that was already there.
     closeOutWithin: 0,
     // How big a close-out gift is. 2 rather than 1 is load-bearing rather than
     // a tuning choice: `driftStanding` pulls an unpacted, un-warring,
@@ -527,6 +574,10 @@ export const CONFIG = {
     // interesting part: what this measures is that the war rate is held down
     // by friction rather than by anybody deciding anything, which is the same
     // thing finding 4 says from the other side.
+    //
+    // RE-MEASURED on the post-landless-clock board (baseline 12 / 0.27 / 42 /
+    // 8): 13 / 0.29 / 44 / 10, wars 37.9 -> 43.2. Unchanged in shape — cheap
+    // peace still makes war cheap, and the war rate still rises by five.
     settleWithoutCession: 0,
     // §5 — whether the AI will march on a faction that holds no ground.
     // 0 is the no-op: the goal list is exactly `knownGoalHexes` as before.
@@ -564,6 +615,16 @@ export const CONFIG = {
     // Note also how the effect SHRANK with the sample: 16->12 at n=45 read as
     // a 9-point drop, 33->28 at n=90 reads as 5.6. Same lesson as the one on
     // `intrigue` — the smaller sample was doing some of the arguing.
+    //
+    // RE-MEASURED on the post-landless-clock board, and BOTH of its readings
+    // reversed sign (baseline 12 / 0.27 / 42 / 8): it now reads 19 / 0.42 / 42
+    // / 10. The ending mix, which it used to cost a third of, is now the best
+    // of anything measured; `unresolved`, which it used to be the only thing
+    // to improve, gets two games worse. That is what redundancy looks like —
+    // `victory.landlessGraceRounds` removes the blocker this existed to chase,
+    // so all that is left is the marching. Alongside `dominionWeight: 1` it is
+    // worse again (15 / 0.33 / 42.5 / 9 against 12 / 0.27 / 45 / 6). Dark, and
+    // now dark for a good reason rather than a reluctant one.
     huntLandlessBlocker: 0,
   },
 
@@ -1567,6 +1628,14 @@ export const CONFIG = {
       // The rep-gate argument is real but only 4 of 28 blocked endgame pairs
       // fail on reputation, so fixing it perfectly could not have paid for the
       // ending mix. Left off.
+      //
+      // RE-MEASURED A FOURTH TIME on the post-landless-clock board, where the
+      // war rate is 37.9 rather than 45.5 and the ending mix is the number
+      // under pressure (baseline 12 / 0.27 / 42 / 8): 0.6 reads 13 / 0.29 /
+      // 40.5 / 9. It is now very nearly free — a point of mix for a game — and
+      // still not a reason to turn it on, because it still does not buy
+      // anything. This is the closest it has come to paying in four readings;
+      // worth re-asking if the war rate falls further.
       //
       // The original note, kept because the raid-branch finding in it is still
       // true and still load-bearing:

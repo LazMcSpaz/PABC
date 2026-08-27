@@ -1,5 +1,10 @@
 # Findings: the opponent, measured
 
+**Supersedes `docs/ai-robustness-brief-2026-08-27.md`** for anything about the
+endgame, the win condition, or what the AI is failing to do. That brief's
+instruments, method rules and traps still stand and are still the place to
+start; four of its findings do not, and the corrections are marked below.
+
 Answering `docs/ai-robustness-brief-2026-08-27.md`. Everything here was
 measured on this branch; the baseline it is measured against is `main` at
 `b33d1ee`, reproduced exactly on the build this work started from:
@@ -10,25 +15,30 @@ median rounds to Dominion         45         baseline ±4  PASS
 games unresolved                  16         band 0       FAIL
 ```
 
-**Current state of the branch:**
+**Current state of the branch**, at n=45 (and n=90 in brackets):
 
 ```
-ending mix (submission + mixed)   30 of 90   band >= 11   PASS
-median rounds to Dominion         41.5       baseline ±4  PASS
-games unresolved                  22 of 90   band 0       FAIL, down from 33
+ending mix (submission + mixed)   12 of 45 = 0.27  [0.32]   band >= 0.24   PASS
+median rounds to Dominion         45              [45]      baseline ±4    PASS
+games unresolved                  6 of 45         [13/90]   band 0         FAIL, from 16
 ```
 
-One rule ships live — the landless clock (§3 of the third pass below), a design
-decision taken by the repo's owner, not an AI tuning lever. It is the only
-thing measured against this brief that moves the headline defect substantially:
-**unresolved games fall by a third and the war rate falls 15%.** Every other
-behavioural change here ships behind a switch at its no-op value, and with the
-clock switched off the build still reproduces `b33d1ee` seed-for-seed on all 45
-seeds.
+**`unresolved` has gone 16 → 6 of 45, and 33 → 13 of 90.** Two things ship live
+to get there, and they had to land in that order:
+
+1. **The landless clock** (`victory.landlessGraceRounds: 8`) — a rules decision
+   taken by the repo's owner. Third pass below.
+2. **`ai.dominionWeight: 1`** — the win condition in `courtshipScore`, which
+   measured *worse* on the old board and is the best thing measured on the new
+   one. Fourth pass below.
+
+Everything else ships behind a switch at its no-op, and with both of the above
+switched off the build still reproduces `b33d1ee` seed-for-seed on all 45 seeds.
 
 The brief said measuring worse was the expected outcome for some of this work.
-It was the outcome for eight of the nine levers built, and the reasons are
-worth more than the levers.
+It was the outcome for nine of the ten levers built — and the tenth only paid
+once the rules underneath it changed, which is the single most useful thing in
+this document.
 
 ---
 
@@ -548,26 +558,117 @@ documented.
 
 ---
 
+## Fourth pass: fixing the yardstick, and one verdict that flipped
+
+### The instrument was broken in two places
+
+**`docs/sim-baseline.json` was stale.** It was taken 2026-08-23 at **n=15**,
+reading 5 / 62 / 6, and predates `b33d1ee` entirely — while
+`docs/scoreboard-2026-08-23.md` told people to run `--baseline
+docs/sim-baseline.json` to get "the delta". That delta was meaningless.
+Regenerated on the shipped build at n=45, and `sim-suite` now refuses to
+pretend: it prints a loud warning when the baseline's sample size and the
+current run's disagree, because half the rows are counts per suite and
+comparing across sizes reports the sample size as if it were a result.
+
+**The ending-mix band was a count, not a rate.** `sim-suite` hardcoded
+`band: ">= 11"` and compared it against however many seeds happened to be
+running. One name, three tests: 11 of 15 is 73% of games, 11 of 45 is 24%, 11
+of 90 is 12%. The band was authored at n=45, so 24% is what it always meant.
+
+Two consequences, and the second is a correction to this document's own earlier
+reporting:
+
+- The committed n=15 baseline read 5 against a band of 11 — **it failed its own
+  band**, and nobody noticed because nothing read it. At 33% it passes.
+- **Anything reported here as "passing the mix band" at n=90 was not really
+  being tested.** The third pass above said the clock's mix cost "still passes
+  the band at 30 of 90". At n=90 that band was nearly free. The honest statement
+  is the share: the clock moves the mix from 0.40 to 0.33 of games, and the
+  0.24 band is a real test of that.
+
+The band is now graded on the share, with the count still printed because every
+note in `config.js` quotes counts.
+
+### One verdict flipped, and it is the brief's own headline proposal
+
+Every dark switch was condemned against 21 / 45 / 16, on a board where landless
+factions were immortal and wars ran at 45 a game. That board is gone. Re-run
+against the current baseline (12 / **0.27** / 42 / 8):
+
+| switch | mix | share | median | unresolved | wars | verdict |
+|---|---|---|---|---|---|---|
+| **baseline** | 12 | 0.27 | 42 | **8** | 37.9 | |
+| **`ai.dominionWeight` 1** | 12 | **0.27** | 45 | **6** | 40.5 | **flipped — ships on** |
+| `ai.dominionWeight` 0.5 | 10 | 0.22 · *fails* | 44 | 10 | 41.3 | worse |
+| `attackPrice.enabled` 0.6 | 13 | 0.29 | 40.5 | 9 | 40.1 | ~free, still buys nothing |
+| `ai.huntLandlessBlocker` 1 | **19** | **0.42** | 42 | 10 | 41.9 | both readings reversed sign |
+| `ai.closeOutWithin` 2 | 10 | 0.22 · *fails* | 45.5 | 7 | 38.1 | worse |
+| `ai.pactCall` 1 | 13 | 0.29 | 45 | 10 | 43.8 | worse |
+| `ai.settleWithoutCession` 1 | 13 | 0.29 | 44 | 10 | 43.2 | worse |
+| `ai.giftAboveShareOfCap` 0.8 | 11 | 0.24 | 42 | 11 | 38.2 | worse |
+
+Confirmed at n=90, because everything else measured here shrank when the sample
+grew:
+
+| n=90 | baseline | `dominionWeight: 1` |
+|---|---|---|
+| ending mix | 30 (0.33) | 29 (0.32) |
+| median rounds | 41.5 | 45 |
+| **games unresolved** | **22** | **13** |
+| wars per game | 43.74 | 43.10 |
+
+**Unresolved games fall 41% for essentially nothing** — the mix moves one
+hundredth, the war rate is flat, the median lands inside the band. It holds at
+the larger sample.
+
+**Why the old reading was right and the old reason was wrong.** The second pass
+concluded that the bottleneck is *conversion*, not selection: `courtshipScore`
+only ranks candidates a Standing floor has already filtered, so re-ranking them
+moves the AI off the partner it could convert and onto one it cannot. That was
+true. What it did not say is *why* the pool was full of unconvertible partners
+— and the answer is the landless factions: frozen out of the political layer by
+construction, unreachable by any verb, and counted by the win condition anyway.
+Remove them and the pool becomes worth ranking.
+
+So the brief was right about its own headline proposal and wrong about the
+order of operations. `courtshipScore` really did read warmth alone, and fixing
+it really was the highest-value change available — but only after the rules
+underneath it stopped manufacturing partners nobody could convert. Two changes
+that each measure worse alone can compound; the discipline of one flag on one
+build finds that, and only if you re-ask the old questions after the board
+moves.
+
+Note 0.5 is not a safe middle — it fails the mix band where 1 clears it. The
+blend is not monotone in the weight.
+
+And `ai.huntLandlessBlocker` is the mirror image: **both** its readings reversed
+sign. The mix it used to cost a third of is now the best of anything measured
+(0.42), and the `unresolved` it used to be the only thing to improve gets two
+games worse. That is what redundancy looks like — the clock removed the blocker
+the switch existed to chase, so all that is left is the marching.
+
+---
+
 ## Where I would go next, in order
 
-1. **Decide whether 8 is the number you want.** The sweep is above and the
-   trade is legible: 8 halves the unresolved games and costs a third of the
-   ending mix; 12 and 16 give four of those games back and return most of the
-   mix. This is a taste question about how the game should feel, and the
-   numbers are now there to answer it with.
-2. **Ask why a bigger board is worse.** It is the most surprising reading in
-   this document and I only have the shape of an answer: Dominion asks you to
-   deal with every survivor, and room makes survivors cheap. If that is right,
-   the win condition and the map size are coupled in a way nothing currently
-   accounts for, and the large/huge boards need either a different victory
-   threshold or a different faction count. `--map` makes this cheap to chase.
-3. **Re-measure the dark switches on the new board.** Every one of them was
-   condemned on a board where landless factions were immortal and the war rate
-   was 45 a game. It is now 44 and falling, `unresolved` has halved, and the
-   endgame walls have been re-dealt. `ai.dominionWeight` in particular was
-   aimed at a bottleneck (conversion) that this rule partly removes, and
-   `attackPrice` was condemned partly for costing unresolved games there are
-   now fewer of. I would not assume any of those verdicts survived.
+1. **Re-ask the questions this pass could not.** Two verdicts flipped when the
+   board moved, so the others are not safe either — but re-measuring everything
+   after every change is not a method. The rule that would have caught both:
+   **a dark switch's verdict expires when a rule it was condemned against
+   changes.** `attackPrice` is the live candidate — four readings, and the
+   latest is very nearly free (a point of mix for a game) on a board where the
+   war rate is still falling.
+2. **Ask why a bigger board is worse.** Still the most surprising reading here
+   and still unexplained beyond a shape: Dominion asks you to deal with every
+   survivor, and room makes survivors cheap. `--map` makes it cheap to chase,
+   and it now matters more, because the clock and `dominionWeight` both work by
+   reducing the number of parties left to deal with — which is exactly what a
+   bigger board undoes.
+3. **Decide whether 8 is the grace you want.** The sweep is in the third pass
+   and the trade is legible; this is a taste question about how the game should
+   feel, and the numbers are there to answer it with.
 
-I would still not spend another run on `courtshipScore`. The pool it ranks is
-the wrong pool, and that is a floor problem, not a scoring one.
+I would not spend another run on the political verbs. Six of the ten levers
+built here were political and one paid, and it paid only because a rules change
+went in first.

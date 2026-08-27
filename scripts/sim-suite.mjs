@@ -18,9 +18,24 @@
 // lands — two stages deep is where you stop being able to tell which one did
 // it.
 //
-//   ending mix (submission + mixed, of 15)   band >= 11
+//   ending mix (submission + mixed)          band >= 24% of games
 //   median rounds to Dominion                band  baseline +/- 4
 //   games unresolved                         band  0
+//
+// THE MIX BAND IS A RATE, AND IT USED TO BE A COUNT. It was written as the
+// literal ">= 11", compared against however many seeds happened to be running,
+// so one name covered three different tests: 11 of 15 is 73% of games, 11 of
+// 45 is 24%, and 11 of 90 is 12% — nearly free. The band was authored at
+// n=45, so 11/45 = 24% is the threshold it always meant, and that is what it
+// now checks. Two consequences worth knowing:
+//
+//   · docs/sim-baseline.json, taken at n=15, reads 5 of 15 and therefore
+//     "failed" its own band under the old count. At 33% it passes comfortably.
+//   · anything reported as passing the mix band at n=90 was not really being
+//     tested. Re-read such claims against the share.
+//
+// The count is still printed, because every note in `config.js` quotes counts
+// and they stay readable. It is the SHARE that is graded.
 //
 // The doc-reported values (13 / 29 / 1) are NOT this suite's baseline — see
 // the note on the seeds below. docs/sim-baseline.json holds the real one.
@@ -85,6 +100,9 @@ function seedsFor(n) {
 // are genuinely deadlocked rather than slow, which is exactly the failure the
 // diplomacy brief §15 predicts from the `mayEngage` minor-reachability hole.
 const MAX_ROUNDS = 80;
+// The ending-mix band, as a share of games. 11/45 — the threshold the number
+// was authored against — rather than the bare count it used to be compared as.
+const MIX_BAND = 0.24;
 const SNAPSHOT_ROUND = 15; // where the 2026-08-15 playtest took its readings
 
 // --- argv ------------------------------------------------------------
@@ -385,7 +403,14 @@ const report = {
   overrides: overrides || null,
   // --- the three governing numbers -----------------------------------
   governing: {
-    endingMix: { submissionPlusMixed: mixLike, of: seeds.length, band: ">= 11" },
+    endingMix: {
+      submissionPlusMixed: mixLike,
+      of: seeds.length,
+      // Graded on the share; 0.24 is the n=45 band (11/45) the number was
+      // authored against. See the header note on why this is not a count.
+      share: r2(seeds.length ? mixLike / seeds.length : 0),
+      band: ">= 0.24 of games",
+    },
     medianRoundsToDominion: { value: median(resolved.map((g) => g.round)), band: "baseline +/- 4" },
     unresolved: { value: byEnding.unresolved || 0, band: "0" },
   },
@@ -454,7 +479,8 @@ const report = {
 if (!quiet) {
   const G = report.governing;
   console.log("\n=== the three governing numbers ===");
-  console.log(`  ending mix (submission + mixed)   ${G.endingMix.submissionPlusMixed} of ${G.endingMix.of}   band ${G.endingMix.band}`);
+  const mixVerdict = G.endingMix.share >= MIX_BAND ? "PASS" : "FAIL";
+  console.log(`  ending mix (submission + mixed)   ${G.endingMix.submissionPlusMixed} of ${G.endingMix.of} = ${G.endingMix.share}   band ${G.endingMix.band}   ${mixVerdict}`);
   console.log(`  median rounds to Dominion         ${G.medianRoundsToDominion.value}   band ${G.medianRoundsToDominion.band}`);
   console.log(`  games unresolved                  ${G.unresolved.value}   band ${G.unresolved.band}`);
   console.log(`  endings: ${JSON.stringify(byEnding)}`);
@@ -469,6 +495,16 @@ if (!quiet) {
 if (baselinePath) {
   const base = JSON.parse(readFileSync(baselinePath, "utf8"));
   console.log(`\n=== delta against ${baselinePath} ===`);
+  // A DELTA ACROSS TWO SAMPLE SIZES IS NOT A DELTA. Half these rows are counts
+  // per suite (`unresolved`, the ending mix, every per-game total), so
+  // comparing a 45-seed run against a 15-seed baseline reports the sample size
+  // as if it were a result. The baseline file records what it was taken at;
+  // say so loudly rather than printing a table of nonsense.
+  const baseN = base?.governing?.endingMix?.of;
+  if (baseN != null && baseN !== seeds.length) {
+    console.log(`  !! baseline was taken at n=${baseN}, this run is n=${seeds.length}.`);
+    console.log(`  !! Counts below are not comparable. Re-run with --n ${baseN}.`);
+  }
   const walk = (a, b, path = "") => {
     for (const k of Object.keys(b)) {
       if (k === "games" || k === "seeds") continue;
