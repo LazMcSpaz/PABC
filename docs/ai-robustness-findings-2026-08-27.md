@@ -18,19 +18,23 @@ games unresolved                  16         band 0       FAIL
 **Current state of the branch**, at n=45 (and n=90 in brackets):
 
 ```
-ending mix (submission + mixed)   12 of 45 = 0.27  [0.32]   band >= 0.24   PASS
-median rounds to Dominion         45              [45]      baseline ±4    PASS
-games unresolved                  6 of 45         [13/90]   band 0         FAIL, from 16
+ending mix (submission + mixed)   14 of 45 = 0.31  [0.40]   band >= 0.24   PASS
+median rounds to Dominion         45.5            [45]      baseline ±4    PASS
+games unresolved                  5 of 45         [14/90]   band 0         FAIL, from 16
 ```
 
-**`unresolved` has gone 16 → 6 of 45, and 33 → 13 of 90.** Two things ship live
-to get there, and they had to land in that order:
+**`unresolved` has gone 16 → 5 of 45, and 33 → 14 of 90 — and the ending mix is
+back where it started (0.40 at n=90).** Three things ship live to get there, and
+they had to land in that order — each one measured *worse* until the one before
+it existed:
 
 1. **The landless clock** (`victory.landlessGraceRounds: 8`) — a rules decision
    taken by the repo's owner. Third pass below.
 2. **`ai.dominionWeight: 1`** — the win condition in `courtshipScore`, which
-   measured *worse* on the old board and is the best thing measured on the new
-   one. Fourth pass below.
+   measured worse on the old board and is the best thing measured on the new
+   one. Fourth pass.
+3. **`ai.giftAboveShareOfCap: 0.8`** — dark through four condemnations, and it
+   buys back the whole ending mix the clock cost. Fifth pass.
 
 Everything else ships behind a switch at its no-op, and with both of the above
 switched off the build still reproduces `b33d1ee` seed-for-seed on all 45 seeds.
@@ -650,25 +654,102 @@ the switch existed to chase, so all that is left is the marching.
 
 ---
 
+## Fifth pass: what is left, and a third flip
+
+### The six remaining games are all the same shape
+
+Re-diagnosing the games still unresolved on the shipped build, the picture has
+collapsed from four walls to essentially one:
+
+| | before (28 blocked pairs) | now (12) |
+|---|---|---|
+| blocked on Standing | 18 | **10** |
+| at war | 4 | 2 |
+| failing reputation gates | 4 | **0** |
+| unreachable (§15) | 2 | **0** |
+| **held by a landless faction** | **8** | **1** |
+| outstanding-count histogram | `{1:13, 2:6, 3:1}` | `{1:12}` |
+
+**Every remaining game is a two-survivor standoff with exactly one faction
+outstanding on each side**, and both sides hold ground — cities, armies, income,
+Sway. These are not zombies. They are functioning factions one signature from
+ending the game, sitting at -3 to -10 against a pact bar of +6.
+
+The reputation and reachability walls are gone entirely. What is left is a
+single, well-defined defect: **two healthy factions at peace cannot close a
+Standing gap.**
+
+### Which makes the gift the right tool, and it flipped
+
+`ai.giftAboveShareOfCap` is the only verb in the game that raises Standing on
+demand, and it has been dark through four separate condemnations. Its fourth
+reading was taken before `dominionWeight: 1` shipped, so by the expiry rule it
+was stale. Re-measured:
+
+| | n=45 dark | n=45 at 0.8 | n=90 dark | n=90 at 0.8 |
+|---|---|---|---|---|
+| ending mix share | 0.27 | **0.31** | 0.32 | **0.40** |
+| median rounds | 45 | 45.5 | 45 | 45 |
+| games unresolved | 6 | 5 | 13 | 14 |
+| wars per game | 40.5 | 38.5 | 43.1 | 41.1 |
+
+**Stated honestly: `unresolved` is flat.** One game better at n=45, one worse at
+n=90 — 19 of 135 either way, which is noise. What is not noise is the ending
+mix, which gains in the same direction at both samples and by a *growing*
+margin.
+
+And what it gains is precise. The mix is the number the landless clock cost:
+0.40 → 0.32 at n=90. This buys back exactly that, to the hundredth, without
+giving the unresolved games back.
+
+**Why a branch condemned four times suddenly pays** is not the branch. It is
+that `dominionOrder` now runs inside it. At `dominionWeight: 0` the gift walked
+the other factions in faction-id order and warmed whoever came first; at 1 it
+warms the factions that still stand between this one and Dominion. The same
+Sway, aimed. Note the gift is still *one* point, which drift cancels — so what
+it buys is not permanent Standing, it is the right target at the right moment.
+The treadmill note stands as a mechanism claim and was never the whole story.
+
+`closeOutWithin`, which was built for exactly this endgame, was re-measured too
+and is still worse (11 and 9 unresolved at 2 and 5, against 6). The gift reaches
+the same pairs through a branch that already existed.
+
+### A check that pinned a verdict instead of a rule
+
+`harness.js` asserted `CONFIG.ai.giftAboveShareOfCap >= 1` — "the AI's gift
+branch ships switched off". That is a check on a **verdict**, and it failed the
+moment somebody re-measured honestly, which is the opposite of what a check is
+for. It has been replaced with the rule the branch must obey at any setting, and
+the one whose breach was actually measured: **a gift must never cost a
+courtship**. `giftBudget` must never spend the reserve a running courtship is
+owed, and share 1 must still shut the branch completely.
+
+Worth a sweep for others of the same kind. A check that pins a tuning value
+freezes a measurement; a check that pins a mechanism survives one.
+
+---
+
 ## Where I would go next, in order
 
-1. **Re-ask the questions this pass could not.** Two verdicts flipped when the
-   board moved, so the others are not safe either — but re-measuring everything
-   after every change is not a method. The rule that would have caught both:
-   **a dark switch's verdict expires when a rule it was condemned against
-   changes.** `attackPrice` is the live candidate — four readings, and the
-   latest is very nearly free (a point of mix for a game) on a board where the
-   war rate is still falling.
-2. **Ask why a bigger board is worse.** Still the most surprising reading here
-   and still unexplained beyond a shape: Dominion asks you to deal with every
-   survivor, and room makes survivors cheap. `--map` makes it cheap to chase,
-   and it now matters more, because the clock and `dominionWeight` both work by
-   reducing the number of parties left to deal with — which is exactly what a
-   bigger board undoes.
-3. **Decide whether 8 is the grace you want.** The sweep is in the third pass
-   and the trade is legible; this is a taste question about how the game should
-   feel, and the numbers are there to answer it with.
+1. **Close the last wall.** Five games at n=45, fourteen at n=90, and they are
+   now all one shape: two healthy factions, at peace, one alliance from
+   Dominion, at -3 to -10 against a bar of +6. That is a single well-defined
+   problem for the first time. The gift narrows it; something has to finish it.
+   Candidates in order of cheapness: a two-point gift *now that it is aimed*
+   (the treadmill measurement was taken unaimed and is stale by the same rule
+   as everything else here); a Standing bar that eases between the last two
+   survivors; or a draw/tiebreak so a genuine standoff is an ending rather than
+   a timeout.
+2. **Sweep the harness for checks that pin verdicts.** One was found by
+   accident, because a re-measurement broke it. There may be others, and each
+   one silently freezes a tuning value into a rule.
+3. **Ask why a bigger board is worse.** Unchanged and still unexplained, and it
+   now matters more: all three live changes work by reducing the number of
+   parties left to deal with, which is exactly what a bigger board undoes.
 
-I would not spend another run on the political verbs. Six of the ten levers
-built here were political and one paid, and it paid only because a rules change
-went in first.
+**The rule I would write into the method doc:** *a dark switch's verdict expires
+when a rule it was condemned against changes.* Three verdicts flipped in this
+work — `dominionWeight`, `huntLandlessBlocker` and `giftAboveShareOfCap` — and
+every one of them flipped because the board moved, not because the switch did.
+Two of the three were caught only because I happened to re-ask. That should not
+be luck.

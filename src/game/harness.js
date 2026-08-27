@@ -50,6 +50,8 @@ import {
   // §8 what a fight costs your name
   diplomaticPrice, attackIsWorthIt,
   giftCost, cleanHandsSurcharge,
+  // §6 Sway — the pool a gift must never spend out from under a courtship.
+  swayOf, courtingList,
   // §9 grounds for a rising, and one faction's appetite for it
   coalitionGrounds, coalitionJoinScore, coalitionAgainst,
 } from "./diplomacy.js";
@@ -75,7 +77,7 @@ import { evalCond, evalStrength } from "./dsl.js";
 import { registerQuest } from "./quests.js";
 import { CONFIG } from "./config.js";
 import { takeAITurn, maybeAssignTech, warPeaceTerms, manageDiplomacy,
-  DIPLOMACY_BRANCH_ORDER, runDiplomacyBranch, landlessBlockerHexes } from "./ai.js";
+  DIPLOMACY_BRANCH_ORDER, runDiplomacyBranch, landlessBlockerHexes, giftBudget } from "./ai.js";
 import { enforceLoyaltySlotCap, chargeChipUpkeep, slotCapacity, effectiveBuildCost, buildableChips, applyOutputAndBuilds, locationOutput, unitUpkeepFor, chargeUnitUpkeep, chipsHeldBy, chipUpkeepFor, slotExpansionCost, completeBuildIfDone } from "./economy.js";
 
 const seed = Number(process.argv[2]) || 42;
@@ -4498,12 +4500,42 @@ line("\n  [§6.4] no faction buys goodwill with coin — the AI included");
     bought.length === 0, );
 }
 {
-  // …and the switch that would let the AI gift again is off, deliberately.
-  // The measured table is in the config comment: the scrap breach read best
-  // (mix 9, unresolved 1) and still cannot stay, and every Sway-priced version
-  // reads worse than removing it because a gift competes with COURTSHIP for
-  // the same pool.
-  check("the AI's gift branch ships switched off", CONFIG.ai.giftAboveShareOfCap >= 1);
+  // THIS USED TO PIN THE BRANCH SHUT — `giftAboveShareOfCap >= 1` — and that
+  // was a check on a VERDICT rather than on a rule. The verdict has since
+  // flipped: re-measured alongside `ai.dominionWeight: 1`, the gift buys back
+  // the whole ending mix the landless clock cost (0.32 -> 0.40 at n=90) with
+  // `unresolved` flat, and it now ships at 0.8. A check that asserts today's
+  // setting fails the day somebody re-measures honestly, which is the opposite
+  // of what it is for.
+  //
+  // What replaces it is the rule the branch has to obey at ANY setting, and
+  // the one whose breach was actually measured: A GIFT MUST NEVER COST A
+  // COURTSHIP. Letting a gift eat the pool took the ending mix from 9 to 5 and
+  // unresolved from 1 to 6, because `chargeSwayUpkeep` then called the running
+  // courtships off and lapses went 3.9 to 6.4. Commitments first, surplus
+  // second — for however many rounds `giftReserveRounds` asks for.
+  const g6g = createGame({ seed: 2071, humanFactionId: "versari" });
+  ensureDiplomacy(g6g);
+  const SW = CONFIG.sway;
+  g6g.players.goldgrass.sway = SW.cap;
+  // Warm enough to be SEEN courting them — the courtship floor is Neutral, and
+  // at this seed Goldgrass starts below it toward both.
+  for (const f of ["lakers", "plainers"]) {
+    setStanding(g6g, "goldgrass", f, CONFIG.diplomacy.tiers.friendly, "test");
+  }
+  const openedCourtships = ["lakers", "plainers"].filter((f) =>
+    performDiplomacy(g6g, "goldgrass", "court", { faction: f }).ok === true).length;
+  check("the courtship fixture opened something to protect",
+    openedCourtships > 0 && courtingList(g6g, "goldgrass").length === openedCourtships);
+  const owed = openedCourtships * SW.courtUpkeep * (CONFIG.ai.giftReserveRounds ?? 2);
+  check("a gift never spends what a running courtship is owed",
+    giftBudget(g6g, "goldgrass") <= swayOf(g6g, "goldgrass") - owed);
+  // …and the no-op is still a no-op, whatever the shipped value happens to be.
+  const shareSave6g = CONFIG.ai.giftAboveShareOfCap;
+  CONFIG.ai.giftAboveShareOfCap = 1;
+  check("share 1 still shuts the branch completely",
+    giftBudget(g6g, "goldgrass") === 0);
+  CONFIG.ai.giftAboveShareOfCap = shareSave6g;
   // The human's, of course, does not.
   const g = createGame({ seed }); ensureDiplomacy(g);
   g.players.versari.sway = 200;

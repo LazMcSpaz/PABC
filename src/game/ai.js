@@ -651,7 +651,7 @@ function tryIntrigue(state, pid, others) {
   return performDiplomacy(state, pid, "expose", { faction: best }).ok === true;
 }
 
-function giftBudget(state, pid) {
+export function giftBudget(state, pid) {
   const cfg = CONFIG.sway;
   const running = courtingList(state, pid).length;
   // A gift MUST NOT COST A COURTSHIP, which is not the same rule as "a gift

@@ -318,9 +318,35 @@ export const CONFIG = {
     //
     // RE-MEASURED A FOURTH TIME on the post-landless-clock board (baseline
     // 12 / 0.27 / 42 / 8): 0.8 reads 11 / 0.24 / 42 / 11. Three unresolved
-    // games worse and sitting exactly ON the mix band. The verdict has now
-    // survived four boards.
-    giftAboveShareOfCap: 1,
+    // games worse and sitting exactly ON the mix band. The verdict survived
+    // four boards.
+    //
+    // AND THEN A FIFTH TIME, ALONGSIDE `dominionWeight: 1`, WHERE IT FLIPS.
+    // The fourth reading above was taken with `dominionWeight` still at 0, so
+    // it expired the moment that shipped. Against the current build:
+    //
+    //   n=45   dark  12 / 0.27 / 45 /  6      0.8 -> 14 / 0.31 / 45.5 /  5
+    //   n=90   dark  29 / 0.32 / 45 / 13      0.8 -> 36 / 0.40 / 45   / 14
+    //
+    // The ENDING MIX gains and holds — 0.27 -> 0.31 and 0.32 -> 0.40, the same
+    // direction and a growing margin at the larger sample — while `unresolved`
+    // is flat within noise (one game better at n=45, one worse at n=90; 19 of
+    // 135 either way). Wars fall 43.1 -> 41.1.
+    //
+    // WHAT IT IS ACTUALLY DOING, and why it could not do it before. The mix is
+    // the number `victory.landlessGraceRounds` cost: 0.40 -> 0.32 at n=90. This
+    // buys back exactly that, to the hundredth, without giving the unresolved
+    // games back. And the reason a branch condemned four times suddenly pays is
+    // not the branch — it is that `dominionOrder` now runs inside it. At
+    // `dominionWeight: 0` the gift walked the other factions in faction-id
+    // order and warmed whoever came first; at 1 it warms the factions that
+    // still stand between this one and Dominion. The same Sway, aimed.
+    //
+    // Note the gift is still ONE point (`giftStanding`), which drift cancels —
+    // so what it is buying is not permanent Standing, it is the right target
+    // at the right moment. Worth re-reading the treadmill note there against
+    // this: the mechanism claim stands and it was never the whole story.
+    giftAboveShareOfCap: 0.8,
     // How many rounds of every RUNNING courtship's upkeep `giftBudget` sets
     // aside before it will consider a gift at all. This is the real rule the
     // guard above was reaching for: courtship is the ladder and must never be
