@@ -531,7 +531,13 @@ function SwayCard({ sway }) {
 // the only question left: how much warmth, at the published rate.
 function GiftPane({ f, dip, onBack, onSubmit }) {
   const sway = dip.sway || { pool: 0, costs: { perStanding: 8 } };
-  const rate = sway.costs.perStanding;
+  // THIS faction's rate, not the published one. Reaching somebody who despises
+  // you costs more per point (§6.3 reparations), and the engine quotes the
+  // real number on the verb so the pane never promises a price the verb will
+  // refuse. Falls back to the flat rate for every ordinary case.
+  const listed = (f.verbs || []).find((v) => v.verb === "gift");
+  const base = sway.costs.perStanding;
+  const rate = listed?.rate || base;
   const affordable = Math.max(0, Math.floor(sway.pool / rate));
   const [want, setWant] = useState(() => Math.min(2, Math.max(1, affordable)));
   const cost = want * rate;
@@ -548,6 +554,13 @@ function GiftPane({ f, dip, onBack, onSubmit }) {
           <b style={{ color: C.holoHi }}>{rate} Sway</b> per point of their regard —
           political capacity, not scrap. Lean on them too often and each gift
           buys less than the last.
+          {rate > base && (
+            <>
+              {" "}The usual rate is <b>{base}</b>. You are paying more because of
+              how badly they think of you — this is not a courtesy, it is
+              reparations, and there is no cheaper way back.
+            </>
+          )}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <button className="hud-int" onClick={() => setWant((v) => Math.max(1, v - 1))}

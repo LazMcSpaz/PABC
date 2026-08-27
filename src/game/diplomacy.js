@@ -451,6 +451,32 @@ export function settleGrievances(state, victim, offender) {
   return weight;
 }
 
+// §6.3 — WHAT A GIFT COSTS, in one place, because three callers need the same
+// number: the verb that charges it, the AI that budgets for it, and the pane
+// that prints it. A flat `want * perStanding` was fine while gifts only ever
+// went to factions that already tolerated you; reparations are priced by how
+// far below Neutral their regard for you has fallen.
+//
+// Note the DIRECTION. A gift moves THEIR opinion of YOU, so the surcharge is
+// read off `getStanding(state, them, you)` — how badly they think of you —
+// and not off your view of them, which is nobody's business but yours.
+export function giftMultiplier(state, pid, f) {
+  const rep = CONFIG.sway?.giftReparations;
+  if (!rep?.perStepBelowNeutral) return 1;
+  const neutral = D().tiers.neutral;
+  const theirs = getStanding(state, f, pid);
+  if (theirs >= neutral) return 1;
+  const steps = neutral - theirs;
+  return Math.min(rep.maxMultiplier ?? 3, 1 + steps * rep.perStepBelowNeutral);
+}
+
+// Rounded UP: a price the player is shown has to be a price they can pay
+// exactly, and a fractional Sway is not a thing this game has.
+export function giftCost(state, pid, f, want = 1) {
+  const n = Math.max(1, Math.round(want));
+  return Math.ceil(n * CONFIG.sway.perStanding * giftMultiplier(state, pid, f));
+}
+
 // Is there something to denounce? Judged by the DENOUNCER's own standards —
 // tolerance and trustFloor are per-observer, so a pacifist and a warlord
 // genuinely disagree about what counts as beyond the pale, which is as it
@@ -832,6 +858,23 @@ export function locationWorth(state, fid, hexId) {
   return worth;
 }
 
+// §18.5 — the extra Menace for declaring an unjustified war on somebody whose
+// name is better than yours. Zero when the gap is small, when the charge is
+// switched off, or when either side is not a scored faction.
+//
+// Read as a forecast as well as a charge — `diplomaticPrice` calls it so the
+// AI weighs the surcharge BEFORE declaring rather than discovering it after,
+// which is the difference between a deterrent and a tax.
+export function cleanHandsSurcharge(state, a, b) {
+  const cfg = D().menace?.declareOnCleanHands;
+  if (!cfg?.perPoint) return 0;
+  if (!state.players[a] || !state.players[b]) return 0;
+  const gap = honorOf(state, b) - honorOf(state, a);
+  const over = gap - (cfg.freeGap ?? 0);
+  if (over <= 0) return 0;
+  return Math.min(cfg.max ?? Infinity, over * cfg.perPoint);
+}
+
 // §8 — WHAT ATTACKING `target` WOULD COST `pid`, in locationWorth units.
 //
 // The comparison the brief states precisely, because the first draft of it
@@ -848,10 +891,17 @@ export function diplomaticPrice(state, pid, target, { declared = false } = {}) {
   if (declared) {
     // A justified war costs nothing to declare — which is the whole point of
     // having earned one.
-    points += warIsJustified(state, pid, target) ? 0 : m.declareUnjustified;
+    points += warIsJustified(state, pid, target)
+      ? 0
+      : m.declareUnjustified + cleanHandsSurcharge(state, pid, target);
   } else {
     points += h.surpriseAttackLoss;
     points += D().grievance.severity["surprise-attack"] ?? D().grievance.defaultSeverity;
+    // A surprise attack calls `declareWar` on the way through, so it pays the
+    // clean-hands surcharge too. Forecasting it on one branch and not the
+    // other would have made striking a blameless neighbour without warning
+    // the CHEAPER of the two — the exact opposite of the rule's point.
+    points += cleanHandsSurcharge(state, pid, target);
   }
   // Expected Menace, forecast the way `menaceFromAttack` scores it: by the
   // share of the board that can see, and by the target's own temperament —
@@ -1910,6 +1960,10 @@ export function declareWar(state, a, b, cause = "declared", opts = {}) {
   // charged it, so declaring was free and only fighting was scored.)
   if (!justified.includes(a) && D().menace.declareUnjustified) {
     adjustMenace(state, a, D().menace.declareUnjustified, `declare:${b}`);
+    // …and the board judges WHO you hit, not only that you hit somebody. A
+    // spotless neighbour is armour: see `menace.declareOnCleanHands`.
+    const extra = cleanHandsSurcharge(state, a, b);
+    if (extra > 0) adjustMenace(state, a, extra, `declare-clean-hands:${b}`);
   }
   // §13 — a position said to the whole board is broken by the deed, not by
   // the declaration's wording, so this sits after the war record exists.
@@ -3776,11 +3830,10 @@ export function performDiplomacy(state, pid, action, params = {}) {
     // actually is, and it is priced as generosity by the deal rules rather
     // than as a Standing purchase.
     case "gift": {
-      const cfg = CONFIG.sway;
       const want = Math.max(1, Math.round(params.standing || 1));
       if (!f || f === pid) return { ok: false, reason: "there is nobody to send to" };
       if (!mayCourt(state, pid, f)) return { ok: false, reason: "they are beyond your reach" };
-      const cost = want * cfg.perStanding;
+      const cost = giftCost(state, pid, f, want);
       if (!canAffordSway(state, pid, cost)) {
         return { ok: false, reason: `not enough Sway — ${cost} needed, you hold ${swayOf(state, pid)}` };
       }

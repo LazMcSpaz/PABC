@@ -49,6 +49,7 @@ import {
   locationWorth, cedeBlocker, cedeableLocations, cedeLocation, resolveProposal,
   // §8 what a fight costs your name
   diplomaticPrice, attackIsWorthIt,
+  giftCost, cleanHandsSurcharge,
   // §9 grounds for a rising, and one faction's appetite for it
   coalitionGrounds, coalitionJoinScore, coalitionAgainst,
 } from "./diplomacy.js";
@@ -73,7 +74,7 @@ import { resolveTokens } from "./textTokens.js";
 import { evalCond, evalStrength } from "./dsl.js";
 import { registerQuest } from "./quests.js";
 import { CONFIG } from "./config.js";
-import { takeAITurn, maybeAssignTech, warPeaceTerms } from "./ai.js";
+import { takeAITurn, maybeAssignTech, warPeaceTerms, manageDiplomacy } from "./ai.js";
 import { enforceLoyaltySlotCap, chargeChipUpkeep, slotCapacity, effectiveBuildCost, buildableChips, applyOutputAndBuilds, locationOutput, unitUpkeepFor, chargeUnitUpkeep, chipsHeldBy, chipUpkeepFor, slotExpansionCost, completeBuildIfDone } from "./economy.js";
 
 const seed = Number(process.argv[2]) || 42;
@@ -7284,6 +7285,143 @@ line("\n  [Phase 11] text-token resolver");
     || CONFIG.diplomacy.posture.courtRounds > 0);
   check("a landed gift warms the baseline — drift can't erase generosity",
     getBaseline(g5, "goldgrass", "versari") === CONFIG.diplomacy.gift.baselineWarmth);
+
+  // --- reparations: a gift to somebody who hates you is priced, not refused ---
+  //
+  // The rule under test is that HOSTILITY IS NOT A CLOSED DOOR. Courting has a
+  // Standing floor and always will; the gift must not, because sending envoys
+  // to a faction that despises you is the one move a beaten player has left.
+  // What it has instead is a bill.
+  const g5b = createGame({ seed: 2051, humanFactionId: "versari" });
+  ensureDiplomacy(g5b);
+  const REP = CONFIG.sway.giftReparations;
+  const NEUT = CONFIG.diplomacy.tiers.neutral;
+  setStanding(g5b, "goldgrass", "versari", CONFIG.diplomacy.tiers.hostile, "test");
+  g5b.players.versari.sway = CONFIG.sway.cap;
+  const hostileRate = giftCost(g5b, "versari", "goldgrass", 1);
+  check("reaching a hostile faction costs more than the published rate",
+    hostileRate > CONFIG.sway.perStanding);
+  check("…by how far below Neutral THEIR regard for you has fallen",
+    hostileRate === Math.ceil(CONFIG.sway.perStanding
+      * Math.min(REP.maxMultiplier,
+        1 + (NEUT - CONFIG.diplomacy.tiers.hostile) * REP.perStepBelowNeutral)));
+  const rep1 = performDiplomacy(g5b, "versari", "gift", { faction: "goldgrass", standing: 1 });
+  check("…and the gift lands anyway — the door is priced, not shut",
+    rep1.ok && getStanding(g5b, "goldgrass", "versari") === CONFIG.diplomacy.tiers.hostile + 1);
+  check("…charged at the quoted price, not the published one",
+    g5b.players.versari.sway === CONFIG.sway.cap - hostileRate);
+  // The surcharge reads THEIR opinion of YOU, because that is what a gift
+  // moves. Your own contempt for them is nobody's business but yours.
+  const g5c = createGame({ seed: 2052, humanFactionId: "versari" });
+  ensureDiplomacy(g5c);
+  setStanding(g5c, "versari", "goldgrass", CONFIG.diplomacy.tiers.hostile, "test");
+  check("a gift is priced by their regard for you, not yours for them",
+    giftCost(g5c, "versari", "goldgrass", 1) === CONFIG.sway.perStanding);
+  // …and the whole surcharge is switchable back to the flat rate.
+  const repSave = REP.perStepBelowNeutral;
+  REP.perStepBelowNeutral = 0;
+  const flat = giftCost(g5b, "versari", "goldgrass", 3);
+  REP.perStepBelowNeutral = repSave;
+  check("perStepBelowNeutral 0 restores the flat published rate",
+    flat === 3 * CONFIG.sway.perStanding);
+
+  // --- and a gift never speaks over a reply ---
+  //
+  // `manageDiplomacy` is bounded to ONE act, so branch order IS priority, and
+  // a gift is the only branch in it that answers nothing on the board. This
+  // pins it below the branch that names a faction that has earned it —
+  // measured, having it above cost a peaceful faction its whole Honor engine
+  // (8.3 to 4.1), which is the same stat `declareOnCleanHands` prices its
+  // safety in. It would have been buying warmth with its armour.
+  //
+  // Set up so that the gift and the denouncement are the only two branches
+  // with anything to say: Goldgrass thinks little enough of everybody that it
+  // will not be SEEN courting them (which is the courtship floor doing its
+  // job), while the gift has no such floor and the Lakers have earned to be
+  // named. The one act it gets should be the naming.
+  const g5h = createGame({ seed: 2057, humanFactionId: "plainers" });
+  ensureDiplomacy(g5h);
+  const shareSave = CONFIG.ai.giftAboveShareOfCap;
+  CONFIG.ai.giftAboveShareOfCap = 0;
+  for (const other of ["versari", "lakers", "plainers"]) {
+    setStanding(g5h, "goldgrass", other, CONFIG.diplomacy.tiers.hostile, "test");
+  }
+  g5h.players.goldgrass.sway = CONFIG.sway.cap;   // diplomacy-lean, sociable
+  g5h.players.lakers.menace = CONFIG.diplomacy.menace.max;  // and plainly worth naming
+  const before5h = g5h.log.length;
+  manageDiplomacy(g5h, "goldgrass");
+  const said = g5h.log.slice(before5h).map((e) => e.name);
+  check("with money to gift AND somebody worth naming, it names them",
+    said.includes("denounced")
+    && !g5h.log.slice(before5h).some((e) => e.payload?.cause === "gift"));
+  // …and with nobody left worth naming, the same faction does spend it —
+  // on a relationship the courtship floor had locked it out of entirely.
+  const before5i = g5h.log.length;
+  g5h.players.lakers.menace = 0;
+  manageDiplomacy(g5h, "goldgrass");
+  CONFIG.ai.giftAboveShareOfCap = shareSave;
+  check("…and with nothing to answer, it gifts — even where it could not court",
+    g5h.log.slice(before5i).some((e) => e.payload?.cause === "gift"));
+
+  // --- a clean record is armour: the Honor-gap Menace surcharge ---
+  //
+  // Two claims, and the second is the one that makes it a RULE rather than a
+  // penalty: an unjustified war on a spotless faction costs extra Menace, and
+  // a war you earned the right to still costs nothing at all to open.
+  const CH = CONFIG.diplomacy.menace.declareOnCleanHands;
+  const HON = CONFIG.diplomacy.honor;
+  const g5d = createGame({ seed: 2053, humanFactionId: "versari" });
+  ensureDiplomacy(g5d);
+  g5d.players.versari.honor = -2;
+  g5d.players.goldgrass.honor = HON.max;
+  const gapExtra = cleanHandsSurcharge(g5d, "versari", "goldgrass");
+  check("hitting a far cleaner faction carries a surcharge",
+    gapExtra > 0);
+  check("…scaled by the gap, past a free margin, and capped",
+    gapExtra === Math.min(CH.max, (HON.max - -2 - CH.freeGap) * CH.perPoint));
+  const m5dBefore = g5d.players.versari.menace || 0;
+  declareWar(g5d, "versari", "goldgrass", "declared");
+  check("…and the declaration charges it on top of the unjustified fee",
+    (g5d.players.versari.menace || 0)
+      === m5dBefore + CONFIG.diplomacy.menace.declareUnjustified + gapExtra);
+  // An equal — or a target no better than you — is the ordinary case.
+  const g5e = createGame({ seed: 2054, humanFactionId: "versari" });
+  ensureDiplomacy(g5e);
+  check("an even record carries no surcharge at all",
+    cleanHandsSurcharge(g5e, "versari", "goldgrass") === 0);
+  // The rule the design keeps: earning the war still makes opening it free.
+  const g5f = createGame({ seed: 2055, humanFactionId: "versari" });
+  ensureDiplomacy(g5f);
+  g5f.players.versari.honor = -2;
+  g5f.players.goldgrass.honor = HON.max;
+  g5f.diplomacy.denouncements = g5f.diplomacy.denouncements || {};
+  g5f.diplomacy.denouncements.versari = g5f.diplomacy.denouncements.versari || {};
+  g5f.diplomacy.denouncements.versari.goldgrass = { round: g5f.round, warrant: "menace" };
+  const m5fBefore = g5f.players.versari.menace || 0;
+  declareWar(g5f, "versari", "goldgrass", "declared");
+  check("a war you earned the right to is still free to open, however clean they are",
+    (g5f.players.versari.menace || 0) === m5fBefore);
+  // …and the war calculus sees it BEFORE the declaration, not after — which is
+  // the difference between a deterrent and a tax. Measured with
+  // `attackPrice.enabled` forced on, because it ships OFF (see the note on the
+  // config block: the gate is built and switchable but has not yet earned its
+  // price to the AI). So the surcharge's LIVE effect today is the Menace
+  // itself — third parties' threat scores, coalitions, tolerance — and this
+  // check pins the forecast so the gate is correct on the day it comes on.
+  const g5g = createGame({ seed: 2056, humanFactionId: "versari" });
+  ensureDiplomacy(g5g);
+  const apSave = CONFIG.diplomacy.attackPrice.enabled;
+  CONFIG.diplomacy.attackPrice.enabled = 1;
+  const priceEven = diplomaticPrice(g5g, "versari", "goldgrass", { declared: true });
+  g5g.players.goldgrass.honor = HON.max;
+  g5g.players.versari.honor = -2;
+  const priceClean = diplomaticPrice(g5g, "versari", "goldgrass", { declared: true });
+  const priceRaw = diplomaticPrice(g5g, "versari", "goldgrass", { declared: false });
+  CONFIG.diplomacy.attackPrice.enabled = apSave;
+  check("the war calculus sees the surcharge before the declaration, not after",
+    priceClean > priceEven);
+  check("…on the undeclared branch too, so treachery never becomes the cheap road",
+    priceRaw > priceClean);
 
   // --- encounter standing rewards: self-standing is a no-op ---
   const g6 = createGame({ seed: 206, humanFactionId: "versari" });

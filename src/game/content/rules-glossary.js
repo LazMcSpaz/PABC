@@ -144,7 +144,7 @@ WHAT IT AFFECTS
 · A high Menace makes a faction that would otherwise court you refuse to.
 
 WHAT MOVES IT
-· Declaring war raises it at once — by more if you had no [[r-grievance|grievance]] on record to justify it.
+· Declaring war raises it at once — by more if you had no [[r-grievance|grievance]] on record to justify it, and by more again if the faction you declared on has a far better name than yours. The board judges who you hit, not only that you hit somebody, so a spotless neighbour is expensive to attack and a notorious one is cheap.
 · Attacking without warning, breaking a [[r-truce|truce]], breaking a [[r-position|declared position]], and being caught at [[r-intrigue|quiet work]].
 · Downward: it decays on its own, about ${M.decayPerRound} a round, with no action from you. Menace is a debt that pays itself off if you stop borrowing.`,
   },
@@ -163,6 +163,7 @@ WHAT IT AFFECTS
 · Factions have a floor below which they will not sign anything with you. Under it, the skull appears on their card and the deals stop, regardless of how warm they feel.
 · It is your cover for [[r-intrigue|quiet work]]. An honourable faction is likelier to be believed and less likely to be suspected, so the same lie is safer told by somebody with a clean record.
 · It weights whether allies answer your calls to arms and whether anybody believes your accusations.
+· It is armour. Attacking a faction whose Honor stands well above the attacker's own costs extra [[r-menace|Menace]], scaled by the gap — so a long clean record makes you a more expensive target for everybody who has one.
 
 WHAT MOVES IT
 · Up: keeping promises, honouring a call to arms, [[r-mediate|mediating]] somebody else's war, freeing a [[r-vassalage|vassal]].
@@ -475,6 +476,8 @@ WHAT IT AFFECTS
 
 WHAT MOVES IT
 · There are diminishing returns inside a window of about ${rounds(D.gift.windowRounds)}. Leaning on the same faction repeatedly pays less each time.
+· A faction that already dislikes you charges more. Every point their regard for you sits below Neutral raises the price of the next point, up to a ceiling of about ${S.giftReparations.maxMultiplier} times the published rate. Reaching somebody hostile is reparations rather than a courtesy, and it is priced like it.
+· It is never refused for being unwelcome, though. [[r-courtship|Courting]] somebody you openly despise is impossible — you would not be seen doing it — but you can always send envoys, at whatever the going rate for your name is. This is the one door that never closes.
 · It is the fastest way to move Standing, and the least durable — gifted warmth drifts back like any other, whereas a [[r-courtship|courtship]] suspends the drift while it runs. Gifts are for getting over a line this turn; courtship is for staying over it.`,
   },
 

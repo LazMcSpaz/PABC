@@ -28,6 +28,7 @@ import { isUnitVisibleTo } from "../game/visibility.js";
 import { factionDef } from "../game/content.js";
 import {
   threatScore, tolerance, trustFloor, standingTier, getStanding, standingReceipts,
+  giftCost,
   arePacted, atWar, vassalLord, coalitionAgainst, factionIds,
   aiAcceptsPact, aiAcceptsVassalage, aiAcceptsPeace, wouldAccept, passesRepGates,
   denounceCooldown, denounceWarrant, denounceGrounds, grievanceWeight, grievancesAgainst,
@@ -1789,16 +1790,26 @@ function availableVerbsAgainst(state, viewer, fid) {
     // Hidden — gift to your own lord doesn't make sense (you owe them, this verb is for outsiders).
   } else if (myVassal) {
     // Hidden — vassal already pays into your bank.
-  } else if (sway < SW.perStanding) {
+  } else if (sway < giftCost(state, viewer, fid, 1)) {
     out.push({
       verb: "gift", state: "disabled",
-      reason: `Not enough Sway — ${SW.perStanding} per point of regard, you hold ${sway}.`,
+      reason: `Not enough Sway — ${giftCost(state, viewer, fid, 1)} per point of regard, you hold ${sway}.`,
     });
   } else {
+    // Reparations are priced, not refused (§6.3), so the pane quotes THIS
+    // faction's rate rather than the published one. Quoting the flat rate to
+    // somebody who hates you would be the UI promising a price the verb will
+    // not honour.
+    const rate = giftCost(state, viewer, fid, 1);
     out.push({
       verb: "gift", state: "enabled",
-      outcome: `${SW.perStanding} Sway per point of their regard, with diminishing returns ` +
-        `if you lean on them too often. Costs no scrap.`,
+      rate,
+      outcome: rate > SW.perStanding
+        ? `${rate} Sway per point of their regard — more than the usual ${SW.perStanding}, ` +
+          `because you are buying your way back from how badly they think of you. ` +
+          `Diminishing returns if you lean on them too often. Costs no scrap.`
+        : `${rate} Sway per point of their regard, with diminishing returns ` +
+          `if you lean on them too often. Costs no scrap.`,
     });
   }
 

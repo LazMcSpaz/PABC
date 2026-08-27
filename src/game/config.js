@@ -228,7 +228,38 @@ export const CONFIG = {
     // median / 16 unresolved against a baseline of 16 / 46 / 15, and 16 / 50 /
     // 18 alongside `intrigue`. This is the one of the three dark switches
     // whose original verdict survived a bigger sample.
+    //
+    // MEASURED A THIRD TIME, after the branch was rebuilt from the ground up —
+    // the Standing floor gone, the price of reaching a hostile faction made
+    // real, the `if (running) return 0` guard replaced with a reserve, and the
+    // whole branch moved to the bottom of the political pass. Every reason the
+    // branch was previously dead is fixed. It still ships at 1:
+    //
+    //   share  mix  median  unresolved      (n=45, everything else identical)
+    //   1      21   45      16
+    //   0.8    18   44      20
+    //   0.6    16   44      18
+    //
+    // and the scripted-pacifist probe, which is the instrument that exists
+    // precisely because the suite cannot see a player who does not play like
+    // the AI, agrees within its own noise: 1 win / 11.6 wars declared on it at
+    // share 1, 1 win / 12.9 at share 0.6.
+    //
+    // So the verdict is unchanged and the REASON for it finally is not. It was
+    // never "this AI cannot convert political capacity into progress" — that
+    // sentence was inferred from three correlated regressions and is now
+    // disproved, because the branch works. It is that Sway spent on warmth is
+    // Sway not spent on the ladder, and the ladder is what ends games. The
+    // surplus at the ceiling is still real (about a third of all rounds) and
+    // still wants a sink that is not this one.
     giftAboveShareOfCap: 1,
+    // How many rounds of every RUNNING courtship's upkeep `giftBudget` sets
+    // aside before it will consider a gift at all. This is the real rule the
+    // guard above was reaching for: courtship is the ladder and must never be
+    // knocked over to pay for a gift, but "never while a courtship runs" was
+    // a much bigger claim than the measurement supported. Raise it to make
+    // the AI more cautious; a very high number restores the old refusal.
+    giftReserveRounds: 2,
     // §12.3 — whether the AI reaches for the intrigue branch. The verbs are
     // live for the player either way; this is only the AI's policy.
     //
@@ -735,6 +766,21 @@ export const CONFIG = {
     courtUpkeep: 6,
     // Per +1 Standing from a gift. Replaces the scrap gift outright.
     perStanding: 8,
+    // REPARATIONS. Courting has a Standing floor and always will — you cannot
+    // be seen courting somebody you openly despise — and for a long time the
+    // gift inherited that floor by accident on the AI's side, which closed the
+    // only door a beaten faction had. A gift has no business needing warm
+    // relations first: sending envoys to somebody who hates you is the whole
+    // point of the verb, and history calls it reparations.
+    //
+    // So it is a PRICE, not a refusal. Every point of their regard below the
+    // Neutral tier makes the next point cost this much more, on top of the
+    // published rate. At the Hostile tier a point runs a little over double;
+    // at the very bottom of the track it is capped, because a wall you can
+    // never climb is the refusal again wearing a number.
+    //
+    // Set `perStepBelowNeutral` to 0 to restore the flat rate.
+    giftReparations: { perStepBelowNeutral: 0.25, maxMultiplier: 3 },
     // Expose / Forge / Fabricate (diplomacy §12.3). The intrigue branch
     // finally has an economy.
     //
@@ -941,6 +987,25 @@ export const CONFIG = {
       // A justified war (denounced first, or answering a betrayal) costs
       // nothing to declare — which is the whole point of earning one.
       declareUnjustified: 2,
+      // …AND A CLEAN RECORD IS ARMOUR.
+      //
+      // Honor decided whether a faction would SIGN with you and nothing else.
+      // A faction that never broke a word, never struck first and never earned
+      // a grievance was therefore the cheapest thing on the board to attack —
+      // measured, the pacifist policy took 13 declarations a game against the
+      // spender's 6 — which is the opposite of what a reputation for keeping
+      // your word ought to buy.
+      //
+      // Hitting somebody whose name is far better than yours costs extra
+      // Menace, scaled by the gap. It applies only to an UNJUSTIFIED
+      // declaration, because "a war you earned the right to costs nothing to
+      // open" is a rule this design keeps: a target who actually wronged you
+      // has the Honor loss to show for it, so the gap closes itself.
+      //
+      // `freeGap` is how much better they can be before the board minds;
+      // `perPoint` is the charge past that; `max` stops a saint being
+      // untouchable. 0 on `perPoint` restores the flat charge.
+      declareOnCleanHands: { freeGap: 4, perPoint: 0.5, max: 4 },
       // Menace is what the BOARD thinks of you, so it should depend on what
       // the board saw. An attack is scored by the share of third parties who
       // could see the hex: seen by everyone it costs full, seen by nobody it

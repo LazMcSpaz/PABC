@@ -33,6 +33,7 @@ import {
   performDiplomacy,
   aiAcceptsVassalage, truceBetween,
   occupationsBy, cedeBlocker, locationWorth,
+  giftCost,
 } from "./diplomacy.js";
 
 const SAFETY_CAP = 16; // hard stop if priority loop ever spins
@@ -605,14 +606,23 @@ function tryIntrigue(state, pid, others) {
 function giftBudget(state, pid) {
   const cfg = CONFIG.sway;
   const running = courtingList(state, pid).length;
-  // A gift NEVER competes with a courtship. Measured: letting it — even one
-  // point at a time, even with a round of upkeep reserved — took the ending
-  // mix from 9 to 5 and unresolved from 1 to 6, because the pool emptied,
+  // A gift MUST NOT COST A COURTSHIP, which is not the same rule as "a gift
+  // never happens while a courtship runs" — and the difference is the whole
+  // fix. Measured, letting a gift eat into the pool took the ending mix from
+  // 9 to 5 and unresolved from 1 to 6, because the pool emptied,
   // `chargeSwayUpkeep` called the running courtships off, and lapses per game
-  // went 3.9 to 6.4. Courtship is the ladder; a gift is what you do with money
-  // the ladder cannot use.
-  if (running) return 0;
-  const surplus = swayOf(state, pid) - cfg.cap * (CONFIG.ai.giftAboveShareOfCap ?? 0.7);
+  // went 3.9 to 6.4. So the failure mode was always LAPSES, and the guard
+  // that shipped — a flat `return 0` whenever anything was being courted —
+  // treated the symptom by closing the branch entirely. Courtships do not
+  // lapse on their own, so in practice the AI gifted approximately never.
+  //
+  // Commitments first, then surplus: reserve what every running courtship
+  // will cost for the next `giftReserveRounds` upkeeps and gift only out of
+  // what is left over after that. Set `giftReserveRounds` high to restore the
+  // old refusal in all but name.
+  const reserve = running * cfg.courtUpkeep * (CONFIG.ai.giftReserveRounds ?? 2);
+  const surplus = swayOf(state, pid) - reserve
+    - cfg.cap * (CONFIG.ai.giftAboveShareOfCap ?? 0.7);
   return Math.max(0, surplus);
 }
 
@@ -623,7 +633,6 @@ export function manageDiplomacy(state, pid) {
   const me = factionDef(pid) || {};
   const human = state.humanFactionId;
   const others = factionIds(state).filter((f) => f !== pid);
-  const tiers = CONFIG.diplomacy.tiers;
 
   // 0) OPEN A COURTSHIP. §5's cadence fix, in the one place it belongs.
   //
@@ -732,26 +741,9 @@ export function manageDiplomacy(state, pid) {
           return;
         }
       }
-      // A gift here used to be `applyDeal` handing over 3 SCRAP, which walked
-      // straight through the wall the whole Sway design rests on: scrap buys
-      // what a faction HAS, Sway buys what a faction THINKS, and nothing
-      // converts. The human's Gift button has been priced in Sway since §6.3;
-      // the AI was still paying in coin, so the wall held at one faucet and not
-      // the other. It goes through the same verb the player presses.
-      //
-      // ONE POINT AT A TIME, and only for a faction that leads with diplomacy.
-      // Both restraints are measured. Spending the whole surplus in one gift
-      // took the ending mix from 9 to 5 and unresolved from 1 to 5: the pool
-      // emptied, `chargeSwayUpkeep` called the running courtships off, and
-      // lapses per game went 3.9 to 6.3. Letting every faction gift did the
-      // same thing to the board at large. The pool sitting at its ceiling is a
-      // real problem — 30% of rounds — but it is phase 6's to solve with an op
-      // to spend it ON, not this branch's to solve by burning it.
-      if (me.victoryLean === "diplomacy"
-        && sFwd >= tiers.neutral && sFwd < CONFIG.diplomacy.pactStandingReq
-        && giftBudget(state, pid) >= CONFIG.sway.perStanding) {
-        if (performDiplomacy(state, pid, "gift", { faction: f, standing: 1 }).ok) return;
-      }
+      // The gift that used to live here is now branch 4b, at the bottom of
+      // the list. It is the only act in this pass that answers nothing, and
+      // this pass is bounded to one act — see the note there.
     }
   }
 
@@ -789,6 +781,56 @@ export function manageDiplomacy(state, pid) {
       if (denounceCooldown(state, pid, f) > 0) continue;
       if (!denounceWarrant(state, pid, f)) continue;
       if (denounce(state, pid, f)) return;
+    }
+  }
+
+  // 4b) LAST, AND THE POSITION IS THE POINT: warm somebody up.
+  //
+  // A gift is the only act in this whole pass that answers nothing. Every
+  // other branch is a response to something already on the board — a debt, a
+  // war, a threat standing over you, a faction that has earned to be named.
+  // `manageDiplomacy` is bounded to ONE act, so whatever fires first silences
+  // the rest, and discretionary spending has no business outranking a reply.
+  //
+  // This is the second time this exact hazard has bitten. The note at 2b
+  // records the first: the gift branch sat above `warTalk` and returned on
+  // every turn a sociable faction took, which made the branch that ENDS WARS
+  // unreachable. Opening the branch up (below) walked straight back into it
+  // from the other side — measured, a pacifist's Honor fell from 8.3 to 4.1,
+  // because a gift now fired every turn and starved branch 4, and branch 4
+  // is a peaceful faction's ONLY source of Honor. Worse, that Honor is what
+  // `menace.declareOnCleanHands` prices its safety in, so the AI was buying
+  // warmth with the armour that kept it alive.
+  //
+  // NO STANDING FLOOR, which is the other half of the fix. There used to be
+  // one — `sFwd >= tiers.neutral` — and it was the single most expensive line
+  // in the political layer: measured across a pacifist run, ten of sixteen
+  // pairs sat BELOW Neutral (median -2), so the branch that exists to warm a
+  // cold relationship refused to run on any relationship that was actually
+  // cold. The recovery mechanism was gated on not needing recovery.
+  //
+  // Reaching somebody who despises you is a PRICE now rather than a refusal
+  // (`sway.giftReparations`), so the budget is checked against what THIS gift
+  // costs, not against the published rate — which is only what the easy cases
+  // cost.
+  //
+  // The two older restraints stay, and both were measured. ONE POINT AT A
+  // TIME: spending the whole surplus in one gift took the ending mix from 9
+  // to 5 and unresolved from 1 to 5, because the pool emptied and
+  // `chargeSwayUpkeep` called the running courtships off. ONLY A FACTION THAT
+  // LEADS WITH DIPLOMACY: letting everybody gift did the same thing to the
+  // board at large. And it goes through `performDiplomacy` — the same verb
+  // the player presses — because the previous draft handed over 3 SCRAP via
+  // `applyDeal`, which walked straight through the wall the Sway design rests
+  // on: scrap buys what a faction HAS, Sway buys what a faction THINKS, and
+  // nothing converts. The wall cannot hold at one faucet and not the other.
+  if (me.victoryLean === "diplomacy" && (me.sociability ?? 0) >= 0.5) {
+    for (const f of others) {
+      if (arePacted(state, pid, f) || atWar(state, pid, f) || vassalLord(state, f) === pid) continue;
+      if (!mayCourt(state, pid, f)) continue;
+      if (getStanding(state, pid, f) >= CONFIG.diplomacy.pactStandingReq) continue;
+      if (giftBudget(state, pid) < giftCost(state, pid, f, 1)) continue;
+      if (performDiplomacy(state, pid, "gift", { faction: f, standing: 1 }).ok) return;
     }
   }
 
