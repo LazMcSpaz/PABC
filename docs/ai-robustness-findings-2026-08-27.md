@@ -258,14 +258,14 @@ wrong.
 
 ---
 
-## What I did not do
+## Loose ends after the first pass
 
-**Finding 5 — neither kind of player can hold ground.** Untouched. The brief
-says treat it as an investigation and do the investigation before writing code,
-and I did not get to it. It is now better motivated than it was: it is the same
-finding as `factionsWithEmptyWheelAtR15`, and two thirds of all courtships end
-with one of the pair **dead** (see below), so whatever is happening to ground is
-upstream of most of the political layer's failure to compound.
+**Finding 5 — neither kind of player can hold ground.** Investigated in the
+second pass below, and it turned out to be the most productive thread here. The
+first signal was that it is the same finding as `factionsWithEmptyWheelAtR15`,
+and that two thirds of all courtships end with one of the pair **dead** — so
+whatever is happening to ground is upstream of most of the political layer's
+failure to compound.
 
 **Finding 6 — the Sway sink.** Not solved. `swayRoundsAtCapShare` is still 0.29
 at the shipped settings. The close-out drains it well (0.29 → 0.16 at
@@ -300,19 +300,165 @@ numbers in either case I tested.
 
 ---
 
+## Second pass: the three next steps, taken
+
+The list above ("where I would go next") was worked through. All three produced
+results; none produced a lever worth turning on, and the third produced the
+best finding in this document.
+
+### 1. The gift at two points — hypothesis disproved
+
+| share / size | mix | median | unresolved |
+|---|---|---|---|
+| **1.0 / 1 (shipped)** | **21** | **45** | **16** |
+| 0.8 / 1 | 18 | 44 | 20 |
+| 0.6 / 1 | 16 | 44 | 18 |
+| 0.8 / 2 | 21 | 45 | 16 · *branch never affords to fire* |
+| 0.6 / 2 | 16 | 43.5 | 21 |
+
+The mechanism claim stands — at one point the gift is exactly cancelled by
+drift, never reaches the two points `gift.baselineWarmth` needs, and so buys
+nothing permanent at any price. **The inference I drew from it was wrong.** A
+two-point gift costs twice the Sway: at share 0.8 the branch can never afford
+to fire at all, and at 0.6 it fires 484 times and lands three unresolved games
+*worse* than the one-point version at the same share. Separating these matters,
+because the true mechanism statement will otherwise get quoted as if it
+predicted an improvement it does not.
+
+### 2. Stalemate wars — a real bug, and fixing it measures worse
+
+`warTalk`'s AI-to-AI path meant to skip the *winning* side's terms and tested
+for it on the wrong side of the deal: `terms.give.some(location)` where the
+winning branch puts its location in `get`. The accidental second condition that
+imposes is that the **losing** side must be squatting on one of the winner's
+cities before it can sue for peace at all.
+
+On the stalemate seeds that condition is what keeps the war alive. Seed 4711 at
+round 81: war exhaustion **73.5 and 108.5** against a losing gate of 4.8,
+Standing -10 both ways, `warPeaceTerms` returning valid terms for both sides,
+and `wouldAccept` returning **true** for both. A peace both parties would sign,
+refused because neither occupies the other.
+
+| `settleWithoutCession` | mix | median | unresolved | `warTalk` fires | wars/game |
+|---|---|---|---|---|---|
+| **0 (shipped)** | **21** | **45** | **16** | 98 | 45.5 |
+| 1 | 13 | 50.5 | 17 | **362** | **55.4** |
+
+The fix does exactly what it should — peace happens 3.7× as often — and the
+board gets worse. Cheap peace makes war cheap: wars per game *rise* by ten, and
+a faction that can always buy its way out is never cornered, which is what was
+producing the submission endings the mix counts. **The inability to make peace
+without a cession was load-bearing.** The bug is documented and switchable; what
+it really measures is that the war rate is held down by friction rather than by
+anybody deciding anything, which is finding 4 seen from the other side.
+
+### 3. Finding 5 — the investigation, and what it found
+
+The map has **eight Locations and eight factions**. Everyone starts with
+exactly one. There is no spare ground; the opening is a zero-sum scramble.
+
+`sweepEliminations` retires a faction only when it holds **no Locations *and* no
+units**. And `baseActions: 0` means actions come from ground. So a faction
+reduced to a few wandering units is:
+
+- **alive**, indefinitely;
+- **frozen** — no actions, no production, no Research, no Sway income, so it
+  cannot fight, court, gift, or bring anything to a deal;
+- **counted** — `dominionStanding` counts every survivor as outstanding.
+
+And it is **invisible to the AI's targeting**. `knownGoalHexes` walks
+`state.locations` and nothing else; `tryOneAction`'s raid branch only fires on an
+enemy already standing on one of your own hexes. The AI navigates entirely by
+Locations, so a faction that holds none can only be engaged by somebody who
+happens to walk into it on the way to a town.
+
+**Eight of the twenty-eight blocked outstanding factions at the round limit hold
+zero Locations.** Seed 8123 is the pure case: plainers holds **seven of the
+map's eight Locations**, croppers holds **none and five units**, and the game
+cannot end. The board state by round shows it plainly — one game reaches `7/0`
+at round 60 and is still unresolved at 80.
+
+This is the deepest version of the headline defect, and note that no amount of
+diplomacy can fix it: a landless faction has no Sway to reciprocate a gift with
+and no actions to court with, so it cannot be brought over *even in principle*.
+
+`ai.huntLandlessBlocker` makes those units move goals, gated on `wouldFight` and
+on visibility (fog still applies — a unit you cannot see is not a goal).
+
+| n | switch | mix | median | unresolved | wars/game |
+|---|---|---|---|---|---|
+| 45 | **0 (shipped)** | **21** | **45** | **16** | 45.49 |
+| 45 | 1 | 16 | 48 | **12** | 45.40 |
+| 90 | **0 (shipped)** | **36** | **43** | **33** | 51.26 |
+| 90 | 1 | 25 | 46.5 | **28** | 49.72 |
+
+**This is the only switch anywhere in this work that moves the headline
+defect** — and it does not buy it with belligerence: wars per game go *down*.
+All three bands hold at both sample sizes.
+
+It still ships dark, for two reasons.
+
+The house rule: the ending mix is a governing number and it gets worse, 36 → 25
+of 90. That is the same standard that keeps `attackPrice` off.
+
+And a design question that is not the AI author's to answer. The branch's
+answer to a frozen faction is to **kill it**: `minorsKilledPerGame` rises
+3.33 → 3.64 and `minorsAlliedOrVassalisedAtEnd` falls 1.59 → 1.48. §15 exists
+precisely because "the only remaining answer was genocide" was judged the wrong
+answer once already. Whether hunting a landless faction down is a legitimate
+ending or the same mistake in a new place is a call about the game, not about
+the opponent.
+
+One methodological note, because it is the third time this project has been
+caught by it: the effect **shrank with the sample**. 16 → 12 at n=45 reads as a
+9-point drop; 33 → 28 at n=90 reads as 5.6. The smaller sample was doing some
+of the arguing.
+
+---
+
+## The scoreboard
+
+Everything measured, against a baseline of 21 mix / 45 median / 16 unresolved
+at n=45. All eight switches ship at their no-op.
+
+| switch | best setting measured | mix | median | unresolved |
+|---|---|---|---|---|
+| `ai.huntLandlessBlocker` | 1 | 16 | 48 | **12** |
+| `ai.closeOutWithin` | 5 | 16 | 49 | 17 |
+| `ai.pactCall` | 1 | 17 | 46 | 16 |
+| `ai.settleWithoutCession` | 1 | 13 | 50.5 | 17 |
+| `ai.dominionWeight` | 0.5 | 17 | 42 | 18 |
+| `ai.giftStanding` (at share 0.6) | 2 | 16 | 43.5 | 21 |
+| `attackPrice.enabled` | 0.6 | 16 | 48.5 | 17 |
+
+Seven levers, one of which improves the number the brief calls the headline
+defect, and it costs a third of the ending mix to do it. That is the honest
+shape of the result: **the endgame is not stuck for one reason, and no single
+lever reaches more than one of the four walls.** Of 28 blocked pairs at the
+round limit — 18 blocked on Standing, 8 of them held by a faction with no
+ground at all, 4 at war, 4 on reputation, 2 on §15 distance.
+
+---
+
 ## Where I would go next, in order
 
-1. **Re-measure the gift at two points.** Cheapest experiment left and the one
-   with an actual mechanism behind it: every reading that condemned
-   `giftAboveShareOfCap` was taken on a one-point gift that drift cancels and
-   that never touches the baseline. One switch, one build, one run.
-2. **Something that ends a stalemate war.** Four of 28 blocked endgame pairs are
-   at war, and `warPeaceTerms`' losing branch needs exhaustion *and* a location
-   to cede, which a two-survivor grind may never produce. A faction one
-   handshake from winning should be willing to buy peace at nearly any price.
-3. **Finding 5, as an investigation.** Two thirds of courted pairs end with a
-   death, and majors are landless by round 15. Everything political compounds
-   downstream of that.
+1. **Decide what a landless faction IS**, at the rules level. It is the single
+   biggest hole: eight of 28 endgame blockers, frozen out of the political layer
+   by construction, and unkillable except by hunting. Three shapes worth
+   weighing — a collapse rule (landless for N rounds → eliminated), a floor
+   (a landless faction keeps a minimum Sway income so it can still be talked
+   to), or accepting the hunt and paying the ending mix for it. This is a game
+   decision and it wants the game's owner, not another AI switch.
+2. **Look at the opening, not the endgame.** Eight Locations, eight factions,
+   one each, and five factions eliminated by a mean round of 25.7. Every
+   endgame problem in this document is downstream of a board that has already
+   collapsed to two or three survivors by round 40. Whether the map is too
+   small for the roster is a cheaper question to answer than any of the ones
+   above, and it would move all of them at once.
+3. **Leave the political layer alone for now.** Six of the seven levers here
+   are political and none paid. The measurements keep saying the same thing
+   from different directions: the political layer is not underpowered, it is
+   downstream of a land war that has already decided the game.
 
 I would not spend another run on `courtshipScore`. The pool it ranks is the
 wrong pool, and that is a floor problem, not a scoring one.

@@ -410,6 +410,98 @@ export const CONFIG = {
     // lands two or more. At 1 the branch pays Sway to stand still — measured,
     // 639 fires across 45 games bought one game. Set to 1 to reproduce that.
     closeOutGiftStanding: 2,
+    // How big `branchGift`'s gift is. 1 is the no-op and is what every reading
+    // on `giftAboveShareOfCap` was taken at — including the three that
+    // condemned the branch. See the note there: at 1 a gift is exactly
+    // cancelled by `driftStanding` and never reaches the two points
+    // `gift.baselineWarmth` needs, so it buys nothing permanent at any price.
+    //
+    // MEASURED at n=45 (mix / median / unresolved, baseline 21 / 45 / 16):
+    //   share 0.8, size 2   21 / 45   / 16   — branch never affords to fire
+    //   share 0.6, size 2   16 / 43.5 / 21
+    //
+    // against the size-1 readings already on `giftAboveShareOfCap` (0.8 ->
+    // 18/44/20, 0.6 -> 16/44/18). SO THE TREADMILL IS REAL AND FIXING IT IS
+    // WORSE, which is worth separating carefully. The mechanism claim stands:
+    // at 1 the gift cannot move a relationship, and every reading that
+    // condemned the branch was taken on a gift that could not work. The
+    // INFERENCE drawn from it — that a working gift would therefore pay — is
+    // false. A 2-point gift costs twice the Sway, so at 0.8 the branch can
+    // never afford to fire at all (0 fires, identical to baseline) and at 0.6
+    // it fires 484 times and lands three unresolved games worse than the
+    // 1-point version at the same share.
+    giftStanding: 1,
+    // §4 — whether two AIs may end a war on terms that hand over no CITY.
+    // 0 is the no-op and reproduces the old refusal exactly.
+    //
+    // This is a bug switch rather than a tuning dial. `warTalk`'s AI-to-AI
+    // path meant to skip the WINNING side's terms (a demand for somebody's
+    // homeland, priced far past what peace is worth) and tested for it on the
+    // wrong side of the deal — `give` rather than `get` — which also, and
+    // accidentally, required the LOSING side to be squatting on one of the
+    // winner's cities before it could sue for peace at all.
+    //
+    // The stalemate seeds are that condition biting. Seed 4711 at round 81:
+    // war exhaustion 73.5 and 108.5 against a losing gate of 4.8, Standing -10
+    // both ways, `warPeaceTerms` returning terms for both sides and
+    // `wouldAccept` returning true for both. A peace both parties would sign,
+    // refused because neither occupies the other.
+    //
+    // MEASURED at n=45 (mix / median / unresolved, baseline 21 / 45 / 16):
+    //   0   21   45   16      warTalk fires 98,  warsPerGame 45.5
+    //   1   13   50.5 17      warTalk fires 362, warsPerGame 55.4
+    //
+    // IT SHIPS DARK, AND THE BUG IS STILL A BUG. The fix does exactly what it
+    // should — peace between two AIs happens 3.7x as often — and the board
+    // gets worse: the ending mix falls eight and wars per game RISE ten.
+    // Cheap peace makes war cheap. A faction that can always buy its way out
+    // of a war is never cornered, and being cornered is what produces the
+    // submission endings the mix is counting; meanwhile each settled war frees
+    // both parties to start another. The inability to make peace without a
+    // cession turns out to have been load-bearing.
+    //
+    // Left off rather than repaired-and-shipped because the repair is not the
+    // interesting part: what this measures is that the war rate is held down
+    // by friction rather than by anybody deciding anything, which is the same
+    // thing finding 4 says from the other side.
+    settleWithoutCession: 0,
+    // §5 — whether the AI will march on a faction that holds no ground.
+    // 0 is the no-op: the goal list is exactly `knownGoalHexes` as before.
+    //
+    // A landless faction is not eliminated (`sweepEliminations` wants no
+    // Locations AND no units), gets no actions (`baseActions: 0`), no
+    // production, no Research and no Sway — and still counts as outstanding
+    // for Dominion. It is frozen and it is in the way. Eight of the
+    // twenty-eight blocked outstanding factions at the round limit hold zero
+    // Locations; in seed 8123 one faction holds seven of the map's eight and
+    // still cannot win.
+    //
+    // MEASURED at n=45 (mix / median / unresolved, baseline 21 / 45 / 16):
+    //   n=45   0: 21/45 of 45/16     1: 16/48 of 45/12
+    //   n=90   0: 36/43 of 90/33     1: 25/46.5 of 90/28
+    //
+    // THIS IS THE ONLY SWITCH IN THIS FILE THAT MOVES THE HEADLINE DEFECT, and
+    // it ships dark anyway. Both halves of that need saying.
+    //
+    // It works, and not by belligerence: at n=90 unresolved games fall 33 -> 28
+    // while wars per game FALL 51.3 -> 49.7. Nothing else measured here has
+    // moved `unresolved` down at all. All three bands hold at both sample
+    // sizes.
+    //
+    // It ships dark on the house rule — the ending mix is a governing number
+    // and it gets worse, 36 -> 25 of 90 — and on a design question that is not
+    // the AI author's to answer. The branch's answer to a frozen faction is to
+    // kill it: `minorsKilledPerGame` rises 3.33 -> 3.64 and
+    // `minorsAlliedOrVassalisedAtEnd` falls 1.59 -> 1.48. §15 exists precisely
+    // because "the only remaining answer was genocide" was judged the wrong
+    // answer once already. Whether hunting a landless faction down is a
+    // legitimate ending or the same mistake in a new place is a call about the
+    // game, not about the opponent.
+    //
+    // Note also how the effect SHRANK with the sample: 16->12 at n=45 read as
+    // a 9-point drop, 33->28 at n=90 reads as 5.6. Same lesson as the one on
+    // `intrigue` — the smaller sample was doing some of the arguing.
+    huntLandlessBlocker: 0,
   },
 
   // §17 Tech Wheel. Research fills a bar; Tech Level is a derived band

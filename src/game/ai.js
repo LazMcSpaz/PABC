@@ -509,6 +509,51 @@ function knownGoalHexes(state, pid) {
   return goals;
 }
 
+// §5 — THE FACTION WITH NO GROUND, AND WHY IT CAN BLOCK A WIN FOREVER.
+//
+// `knownGoalHexes` above walks `state.locations` and nothing else, and
+// `tryOneAction`'s raid branch only ever fires on an enemy standing on a hex
+// one of your own units already occupies. So the AI navigates entirely by
+// LOCATIONS: a faction that holds none is invisible to its goal-finding, and
+// can only be engaged by somebody who happens to walk into it on the way to a
+// town.
+//
+// That matters because of how elimination works. `sweepEliminations` retires a
+// faction only when it holds no Locations AND no units, so a faction reduced
+// to a few wandering units is alive indefinitely — and `dominionStanding`
+// counts every survivor. Meanwhile `baseActions: 0` means actions come from
+// ground, so a landless faction gets no actions at all, no production, no
+// Research and no Sway income. It cannot fight, court, gift or be talked to
+// with anything. It is frozen, and it is outstanding.
+//
+// Measured at the round limit across the eight unresolved seeds: EIGHT of the
+// twenty-eight blocked outstanding factions hold ZERO Locations. Seed 8123 is
+// the pure case — plainers holds SEVEN of the map's eight Locations, croppers
+// holds none and five units, and the game cannot end. The one faction that
+// could win has to stumble into the one faction in its way.
+//
+// This adds those units as move goals, and only theirs: a rival that still
+// holds ground is already reachable through `knownGoalHexes`. Off (0) returns
+// an empty list, so `goals` is byte-identical to what it was.
+export function landlessBlockerHexes(state, pid) {
+  if (!CONFIG.ai.huntLandlessBlocker) return [];
+  const vis = state.visibility?.[pid];
+  const out = [];
+  for (const f of dominionStanding(state, pid).outstanding) {
+    if (state.players[f]?.eliminated) continue;
+    if (Object.values(state.locations).some((l) => l.controller === f)) continue;
+    // The same predicate the pathing already uses, so this cannot send a
+    // pacifist marching at somebody it would refuse to fight on arrival.
+    if (!wouldFight(state, pid, f)) continue;
+    for (const u of Object.values(state.units)) {
+      if (u.owner !== f) continue;
+      if (vis && !isUnitVisibleTo(state, pid, u)) continue; // fair fog, no cheats
+      out.push(u.node);
+    }
+  }
+  return out;
+}
+
 // §18.4.1 — is `hex` within the locality radius of any of pid's Locations?
 function nearOwnTerritory(state, pid, hex) {
   const r = CONFIG.diplomacy.ai.localityRadius;
@@ -1132,8 +1177,16 @@ function branchGift(state, pid, ctx) {
     if (arePacted(state, pid, f) || atWar(state, pid, f) || vassalLord(state, f) === pid) continue;
     if (!mayCourt(state, pid, f)) continue;
     if (getStanding(state, pid, f) >= CONFIG.diplomacy.pactStandingReq) continue;
-    if (giftBudget(state, pid) < giftCost(state, pid, f, 1)) continue;
-    if (performDiplomacy(state, pid, "gift", { faction: f, standing: 1 }).ok) return true;
+    // ONE POINT IS A TREADMILL, and `giftStanding` is the switch that says so.
+    // `driftStanding` pulls an unpacted, un-warring, un-courted pair back
+    // toward its baseline by at least a full point EVERY round, and
+    // `gift.baselineWarmth` only moves the baseline when a gift lands two or
+    // more — so at 1 this branch pays Sway to hold position and cannot move
+    // the thing drift is pulling toward. Every reading that condemned the gift
+    // (see `giftAboveShareOfCap`) was taken at 1. 1 is the no-op.
+    const size = Math.max(1, CONFIG.ai.giftStanding ?? 1);
+    if (giftBudget(state, pid) < giftCost(state, pid, f, size)) continue;
+    if (performDiplomacy(state, pid, "gift", { faction: f, standing: size }).ok) return true;
   }
   return false;
 }
@@ -1234,11 +1287,34 @@ function warTalk(state, pid, me) {
     // past what peace is worth, so the winning branch correctly comes to
     // nothing between two AIs, and an AI is never talked out of a city it
     // is winning by holding.
+    //
+    // THAT IS THE INTENT AND THE FILTER DID NOT IMPLEMENT IT. It read
+    // `terms.give.some(location)` — the losing side must be HANDING BACK a
+    // city — where what it meant is "this is not the winning branch's ask".
+    // The winning branch puts the location in `get`, never in `give`, so the
+    // discriminator was on the wrong side of the deal, and the accidental
+    // second condition it imposed is that the loser must be squatting on one
+    // of the winner's cities.
+    //
+    // Measured on the stalemate seeds, that condition is the thing keeping the
+    // war alive. Seed 4711 at round 81: dambarans and plainers at war exhaustion
+    // 73.5 and 108.5 against a losing gate of 4.8, Standing -10 both ways,
+    // `warPeaceTerms` returning valid terms for BOTH sides, and `wouldAccept`
+    // returning TRUE for both — a peace both sides would sign, refused because
+    // neither happens to hold a city of the other's. Nobody occupies anybody,
+    // so nobody can stop fighting.
+    //
+    // `settleWithoutCession` 0 keeps the old refusal exactly: the winning ask
+    // is skipped by the `get` test just as it used to be skipped by the `give`
+    // test, and a scrap-sweetened peace is still refused.
     const terms = warPeaceTerms(state, pid, other);
-    if (!terms || !terms.give.some((it) => it.location)) continue;
+    if (!terms) continue;
+    if (terms.get.some((it) => it.location)) continue; // the winning branch's ask
+    const cedes = terms.give.some((it) => it.location);
+    if (!cedes && !CONFIG.ai.settleWithoutCession) continue;
     const deal = { proposer: pid, recipient: other, give: terms.give, get: terms.get };
     if (!wouldAccept(state, other, deal)) continue;
-    applyDeal(state, deal, "ai-war-cession");
+    applyDeal(state, deal, cedes ? "ai-war-cession" : "ai-war-settlement");
     return true;
   }
   return false;
@@ -1354,7 +1430,7 @@ function pickMoveTarget(state, pid, unit) {
     .filter(([hex, d]) => d > 0 && hex !== unit.node && hex in field);
   if (!reachable.length) return null;
 
-  const goals = knownGoalHexes(state, pid);
+  const goals = knownGoalHexes(state, pid).concat(landlessBlockerHexes(state, pid));
   const ghosts = ghostHexes(state, pid);
   const targets = goals.length ? goals : ghosts; // chase ghosts only if no known goal
 
@@ -1371,8 +1447,13 @@ function pickMoveTarget(state, pid, unit) {
   for (const [hex, d] of reachable) {
     let score = 0;
     if (goals.includes(hex)) {
+      // A goal is not necessarily a Location any more — see
+      // `landlessBlockerHexes`. A hex that is only somebody's last unit scores
+      // the base 1000 with no VP bonus, which puts it below any contested town
+      // and above nothing at all, and is the right ranking: finish the blocker
+      // when there is nothing better to do with the move.
       const loc = state.locations[hex];
-      const def = LOCATIONS[loc.locationId];
+      const def = loc ? LOCATIONS[loc.locationId] : null;
       score += 1000 + (def?.vpReward || 0) * 100;
     } else {
       let nearest = Infinity;

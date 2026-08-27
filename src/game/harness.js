@@ -75,7 +75,7 @@ import { evalCond, evalStrength } from "./dsl.js";
 import { registerQuest } from "./quests.js";
 import { CONFIG } from "./config.js";
 import { takeAITurn, maybeAssignTech, warPeaceTerms, manageDiplomacy,
-  DIPLOMACY_BRANCH_ORDER, runDiplomacyBranch } from "./ai.js";
+  DIPLOMACY_BRANCH_ORDER, runDiplomacyBranch, landlessBlockerHexes } from "./ai.js";
 import { enforceLoyaltySlotCap, chargeChipUpkeep, slotCapacity, effectiveBuildCost, buildableChips, applyOutputAndBuilds, locationOutput, unitUpkeepFor, chargeUnitUpkeep, chipsHeldBy, chipUpkeepFor, slotExpansionCost, completeBuildIfDone } from "./economy.js";
 
 const seed = Number(process.argv[2]) || 42;
@@ -7486,6 +7486,56 @@ line("\n  [Phase 11] text-token resolver");
   check("every branch in the chain has a distinct name",
     new Set(DIPLOMACY_BRANCH_ORDER).size === DIPLOMACY_BRANCH_ORDER.length
     && DIPLOMACY_BRANCH_ORDER.every((id) => typeof id === "string" && id.length > 0));
+
+  // --- §5 — the faction with no ground, and the hole it sits in ------
+  //
+  // Three claims, and the first two are RULES this codebase already has. They
+  // are pinned here because the third depends on them and because together
+  // they are the reason a game can be won by nobody: a faction reduced to
+  // wandering units is alive, is counted by the win condition, and is invisible
+  // to the only targeting the AI has.
+  const g5z = createGame({ seed: 2061 });
+  ensureDiplomacy(g5z);
+  // Strip Goldgrass of every Location but leave it a unit.
+  for (const l of Object.values(g5z.locations)) if (l.controller === "goldgrass") l.controller = null;
+  const zombieUnit = Object.values(g5z.units).find((u) => u.owner === "goldgrass");
+  check("a faction can hold no ground and still have units",
+    !!zombieUnit && !Object.values(g5z.locations).some((l) => l.controller === "goldgrass"));
+  // …and the elimination sweep keeps it alive, because it wants BOTH gone.
+  endTurn(g5z);
+  check("…and it is not eliminated, because elimination wants no ground AND no units",
+    g5z.players.goldgrass.eliminated !== true);
+  // …so the win condition still counts it.
+  check("…so it still stands between somebody and Dominion",
+    dominionStanding(g5z, "versari").outstanding.includes("goldgrass"));
+
+  // The targeting hole itself, asserted as the RULE rather than as a hex list:
+  // with the switch off the goal set is Locations only, so a landless faction
+  // contributes nothing; with it on, its units are goals. `wouldFight` still
+  // governs, so this can never send a faction at somebody it would refuse to
+  // fight on arrival.
+  const huntSave = CONFIG.ai.huntLandlessBlocker;
+  CONFIG.ai.huntLandlessBlocker = 0;
+  check("with the hunt off, a landless faction is not a goal at all",
+    landlessBlockerHexes(g5z, "versari").length === 0);
+  CONFIG.ai.huntLandlessBlocker = 1;
+  setStanding(g5z, "versari", "goldgrass", CONFIG.diplomacy.tiers.wary, "test"); // …and worth fighting
+  // FAIR FOG, NO CHEATS, and it is the half worth asserting first: a unit the
+  // hunter cannot see is not a goal, however badly the win condition wants it
+  // dealt with.
+  check("…and with it on, a landless faction it cannot SEE is still not a goal",
+    !landlessBlockerHexes(g5z, "versari").includes(zombieUnit.node));
+  g5z.visibility.versari.visible.add(zombieUnit.node);
+  const hunted = landlessBlockerHexes(g5z, "versari");
+  check("…and once it can see them, its surviving units are goals",
+    hunted.includes(zombieUnit.node));
+  // A rival that still HOLDS ground is reached through `knownGoalHexes` and
+  // must not be double-counted here — the branch is for the hole, not for
+  // every enemy unit on the map.
+  check("…while a faction that still holds ground is left to the Location goals",
+    Object.values(g5z.units).filter((u) => u.owner === "lakers")
+      .every((u) => !hunted.includes(u.node) || g5z.locations[u.node]));
+  CONFIG.ai.huntLandlessBlocker = huntSave;
 
   // --- a clean record is armour: the Honor-gap Menace surcharge ---
   //
