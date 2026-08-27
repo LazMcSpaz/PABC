@@ -2885,6 +2885,49 @@ export function dominionMet(state, pid) {
   return dominionStanding(state, pid).met;
 }
 
+// --- distance to Dominion, as a number the AI can steer by ------------
+//
+// `checkDominion` is DETECTION: it runs after a handshake to see whether that
+// handshake happened to win the game. Until now that was the only reading of
+// the win condition anywhere in the AI, and the consequence is the headline
+// defect — sixteen games in forty-five reach the round limit with nobody
+// having won, because nobody on the board is trying to. They behave in
+// character until the clock runs out.
+//
+// This is the other reading: not "have I won" but "how far am I, and who is
+// in the way". Dominion asks that every surviving faction be an ally, a
+// vassal, or gone. So the only factions that matter are `outstanding`, and
+// what separates them is not how much you like them — it is what closing each
+// one COSTS.
+//
+// Returns, for `pid` considering `target`:
+//   0            they are already allied, sworn, or dead — courting them
+//                buys nothing the win condition counts
+//   (0, 1]       they are outstanding, scored by cheapness: a faction at or
+//                below your power comes over by patronage or submission and
+//                scores 1; one twice your power has to be talked round and
+//                scores 0.5.
+//
+// The power ratio is the cheapness proxy on purpose — it is the same reading
+// `aiAcceptsVassalage` and `evaluatePactCall` already take, so a minor two
+// hexes away and a major across the map are separated by the thing that
+// actually separates them rather than by a second distance model.
+export function dominionValue(state, pid, target) {
+  if (pid === target) return 0;
+  const st = dominionStanding(state, pid);
+  if (!st.outstanding.includes(target)) return 0;
+  const mine = Math.max(1, powerOf(state, pid));
+  const theirs = Math.max(1, powerOf(state, target));
+  return 1 / (1 + Math.max(0, theirs / mine - 1));
+}
+
+// How many factions `pid` still has to deal with. The probe reads this as
+// "rivals still to deal with" and measures 1.9 for a scripted pacifist at the
+// end of a game it did not win.
+export function dominionOutstanding(state, pid) {
+  return dominionStanding(state, pid).outstanding.length;
+}
+
 // Latch a winner once the arrangement has HELD for `holdRounds` consecutive
 // rounds. The hold is what makes a bloodless win a position you defend rather
 // than a switch you flip: rivals get a window to denounce you, break a partner
@@ -4431,6 +4474,10 @@ registerPostureReaders({
   exposureApparatus, counterIntelligence, covertDetection, sabotageCaught,
   getStanding, adjustStanding, passesRepGates, grievanceWeight,
   tradingPactBetween, unitsInTerritory,
+  // §2 — how much a partner closes the win condition. `courtshipScore` picks
+  // who the AI spends its one initiative a round on, and until this landed it
+  // picked on warmth alone.
+  dominionValue,
 });
 
 export {

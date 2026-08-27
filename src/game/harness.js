@@ -74,7 +74,8 @@ import { resolveTokens } from "./textTokens.js";
 import { evalCond, evalStrength } from "./dsl.js";
 import { registerQuest } from "./quests.js";
 import { CONFIG } from "./config.js";
-import { takeAITurn, maybeAssignTech, warPeaceTerms, manageDiplomacy } from "./ai.js";
+import { takeAITurn, maybeAssignTech, warPeaceTerms, manageDiplomacy,
+  DIPLOMACY_BRANCH_ORDER, runDiplomacyBranch } from "./ai.js";
 import { enforceLoyaltySlotCap, chargeChipUpkeep, slotCapacity, effectiveBuildCost, buildableChips, applyOutputAndBuilds, locationOutput, unitUpkeepFor, chargeUnitUpkeep, chipsHeldBy, chipUpkeepFor, slotExpansionCost, completeBuildIfDone } from "./economy.js";
 
 const seed = Number(process.argv[2]) || 42;
@@ -7362,6 +7363,129 @@ line("\n  [Phase 11] text-token resolver");
   CONFIG.ai.giftAboveShareOfCap = shareSave;
   check("…and with nothing to answer, it gifts — even where it could not court",
     g5h.log.slice(before5i).some((e) => e.payload?.cause === "gift"));
+
+  // --- §1 — BRANCH ORDER IS PRIORITY, AND NOW SOMETHING CHECKS IT -----
+  //
+  // The pass is bounded to one act, so whatever fires first silences the rest.
+  // That has cost two regressions (both recorded on the branches themselves),
+  // and both were found by measuring an unrelated number weeks later and
+  // noticing it had moved. The check above pins ONE pair — the gift against
+  // the denouncement — which is the pair that bit last time and no help at all
+  // against the pair that bites next.
+  //
+  // This checks the RULE instead of a pair: whatever set of branches is live
+  // on a given board, the act goes to the highest one of them. It cannot be
+  // fitted to an observation and it does not need updating when a branch is
+  // added — `DIPLOMACY_BRANCH_ORDER` is the chain itself, so a branch inserted
+  // in the wrong place fails here on the first board where both are live.
+  //
+  // Liveness is asked of each branch on its OWN freshly-built board, because
+  // running a branch spends the act and moves the position. That is what makes
+  // the scenarios below builders rather than states.
+  const chainScenarios = [
+    {
+      name: "a mid-game board, no human in the room",
+      pid: "goldgrass",
+      build: () => {
+        const g = createGame({ seed: 3301 });
+        ensureDiplomacy(g);
+        for (let i = 0; i < 24; i++) takeAITurn(g);
+        return g;
+      },
+    },
+    {
+      name: "…and one with a player seat in it",
+      pid: "goldgrass",
+      build: () => {
+        const g = createGame({ seed: 3302, humanFactionId: "versari" });
+        ensureDiplomacy(g);
+        for (let i = 0; i < 18; i++) { if (activePlayerId(g) === "versari") endTurn(g); else takeAITurn(g); }
+        return g;
+      },
+    },
+    {
+      name: "…and a warlord holding an ultimatum somebody defied",
+      pid: "plainers",
+      build: () => {
+        const g = createGame({ seed: 3303 });
+        ensureDiplomacy(g);
+        for (let i = 0; i < 12; i++) takeAITurn(g);
+        return g;
+      },
+    },
+  ];
+  for (const sc of chainScenarios) {
+    const live = DIPLOMACY_BRANCH_ORDER.filter((id) => runDiplomacyBranch(sc.build(), sc.pid, id));
+    const fired = manageDiplomacy(sc.build(), sc.pid);
+    check(`branch order: ${sc.name} — the act goes to the highest live branch`,
+      fired === (live.length ? live[0] : null));
+  }
+
+  // …and the rule has to have something to bite on: a run where NO branch is
+  // ever live proves nothing, so assert the scenarios are doing work. Counting
+  // that at least one board had a live branch is a MECHANISM claim (the check
+  // above is not vacuous), not a rate fitted to this sample.
+  check("…and those boards actually had political acts available to starve",
+    chainScenarios.some((sc) =>
+      DIPLOMACY_BRANCH_ORDER.some((id) => runDiplomacyBranch(sc.build(), sc.pid, id))));
+
+  // …and the ordering itself, as CONSTRAINTS rather than as the order.
+  //
+  // The check above is worth having — it proves the chain runs in its declared
+  // order and that the branch it names is the branch that acted — but on its
+  // own it is a tautology about priority: it reads `DIPLOMACY_BRANCH_ORDER` to
+  // test a chain built from `DIPLOMACY_BRANCH_ORDER`, so moving the gift to
+  // the top moves both and it still passes. It cannot catch the hazard that
+  // has actually bitten twice.
+  //
+  // What catches that is naming the positions that are load-bearing, one pair
+  // at a time, each with the measurement that put it there. These fail if the
+  // chain is reordered, which is the entire point. Every pair below is a
+  // reading somebody paid for.
+  const PRIORITY_RULES = [
+    // A gift is the only act in the pass that answers nothing on the board.
+    // It sat above `warTalk` once and returned on every turn a sociable
+    // faction took, which made the branch that ENDS WARS unreachable.
+    ["war-talk", "gift", "a gift never speaks over the branch that ends a war"],
+    // …and at position 3 it starved the denouncement, taking a pacifist's
+    // Honor from 8.3 to 4.1 — the stat `declareOnCleanHands` prices its
+    // safety in. It was buying warmth with its armour.
+    ["denounce", "gift", "…nor over naming a faction that has earned it"],
+    // A faction that gifts a stranger while owing its neighbour blood reads
+    // as having no memory.
+    ["amends", "gift", "…nor over a debt it already owes"],
+    // Talking to the party you are actually fighting outranks courting a
+    // stranger; the settle branch was hoisted over the same obstacle.
+    ["war-talk", "pact", "the war you are in outranks shopping for new friends"],
+    ["amends", "pact", "…and so does the debt you already owe"],
+    // An ultimatum you let lapse costs Honor publicly. Following through is
+    // an obligation, and obligations outrank discretionary spending.
+    ["enforce-ultimatum", "gift", "your own standing threat outranks a gift"],
+    // The close-out spends Sway on the last faction between it and the win.
+    // It sits below every reply — putting it at the top of the chain measured
+    // 12 / 43.5 / 23 against 21 / 45 / 16 by starving `amends`, `vassalize`
+    // and `warTalk`, which is the same hazard for the third time. It outranks
+    // the denouncement because naming the faction you need an alliance with
+    // moves the pair the wrong way.
+    ["amends", "close-out", "a reply on the board outranks closing the game out"],
+    ["war-talk", "close-out", "…and so does the war you are already in"],
+    ["answer-ultimatum", "close-out", "…and so does a threat standing over you"],
+    ["close-out", "denounce", "but closing the game out outranks naming the partner you need"],
+    ["close-out", "gift", "…and outranks warming somebody who is not in the way"],
+    ["answer-ultimatum", "gift", "…and so does a threat standing over you"],
+  ];
+  const pos = (id) => DIPLOMACY_BRANCH_ORDER.indexOf(id);
+  for (const [higher, lower, why] of PRIORITY_RULES) {
+    check(`priority: ${why}`,
+      pos(higher) >= 0 && pos(lower) >= 0 && pos(higher) < pos(lower));
+  }
+
+  // Every branch id the chain runs is one `sim-suite` will report, and one the
+  // event carries. A branch added without a name is a branch that goes back to
+  // being invisible, which is the whole defect.
+  check("every branch in the chain has a distinct name",
+    new Set(DIPLOMACY_BRANCH_ORDER).size === DIPLOMACY_BRANCH_ORDER.length
+    && DIPLOMACY_BRANCH_ORDER.every((id) => typeof id === "string" && id.length > 0));
 
   // --- a clean record is armour: the Honor-gap Menace surcharge ---
   //

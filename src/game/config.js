@@ -291,6 +291,125 @@ export const CONFIG = {
     // is the Sway sink the pool has been waiting for since phase 3. Combined
     // with either of the others it gets worse, so the others stay dark.
     intrigue: 1,
+    // §2 — HOW MUCH THE WIN CONDITION GETS TO SAY. 0 is the no-op and is
+    // exactly the behaviour that shipped at b33d1ee: `courtshipScore` reads
+    // sociability times warmth and every branch that walks the other factions
+    // walks them in faction-id order.
+    //
+    // At 1 the selection is handed to `dominionValue` — a faction already
+    // allied, sworn or dead scores 0 however warm it is, and warmth survives
+    // only as the tie-break among the factions still outstanding. Anything
+    // between blends the two.
+    //
+    // The defect this exists for is the headline one: 16 of 45 games reach the
+    // round limit unwon, and the AI has never read the win condition at all.
+    // `checkDominion` appears twice in `ai.js` and both are detection AFTER a
+    // handshake — nothing anywhere read DISTANCE.
+    //
+    // MEASURED at n=45, everything else identical (mix / median / unresolved,
+    // against a baseline of 21 / 45 / 16):
+    //
+    //   0     21   45   16      (baseline, the shipped behaviour)
+    //   0.5   17   42   18
+    //   1     16   46   19
+    //
+    // SO IT SHIPS DARK, and the reason is more useful than the reading. The
+    // brief that asked for this called it "the single highest-value change",
+    // on the argument that `courtshipScore` courts whoever it likes most
+    // rather than whoever it still has to deal with. The argument is correct
+    // about the code and wrong about the consequence, because it aims at the
+    // wrong stage: `courtshipScore` only RANKS candidates that already passed
+    // `mayBeginCourtship`, which has a Neutral Standing floor. The factions
+    // standing between a faction and Dominion are, at the point it matters,
+    // BELOW that floor and therefore not in the pool being ranked at all.
+    // Re-ranking the pool just moves the AI off the partner it could have
+    // converted onto one it cannot — `courtshipsOpenedPerGame` barely moves
+    // (61.6 -> 62.1) and `minorsAlliedOrVassalisedAtEnd` barely moves
+    // (1.60 -> 1.67) while `warsPerGame` rises 45.5 -> 48.4.
+    //
+    // The bottleneck is CONVERSION, not selection. See `closeOutWithin` for
+    // where the measurement went next, and `docs/ai-robustness-findings-
+    // 2026-08-27.md` for what the endgame actually looks like.
+    dominionWeight: 0,
+    // §3 — whether the AI calls its OWN allies into its wars. 0 is the no-op:
+    // the `pact-call` verb keeps working for the player and the AI→human
+    // inbox (`queueHumanPactCalls`) is untouched either way, because that path
+    // never went through here.
+    //
+    // What this opens is AI→AI, which has never happened once: the verb has no
+    // caller in `ai.js` at all, so an alliance between two AI factions has
+    // been a line in a drawer. The branch asks `evaluatePactCall` first and
+    // only calls where the answer is yes, so it cannot bleed Standing on
+    // refusals.
+    //
+    // MEASURED at n=45 (mix / median / unresolved, baseline 21 / 45 / 16):
+    //   0   21   45   16
+    //   1   17   46   16      217 calls made, warsPerGame 45.5 -> 50.5
+    //
+    // IT SHIPS DARK. The calls land — 217 of them, all honored, because the
+    // branch consults `evaluatePactCall` first — and they buy nothing:
+    // `unresolved` does not move and the ending mix costs four. The mechanism
+    // is not mysterious. A pact call is a machine for STARTING wars, wars are
+    // what block Dominion, and the board is already at 45 declarations a game.
+    // Turning allies into co-belligerents on a board that cannot finish its
+    // existing wars adds belligerence to the thing that was already stuck.
+    //
+    // The branch stays because the ASYMMETRY it fixes is real and is worth
+    // reaching for again if the war rate ever comes down: an AI that can be
+    // called to arms and can never call is a partner in name.
+    pactCall: 0,
+    // §2 — HOW CLOSE TO WINNING BEFORE THE AI PLAYS FOR THE WIN. Act when this
+    // many factions or fewer are still outstanding; 0 is the no-op and is the
+    // behaviour that shipped at b33d1ee.
+    //
+    // The reading this exists for, taken by walking the eight unresolved seeds
+    // to the round limit: those games are not milling about. They are down to
+    // 2-4 survivors, thirteen of twenty surviving faction-games have exactly
+    // ONE faction left outstanding, and twenty of twenty-eight outstanding
+    // pairs are blocked on nothing but Standing — around -3 against a pact bar
+    // of 6, not at war, with every door out of the position shut: the
+    // courtship floor is above them, the pact bar is above them, and the gift
+    // is dark board-wide.
+    //
+    // 1 is the tightest possible scope — only the very last faction, and only
+    // once everybody else is an ally, a vassal or dead — which is exactly the
+    // board on which `giftAboveShareOfCap`'s argument (Sway spent on warmth is
+    // Sway not spent on the ladder) has stopped applying, because there is no
+    // ladder left.
+    //
+    // MEASURED at n=45 (mix / median / unresolved, baseline 21 / 45 / 16):
+    //   0   21   45   16      (baseline)
+    //   1   17   44   18
+    //   2   19   51   18
+    //   5   16   49   17
+    //
+    // (Those three are with the branch at its FINAL position, below every
+    // reply. With it at the top of the chain — where the first draft put it —
+    // the same sweep read 20/48.5/17, 12/43.5/23 and 14/52/22, and the branch
+    // histogram named the cause in one line: it was starving `amends`,
+    // `vassalize` and `warTalk`. See the note on `branchCloseOut`.)
+    //
+    // IT SHIPS DARK, and it is the most interesting dark switch here because
+    // it demonstrably WORKS and still does not pay. Probing the same eight
+    // unresolved seeds to the round limit with it on: two of them now resolve,
+    // and the endgame Standing gaps close visibly — seed 31337's last pair
+    // goes from -2 and -4 against a bar of 6 to +3 and +2. It does the thing
+    // it was built to do.
+    //
+    // It does not pay because Standing is only one of FOUR walls in front of
+    // that last handshake, and it can only take down the one. Of 28 blocked
+    // outstanding pairs at the round limit: 18 blocked on Standing, 4 at war,
+    // 4 failing the reputation gates (one pair at Menace 11 against tolerance
+    // 9.6 AND Honor -9.5 against a trust floor of 3.1), 2 unreachable under
+    // §15. Pull down the Standing wall and the pairs walk into the next one.
+    closeOutWithin: 0,
+    // How big a close-out gift is. 2 rather than 1 is load-bearing rather than
+    // a tuning choice: `driftStanding` pulls an unpacted, un-warring,
+    // un-courted pair back toward its baseline by at least a full point every
+    // round, and `gift.baselineWarmth` only moves the baseline when a gift
+    // lands two or more. At 1 the branch pays Sway to stand still — measured,
+    // 639 fires across 45 games bought one game. Set to 1 to reproduce that.
+    closeOutGiftStanding: 2,
   },
 
   // §17 Tech Wheel. Research fills a bar; Tech Level is a derived band
@@ -1272,6 +1391,27 @@ export const CONFIG = {
       // it is worse again (15 / 52 / 19 against intrigue's own 17 / 52 / 13).
       // The rule is built, fixtured and switchable; it is not yet worth its
       // price to the AI.
+      //
+      // RE-MEASURED A THIRD TIME (2026-08-27), because the robustness brief
+      // asked for it and because there is now a MECHANISM argument for it that
+      // the earlier readings did not have. Honor is not only a defensive stat:
+      // `passesRepGates` hard-gates the alliance door on it, and walking the
+      // unresolved seeds to the round limit turns up survivors sitting at
+      // Honor -9.5 against a trust floor of 3.1 — one handshake from Dominion
+      // and permanently ineligible for it. An AI that surprise-attacks its way
+      // to -9.5 Honor has disqualified itself from the win condition.
+      //
+      // So the hope was that the bill would pay for itself further downstream
+      // than the undeclared-attack row can see. At n=45 on the current build,
+      // against a baseline of 21 / 45 / 16 with 22.04 undeclared:
+      //
+      //   0.6   16 / 48.5 / 17, 20.80 undeclared
+      //
+      // It bites slightly harder than it did (22.04 -> 20.80, 5.6%) and the
+      // verdict is unchanged: one unresolved game and five of the ending mix.
+      // The rep-gate argument is real but only 4 of 28 blocked endgame pairs
+      // fail on reputation, so fixing it perfectly could not have paid for the
+      // ending mix. Left off.
       //
       // The original note, kept because the raid-branch finding in it is still
       // true and still load-bearing:

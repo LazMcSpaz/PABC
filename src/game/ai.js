@@ -18,6 +18,7 @@ import { previewAttackerStrength, previewLocationContest } from "./contest.js";
 import { assignTechNode } from "./stats.js";
 import { hasTechNode, TECH_NODES, prereqMet } from "./tech.js";
 import { postAt } from "./posts.js";
+import { emit } from "./events.js";
 import { standingTier } from "./standing.js";
 import { factionDef } from "./content.js";
 import {
@@ -34,6 +35,8 @@ import {
   aiAcceptsVassalage, truceBetween,
   occupationsBy, cedeBlocker, locationWorth,
   giftCost,
+  dominionValue, dominionOutstanding, dominionStanding,
+  evaluatePactCall,
 } from "./diplomacy.js";
 
 const SAFETY_CAP = 16; // hard stop if priority loop ever spins
@@ -625,223 +628,525 @@ function giftBudget(state, pid) {
     - cfg.cap * (CONFIG.ai.giftAboveShareOfCap ?? 0.7);
   return Math.max(0, surplus);
 }
-
+// --- the political pass, as an ordered list of named branches ----------
+//
 // §18.8 — the AI works the political layer once per turn (free of Actions):
 // vassalize a cornered weakling, form a pact with a warm compatible
 // neighbour, or gift to warm a promising relationship. Bounded: one move.
+//
+// THE ORDER IS THE PRIORITY, AND THAT USED TO BE THE WHOLE PROBLEM. The pass
+// is bounded to ONE act, so whatever fires first silences everything under it
+// — and for two months nothing in the code said so, said which branch had
+// fired, or would fail if a new branch were dropped in above a load-bearing
+// one. It has cost two regressions, both recorded on the branches below:
+//
+//   · the gift sat above `warTalk` and returned on every turn a sociable
+//     faction took, which made the branch that ENDS WARS unreachable;
+//   · reopening the gift at position 3 walked into it from the other side and
+//     starved `denounce`, which is a peaceful faction's ONLY source of Honor.
+//
+// Both were found by measuring an unrelated number and noticing it had moved.
+// So the chain is now DATA rather than a run of `if`s: the order is a literal
+// you can read in one screen, every branch has a name, the name of whichever
+// branch fired is emitted (`ai_political_act`), and `harness.js` asserts, for
+// each adjacent pair, that the higher one wins when both are live. Adding a
+// branch in the wrong place is now a failing check rather than a number that
+// moves somewhere else three weeks later.
+//
+// Each branch takes (state, pid, ctx) and returns true if it SPENT the act.
+const DIPLOMACY_CHAIN = [
+  ["court", branchCourt],
+  ["intrigue", branchIntrigue],
+  ["vassalize", branchVassalize],
+  ["amends", branchAmends],
+  ["war-talk", branchWarTalk],
+  ["pact-call", branchPactCall],
+  ["pact", branchPact],
+  ["enforce-ultimatum", branchEnforceUltimatum],
+  ["answer-ultimatum", branchAnswerUltimatum],
+  ["close-out", branchCloseOut],
+  ["denounce", branchDenounce],
+  ["gift", branchGift],
+  ["approach-human", branchApproachHuman],
+];
+
+// The branch ids in priority order, highest first. Exported because the
+// ordering checks in `harness.js` walk adjacent pairs of it rather than
+// hard-coding a list that would drift the first time a branch is added.
+export const DIPLOMACY_BRANCH_ORDER = DIPLOMACY_CHAIN.map(([id]) => id);
+
+// Run one branch by name, on the same context the chain builds. The harness
+// uses this to ask "was this branch live?" without running the chain.
+export function runDiplomacyBranch(state, pid, id) {
+  const entry = DIPLOMACY_CHAIN.find(([k]) => k === id);
+  if (!entry) throw new Error(`no such diplomacy branch: ${id}`);
+  return entry[1](state, pid, diplomacyContext(state, pid)) === true;
+}
+
+// §2 — WHO IS LEFT TO DEAL WITH, as an ordering.
+//
+// Every branch below that walks `others` walked them in faction-id order, so
+// the same faction was always served first and the win condition had no say
+// in it at all. This puts the factions that still stand between `pid` and
+// Dominion in front, cheapest first — see `dominionValue`.
+//
+// A STABLE sort with an all-zero key is the identity, so `dominionWeight` 0
+// hands back the argument untouched and the old order survives exactly. That
+// is the no-op this ships with, not an approximation of one.
+function dominionOrder(state, pid, others) {
+  if (!(CONFIG.ai.dominionWeight ?? 0)) return others;
+  const key = new Map(others.map((f) => [f, dominionValue(state, pid, f)]));
+  return others.slice().sort((a, b) => key.get(b) - key.get(a));
+}
+
+function diplomacyContext(state, pid) {
+  return {
+    me: factionDef(pid) || {},
+    human: state.humanFactionId,
+    others: factionIds(state).filter((f) => f !== pid),
+  };
+}
+
+// Returns the id of the branch that spent the act, or null if the pass came
+// to nothing. The return value is what makes `actsPerAITurn` measurable at
+// all: courtship — the most common act by a wide margin and the only one that
+// climbs the ladder the win condition is made of — emits `posture_changed`
+// and none of the verb events the suite was counting, so the published 0.45
+// was never the act rate. See the note in `sim-suite.mjs`.
 export function manageDiplomacy(state, pid) {
-  const me = factionDef(pid) || {};
-  const human = state.humanFactionId;
-  const others = factionIds(state).filter((f) => f !== pid);
-
-  // 0) OPEN A COURTSHIP. §5's cadence fix, in the one place it belongs.
-  //
-  // A courtship is an ACT, not a mood that settles over the board: it is
-  // chosen, one per faction per round, and from economy stage 5 it is paid for
-  // every round it runs. Entering it as a per-round roll inside
-  // `recomputePostures` was tried and measured — roughly every eligible pair
-  // was Courting inside four rounds, which makes the posture meaningless and,
-  // through `courtDriftExempt`, switches Standing drift off across the whole
-  // board.
-  //
-  // This is a SELECTION rather than a scan: score every candidate and take the
-  // argmax. The existing branch loop below is a fixed-order priority list where
-  // the same faction is always served first and the HUMAN IS SERVED LAST, in
-  // branch 8 — so adding cadence gates alone would make the AI approach the
-  // player LESS, which is the one regression audit finding 7 explicitly warns
-  // against. Argmax has no ordering to be starved by.
-  if (courtSomebody(state, pid, others)) return;
-
-  // 0b) …and if the courtships are paid for and the pool is still deep, spend
-  //     it on what the board believes. See `tryIntrigue`: EXPOSE only, because
-  //     an accusation has to be grounded in something the target actually did.
-  if (tryIntrigue(state, pid, others)) return;
-
-  // 1) Vassalize a much-weaker, cornered, engageable faction (the vassal
-  //    runs through converting weak factions, §18.9). Lords only.
-  if (!vassalLord(state, pid) && (me.victoryLean === "diplomacy" || (me.aggression ?? 0) >= 0.7)) {
-    for (const f of others) {
-      if (f === human || vassalLord(state, f)) continue;
-      // aiAcceptsVassalage carries the full rulebook: power gate, cornered
-      // submission, peaceful PATRONAGE for friendly minors, and the
-      // post-rebellion cooldown (no more same-round re-vassalizing).
-      if (aiAcceptsVassalage(state, f, pid)) {
-        vassalize(state, pid, f, "ai-vassalize");
-        checkDominion(state);
-        return;
-      }
-    }
+  const ctx = diplomacyContext(state, pid);
+  for (const [id, run] of DIPLOMACY_CHAIN) {
+    if (run(state, pid, ctx) !== true) continue;
+    emit(state, "ai_political_act", { player: pid, branch: id });
+    return id;
   }
+  return null;
+}
 
-  // 2) Settle with somebody you have wronged, BEFORE going shopping for new
-  //    friends. A faction that gifts a stranger while owing its neighbour
-  //    blood reads as having no memory — and the gift branch below fires
-  //    every single turn for a diplomacy-lean faction, so anything under it
-  //    was unreachable in practice. This is also the one road back for a
-  //    faction that has burned its reputation.
-  if ((me.aggression ?? 0.5) < 0.7) {
-    for (const f of others) {
-      // §15 — `mayCourt`, not `mayEngage`: making amends is an overture, and
-      // the escape exists so a faction the win condition counts is reachable
-      // by something other than an army.
-      if (atWar(state, pid, f) || !mayCourt(state, pid, f)) continue;
-      if (!grievanceWeight(state, f, pid)) continue;
-      // Ask what it would take rather than guessing: counterOffer already
-      // walks exactly this gap, and already clamps to what the payer holds.
-      // Guessing the bare weight-times-rate landed a hair under whatever the
-      // wronged party's standing bias asked for, so nobody ever settled.
-      const bare = { proposer: pid, recipient: f, give: [], get: [{ settlement: true }] };
-      const deal = wouldAccept(state, f, bare) ? bare : counterOffer(state, f, bare);
-      if (!deal) continue;
-      // The human is ASKED — taking compensation means giving up the
-      // righteous war the grievance entitles them to, which is their call
-      // to make. Between two AIs it lands on the spot; neither has an inbox.
+// -1) §2 — CLOSE THE GAME OUT. The one act that outranks everything, because
+//      it is the act that wins.
+//
+// THE MEASUREMENT THIS EXISTS FOR. Sixteen of forty-five games reach the round
+// limit unwon, and the brief that reported it guessed the cause: nobody is
+// trying to win, they are behaving in character until the clock runs out. That
+// guess is wrong, and the shape of the real answer is the reason this branch
+// looks nothing like what the brief asked for.
+//
+// Walking the eight unresolved seeds to round 81 and reading the board:
+//
+//   · every one of them is down to 2-4 survivors — the board is not milling
+//     about, it has been fought almost to a finish;
+//   · thirteen of twenty surviving faction-games have exactly ONE faction
+//     outstanding. They are one handshake from Dominion;
+//   · of the twenty-eight outstanding pairs, EIGHT are at war and TWENTY are
+//     blocked on nothing but Standing — typically -1 to -5 against a pact bar
+//     of 6.
+//
+// So the endgame is a dead position. The last two survivors are not at war,
+// need each other's Standing at 6, sit at -3, and have no legal move that
+// changes it: `mayBeginCourtship` has a Neutral floor and they are below it,
+// the pact branch has the bar itself, and the gift — the only verb in the game
+// that raises Standing on demand — is switched off board-wide by
+// `giftAboveShareOfCap`. Every door out of the position is shut.
+//
+// WHY THE GIFT'S CEILING IS RIGHT EVERYWHERE ELSE AND WRONG HERE. The note on
+// that switch is careful and its reasoning holds: Sway spent on warmth is Sway
+// not spent on the courtship ladder, and the ladder is what ends games. But
+// when one faction is outstanding there IS no ladder left — everybody else is
+// already an ally, a vassal or dead. The surplus has nothing else to buy. That
+// is why this branch is scoped by DISTANCE TO DOMINION rather than by
+// personality or by pool depth: it can only fire on a board where the argument
+// against it has stopped applying.
+//
+// AND IT IS NOT GATED ON `victoryLean` OR `sociability`. Every other
+// discretionary branch is, and correctly — a warlord gifting strangers is out
+// of character. Wanting to win is not a character trait; it is the win
+// condition, and it is the same one for all six factions.
+//
+// WHERE IT SITS, AND WHY IT MOVED. The first draft put this FIRST in the
+// chain, on the argument that nothing a faction can do with its one political
+// act is worth more than the act that ends the game in its favour. That
+// argument is fine and the placement was wrong, and it was wrong in precisely
+// the way this file has been wrong twice before — it starved everything under
+// it. Measured, sweeping how early the branch is allowed to start
+// (`closeOutWithin`, mix / median / unresolved against 21 / 45 / 16):
+//
+//   within  1: 17 / 44   / 18      close-out fires  525
+//   within  2: 20 / 48.5 / 17                      1516
+//   within  3: 12 / 43.5 / 23                      2438
+//   within  5: 14 / 52   / 22                      3668
+//
+// Monotone in the wrong direction, and the branch histogram says why in one
+// line: at `within: 3` the pass's other branches collapse — `amends` 2009 ->
+// 1498, `denounce` 1185 -> 1245 -> 1074, `vassalize` 909 -> 899 -> 746,
+// `warTalk` 98 -> 72. Vassalage is the OTHER door to Dominion and `warTalk` is
+// the branch that ends wars, so a branch added to close games out was shutting
+// both of the roads that close games. That is the third instance of the same
+// hazard, and the first one caught inside a single measurement rather than
+// three weeks later — which is what the branch histogram is for.
+//
+// So it sits BELOW every reply and above only the discretionary spending. It
+// still outranks `denounce`, and that one is deliberate: denouncing the
+// faction you need an alliance with is the opposite of the act, and unlike the
+// gift it is not merely idle, it actively moves the pair the wrong way.
+// It cannot starve the war branches either way, because it refuses to fire on
+// a faction it is at war with — that pair belongs to `warTalk` and `amends`.
+//
+// The branch is SELF-COMPLETING on purpose: it closes the pact itself rather
+// than warming the pair and trusting `branchPact` six positions below to
+// finish the job. Handing the last step to a lower branch is how the last two
+// regressions happened.
+function branchCloseOut(state, pid, ctx) {
+  const within = CONFIG.ai.closeOutWithin ?? 0;
+  if (!within) return false;
+  const { human, others } = ctx;
+  const st = dominionStanding(state, pid);
+  if (!st.outstanding.length || st.outstanding.length > within) return false;
+  const REQ = CONFIG.diplomacy.pactStandingReq;
+  for (const f of dominionOrder(state, pid, st.outstanding)) {
+    // A war is somebody else's branch. `warTalk` and `amends` sit above every
+    // other reply for a measured reason and this must not reach over them.
+    if (atWar(state, pid, f)) continue;
+    if (!mayCourt(state, pid, f)) continue;
+    const sFwd = getStanding(state, pid, f), sBack = getStanding(state, f, pid);
+    // The handshake itself, wherever it is already available.
+    if (sFwd >= REQ && sBack >= REQ && passesRepGates(state, pid, f) && passesRepGates(state, f, pid)) {
       if (f === human) {
-        if (offersFor(state, human).some((o) => o.from === pid)) continue;
-        tableOffer(state, pid, human, deal, { kind: "deal", note: "They want the books closed." });
-        return;
+        if (offersFor(state, human).some((o) => o.from === pid && o.kind === "pact")) continue;
+        tableOffer(state, pid, human, { give: [{ promise: { kind: "pact" } }], get: [] }, { kind: "pact" });
+        return true;
       }
-      if (!wouldAccept(state, f, deal)) continue;
-      applyDeal(state, deal, "ai-amends");
-      return;
+      formPact(state, pid, f, "ai-close-out");
+      checkDominion(state);
+      return true;
+    }
+    // Otherwise buy the distance. A gift moves THEIR regard for YOU
+    // (`adjustStanding(state, f, pid, …)`), never yours for them, so this only
+    // ever closes half the gap — the other half closes when they run the same
+    // branch back at you, which between two AIs they do. Against a player who
+    // never reciprocates it correctly stalls: an alliance is not something the
+    // AI can award itself.
+    if (sBack >= REQ) continue;               // nothing left for a gift to buy
+    // TWO POINTS, NOT ONE, and this is the whole reason the branch converts.
+    //
+    // A one-point gift is a TREADMILL. `driftStanding` pulls every unpacted,
+    // un-warring, un-courted pair back toward its baseline every round at
+    // `max(1, …)` — always at least a full point — so +1 a round is exactly
+    // cancelled and the relationship never moves. Worse, `performDiplomacy`
+    // only warms the BASELINE when the gift lands two or more
+    // (`gift.baselineWarmth`), so a one-point gift cannot move the thing drift
+    // is pulling toward either. It pays Sway to stand still.
+    //
+    // Measured: at one point a game, the close-out fired 639 times across 45
+    // games and moved `unresolved` by one. The gift branch proper
+    // (`branchGift`) still gifts one point and has the same defect, which is
+    // worth re-reading the note on `giftAboveShareOfCap` against — "Sway spent
+    // on warmth is Sway not spent on the ladder" is true, and it is not the
+    // only thing that was wrong with that branch.
+    const size = Math.max(1, CONFIG.ai.closeOutGiftStanding ?? 2);
+    if (!closeOutBudget(state, pid, f, size)) continue;
+    if (performDiplomacy(state, pid, "gift", { faction: f, standing: size }).ok) return true;
+  }
+  return false;
+}
+
+// What the close-out may spend. `giftBudget`'s ceiling is deliberately not
+// used here — at `giftAboveShareOfCap: 1` it reserves the entire pool, which
+// is the right answer for a discretionary gift and the wrong one for the act
+// that ends the game. What survives is the rule that has always been the real
+// one: A GIFT MUST NOT COST A COURTSHIP. Commitments first, and the same
+// `giftReserveRounds` of upkeep set aside, so this can never be the thing that
+// makes `chargeSwayUpkeep` call a running courtship off.
+function closeOutBudget(state, pid, f, size = 1) {
+  const reserve = courtingList(state, pid).length
+    * CONFIG.sway.courtUpkeep * (CONFIG.ai.giftReserveRounds ?? 2);
+  return swayOf(state, pid) - reserve >= giftCost(state, pid, f, size);
+}
+
+// 0) OPEN A COURTSHIP. §5's cadence fix, in the one place it belongs.
+//
+// A courtship is an ACT, not a mood that settles over the board: it is
+// chosen, one per faction per round, and from economy stage 5 it is paid for
+// every round it runs. Entering it as a per-round roll inside
+// `recomputePostures` was tried and measured — roughly every eligible pair
+// was Courting inside four rounds, which makes the posture meaningless and,
+// through `courtDriftExempt`, switches Standing drift off across the whole
+// board.
+//
+// This is a SELECTION rather than a scan: score every candidate and take the
+// argmax. The rest of the chain is a fixed-order priority list where the same
+// faction is always served first and the HUMAN IS SERVED LAST, in the final
+// branch — so adding cadence gates alone would make the AI approach the
+// player LESS, which is the one regression audit finding 7 explicitly warns
+// against. Argmax has no ordering to be starved by.
+function branchCourt(state, pid, ctx) {
+  return courtSomebody(state, pid, ctx.others);
+}
+
+// 0b) …and if the courtships are paid for and the pool is still deep, spend
+//     it on what the board believes. See `tryIntrigue`: EXPOSE only, because
+//     an accusation has to be grounded in something the target actually did.
+function branchIntrigue(state, pid, ctx) {
+  return tryIntrigue(state, pid, ctx.others);
+}
+
+// 1) Vassalize a much-weaker, cornered, engageable faction (the vassal
+//    runs through converting weak factions, §18.9). Lords only.
+function branchVassalize(state, pid, ctx) {
+  const { me, human, others } = ctx;
+  if (vassalLord(state, pid)) return false;
+  if (!(me.victoryLean === "diplomacy" || (me.aggression ?? 0) >= 0.7)) return false;
+  for (const f of dominionOrder(state, pid, others)) {
+    if (f === human || vassalLord(state, f)) continue;
+    // aiAcceptsVassalage carries the full rulebook: power gate, cornered
+    // submission, peaceful PATRONAGE for friendly minors, and the
+    // post-rebellion cooldown (no more same-round re-vassalizing).
+    if (!aiAcceptsVassalage(state, f, pid)) continue;
+    vassalize(state, pid, f, "ai-vassalize");
+    checkDominion(state);
+    return true;
+  }
+  return false;
+}
+
+// 2) Settle with somebody you have wronged, BEFORE going shopping for new
+//    friends. A faction that gifts a stranger while owing its neighbour
+//    blood reads as having no memory — and the gift branch below fires
+//    every single turn for a diplomacy-lean faction, so anything under it
+//    was unreachable in practice. This is also the one road back for a
+//    faction that has burned its reputation.
+function branchAmends(state, pid, ctx) {
+  const { me, human, others } = ctx;
+  if ((me.aggression ?? 0.5) >= 0.7) return false;
+  for (const f of others) {
+    // §15 — `mayCourt`, not `mayEngage`: making amends is an overture, and
+    // the escape exists so a faction the win condition counts is reachable
+    // by something other than an army.
+    if (atWar(state, pid, f) || !mayCourt(state, pid, f)) continue;
+    if (!grievanceWeight(state, f, pid)) continue;
+    // Ask what it would take rather than guessing: counterOffer already
+    // walks exactly this gap, and already clamps to what the payer holds.
+    // Guessing the bare weight-times-rate landed a hair under whatever the
+    // wronged party's standing bias asked for, so nobody ever settled.
+    const bare = { proposer: pid, recipient: f, give: [], get: [{ settlement: true }] };
+    const deal = wouldAccept(state, f, bare) ? bare : counterOffer(state, f, bare);
+    if (!deal) continue;
+    // The human is ASKED — taking compensation means giving up the
+    // righteous war the grievance entitles them to, which is their call
+    // to make. Between two AIs it lands on the spot; neither has an inbox.
+    if (f === human) {
+      if (offersFor(state, human).some((o) => o.from === pid)) continue;
+      tableOffer(state, pid, human, deal, { kind: "deal", note: "They want the books closed." });
+      return true;
+    }
+    if (!wouldAccept(state, f, deal)) continue;
+    applyDeal(state, deal, "ai-amends");
+    return true;
+  }
+  return false;
+}
+
+// 2b) Say something about the war you are in, before going shopping for
+//     friends. See warTalk: the gift branch further down returns on every
+//     turn a sociable faction takes, which made every branch under it
+//     unreachable — including the one that ends the war.
+function branchWarTalk(state, pid, ctx) {
+  return warTalk(state, pid, ctx.me);
+}
+
+// 2c) §3 — CALL YOUR ALLIES IN. The alliance the AI signs has, until now, only
+//      ever worked in one direction.
+//
+// The correction first, because the brief this came from has it half wrong and
+// the half it has right is the half that matters. AI→HUMAN calls DO happen and
+// always have: `queueHumanPactCalls` runs inside `runDiplomacyRound` every
+// round, drops a call in the player's inbox for every AI ally at war, and the
+// player answers it with `respond-pact-call` from the drawer. So an alliance
+// with the AI is not one-way from the player's seat.
+//
+// What has never happened is AI→AI. `performDiplomacy(…, "pact-call")` has no
+// caller outside `harness.js` and `engineAdapter.js`, which means the entire
+// alliance graph between AI factions is decorative in exactly the situation an
+// alliance is FOR. A board where nobody's allies ever turn up is a board where
+// an alliance costs Sway and buys a line in a drawer, and it is one of the
+// reasons the political layer does not compound into anything.
+//
+// BELOW `warTalk`, and the position is deliberate. `warTalk` is the branch that
+// ENDS wars, it fires rarely (98 times across 45 games), and it has been
+// starved from above once already — see the note on `branchGift`. Rallying
+// your friends must not push suing for peace out of the pass. So: try to end
+// the war on terms first; if there are no terms, call for help.
+//
+// ASK ONLY WHERE THE ANSWER IS YES. A refused call costs the caller 4 Standing
+// toward the ally and costs the ALLY Honor, so an AI that called
+// indiscriminately would spend its alliances down every turn it was at war.
+// `evaluatePactCall` is the ally's own decision function and reads nothing the
+// caller could not see — Standing, public power, a temperament dial the board
+// can read off five rounds of behaviour — so consulting it is a faction
+// knowing its friends, not a faction reading their mail. It is the same shape
+// as `branchVassalize` asking `aiAcceptsVassalage` before it acts.
+//
+// The human ally is skipped here precisely because `queueHumanPactCalls`
+// already covers them; calling twice would put the same war in the inbox from
+// two directions.
+function branchPactCall(state, pid, ctx) {
+  if (!CONFIG.ai.pactCall) return false;
+  const { human, others } = ctx;
+  const allies = others.filter((f) => f !== human && arePacted(state, pid, f));
+  if (!allies.length) return false;
+  // The war that most needs help first: the enemy with the biggest lead on
+  // you. A war you are comfortably winning does not need your friends spending
+  // their Honor on it.
+  const enemies = others
+    .filter((f) => atWar(state, pid, f))
+    .sort((a, b) => powerOf(state, b) - powerOf(state, a));
+  for (const target of enemies) {
+    for (const ally of allies) {
+      if (atWar(state, ally, target) || ally === target) continue;
+      if (!evaluatePactCall(state, ally, pid, target).honor) continue;
+      if (performDiplomacy(state, pid, "pact-call", { ally, target }).ok) return true;
     }
   }
+  return false;
+}
 
-  // 2b) Say something about the war you are in, before going shopping for
-  //     friends. See warTalk: the gift branch immediately below returns on
-  //     every turn a sociable faction takes, which made every branch under
-  //     it unreachable — including the one that ends the war.
-  if (warTalk(state, pid, me)) return;
-
-  // 3) Proactive pact with a warm, compatible, engageable faction; or a gift
-  //    to warm one up (diplomacy-lean factions buy Standing toward a pact).
-  if ((me.sociability ?? 0) >= 0.5) {
-    for (const f of others) {
-      if (arePacted(state, pid, f) || atWar(state, pid, f) || vassalLord(state, f) === pid) continue;
-      // §15 — the ally door. Widening the WAR predicate here instead was
-      // measured and reverted: it took unresolved games from 6 of 15 to 11.
-      if (!mayCourt(state, pid, f)) continue;
-      const sFwd = getStanding(state, pid, f), sBack = getStanding(state, f, pid);
-      if (sFwd >= CONFIG.diplomacy.pactStandingReq && sBack >= CONFIG.diplomacy.pactStandingReq
-        && passesRepGates(state, pid, f) && passesRepGates(state, f, pid)) {
-        // Between two AIs an alliance is settled on the spot — neither has an
-        // inbox to read. The human gets ASKED, because being handed an
-        // alliance you never agreed to (which is what this used to do) is
-        // not diplomacy happening to you, it is diplomacy bypassing you.
-        if (f === human) {
-          if (!offersFor(state, human).some((o) => o.from === pid && o.kind === "pact")) {
-            tableOffer(state, pid, human, {
-              give: [{ promise: { kind: "pact" } }], get: [],
-            }, { kind: "pact" });
-            return;
-          }
-        } else {
-          formPact(state, pid, f, "ai-offer");
-          checkDominion(state);
-          return;
-        }
-      }
-      // The gift that used to live here is now branch 4b, at the bottom of
-      // the list. It is the only act in this pass that answers nothing, and
-      // this pass is bounded to one act — see the note there.
+// 3) Proactive pact with a warm, compatible, engageable faction.
+function branchPact(state, pid, ctx) {
+  const { me, human, others } = ctx;
+  if ((me.sociability ?? 0) < 0.5) return false;
+  for (const f of dominionOrder(state, pid, others)) {
+    if (arePacted(state, pid, f) || atWar(state, pid, f) || vassalLord(state, f) === pid) continue;
+    // §15 — the ally door. Widening the WAR predicate here instead was
+    // measured and reverted: it took unresolved games from 6 of 15 to 11.
+    if (!mayCourt(state, pid, f)) continue;
+    const sFwd = getStanding(state, pid, f), sBack = getStanding(state, f, pid);
+    if (sFwd < CONFIG.diplomacy.pactStandingReq || sBack < CONFIG.diplomacy.pactStandingReq) continue;
+    if (!passesRepGates(state, pid, f) || !passesRepGates(state, f, pid)) continue;
+    // Between two AIs an alliance is settled on the spot — neither has an
+    // inbox to read. The human gets ASKED, because being handed an
+    // alliance you never agreed to (which is what this used to do) is
+    // not diplomacy happening to you, it is diplomacy bypassing you.
+    if (f === human) {
+      if (offersFor(state, human).some((o) => o.from === pid && o.kind === "pact")) continue;
+      tableOffer(state, pid, human, {
+        give: [{ promise: { kind: "pact" } }], get: [],
+      }, { kind: "pact" });
+      return true;
     }
+    formPact(state, pid, f, "ai-offer");
+    checkDominion(state);
+    return true;
   }
+  return false;
+}
 
-  // 3b2) Make good on your own words. An ultimatum you let lapse costs Honor
-  //      publicly, and it should: the AI checked it had the strength to mean
-  //      it before issuing, so the only reason not to follow through is that
-  //      nothing in the code ever made it. Left unfixed, every threat it
-  //      issued became a bluff it called on itself.
+// 3b2) Make good on your own words. An ultimatum you let lapse costs Honor
+//      publicly, and it should: the AI checked it had the strength to mean
+//      it before issuing, so the only reason not to follow through is that
+//      nothing in the code ever made it. Left unfixed, every threat it
+//      issued became a bluff it called on itself.
+function branchEnforceUltimatum(state, pid) {
   for (const u of ultimatumsFor(state, pid, { issuedBy: true })) {
     if (!u.defied || atWar(state, pid, u.to)) continue;
     declareWar(state, pid, u.to, "ultimatum-defied");
-    return;
+    return true;
   }
+  return false;
+}
 
-  // 3c) Answer anything standing over you. Silence past the deadline is
-  //     defiance, and defiance hands them a righteous war — so this is a
-  //     decision, not a formality.
+// 3c) Answer anything standing over you. Silence past the deadline is
+//     defiance, and defiance hands them a righteous war — so this is a
+//     decision, not a formality.
+function branchAnswerUltimatum(state, pid) {
   for (const u of ultimatumsFor(state, pid)) {
     if (u.defied) continue;
     if (!aiComplies(state, pid, u)) continue;
-    const res = answerUltimatum(state, pid, u.id, true);
-    if (res.ok) return;
+    if (answerUltimatum(state, pid, u.id, true).ok) return true;
   }
+  return false;
+}
 
-  // 4) Say something about a faction that has earned it. A denouncement is
-  //    now judged on whether there are grounds, which makes it the peaceful
-  //    faction's real lever: a pacifist that cannot answer a tyrant with
-  //    armies can answer with its reputation, gain Honor for it, and pull
-  //    the board along. A warlord would rather just attack, so it doesn't
-  //    bother.
-  if ((me.aggression ?? 0.5) < 0.7 && honorOf(state, pid) > 0) {
-    for (const f of others) {
-      if (arePacted(state, pid, f) || vassalLord(state, f) === pid) continue;
-      if (!mayEngage(state, pid, f)) continue;
-      if (denounceCooldown(state, pid, f) > 0) continue;
-      if (!denounceWarrant(state, pid, f)) continue;
-      if (denounce(state, pid, f)) return;
-    }
+// 4) Say something about a faction that has earned it. A denouncement is
+//    now judged on whether there are grounds, which makes it the peaceful
+//    faction's real lever: a pacifist that cannot answer a tyrant with
+//    armies can answer with its reputation, gain Honor for it, and pull
+//    the board along. A warlord would rather just attack, so it doesn't
+//    bother.
+function branchDenounce(state, pid, ctx) {
+  const { me, others } = ctx;
+  if ((me.aggression ?? 0.5) >= 0.7 || honorOf(state, pid) <= 0) return false;
+  for (const f of others) {
+    if (arePacted(state, pid, f) || vassalLord(state, f) === pid) continue;
+    if (!mayEngage(state, pid, f)) continue;
+    if (denounceCooldown(state, pid, f) > 0) continue;
+    if (!denounceWarrant(state, pid, f)) continue;
+    if (denounce(state, pid, f)) return true;
   }
+  return false;
+}
 
-  // 4b) LAST, AND THE POSITION IS THE POINT: warm somebody up.
-  //
-  // A gift is the only act in this whole pass that answers nothing. Every
-  // other branch is a response to something already on the board — a debt, a
-  // war, a threat standing over you, a faction that has earned to be named.
-  // `manageDiplomacy` is bounded to ONE act, so whatever fires first silences
-  // the rest, and discretionary spending has no business outranking a reply.
-  //
-  // This is the second time this exact hazard has bitten. The note at 2b
-  // records the first: the gift branch sat above `warTalk` and returned on
-  // every turn a sociable faction took, which made the branch that ENDS WARS
-  // unreachable. Opening the branch up (below) walked straight back into it
-  // from the other side — measured, a pacifist's Honor fell from 8.3 to 4.1,
-  // because a gift now fired every turn and starved branch 4, and branch 4
-  // is a peaceful faction's ONLY source of Honor. Worse, that Honor is what
-  // `menace.declareOnCleanHands` prices its safety in, so the AI was buying
-  // warmth with the armour that kept it alive.
-  //
-  // NO STANDING FLOOR, which is the other half of the fix. There used to be
-  // one — `sFwd >= tiers.neutral` — and it was the single most expensive line
-  // in the political layer: measured across a pacifist run, ten of sixteen
-  // pairs sat BELOW Neutral (median -2), so the branch that exists to warm a
-  // cold relationship refused to run on any relationship that was actually
-  // cold. The recovery mechanism was gated on not needing recovery.
-  //
-  // Reaching somebody who despises you is a PRICE now rather than a refusal
-  // (`sway.giftReparations`), so the budget is checked against what THIS gift
-  // costs, not against the published rate — which is only what the easy cases
-  // cost.
-  //
-  // The two older restraints stay, and both were measured. ONE POINT AT A
-  // TIME: spending the whole surplus in one gift took the ending mix from 9
-  // to 5 and unresolved from 1 to 5, because the pool emptied and
-  // `chargeSwayUpkeep` called the running courtships off. ONLY A FACTION THAT
-  // LEADS WITH DIPLOMACY: letting everybody gift did the same thing to the
-  // board at large. And it goes through `performDiplomacy` — the same verb
-  // the player presses — because the previous draft handed over 3 SCRAP via
-  // `applyDeal`, which walked straight through the wall the Sway design rests
-  // on: scrap buys what a faction HAS, Sway buys what a faction THINKS, and
-  // nothing converts. The wall cannot hold at one faucet and not the other.
-  if (me.victoryLean === "diplomacy" && (me.sociability ?? 0) >= 0.5) {
-    for (const f of others) {
-      if (arePacted(state, pid, f) || atWar(state, pid, f) || vassalLord(state, f) === pid) continue;
-      if (!mayCourt(state, pid, f)) continue;
-      if (getStanding(state, pid, f) >= CONFIG.diplomacy.pactStandingReq) continue;
-      if (giftBudget(state, pid) < giftCost(state, pid, f, 1)) continue;
-      if (performDiplomacy(state, pid, "gift", { faction: f, standing: 1 }).ok) return;
-    }
+// 4b) LAST BUT ONE, AND THE POSITION IS THE POINT: warm somebody up.
+//
+// A gift is the only act in this whole pass that answers nothing. Every
+// other branch is a response to something already on the board — a debt, a
+// war, a threat standing over you, a faction that has earned to be named.
+// `manageDiplomacy` is bounded to ONE act, so whatever fires first silences
+// the rest, and discretionary spending has no business outranking a reply.
+//
+// This is the second time this exact hazard has bitten. The note on
+// `branchWarTalk` records the first: the gift branch sat above `warTalk` and
+// returned on every turn a sociable faction took, which made the branch that
+// ENDS WARS unreachable. Opening the branch up (below) walked straight back
+// into it from the other side — measured, a pacifist's Honor fell from 8.3 to
+// 4.1, because a gift now fired every turn and starved `branchDenounce`, and
+// that branch is a peaceful faction's ONLY source of Honor. Worse, that Honor
+// is what `menace.declareOnCleanHands` prices its safety in, so the AI was
+// buying warmth with the armour that kept it alive.
+//
+// NO STANDING FLOOR, which is the other half of the fix. There used to be
+// one — `sFwd >= tiers.neutral` — and it was the single most expensive line
+// in the political layer: measured across a pacifist run, ten of sixteen
+// pairs sat BELOW Neutral (median -2), so the branch that exists to warm a
+// cold relationship refused to run on any relationship that was actually
+// cold. The recovery mechanism was gated on not needing recovery.
+//
+// Reaching somebody who despises you is a PRICE now rather than a refusal
+// (`sway.giftReparations`), so the budget is checked against what THIS gift
+// costs, not against the published rate — which is only what the easy cases
+// cost.
+//
+// The two older restraints stay, and both were measured. ONE POINT AT A
+// TIME: spending the whole surplus in one gift took the ending mix from 9
+// to 5 and unresolved from 1 to 5, because the pool emptied and
+// `chargeSwayUpkeep` called the running courtships off. ONLY A FACTION THAT
+// LEADS WITH DIPLOMACY: letting everybody gift did the same thing to the
+// board at large. And it goes through `performDiplomacy` — the same verb
+// the player presses — because the previous draft handed over 3 SCRAP via
+// `applyDeal`, which walked straight through the wall the Sway design rests
+// on: scrap buys what a faction HAS, Sway buys what a faction THINKS, and
+// nothing converts. The wall cannot hold at one faucet and not the other.
+function branchGift(state, pid, ctx) {
+  const { me, others } = ctx;
+  if (me.victoryLean !== "diplomacy" || (me.sociability ?? 0) < 0.5) return false;
+  for (const f of dominionOrder(state, pid, others)) {
+    if (arePacted(state, pid, f) || atWar(state, pid, f) || vassalLord(state, f) === pid) continue;
+    if (!mayCourt(state, pid, f)) continue;
+    if (getStanding(state, pid, f) >= CONFIG.diplomacy.pactStandingReq) continue;
+    if (giftBudget(state, pid) < giftCost(state, pid, f, 1)) continue;
+    if (performDiplomacy(state, pid, "gift", { faction: f, standing: 1 }).ok) return true;
   }
+  return false;
+}
 
-  // 5) …and if none of that fired, consider opening a conversation with the
-  //    human. The audit's blunt finding was that across thirty rounds the AI
-  //    approached the player exactly zero times: it had no way to propose,
-  //    only to act. Now it has an inbox to put things in.
-  if (human && pid !== human) {
-    if (ultimatumToHuman(state, pid, me)) return;
-    proposeToHuman(state, pid, me);
-  }
+// 5) …and if none of that fired, consider opening a conversation with the
+//    human. The audit's blunt finding was that across thirty rounds the AI
+//    approached the player exactly zero times: it had no way to propose,
+//    only to act. Now it has an inbox to put things in.
+function branchApproachHuman(state, pid, ctx) {
+  const { me, human } = ctx;
+  if (!human || pid === human) return false;
+  if (ultimatumToHuman(state, pid, me)) return true;
+  return proposeToHuman(state, pid, me);
 }
 
 // What `pid` would put to `other` about the war between them, or null if it
@@ -944,27 +1249,27 @@ function warTalk(state, pid, me) {
 // stays a thing that happens rather than a thing that accumulates.
 function proposeToHuman(state, pid, me) {
   const human = state.humanFactionId;
-  if (!mayCourt(state, pid, human)) return; // §15 — an approach, not an attack
-  if (offersFor(state, human).some((o) => o.from === pid)) return;
+  if (!mayCourt(state, pid, human)) return false; // §15 — an approach, not an attack
+  if (offersFor(state, human).some((o) => o.from === pid)) return false;
   const cfg = CONFIG.diplomacy.offers;
   const tiers = CONFIG.diplomacy.tiers;
   const s = getStanding(state, pid, human);
   const purse = state.players[pid]?.resource || 0;
   // Deterministic in the seed like every other AI decision — the RNG is the
   // game's, not Math.random, so a replayed game proposes identically.
-  if (state.rng.next() > (cfg.aiProposeChance * (0.4 + (me.sociability ?? 0.5)))) return;
+  if (state.rng.next() > (cfg.aiProposeChance * (0.4 + (me.sociability ?? 0.5)))) return false;
 
-  if (atWar(state, pid, human)) return; // handled above, before the courtship
+  if (atWar(state, pid, human)) return false; // handled above, before the courtship
   // Warm but not allied: buy the alliance rather than wait for the numbers.
   if (s >= tiers.neutral && s < CONFIG.diplomacy.pactStandingReq && !arePacted(state, pid, human)
     && passesRepGates(state, pid, human)) {
     const sweetener = Math.min(purse, 4 + Math.round((me.sociability ?? 0.5) * 6));
-    if (sweetener <= 0) return;
+    if (sweetener <= 0) return false;
     tableOffer(state, pid, human, {
       give: [{ resource: { resource: "scrap", amount: sweetener } }, { promise: { kind: "pact" } }],
       get: [],
     }, { kind: "pact", note: "They are courting you." });
-    return;
+    return true;
   }
   // Cold and cautious: a non-aggression pact is what you ask a neighbour you
   // do not trust and do not want to fight yet.
@@ -973,7 +1278,7 @@ function proposeToHuman(state, pid, me) {
       give: [{ promise: { kind: "nonAggression", rounds: 6 } }],
       get: [{ promise: { kind: "nonAggression", rounds: 6 } }],
     }, { kind: "deal", note: "They would rather not find out." });
-    return;
+    return true;
   }
   // Strong and unfriendly: name a price for leaving you alone.
   if ((me.aggression ?? 0.5) >= 0.6 && s < tiers.neutral
@@ -982,7 +1287,9 @@ function proposeToHuman(state, pid, me) {
       give: [{ promise: { kind: "nonAggression", rounds: 5 } }],
       get: [{ flow: { resource: "scrap", amountPerTurn: 2, rounds: 5 } }],
     }, { kind: "deal", note: "It would be a shame if anything happened." });
+    return true;
   }
+  return false;
 }
 
 // "Stop, or else." What a faction reaches for when it is strong enough to

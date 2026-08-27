@@ -1,0 +1,318 @@
+# Findings: the opponent, measured
+
+Answering `docs/ai-robustness-brief-2026-08-27.md`. Everything here was
+measured on this branch; the baseline it is measured against is `main` at
+`b33d1ee`, reproduced exactly on the build this work started from:
+
+```
+ending mix (submission + mixed)   21 of 45   band >= 11   PASS
+median rounds to Dominion         45         baseline ±4  PASS
+games unresolved                  16         band 0       FAIL
+```
+
+**The build in this branch reproduces those three numbers seed-for-seed on all
+45 seeds — same ending, same round, same winner.** Every behavioural change
+here ships behind a switch at its no-op value. That is the honest headline: the
+instrument is better, the diagnosis is much better, and none of the three
+levers built earned its place.
+
+The brief said that was the expected outcome for some of this work. It was the
+outcome for most of it, and the reasons are worth more than the levers.
+
+---
+
+## What shipped live
+
+Only one thing changes behaviour, and it changes no game: the political pass is
+now readable.
+
+`manageDiplomacy` was eleven `if`s ending in `return`, in a fixed order that
+nothing enforced, documented, or reported. It is now an ordered list of named
+branches (`DIPLOMACY_CHAIN` in `ai.js`), each branch carrying the measurement
+comment that put it where it is. Whichever branch spends the act emits
+`ai_political_act` with its name, `sim-suite` reports the per-branch histogram,
+and `harness.js` gained twelve checks: one per load-bearing adjacent pair, each
+naming the reading that pinned it, plus a mechanism check that the pass really
+does spend its act on the highest live branch.
+
+Two corrections fell straight out of the instrument.
+
+**`actsPerAITurn: 0.45` was never the act rate.** The suite counted a union of
+verb events that leaves out opening a courtship — which emits `posture_changed`
+and nothing else, is the most common political act in the game by a factor of
+three, and is the only one that climbs the ladder Dominion is made of. The real
+rate is **0.61**. The old row is kept, relabelled, next to the new one.
+
+**`factionsWithEmptyWheelAtR15: 1.91` is not a tech bug.** The brief calls it "a
+straightforward bug hunt in `maybeAssignTech`". Probing wheel state directly at
+round 15: every faction with an empty wheel also held **zero Locations** and sat
+at Tech Level 1 with 0–1 Research. There is nothing to allocate — no ground, no
+production, no Research, no Ability Point, and by `baseActions: 0` no actions
+either. The row measures how often a faction is driven off the board before
+round 15. It belongs next to finding 5, not in the economy hunt. `sim-suite`
+now splits it: the half that could possibly be an allocator bug measures **0**.
+
+---
+
+## The headline defect: what the sixteen unresolved games actually are
+
+The brief's guess is that nobody is trying to win — they behave in character
+until the round limit. Walking all eight unresolved seeds to round 81 and
+reading the board says something quite different.
+
+Those games are not milling about. **They have been fought almost to a finish.**
+Every one is down to 2–4 survivors, and thirteen of twenty surviving
+faction-games have exactly **one** faction outstanding. They are one handshake
+from Dominion and cannot take it.
+
+Of the 28 blocked outstanding pairs at the round limit:
+
+| wall | pairs | what it looks like |
+|---|---|---|
+| Standing below the pact bar | 18 | typically **-3 against a bar of 6** |
+| at war | 4 | a stalemate neither side can finish |
+| reputation gates | 4 | one pair at Menace 11 vs tolerance 9.6 **and** Honor -9.5 vs a trust floor of 3.1 |
+| unreachable (§15) | 2 | |
+
+The Standing cases are a **dead position with no legal move**. The two survivors
+are not at war. They need each other's Standing at 6 and sit at -3.
+`mayBeginCourtship` has a Neutral floor and they are below it. The pact branch
+has the bar itself. And the gift — the only verb in the game that raises
+Standing on demand — is dark board-wide via `giftAboveShareOfCap`. Every door
+out of the position is shut.
+
+That is the defect. It is not a motivation problem, it is a **reachability**
+problem in the endgame.
+
+### A mechanism finding that outlives all of this
+
+`driftStanding` pulls every unpacted, un-warring, un-courted pair back toward
+its baseline every round by `max(1, …)` — **always at least a full point**. And
+`performDiplomacy("gift")` only warms the *baseline* when the gift lands two or
+more (`gift.baselineWarmth`).
+
+So **a one-point gift is a treadmill.** It is exactly cancelled by drift and
+cannot move the thing drift is pulling toward. `branchGift` gifts one point.
+
+This is worth re-reading the note on `giftAboveShareOfCap` against. That note
+says "Sway spent on warmth is Sway not spent on the ladder, and the ladder is
+what ends games." That is true, and it is not the only thing that was wrong
+with the branch: as written, the gift also **buys nothing permanent**. Every
+measurement that condemned the gift was taken on a gift that could not work.
+Re-measuring it at two points is the obvious next experiment, and it is not one
+I ran — I found this while building the close-out and spent the remaining
+budget on the endgame instead.
+
+---
+
+## The three levers, and why all three are dark
+
+### `ai.dominionWeight` — the win-condition term in `courtshipScore` (finding 2)
+
+| weight | mix | median | unresolved |
+|---|---|---|---|
+| **0 (shipped)** | **21** | **45** | **16** |
+| 0.5 | 17 | 42 | 18 |
+| 1 | 16 | 46 | 19 |
+
+The brief calls this "the single highest-value change in this brief". It is
+correct about the code — `courtshipScore` really did read sociability × warmth
+and nothing else, and a partner you are *already allied to* scored higher than
+an outstanding rival, because being allied is what makes a pair warm — and
+wrong about the consequence, because it aims one stage too late.
+
+`courtshipScore` only **ranks** candidates that already passed
+`mayBeginCourtship`, which has a Neutral Standing floor. At the point the win
+condition matters, the factions standing between you and Dominion are *below*
+that floor and are therefore not in the pool being ranked at all. Re-ranking the
+pool just moves the AI off the partner it could have converted onto one it
+cannot: `courtshipsOpenedPerGame` barely moves (61.6 → 62.1),
+`minorsAlliedOrVassalisedAtEnd` barely moves (1.60 → 1.67), and `warsPerGame`
+rises 45.5 → 48.4.
+
+**The bottleneck is conversion, not selection.** That is the finding.
+
+### `ai.closeOutWithin` — play for the win when you are one faction away
+
+A new branch. When few enough factions are outstanding, form the pact with the
+last one if it is available, and otherwise buy the distance with a **two**-point
+gift (one point is the treadmill above). Not gated on `victoryLean` or
+`sociability`, because wanting to win is not a character trait.
+
+| within | mix | median | unresolved | fires |
+|---|---|---|---|---|
+| **0 (shipped)** | **21** | **45** | **16** | 0 |
+| 1 | 17 | 44 | 18 | 525 |
+| 2 | 19 | 51 | 18 | 864 |
+| 5 | 16 | 49 | 17 | 1909 |
+
+**It demonstrably works and still does not pay.** With it on, two of the eight
+unresolved seeds resolve, and the endgame Standing gaps visibly close — seed
+31337's last pair goes from -2 and -4 against a bar of 6 to **+3 and +2**. It
+does exactly the thing it was built to do.
+
+It does not pay because Standing is one wall of four, and it can only take that
+one down. Pull it down and the pairs walk into war, the reputation gates, or
+§15 distance.
+
+### `ai.pactCall` — AI factions call their own allies to arms (finding 3)
+
+| setting | mix | median | unresolved | calls |
+|---|---|---|---|---|
+| **0 (shipped)** | **21** | **45** | **16** | 0 |
+| 1 | 17 | 46 | 16 | 217 |
+
+The calls land — all 217 of them, because the branch consults
+`evaluatePactCall` first and only calls where the answer is yes, so it cannot
+bleed Standing on refusals. They buy nothing: `unresolved` does not move and the
+ending mix costs four. The mechanism is not mysterious. A pact call is a machine
+for **starting wars**, wars are what block Dominion, and the board is already at
+45 declarations a game. `warsPerGame` goes 45.5 → 50.5.
+
+**A correction to the brief here, and it is the half that matters.** The brief's
+first row says an alliance with the AI is one-way — "the human can call them to
+arms; they never call the human". That is not so, and has not been for some
+time. `queueHumanPactCalls` runs inside `runDiplomacyRound` every round, drops a
+call in the player's inbox for every AI ally at war, and the player answers it
+with `respond-pact-call` from `DiplomacyDrawer.jsx`. The path is live end to
+end. What has never happened is **AI→AI**, which is what this branch adds and
+what the brief's own second sentence says. So the asymmetry a player would feel
+is not there; the one that is there is between two AIs, where it makes the
+alliance graph decorative but costs the player nothing directly.
+
+---
+
+## Re-measuring `attackPrice` (finding 4)
+
+The brief asks for this and is right that the board it was condemned on no
+longer exists. There is now also a *mechanism* argument the old readings did not
+have: Honor is not only a defensive stat, `passesRepGates` **hard-gates the
+alliance door** on it, and the endgame walk turns up survivors at Honor -9.5
+against a trust floor of 3.1. An AI that surprise-attacks its way to -9.5 Honor
+has disqualified itself from the win condition.
+
+| `attackPrice.enabled` | mix | median | unresolved | undeclared |
+|---|---|---|---|---|
+| **0 (shipped)** | **21** | **45** | **16** | **22.04** |
+| 0.6 | 16 | 48.5 | 17 | 20.80 |
+
+It bites slightly harder than it used to (22.04 → 20.80, 5.6%) and the verdict
+is unchanged: one unresolved game and five of the ending mix. The rep-gate
+argument is real but small — only 4 of 28 blocked endgame pairs fail on
+reputation, so fixing it perfectly could not have paid for the ending mix.
+**Stays off.**
+
+---
+
+## Finding 1, demonstrated the hard way
+
+The brief says the one-act chain has starved its own lower branches twice in two
+months. It happened a third time, in the branch I added to fix the headline
+defect, and this is the most useful thing in this document.
+
+The close-out was first placed at the **top** of the chain, on the argument that
+nothing is worth more than the act that wins the game. Sweeping how early it may
+start:
+
+| within | mix | median | unresolved |
+|---|---|---|---|
+| 1 | 20 | 48.5 | 17 |
+| 3 | **12** | 43.5 | **23** |
+| 5 | 14 | 52 | 22 |
+
+Monotone in the wrong direction, and the new branch histogram named the cause in
+one line: at `within: 3`, `amends` collapses 2009 → 1498, `vassalize` 909 → 746,
+`warTalk` 98 → 72. **Vassalage is the other door to Dominion and `warTalk` is
+the branch that ends wars** — a branch added to close games out was shutting
+both of the roads that close games.
+
+Moving it below every reply (its final position) removed the collapse entirely:
+`amends` back to 2150, `vassalize` to 939, `warTalk` to 107, and the worst
+reading goes 23 → 17.
+
+The first two instances of this hazard were found weeks later by measuring an
+unrelated number and noticing it had moved. **This one was found inside a single
+run, from one line of output.** That is what the histogram is for, and it is the
+argument for having done finding 1 first.
+
+### On the two ways forward the brief offers
+
+I took the smaller one — keep the chain, name every branch, emit which fired,
+and assert the ordering — rather than the scored candidate list the brief leans
+toward. Two reasons. The instrumentation is what makes the scored refactor
+*safe* to attempt and had to come first regardless; and every one of the three
+findings below it adds a branch, so the chain had to be able to survive
+additions before anything was added to it. The measurement comments are all
+still attached to their branches and would move onto scorers cleanly. The
+scored version is now a smaller job than it was.
+
+One caution for whoever does it. The generic "the act goes to the highest live
+branch" check is **a tautology about priority**: it reads
+`DIPLOMACY_BRANCH_ORDER` to test a chain built from `DIPLOMACY_BRANCH_ORDER`, so
+moving a branch moves both and it still passes. It earns its place by proving
+the chain runs in its declared order and that the name it emits is the branch
+that acted — nothing more. The falsifiable part is `PRIORITY_RULES`, which names
+each load-bearing pair explicitly with the reading behind it. Keep that list
+when the chain becomes a score; it is the part that fails when somebody is
+wrong.
+
+---
+
+## What I did not do
+
+**Finding 5 — neither kind of player can hold ground.** Untouched. The brief
+says treat it as an investigation and do the investigation before writing code,
+and I did not get to it. It is now better motivated than it was: it is the same
+finding as `factionsWithEmptyWheelAtR15`, and two thirds of all courtships end
+with one of the pair **dead** (see below), so whatever is happening to ground is
+upstream of most of the political layer's failure to compound.
+
+**Finding 6 — the Sway sink.** Not solved. `swayRoundsAtCapShare` is still 0.29
+at the shipped settings. The close-out drains it well (0.29 → 0.16 at
+`within: 5`) but does not pay for itself, so the pool is still a currency
+nothing can exhaust.
+
+**Where courtships go**, though, is now answered — the brief says finding out is
+cheap and probably informative, and it is both. Across ten games, 102 *distinct*
+pairs are courted (the 61.56 per game is the same ~10 pairs re-opened about six
+times each, which is where the Sway goes):
+
+| fate of a courted pair | share |
+|---|---|
+| one of them is **dead** | **66.7%** |
+| became a vassalage | 15.7% |
+| became a pact | 5.9% |
+| cooled off, both alive | 9.8% |
+| still running at the end | 2.0% |
+| became a war | 0.0% |
+
+And one hypothesis killed: courtship is **not** starving the pact branch. Of 232
+turns on which the courtship branch spent the act, a pact was simultaneously
+available on **2** (0.9%). The pact branch fires rarely because it is rarely
+eligible, not because something above it is eating its turn.
+
+**The remaining seven verbs.** `mediate`, `demand-tribute`, `trading-pact`,
+`declare-position`, `free-vassal` and the three grant toggles still have no AI
+caller. On the evidence of the two I did wire up, I would want a mechanism
+argument for each one before spending a suite run on it — "the verb exists and
+the AI does not use it" turned out not to predict anything about the governing
+numbers in either case I tested.
+
+---
+
+## Where I would go next, in order
+
+1. **Re-measure the gift at two points.** Cheapest experiment left and the one
+   with an actual mechanism behind it: every reading that condemned
+   `giftAboveShareOfCap` was taken on a one-point gift that drift cancels and
+   that never touches the baseline. One switch, one build, one run.
+2. **Something that ends a stalemate war.** Four of 28 blocked endgame pairs are
+   at war, and `warPeaceTerms`' losing branch needs exhaustion *and* a location
+   to cede, which a two-survivor grind may never produce. A faction one
+   handshake from winning should be willing to buy peace at nearly any price.
+3. **Finding 5, as an investigation.** Two thirds of courted pairs end with a
+   death, and majors are landless by round 15. Everything political compounds
+   downstream of that.
+
+I would not spend another run on `courtshipScore`. The pool it ranks is the
+wrong pool, and that is a floor problem, not a scoring one.

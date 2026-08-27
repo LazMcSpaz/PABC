@@ -43,7 +43,7 @@
 // matters, not with a number nobody can recompute.
 import { createGame } from "../src/game/setup.js";
 import { startTurn, endTurn } from "../src/game/turn.js";
-import { takeAITurn } from "../src/game/ai.js";
+import { takeAITurn, DIPLOMACY_BRANCH_ORDER } from "../src/game/ai.js";
 import { activePlayerId } from "../src/game/targeting.js";
 import { MINOR_FACTIONS, factionDef } from "../src/game/content.js";
 import { vassalLord, arePacted } from "../src/game/diplomacy.js";
@@ -173,7 +173,11 @@ function readSnapshot(g) {
     const p = g.players[pid];
     if (!p || factionDef(pid)?.tier === "minor") continue;
     const nodes = (p.techWheel || []).length;
-    rows.push({ pid, scrap: p.resource || 0, techLevel: p.techLevel || 1, nodes });
+    // §6 — how much GROUND it holds, recorded alongside the wheel because the
+    // two rows only mean anything together. See the note on
+    // `factionsWithEmptyWheelAtR15` below.
+    const locs = Object.values(g.locations).filter((l) => l.controller === pid).length;
+    rows.push({ pid, scrap: p.resource || 0, techLevel: p.techLevel || 1, nodes, locs });
   }
   return rows;
 }
@@ -195,6 +199,27 @@ function summarise(g, { aiTurns, snapshot, seed }) {
   ];
   const acts = ACT_EVENTS.reduce((n, k) => n + evName(g, k).length, 0);
   const denouncements = evName(g, "denounced").length;
+
+  // --- §1 — the political pass, per BRANCH.
+  //
+  // `actsPerAITurn` above is not the act rate and never was. The union of verb
+  // events it counts leaves out the single most common act in the game:
+  // opening a COURTSHIP emits `posture_changed` and nothing else, and it is
+  // the only political act that climbs the ladder Dominion is made of. At
+  // 61.56 courtships a game against ~270 AI turns it was missing roughly a
+  // third of every act taken. The published 0.45 is a subset rate.
+  //
+  // `ai_political_act` is emitted by `manageDiplomacy` itself, carries the
+  // name of the branch that spent the act, and so answers both questions at
+  // once: what the real rate is, and — because the pass is bounded to ONE act
+  // and branch order is priority — which branches are actually reachable.
+  // A branch that never appears here is a branch something above it is eating.
+  const political = evName(g, "ai_political_act");
+  const branchMix = {};
+  for (const e of political) {
+    const b = e.payload?.branch || "unknown";
+    branchMix[b] = (branchMix[b] || 0) + 1;
+  }
 
   // --- wars, and how they opened. A war whose declaration is preceded by the
   // attacker's own surprise-attack Honor charge was opened by a blow, not a
@@ -270,6 +295,8 @@ function summarise(g, { aiTurns, snapshot, seed }) {
     ending,
     aiTurns,
     actsPerTurn: aiTurns ? acts / aiTurns : 0,
+    politicalActsPerTurn: aiTurns ? political.length / aiTurns : 0,
+    branchMix,
     denounceShare: acts ? denouncements / acts : 0,
     wars: wars.length,
     surpriseOpenings: surprises,
@@ -282,6 +309,10 @@ function summarise(g, { aiTurns, snapshot, seed }) {
     // Economy rows
     endScrap: snapshot,
     emptyWheels: snapshot.filter((r) => r.nodes === 0).length,
+    // The same count, split by whether the faction still holds ground. See the
+    // report row for why the split is the whole finding.
+    emptyWheelsLandless: snapshot.filter((r) => r.nodes === 0 && r.locs === 0).length,
+    emptyWheelsWithLand: snapshot.filter((r) => r.nodes === 0 && r.locs > 0).length,
     delayedPurchases: evName(g, "purchase_delayed").length,
     supplyRefusals: evName(g, "purchase_refused_unsupplied").length,
     chipUpgrades: evName(g, "chip_upgraded").length,
@@ -306,6 +337,17 @@ const median = (xs) => {
 };
 const mean = (xs) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0);
 const r2 = (n) => Math.round(n * 100) / 100;
+// Total branch fires across the suite, ordered by the priority the chain runs
+// them in, so a starved branch reads as a hole in the middle of the list
+// rather than as a name you have to notice is missing.
+const sumMix = (mixes) => {
+  const total = {};
+  for (const m of mixes) for (const k of Object.keys(m)) total[k] = (total[k] || 0) + m[k];
+  const out = {};
+  for (const id of DIPLOMACY_BRANCH_ORDER) out[id] = total[id] || 0;
+  for (const k of Object.keys(total)) if (!(k in out)) out[k] = total[k];
+  return out;
+};
 
 const games = [];
 for (const seed of seeds) {
@@ -345,6 +387,8 @@ const report = {
   // --- diplomacy brief §17 --------------------------------------------
   diplomacy: {
     actsPerAITurn: r2(mean(ok.map((g) => g.actsPerTurn))),
+    politicalActsPerAITurn: r2(mean(ok.map((g) => g.politicalActsPerTurn))),
+    politicalBranchMix: sumMix(ok.map((g) => g.branchMix)),
     denounceShareOfActs: r2(mean(ok.map((g) => g.denounceShare))),
     warsPerGame: r2(mean(ok.map((g) => g.wars))),
     warsOpenedByUndeclaredAttack: r2(mean(ok.map((g) => g.surpriseOpenings))),
@@ -364,7 +408,23 @@ const report = {
   economy: {
     medianEndScrap: median(ok.flatMap((g) => g.endScrap.map((r) => r.scrap))),
     maxEndScrap: Math.max(0, ...ok.flatMap((g) => g.endScrap.map((r) => r.scrap))),
+    // §6 — THIS ROW IS NOT A TECH BUG, and it was read as one for long enough
+    // to be worth writing down. `maybeAssignTech` was the suspect: two majors
+    // in every game reach round 15 with nothing on the wheel. Probing the
+    // wheel state directly at round 15 across six seeds, EVERY faction with an
+    // empty wheel also held ZERO Locations and sat at Tech Level 1 with 0-1
+    // Research. There is nothing for the allocator to allocate: no ground, no
+    // production, no Research, no Ability Point. `baseActions: 0` means it has
+    // no actions either.
+    //
+    // So the row measures how often a faction is driven off the board before
+    // round 15, and it belongs next to finding 5 (neither kind of player can
+    // hold ground) rather than in the economy hunt. The split reports both
+    // halves so the next reader does not have to re-derive it: only the
+    // `WithLand` half could ever be an allocator bug, and it measures 0.
     factionsWithEmptyWheelAtR15: r2(mean(ok.map((g) => g.emptyWheels))),
+    factionsEmptyWheelLandlessAtR15: r2(mean(ok.map((g) => g.emptyWheelsLandless))),
+    factionsEmptyWheelHoldingLandAtR15: r2(mean(ok.map((g) => g.emptyWheelsWithLand))),
     chipUpgradesByAI: ok.reduce((n, g) => n + g.chipUpgrades, 0),
     purchasesDelayedBySupply: ok.reduce((n, g) => n + g.delayedPurchases, 0),
     purchasesRefusedUnsupplied: ok.reduce((n, g) => n + g.supplyRefusals, 0),
@@ -393,7 +453,9 @@ if (!quiet) {
   console.log(`  games unresolved                  ${G.unresolved.value}   band ${G.unresolved.band}`);
   console.log(`  endings: ${JSON.stringify(byEnding)}`);
   console.log("\n=== diplomacy brief §17 ===");
-  for (const [k, v] of Object.entries(report.diplomacy)) console.log(`  ${k.padEnd(34)} ${v}`);
+  for (const [k, v] of Object.entries(report.diplomacy)) {
+    console.log(`  ${k.padEnd(34)} ${typeof v === "object" ? JSON.stringify(v) : v}`);
+  }
   console.log("\n=== economy brief §17 ===");
   for (const [k, v] of Object.entries(report.economy)) console.log(`  ${k.padEnd(34)} ${v}`);
 }

@@ -115,6 +115,12 @@ export const EVENT_NAMES = new Set([
   "standing_baseline_changed", "recognition_summit",
   // Precursor warnings — AI telegraphs trouble to the human before acting.
   "diplomatic_warning",
+  // §1 — WHICH BRANCH OF THE POLITICAL PASS SPENT THE ACT. `manageDiplomacy`
+  // is bounded to one act a turn and branch order is priority, so the only
+  // way to see a new branch starving an old one is to record which one fired.
+  // Twice now that has been discovered instead by measuring an unrelated
+  // number and noticing it had moved.
+  "ai_political_act",
   // §5 posture — where a faction stands, and the moment it says so out loud.
   // `posture_changed` is the computed transition; `posture_stated` is the
   // faction actually announcing it, which is the one that gates acting on it.
