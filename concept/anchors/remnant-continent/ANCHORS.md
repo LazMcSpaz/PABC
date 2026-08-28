@@ -295,6 +295,12 @@ Use for: a Dambaran wall opening, distinct from Korad per the user — coursed p
 Do not use for: roof, massing or overall building form, which this crop does not show; also not for Korad work, which the user has drawn as a separate vocabulary from this
 Added: 2026-08-28
 
+## dambaran-tower-01.png
+URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/dambaran-tower-01.png
+Use for: the Dambaran vertical type, matching `dambaran-entryway-01.png`'s vocabulary at building scale — coursed pale stone giving way to massive uncoursed boulder at the base, iron ring-bolts along the roof parapet, a barred iron gate with riveted steel jamb straps identical to the entryway's, small punched window openings, and a corbelled wooden lookout box jettied off the upper wall. The base-to-ashlar transition is the clearest single cue that separates this from Korad's uniform cast block
+Do not use for: a freestanding design on its own — treat it as the taller companion to the entryway rather than a separate structure. Compare against `korad-tower-01.jpg` when the two need to be told apart in a prompt
+Added: 2026-08-28
+
 ## korad-terrace-row-01.jpg
 URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/korad-terrace-row-01.jpg
 Use for: repetition as the civilization signal — a row of identical two-storey units stepping down a slope, every window and door the same size and spacing, one parapet profile carried across all of them, external downpipes to a shared line. The cleanest statement of §3 Rule 1 in the set, and free of lettering
