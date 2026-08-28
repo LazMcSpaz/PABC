@@ -42,6 +42,12 @@ is bad at is what stops it being attached to a shot it will drag off-target.
 > faction one so they cannot be mistaken for canon later. Attach them for the
 > one mechanical idea they get right and say what that is; never let one stand
 > alone on an approved shot.
+>
+> **Anchors marked VERSION N, NOT FINAL** are a legitimate design pass, usable
+> as an anchor now, but the author has flagged it as provisional rather than
+> settled. Unlike NOT CANON, these keep their faction prefix — they may well
+> become canon once refined. Treat anything they establish as subject to
+> change until a later-numbered version confirms or supersedes it.
 
 Entry format:
 
@@ -293,6 +299,12 @@ found objects.
 URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/dambaran-entryway-01.png
 Use for: a Dambaran wall opening, distinct from Korad per the user — coursed pale stone in irregular blocks rather than cast rubble-aggregate, a single massive lintel, iron ring-bolts along the top course, and door and jamb protection built as riveted flat steel straps rather than cast or cut plate. First Dambaran anchor in the registry; note it predates PABC's timeline, where §11 has the Dambarans as a people distinct from the Versari, so treat this as their own architectural language rather than early Versari work
 Do not use for: roof, massing or overall building form, which this crop does not show; also not for Korad work, which the user has drawn as a separate vocabulary from this
+Added: 2026-08-28
+
+## dambaran-hall-01.png
+URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/dambaran-hall-01.png
+Use for: **VERSION 1, NOT FINAL** — per the user, this is a first pass, expect it to be superseded by `dambaran-hall-02.png` or later. Until then it is the only Dambaran anchor at hall scale: a colonnaded open interior in the same pale coursed stone as the entryway and tower, plain square piers with the vocabulary's iron ring-bolts repeated down each one, a stepped sunken floor area, and a single framed door of pierced ironwork facing into the room. Boulder base at the near corner ties it to the same construction as the tower
+Do not use for: settled Dambaran canon — treat anything decided here as provisional until a later version confirms or changes it. Also not for exterior massing, since this is an interior cutaway with the near long wall removed
 Added: 2026-08-28
 
 ## dambaran-tower-01.png
