@@ -729,27 +729,85 @@ freezes a measurement; a check that pins a mechanism survives one.
 
 ---
 
+## Sixth pass: the rebalance — three rules for the player, not the AIs
+
+The repo's owner named the imbalance (conquest is a simple compounding loop,
+diplomacy a complicated non-compounding one, diplomatic wins near-absent) and
+picked three rules: make earned warmth durable, make war bill the political
+pool, and make a record of exterminations price the alliance door. All three
+are built, harness-pinned (ten new mechanism checks), and shipped ON:
+
+- **`diplomacy.warmDriftEvery: 3`** — Standing above its baseline decays only
+  every third round; Standing below it recovers at full rate. Forgiveness
+  stays fast, forgetting gets slow.
+- **`sway.warUpkeep: 2`** — every active war bills the political pool 2/round,
+  first and uncancellably. The two loops finally compete for a resource.
+- **`diplomacy.bloodPrice.menacePerKill: 2`** — every faction you were at war
+  with at the moment it died marks you permanently, and Menace can never decay
+  below marks × 2. Read by every reputation gate on both sides of every pact
+  and courtship.
+
+### The two instruments disagree, and that is the finding
+
+AI-vs-AI, at the honest sample (n=90, package against shipped baseline):
+mix share 0.40 → 0.34, unresolved 14 → 21, wars 41 → 45, board dead/bound
+flat. **Worse.** The glowing n=45 combo reading (0.42 mix, 6 unresolved) was
+the first-45-seeds sample doing the arguing — the fourth documented instance.
+
+The scripted-pacifist probe — the instrument that exists because the suite
+cannot see a player who does not play like the AI, and the exact shape of the
+owner's complaint:
+
+| | before | after |
+|---|---|---|
+| **games a peaceful player wins** | **1 of 15** | **3 of 15** |
+| mean Locations it holds | 0.7 | 1.3 |
+| wars declared on it (drift rule alone) | 11.1 | 6.3 |
+
+The suite measures eight copies of `takeAITurn` grinding each other; durable
+warmth and expensive wars are worth little there. They are worth a great deal
+to the one seat at the table trying to be liked. The package ships on the
+probe's verdict, by the owner's call, with the AI-vs-AI cost stated rather
+than hidden.
+
+### The blood price closes a door the AI never used
+
+It fires (7 marks/game; six of eight winners carry marks) and is flat on every
+suite row — because an AI exterminator wins through conquest and cornered
+submission, and neither door ever asks to be liked. One winner sat at Menace 21
+and still took a submission ending. So it is a player-facing rule at zero
+AI-vs-AI cost: a human exterminator finds courting, pacts and the close-out
+priced against their record, permanently. Surrender-at-swordpoint staying open
+to a butcher is deliberate.
+
+### Instrument added
+
+`boardDeadAtEndShare` / `boardBoundAtEndShare` — the whole board, brought in
+or killed, which is what the ending-mix labels were wrongly being read as. On
+the shipped build: **0.75 dead, 0.21 bound**. That pair of numbers is the
+honest description of how exterminatory the game still is, and the target for
+any future claw-back.
+
+---
+
 ## Where I would go next, in order
 
-1. **Close the last wall.** Five games at n=45, fourteen at n=90, and they are
-   now all one shape: two healthy factions, at peace, one alliance from
-   Dominion, at -3 to -10 against a bar of +6. That is a single well-defined
-   problem for the first time. The gift narrows it; something has to finish it.
-   Candidates in order of cheapness: a two-point gift *now that it is aimed*
-   (the treadmill measurement was taken unaimed and is stale by the same rule
-   as everything else here); a Standing bar that eases between the last two
-   survivors; or a draw/tiebreak so a genuine standoff is an ending rather than
-   a timeout.
-2. **Sweep the harness for checks that pin verdicts.** One was found by
-   accident, because a re-measurement broke it. There may be others, and each
-   one silently freezes a tuning value into a rule.
-3. **Ask why a bigger board is worse.** Unchanged and still unexplained, and it
-   now matters more: all three live changes work by reducing the number of
-   parties left to deal with, which is exactly what a bigger board undoes.
+1. **Playtest the rebalance by hand.** The pacifist probe says a peaceful
+   player's game is now materially different (3× the wins, 2× the ground,
+   wars-on-them down). A scripted policy is still not a person; one real
+   session would say whether it *feels* different, which is the question the
+   suite structurally cannot answer.
+2. **The AI does not exploit the new rules.** It still never reads
+   `warUpkeep` before declaring (finding 4's gate, `attackPrice`, is still
+   dark) and never courts harder because warmth now keeps. If the rules stay,
+   re-measuring `attackPrice` on this board is the next expiry — a war that
+   bills the pool is a war with a visible price the gate could finally read.
+3. **The unresolved regression (14 → 21 at n=90) is unowned.** If AI-vs-AI
+   health matters as much as player experience, the next task is finding which
+   of the two paying rules causes it and whether a milder setting keeps the
+   probe gains. `warmDriftEvery: 2` and `warUpkeep: 1` are the untested
+   midpoints of the package.
 
-**The rule I would write into the method doc:** *a dark switch's verdict expires
-when a rule it was condemned against changes.* Three verdicts flipped in this
-work — `dominionWeight`, `huntLandlessBlocker` and `giftAboveShareOfCap` — and
-every one of them flipped because the board moved, not because the switch did.
-Two of the three were caught only because I happened to re-ask. That should not
-be luck.
+The standing rule from the fifth pass — a dark switch's verdict expires when a
+rule it was condemned against changes — now applies to everything condemned
+before this pass, `attackPrice` first among them.

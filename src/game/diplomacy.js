@@ -17,7 +17,7 @@ import { holdsLocation, syncControlHistory } from "./control.js";
 import { registerInterestReaders, interestsOf, interestToward, interestMultiplier } from "./interests.js";
 import {
   registerSwayReaders, tickSway, seedSway, swayIncome, swayOf, spendSway, canAffordSway,
-  canSustainCourtship, swayLedger,
+  canSustainCourtship, swayLedger, recordSway,
 } from "./sway.js";
 import {
   registerPostureReaders, recomputePostures, postureOf, setPosture, postureStated,
@@ -318,7 +318,23 @@ export function trustFloor(state, observerFid) {
   return tf.base + (def.trust || 0.5) * tf.distrustScale;
 }
 
-export function menaceOf(state, pid) { return state.players[pid]?.menace || 0; }
+// §B-blood — Menace with the BLOOD FLOOR under it. Every faction whose
+// elimination this one was at war for leaves a permanent mark
+// (`bloodMarks`, stamped in `sweepEliminations`), and Menace can decay to
+// the floor those marks set but never below it. One rule, priced everywhere
+// the board already reads Menace: `passesRepGates` checks it against
+// tolerance on BOTH sides of every pact and courtship, `denounceWarrant`
+// makes a serial killer permanently denounceable, and `coalitionGrounds`
+// reads it as grounds to rise. An exterminator does not get to spend the
+// late game being trusted; `menacePerKill: 0` switches the floor off.
+export function menaceOf(state, pid) {
+  const raw = state.players[pid]?.menace || 0;
+  const perKill = D().bloodPrice?.menacePerKill ?? 0;
+  if (!perKill) return raw;
+  const marks = state.players[pid]?.bloodMarks || 0;
+  if (!marks) return raw;
+  return Math.max(raw, Math.min(D().menace.max, marks * perKill));
+}
 export function honorOf(state, pid) {
   const h = state.players[pid]?.honor;
   return h == null ? CONFIG.diplomacy.honor.start : h;
@@ -3584,6 +3600,18 @@ function driftStanding(state) {
       const cur = getStanding(state, a, b);
       const target = getBaseline(state, a, b);
       if (cur === target) continue;
+      // §B1 — WARMTH DECAYS SLOWER THAN CONTEMPT HEALS. Drift above the
+      // baseline (a warm relationship cooling) only ticks every
+      // `warmDriftEvery` rounds; drift below it (a cold one recovering) keeps
+      // the full rate. The asymmetry is the point: forgiveness stays fast,
+      // forgetting gets slow. This is the treadmill fix — at the old symmetric
+      // rate a pair needed +2/round of continuous attention just to hold
+      // position against a pact bar of +6, so earned Standing evaporated
+      // faster than any verb could rebuild it, and the measured consequence
+      // was 6.4 eliminations per game against 1.5 pacts. 1 is the no-op and
+      // restores the symmetric decay exactly.
+      if (cur > target && (d.warmDriftEvery ?? 1) > 1
+        && state.round % d.warmDriftEvery !== 0) continue;
       const grudge = factionDef(a)?.grudge ?? 0.4;
       const step = Math.max(1, Math.round(d.driftPerRound * (1 - grudge * d.grudgeDriftScale * 0.5)));
       if (cur > target) setStanding(state, a, b, Math.max(target, cur - step), "drift");
@@ -4432,6 +4460,30 @@ function chargeSwayUpkeep(state, pid) {
   // makes the competition real: a conqueror who cannot cover both loses the
   // courtship, not the conquest, and that is the trade the design is about.
   let spent = chargeOccupation(state, pid);
+  // §B4 — WAR BILLS THE POLITICAL POOL, and it bills FIRST. Until this, the
+  // two loops never competed for anything: conquest spent scrap and actions,
+  // diplomacy spent Sway, and a conqueror ran a full political program on the
+  // side for free. Now every active war claims `sway.warUpkeep` a round of
+  // political capacity — ahead of occupation and courtship, because a war is
+  // the one commitment a faction cannot quietly stop paying for. It cannot
+  // lapse like a courtship; it just drains, down to zero if the pool is
+  // shallow. Choosing a third war now means not affording the courtship that
+  // was going to end the first one. 0 is the no-op.
+  const warRate = CONFIG.sway.warUpkeep ?? 0;
+  if (warRate > 0) {
+    const activeWars = (state.diplomacy.wars || [])
+      .filter((w) => w.a === pid || w.b === pid).length;
+    if (activeWars > 0) {
+      const owed = activeWars * warRate;
+      const paid = Math.min(owed, p.sway || 0);
+      if (paid > 0) {
+        p.sway -= paid;
+        recordSway(state, pid, -paid, `${activeWars} war${activeWars > 1 ? "s" : ""}`);
+        emit(state, "sway_spent", { player: pid, amount: paid, cause: "war-upkeep", left: p.sway });
+        spent += paid;
+      }
+    }
+  }
   const courting = courtingList(state, pid);
   // Longest-running first: an established courtship is the one worth keeping.
   courting.sort((a, b) => (postureOf(state, pid, a).since) - (postureOf(state, pid, b).since));

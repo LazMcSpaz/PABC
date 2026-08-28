@@ -50,183 +50,111 @@
   "overrides": null,
   "governing": {
     "endingMix": {
-      "submissionPlusMixed": 14,
+      "submissionPlusMixed": 19,
       "of": 45,
-      "share": 0.31,
+      "share": 0.42,
       "band": ">= 0.24 of games"
     },
     "medianRoundsToDominion": {
-      "value": 45.5,
+      "value": 42,
       "band": "baseline +/- 4"
     },
     "unresolved": {
-      "value": 5,
+      "value": 6,
       "band": "0"
     }
   },
   "endings": {
-    "submission": 10,
-    "mixed": 4,
-    "conquest": 20,
-    "diplomacy": 6,
-    "unresolved": 5
+    "submission": 16,
+    "diplomacy": 9,
+    "unresolved": 6,
+    "mixed": 3,
+    "conquest": 11
   },
   "diplomacy": {
-    "actsPerAITurn": 0.46,
-    "politicalActsPerAITurn": 0.7,
+    "actsPerAITurn": 0.49,
+    "politicalActsPerAITurn": 0.68,
     "politicalBranchMix": {
-      "court": 2447,
-      "intrigue": 60,
-      "vassalize": 732,
-      "amends": 1881,
-      "war-talk": 50,
+      "court": 2416,
+      "intrigue": 58,
+      "vassalize": 811,
+      "amends": 1612,
+      "war-talk": 60,
       "pact-call": 0,
-      "pact": 42,
-      "enforce-ultimatum": 19,
-      "answer-ultimatum": 18,
+      "pact": 75,
+      "enforce-ultimatum": 24,
+      "answer-ultimatum": 17,
       "close-out": 0,
-      "denounce": 842,
-      "gift": 392,
-      "approach-human": 250
+      "denounce": 859,
+      "gift": 403,
+      "approach-human": 252
     },
-    "denounceShareOfActs": 0.21,
-    "warsPerGame": 38.51,
-    "warsOpenedByUndeclaredAttack": 18.49,
-    "coalitionsPerGame": 2.96,
-    "courtshipsOpenedPerGame": 54.38,
-    "intrigueOpsPerGame": 1.33,
-    "covertActsSeenThrough": 5.36,
-    "sabotageTracedPerGame": 5.36,
-    "minorsAlliedOrVassalisedAtEnd": 1,
-    "minorsEverCourtedPerGame": 3.6,
-    "minorsKilledPerGame": 3.62
+    "denounceShareOfActs": 0.19,
+    "warsPerGame": 40.89,
+    "warsOpenedByUndeclaredAttack": 20.02,
+    "coalitionsPerGame": 2.64,
+    "courtshipsOpenedPerGame": 53.69,
+    "intrigueOpsPerGame": 1.29,
+    "covertActsSeenThrough": 3.64,
+    "sabotageTracedPerGame": 3.64,
+    "boardDeadAtEndShare": 0.75,
+    "boardBoundAtEndShare": 0.21,
+    "minorsAlliedOrVassalisedAtEnd": 1.49,
+    "minorsEverCourtedPerGame": 3.71,
+    "minorsKilledPerGame": 3.51
   },
   "economy": {
-    "medianEndScrap": 20,
-    "maxEndScrap": 78,
-    "factionsWithEmptyWheelAtR15": 1.76,
-    "factionsEmptyWheelLandlessAtR15": 1.11,
-    "factionsEmptyWheelHoldingLandAtR15": 0.64,
-    "chipUpgradesByAI": 1046,
-    "purchasesDelayedBySupply": 519,
+    "medianEndScrap": 20.5,
+    "maxEndScrap": 81,
+    "factionsWithEmptyWheelAtR15": 2.02,
+    "factionsEmptyWheelLandlessAtR15": 1,
+    "factionsEmptyWheelHoldingLandAtR15": 1.02,
+    "chipUpgradesByAI": 1041,
+    "purchasesDelayedBySupply": 433,
     "purchasesRefusedUnsupplied": 0,
-    "influencePressureEvents": 658,
-    "occupationCharges": 1999,
-    "swayMinorIncomeMin": 9,
-    "swayLeaderToMinorRatio": 1.78,
-    "swayRoundsAtCapShare": 0.26,
-    "courtshipsLapsedPerGame": 1.27
+    "influencePressureEvents": 666,
+    "occupationCharges": 1987,
+    "swayMinorIncomeMin": 8,
+    "swayLeaderToMinorRatio": 2.18,
+    "swayRoundsAtCapShare": 0.21,
+    "courtshipsLapsedPerGame": 3.8
   },
   "games": [
     {
       "seed": 1234,
-      "round": 52,
+      "round": 31,
       "winner": "goldgrass",
       "ending": "submission",
-      "aiTurns": 241,
-      "actsPerTurn": 0.6473029045643154,
-      "politicalActsPerTurn": 0.6639004149377593,
+      "aiTurns": 156,
+      "actsPerTurn": 0.6153846153846154,
+      "politicalActsPerTurn": 0.6794871794871795,
       "branchMix": {
-        "court": 43,
-        "amends": 44,
-        "denounce": 22,
-        "vassalize": 27,
-        "war-talk": 4,
-        "approach-human": 4,
-        "answer-ultimatum": 1,
+        "court": 41,
+        "amends": 17,
+        "approach-human": 5,
+        "denounce": 14,
+        "vassalize": 16,
+        "war-talk": 3,
+        "enforce-ultimatum": 3,
         "pact": 1,
-        "gift": 14
+        "gift": 6
       },
-      "denounceShare": 0.14102564102564102,
-      "wars": 60,
-      "surpriseOpenings": 25,
+      "denounceShare": 0.14583333333333334,
+      "wars": 38,
+      "surpriseOpenings": 17,
       "opsRun": 0,
-      "opsBackfired": 3,
-      "sabotageTraced": 3,
-      "courtOpened": 43,
-      "coalitions": 6,
+      "opsBackfired": 0,
+      "sabotageTraced": 0,
+      "courtOpened": 41,
+      "coalitions": 2,
+      "board": {
+        "total": 8,
+        "dead": 6,
+        "bound": 2
+      },
       "minors": {
         "allied": 0,
         "vassal": 3,
-        "dead": 3,
-        "everCourted": 4,
-        "total": 4
-      },
-      "endScrap": [
-        {
-          "pid": "versari",
-          "scrap": 12,
-          "techLevel": 1,
-          "nodes": 0,
-          "locs": 2
-        },
-        {
-          "pid": "goldgrass",
-          "scrap": 16,
-          "techLevel": 3,
-          "nodes": 2,
-          "locs": 1
-        },
-        {
-          "pid": "lakers",
-          "scrap": 30,
-          "techLevel": 2,
-          "nodes": 1,
-          "locs": 1
-        },
-        {
-          "pid": "plainers",
-          "scrap": 42,
-          "techLevel": 1,
-          "nodes": 0,
-          "locs": 0
-        }
-      ],
-      "emptyWheels": 2,
-      "emptyWheelsLandless": 1,
-      "emptyWheelsWithLand": 1,
-      "delayedPurchases": 10,
-      "supplyRefusals": 0,
-      "chipUpgrades": 28,
-      "pressureEvents": 13,
-      "occupationCharges": 46,
-      "sway": {
-        "minMinor": 11,
-        "maxMajor": 41,
-        "atCapShare": 0.3004807692307692,
-        "lapsedCourtships": 1
-      },
-      "ms": 3307
-    },
-    {
-      "seed": 424242,
-      "round": 40,
-      "winner": "versari",
-      "ending": "mixed",
-      "aiTurns": 201,
-      "actsPerTurn": 0.3582089552238806,
-      "politicalActsPerTurn": 0.6318407960199005,
-      "branchMix": {
-        "court": 45,
-        "amends": 25,
-        "denounce": 21,
-        "vassalize": 18,
-        "approach-human": 3,
-        "pact": 2,
-        "intrigue": 1,
-        "gift": 12
-      },
-      "denounceShare": 0.2916666666666667,
-      "wars": 27,
-      "surpriseOpenings": 12,
-      "opsRun": 1,
-      "opsBackfired": 4,
-      "sabotageTraced": 4,
-      "courtOpened": 45,
-      "coalitions": 1,
-      "minors": {
-        "allied": 0,
-        "vassal": 2,
         "dead": 4,
         "everCourted": 4,
         "total": 4
@@ -234,31 +162,31 @@
       "endScrap": [
         {
           "pid": "versari",
-          "scrap": 18,
+          "scrap": 14,
           "techLevel": 1,
           "nodes": 0,
           "locs": 1
         },
         {
           "pid": "goldgrass",
-          "scrap": 33,
-          "techLevel": 3,
-          "nodes": 2,
+          "scrap": 0,
+          "techLevel": 2,
+          "nodes": 1,
           "locs": 1
         },
         {
           "pid": "lakers",
-          "scrap": 22,
-          "techLevel": 1,
-          "nodes": 0,
-          "locs": 0
+          "scrap": 27,
+          "techLevel": 4,
+          "nodes": 2,
+          "locs": 4
         },
         {
           "pid": "plainers",
-          "scrap": 8,
-          "techLevel": 2,
-          "nodes": 1,
-          "locs": 2
+          "scrap": 16,
+          "techLevel": 1,
+          "nodes": 0,
+          "locs": 0
         }
       ],
       "emptyWheels": 2,
@@ -266,47 +194,223 @@
       "emptyWheelsWithLand": 1,
       "delayedPurchases": 4,
       "supplyRefusals": 0,
-      "chipUpgrades": 18,
-      "pressureEvents": 10,
-      "occupationCharges": 22,
+      "chipUpgrades": 11,
+      "pressureEvents": 12,
+      "occupationCharges": 43,
       "sway": {
         "minMinor": null,
-        "maxMajor": 38,
-        "atCapShare": 0.325,
-        "lapsedCourtships": 0
+        "maxMajor": 42,
+        "atCapShare": 0.1693548387096774,
+        "lapsedCourtships": 4
       },
-      "ms": 2519
+      "ms": 2042
+    },
+    {
+      "seed": 424242,
+      "round": 45,
+      "winner": "goldgrass",
+      "ending": "submission",
+      "aiTurns": 217,
+      "actsPerTurn": 0.3686635944700461,
+      "politicalActsPerTurn": 0.5161290322580645,
+      "branchMix": {
+        "court": 46,
+        "amends": 20,
+        "denounce": 15,
+        "vassalize": 16,
+        "war-talk": 2,
+        "intrigue": 4,
+        "gift": 8,
+        "approach-human": 1
+      },
+      "denounceShare": 0.1875,
+      "wars": 33,
+      "surpriseOpenings": 18,
+      "opsRun": 4,
+      "opsBackfired": 9,
+      "sabotageTraced": 9,
+      "courtOpened": 46,
+      "coalitions": 1,
+      "board": {
+        "total": 8,
+        "dead": 6,
+        "bound": 2
+      },
+      "minors": {
+        "allied": 0,
+        "vassal": 0,
+        "dead": 4,
+        "everCourted": 4,
+        "total": 4
+      },
+      "endScrap": [
+        {
+          "pid": "versari",
+          "scrap": 7,
+          "techLevel": 1,
+          "nodes": 0,
+          "locs": 1
+        },
+        {
+          "pid": "goldgrass",
+          "scrap": 2,
+          "techLevel": 3,
+          "nodes": 2,
+          "locs": 3
+        },
+        {
+          "pid": "lakers",
+          "scrap": 42,
+          "techLevel": 1,
+          "nodes": 0,
+          "locs": 0
+        },
+        {
+          "pid": "plainers",
+          "scrap": 23,
+          "techLevel": 3,
+          "nodes": 2,
+          "locs": 2
+        }
+      ],
+      "emptyWheels": 2,
+      "emptyWheelsLandless": 1,
+      "emptyWheelsWithLand": 1,
+      "delayedPurchases": 3,
+      "supplyRefusals": 0,
+      "chipUpgrades": 24,
+      "pressureEvents": 14,
+      "occupationCharges": 30,
+      "sway": {
+        "minMinor": null,
+        "maxMajor": 35,
+        "atCapShare": 0.20833333333333334,
+        "lapsedCourtships": 7
+      },
+      "ms": 3057
     },
     {
       "seed": 7,
-      "round": 62,
-      "winner": "dambarans",
-      "ending": "conquest",
-      "aiTurns": 275,
-      "actsPerTurn": 0.2545454545454545,
-      "politicalActsPerTurn": 0.5127272727272727,
+      "round": 44,
+      "winner": "tempest",
+      "ending": "submission",
+      "aiTurns": 212,
+      "actsPerTurn": 0.330188679245283,
+      "politicalActsPerTurn": 0.6132075471698113,
       "branchMix": {
-        "court": 65,
-        "denounce": 20,
-        "amends": 35,
-        "vassalize": 7,
-        "war-talk": 4,
-        "approach-human": 6,
-        "gift": 4
+        "court": 53,
+        "denounce": 18,
+        "amends": 28,
+        "vassalize": 18,
+        "pact": 1,
+        "war-talk": 1,
+        "gift": 4,
+        "intrigue": 4,
+        "approach-human": 3
       },
-      "denounceShare": 0.2857142857142857,
-      "wars": 24,
+      "denounceShare": 0.2571428571428571,
+      "wars": 29,
       "surpriseOpenings": 14,
-      "opsRun": 0,
+      "opsRun": 4,
       "opsBackfired": 0,
       "sabotageTraced": 0,
-      "courtOpened": 65,
-      "coalitions": 3,
+      "courtOpened": 53,
+      "coalitions": 1,
+      "board": {
+        "total": 8,
+        "dead": 6,
+        "bound": 2
+      },
       "minors": {
-        "allied": 1,
-        "vassal": 0,
-        "dead": 3,
+        "allied": 2,
+        "vassal": 1,
+        "dead": 2,
         "everCourted": 3,
+        "total": 4
+      },
+      "endScrap": [
+        {
+          "pid": "versari",
+          "scrap": 3,
+          "techLevel": 2,
+          "nodes": 0,
+          "locs": 2
+        },
+        {
+          "pid": "goldgrass",
+          "scrap": 27,
+          "techLevel": 1,
+          "nodes": 0,
+          "locs": 1
+        },
+        {
+          "pid": "lakers",
+          "scrap": 15,
+          "techLevel": 1,
+          "nodes": 0,
+          "locs": 0
+        },
+        {
+          "pid": "plainers",
+          "scrap": 35,
+          "techLevel": 1,
+          "nodes": 0,
+          "locs": 0
+        }
+      ],
+      "emptyWheels": 4,
+      "emptyWheelsLandless": 2,
+      "emptyWheelsWithLand": 2,
+      "delayedPurchases": 1,
+      "supplyRefusals": 0,
+      "chipUpgrades": 22,
+      "pressureEvents": 9,
+      "occupationCharges": 35,
+      "sway": {
+        "minMinor": 12,
+        "maxMajor": null,
+        "atCapShare": 0.19318181818181818,
+        "lapsedCourtships": 4
+      },
+      "ms": 2601
+    },
+    {
+      "seed": 991,
+      "round": 31,
+      "winner": "goldgrass",
+      "ending": "diplomacy",
+      "aiTurns": 153,
+      "actsPerTurn": 0.43137254901960786,
+      "politicalActsPerTurn": 0.6405228758169934,
+      "branchMix": {
+        "court": 39,
+        "denounce": 18,
+        "amends": 20,
+        "vassalize": 9,
+        "pact": 4,
+        "gift": 5,
+        "war-talk": 1,
+        "approach-human": 1,
+        "intrigue": 1
+      },
+      "denounceShare": 0.2727272727272727,
+      "wars": 25,
+      "surpriseOpenings": 11,
+      "opsRun": 1,
+      "opsBackfired": 0,
+      "sabotageTraced": 0,
+      "courtOpened": 39,
+      "coalitions": 2,
+      "board": {
+        "total": 8,
+        "dead": 5,
+        "bound": 3
+      },
+      "minors": {
+        "allied": 0,
+        "vassal": 1,
+        "dead": 4,
+        "everCourted": 4,
         "total": 4
       },
       "endScrap": [
@@ -319,178 +423,106 @@
         },
         {
           "pid": "goldgrass",
-          "scrap": 20,
-          "techLevel": 1,
-          "nodes": 0,
-          "locs": 0
-        },
-        {
-          "pid": "lakers",
-          "scrap": 34,
-          "techLevel": 1,
-          "nodes": 0,
-          "locs": 0
-        },
-        {
-          "pid": "plainers",
-          "scrap": 27,
-          "techLevel": 1,
-          "nodes": 0,
-          "locs": 1
-        }
-      ],
-      "emptyWheels": 4,
-      "emptyWheelsLandless": 3,
-      "emptyWheelsWithLand": 1,
-      "delayedPurchases": 0,
-      "supplyRefusals": 0,
-      "chipUpgrades": 26,
-      "pressureEvents": 22,
-      "occupationCharges": 59,
-      "sway": {
-        "minMinor": 21,
-        "maxMajor": null,
-        "atCapShare": 0.23588709677419356,
-        "lapsedCourtships": 3
-      },
-      "ms": 3579
-    },
-    {
-      "seed": 991,
-      "round": 22,
-      "winner": "goldgrass",
-      "ending": "diplomacy",
-      "aiTurns": 121,
-      "actsPerTurn": 0.45454545454545453,
-      "politicalActsPerTurn": 0.7024793388429752,
-      "branchMix": {
-        "court": 34,
-        "denounce": 16,
-        "amends": 14,
-        "vassalize": 8,
-        "pact": 4,
-        "gift": 6,
-        "approach-human": 2,
-        "war-talk": 1
-      },
-      "denounceShare": 0.2909090909090909,
-      "wars": 19,
-      "surpriseOpenings": 10,
-      "opsRun": 0,
-      "opsBackfired": 0,
-      "sabotageTraced": 0,
-      "courtOpened": 34,
-      "coalitions": 2,
-      "minors": {
-        "allied": 0,
-        "vassal": 1,
-        "dead": 4,
-        "everCourted": 4,
-        "total": 4
-      },
-      "endScrap": [
-        {
-          "pid": "versari",
-          "scrap": 4,
-          "techLevel": 1,
-          "nodes": 0,
-          "locs": 0
-        },
-        {
-          "pid": "goldgrass",
-          "scrap": 48,
+          "scrap": 24,
           "techLevel": 2,
           "nodes": 1,
           "locs": 1
         },
         {
           "pid": "lakers",
-          "scrap": 39,
-          "techLevel": 4,
-          "nodes": 3,
+          "scrap": 33,
+          "techLevel": 5,
+          "nodes": 4,
           "locs": 2
         },
         {
           "pid": "plainers",
-          "scrap": 18,
-          "techLevel": 4,
-          "nodes": 2,
+          "scrap": 22,
+          "techLevel": 5,
+          "nodes": 4,
           "locs": 4
         }
       ],
       "emptyWheels": 1,
       "emptyWheelsLandless": 1,
       "emptyWheelsWithLand": 0,
-      "delayedPurchases": 2,
+      "delayedPurchases": 5,
       "supplyRefusals": 0,
-      "chipUpgrades": 10,
-      "pressureEvents": 2,
-      "occupationCharges": 21,
+      "chipUpgrades": 21,
+      "pressureEvents": 7,
+      "occupationCharges": 38,
       "sway": {
         "minMinor": null,
-        "maxMajor": 29,
-        "atCapShare": 0.21022727272727273,
+        "maxMajor": 32,
+        "atCapShare": 0.2056451612903226,
         "lapsedCourtships": 0
       },
-      "ms": 1213
+      "ms": 1791
     },
     {
       "seed": 4711,
-      "round": 50,
-      "winner": "plainers",
-      "ending": "conquest",
-      "aiTurns": 199,
-      "actsPerTurn": 0.2663316582914573,
-      "politicalActsPerTurn": 0.7085427135678392,
+      "round": 31,
+      "winner": "lakers",
+      "ending": "submission",
+      "aiTurns": 167,
+      "actsPerTurn": 0.4491017964071856,
+      "politicalActsPerTurn": 0.6287425149700598,
       "branchMix": {
-        "court": 50,
-        "denounce": 12,
-        "vassalize": 7,
-        "amends": 61,
+        "court": 45,
+        "denounce": 14,
+        "vassalize": 14,
+        "amends": 11,
+        "pact": 2,
+        "war-talk": 1,
+        "intrigue": 4,
         "approach-human": 9,
-        "pact": 1,
-        "war-talk": 1
+        "enforce-ultimatum": 5
       },
-      "denounceShare": 0.22641509433962265,
-      "wars": 25,
-      "surpriseOpenings": 14,
-      "opsRun": 0,
+      "denounceShare": 0.18666666666666668,
+      "wars": 37,
+      "surpriseOpenings": 15,
+      "opsRun": 4,
       "opsBackfired": 0,
       "sabotageTraced": 0,
-      "courtOpened": 50,
-      "coalitions": 3,
+      "courtOpened": 45,
+      "coalitions": 5,
+      "board": {
+        "total": 8,
+        "dead": 6,
+        "bound": 2
+      },
       "minors": {
         "allied": 0,
-        "vassal": 0,
-        "dead": 4,
-        "everCourted": 1,
+        "vassal": 1,
+        "dead": 3,
+        "everCourted": 4,
         "total": 4
       },
       "endScrap": [
         {
           "pid": "versari",
-          "scrap": 7,
+          "scrap": 14,
           "techLevel": 1,
           "nodes": 0,
           "locs": 0
         },
         {
           "pid": "goldgrass",
-          "scrap": 20,
+          "scrap": 24,
           "techLevel": 2,
           "nodes": 1,
-          "locs": 0
+          "locs": 1
         },
         {
           "pid": "lakers",
-          "scrap": 48,
-          "techLevel": 2,
-          "nodes": 1,
-          "locs": 0
+          "scrap": 12,
+          "techLevel": 3,
+          "nodes": 2,
+          "locs": 1
         },
         {
           "pid": "plainers",
-          "scrap": 4,
+          "scrap": 40,
           "techLevel": 3,
           "nodes": 2,
           "locs": 2
@@ -499,47 +531,55 @@
       "emptyWheels": 1,
       "emptyWheelsLandless": 1,
       "emptyWheelsWithLand": 0,
-      "delayedPurchases": 4,
+      "delayedPurchases": 10,
       "supplyRefusals": 0,
       "chipUpgrades": 22,
-      "pressureEvents": 13,
-      "occupationCharges": 21,
+      "pressureEvents": 11,
+      "occupationCharges": 57,
       "sway": {
-        "minMinor": null,
-        "maxMajor": 26,
-        "atCapShare": 0.2325,
-        "lapsedCourtships": 0
+        "minMinor": 13,
+        "maxMajor": 33,
+        "atCapShare": 0.1532258064516129,
+        "lapsedCourtships": 7
       },
-      "ms": 2244
+      "ms": 1692
     },
     {
       "seed": 8123,
-      "round": 53,
-      "winner": "versari",
-      "ending": "submission",
-      "aiTurns": 247,
-      "actsPerTurn": 0.5951417004048583,
-      "politicalActsPerTurn": 0.6558704453441295,
+      "round": 81,
+      "winner": null,
+      "ending": "unresolved",
+      "aiTurns": 345,
+      "actsPerTurn": 0.7681159420289855,
+      "politicalActsPerTurn": 0.7188405797101449,
       "branchMix": {
-        "court": 61,
-        "denounce": 18,
-        "approach-human": 1,
-        "amends": 42,
-        "vassalize": 36,
-        "war-talk": 1,
-        "gift": 3
+        "court": 59,
+        "denounce": 38,
+        "approach-human": 16,
+        "amends": 41,
+        "vassalize": 39,
+        "gift": 41,
+        "war-talk": 9,
+        "enforce-ultimatum": 1,
+        "answer-ultimatum": 2,
+        "intrigue": 2
       },
-      "denounceShare": 0.12244897959183673,
-      "wars": 61,
-      "surpriseOpenings": 26,
-      "opsRun": 0,
-      "opsBackfired": 12,
-      "sabotageTraced": 12,
-      "courtOpened": 61,
-      "coalitions": 2,
+      "denounceShare": 0.14339622641509434,
+      "wars": 96,
+      "surpriseOpenings": 48,
+      "opsRun": 2,
+      "opsBackfired": 8,
+      "sabotageTraced": 8,
+      "courtOpened": 59,
+      "coalitions": 4,
+      "board": {
+        "total": 8,
+        "dead": 5,
+        "bound": 2
+      },
       "minors": {
         "allied": 1,
-        "vassal": 1,
+        "vassal": 3,
         "dead": 4,
         "everCourted": 4,
         "total": 4
@@ -547,90 +587,10 @@
       "endScrap": [
         {
           "pid": "versari",
-          "scrap": 16,
+          "scrap": 10,
           "techLevel": 3,
           "nodes": 1,
-          "locs": 3
-        },
-        {
-          "pid": "goldgrass",
-          "scrap": 30,
-          "techLevel": 3,
-          "nodes": 2,
-          "locs": 1
-        },
-        {
-          "pid": "lakers",
-          "scrap": 38,
-          "techLevel": 1,
-          "nodes": 0,
-          "locs": 1
-        },
-        {
-          "pid": "plainers",
-          "scrap": 37,
-          "techLevel": 2,
-          "nodes": 1,
-          "locs": 0
-        }
-      ],
-      "emptyWheels": 1,
-      "emptyWheelsLandless": 0,
-      "emptyWheelsWithLand": 1,
-      "delayedPurchases": 5,
-      "supplyRefusals": 0,
-      "chipUpgrades": 25,
-      "pressureEvents": 11,
-      "occupationCharges": 74,
-      "sway": {
-        "minMinor": null,
-        "maxMajor": 35,
-        "atCapShare": 0.3160377358490566,
-        "lapsedCourtships": 0
-      },
-      "ms": 2877
-    },
-    {
-      "seed": 20260821,
-      "round": 49,
-      "winner": "lakers",
-      "ending": "conquest",
-      "aiTurns": 235,
-      "actsPerTurn": 0.425531914893617,
-      "politicalActsPerTurn": 0.6808510638297872,
-      "branchMix": {
-        "court": 42,
-        "approach-human": 5,
-        "amends": 30,
-        "denounce": 13,
-        "vassalize": 31,
-        "gift": 31,
-        "intrigue": 5,
-        "war-talk": 2,
-        "answer-ultimatum": 1
-      },
-      "denounceShare": 0.13,
-      "wars": 50,
-      "surpriseOpenings": 20,
-      "opsRun": 5,
-      "opsBackfired": 14,
-      "sabotageTraced": 14,
-      "courtOpened": 42,
-      "coalitions": 5,
-      "minors": {
-        "allied": 0,
-        "vassal": 0,
-        "dead": 4,
-        "everCourted": 4,
-        "total": 4
-      },
-      "endScrap": [
-        {
-          "pid": "versari",
-          "scrap": 12,
-          "techLevel": 1,
-          "nodes": 0,
-          "locs": 1
+          "locs": 2
         },
         {
           "pid": "goldgrass",
@@ -641,14 +601,97 @@
         },
         {
           "pid": "lakers",
-          "scrap": 28,
+          "scrap": 39,
+          "techLevel": 1,
+          "nodes": 0,
+          "locs": 1
+        },
+        {
+          "pid": "plainers",
+          "scrap": 24,
+          "techLevel": 5,
+          "nodes": 4,
+          "locs": 2
+        }
+      ],
+      "emptyWheels": 1,
+      "emptyWheelsLandless": 0,
+      "emptyWheelsWithLand": 1,
+      "delayedPurchases": 9,
+      "supplyRefusals": 0,
+      "chipUpgrades": 36,
+      "pressureEvents": 28,
+      "occupationCharges": 63,
+      "sway": {
+        "minMinor": null,
+        "maxMajor": 18,
+        "atCapShare": 0.2824074074074074,
+        "lapsedCourtships": 1
+      },
+      "ms": 4880
+    },
+    {
+      "seed": 20260821,
+      "round": 35,
+      "winner": "goldgrass",
+      "ending": "mixed",
+      "aiTurns": 191,
+      "actsPerTurn": 0.4293193717277487,
+      "politicalActsPerTurn": 0.6701570680628273,
+      "branchMix": {
+        "court": 45,
+        "denounce": 20,
+        "approach-human": 5,
+        "amends": 31,
+        "vassalize": 18,
+        "pact": 2,
+        "gift": 7
+      },
+      "denounceShare": 0.24390243902439024,
+      "wars": 29,
+      "surpriseOpenings": 17,
+      "opsRun": 0,
+      "opsBackfired": 0,
+      "sabotageTraced": 0,
+      "courtOpened": 45,
+      "coalitions": 3,
+      "board": {
+        "total": 8,
+        "dead": 5,
+        "bound": 3
+      },
+      "minors": {
+        "allied": 0,
+        "vassal": 4,
+        "dead": 4,
+        "everCourted": 4,
+        "total": 4
+      },
+      "endScrap": [
+        {
+          "pid": "versari",
+          "scrap": 13,
+          "techLevel": 1,
+          "nodes": 0,
+          "locs": 1
+        },
+        {
+          "pid": "goldgrass",
+          "scrap": 27,
           "techLevel": 3,
           "nodes": 2,
           "locs": 1
         },
         {
+          "pid": "lakers",
+          "scrap": 40,
+          "techLevel": 2,
+          "nodes": 1,
+          "locs": 1
+        },
+        {
           "pid": "plainers",
-          "scrap": 3,
+          "scrap": 27,
           "techLevel": 1,
           "nodes": 0,
           "locs": 0
@@ -657,48 +700,54 @@
       "emptyWheels": 2,
       "emptyWheelsLandless": 1,
       "emptyWheelsWithLand": 1,
-      "delayedPurchases": 8,
+      "delayedPurchases": 5,
       "supplyRefusals": 0,
-      "chipUpgrades": 22,
-      "pressureEvents": 13,
-      "occupationCharges": 36,
+      "chipUpgrades": 19,
+      "pressureEvents": 10,
+      "occupationCharges": 26,
       "sway": {
         "minMinor": null,
-        "maxMajor": 26,
-        "atCapShare": 0.3494897959183674,
-        "lapsedCourtships": 0
+        "maxMajor": 35,
+        "atCapShare": 0.225,
+        "lapsedCourtships": 1
       },
-      "ms": 2704
+      "ms": 2348
     },
     {
       "seed": 31337,
       "round": 81,
       "winner": null,
       "ending": "unresolved",
-      "aiTurns": 256,
-      "actsPerTurn": 0.66796875,
-      "politicalActsPerTurn": 0.7578125,
+      "aiTurns": 295,
+      "actsPerTurn": 0.5728813559322034,
+      "politicalActsPerTurn": 0.6644067796610169,
       "branchMix": {
-        "court": 47,
-        "denounce": 14,
-        "amends": 87,
-        "vassalize": 28,
-        "intrigue": 1,
-        "approach-human": 3,
-        "answer-ultimatum": 1,
-        "gift": 13
+        "court": 68,
+        "denounce": 38,
+        "amends": 31,
+        "vassalize": 21,
+        "pact": 4,
+        "intrigue": 5,
+        "approach-human": 7,
+        "gift": 21,
+        "war-talk": 1
       },
-      "denounceShare": 0.08187134502923976,
-      "wars": 70,
-      "surpriseOpenings": 36,
-      "opsRun": 1,
-      "opsBackfired": 23,
-      "sabotageTraced": 23,
-      "courtOpened": 47,
-      "coalitions": 5,
+      "denounceShare": 0.22485207100591717,
+      "wars": 61,
+      "surpriseOpenings": 22,
+      "opsRun": 5,
+      "opsBackfired": 8,
+      "sabotageTraced": 8,
+      "courtOpened": 68,
+      "coalitions": 4,
+      "board": {
+        "total": 8,
+        "dead": 6,
+        "bound": 1
+      },
       "minors": {
         "allied": 0,
-        "vassal": 0,
+        "vassal": 1,
         "dead": 3,
         "everCourted": 3,
         "total": 4
@@ -706,868 +755,82 @@
       "endScrap": [
         {
           "pid": "versari",
-          "scrap": 6,
+          "scrap": 1,
           "techLevel": 1,
           "nodes": 0,
-          "locs": 1
+          "locs": 0
         },
         {
           "pid": "goldgrass",
-          "scrap": 35,
+          "scrap": 22,
           "techLevel": 4,
           "nodes": 3,
           "locs": 2
         },
         {
           "pid": "lakers",
-          "scrap": 42,
+          "scrap": 22,
           "techLevel": 3,
           "nodes": 2,
-          "locs": 1
+          "locs": 3
         },
         {
           "pid": "plainers",
           "scrap": 30,
-          "techLevel": 1,
+          "techLevel": 3,
           "nodes": 0,
           "locs": 0
         }
       ],
       "emptyWheels": 2,
-      "emptyWheelsLandless": 1,
-      "emptyWheelsWithLand": 1,
-      "delayedPurchases": 29,
+      "emptyWheelsLandless": 2,
+      "emptyWheelsWithLand": 0,
+      "delayedPurchases": 5,
       "supplyRefusals": 0,
-      "chipUpgrades": 46,
-      "pressureEvents": 23,
-      "occupationCharges": 60,
+      "chipUpgrades": 51,
+      "pressureEvents": 8,
+      "occupationCharges": 23,
       "sway": {
-        "minMinor": 9,
-        "maxMajor": 29,
-        "atCapShare": 0.25,
+        "minMinor": 26,
+        "maxMajor": 25,
+        "atCapShare": 0.31635802469135804,
         "lapsedCourtships": 0
       },
-      "ms": 3296
+      "ms": 3514
     },
     {
       "seed": 55555,
-      "round": 81,
-      "winner": null,
-      "ending": "unresolved",
-      "aiTurns": 273,
-      "actsPerTurn": 0.34798534798534797,
-      "politicalActsPerTurn": 0.8571428571428571,
-      "branchMix": {
-        "court": 61,
-        "amends": 114,
-        "denounce": 24,
-        "vassalize": 18,
-        "approach-human": 8,
-        "enforce-ultimatum": 1,
-        "intrigue": 3,
-        "gift": 5
-      },
-      "denounceShare": 0.25263157894736843,
-      "wars": 33,
-      "surpriseOpenings": 12,
-      "opsRun": 3,
-      "opsBackfired": 30,
-      "sabotageTraced": 30,
-      "courtOpened": 61,
-      "coalitions": 3,
-      "minors": {
-        "allied": 0,
-        "vassal": 0,
-        "dead": 3,
-        "everCourted": 3,
-        "total": 4
-      },
-      "endScrap": [
-        {
-          "pid": "versari",
-          "scrap": 8,
-          "techLevel": 1,
-          "nodes": 0,
-          "locs": 0
-        },
-        {
-          "pid": "goldgrass",
-          "scrap": 49,
-          "techLevel": 3,
-          "nodes": 2,
-          "locs": 1
-        },
-        {
-          "pid": "lakers",
-          "scrap": 24,
-          "techLevel": 1,
-          "nodes": 0,
-          "locs": 0
-        },
-        {
-          "pid": "plainers",
-          "scrap": 26,
-          "techLevel": 3,
-          "nodes": 2,
-          "locs": 2
-        }
-      ],
-      "emptyWheels": 2,
-      "emptyWheelsLandless": 2,
-      "emptyWheelsWithLand": 0,
-      "delayedPurchases": 3,
-      "supplyRefusals": 0,
-      "chipUpgrades": 34,
-      "pressureEvents": 9,
-      "occupationCharges": 40,
-      "sway": {
-        "minMinor": 25,
-        "maxMajor": 20,
-        "atCapShare": 0.24845679012345678,
-        "lapsedCourtships": 9
-      },
-      "ms": 3733
-    },
-    {
-      "seed": 90210,
-      "round": 54,
-      "winner": "dambarans",
-      "ending": "conquest",
-      "aiTurns": 227,
-      "actsPerTurn": 0.3876651982378855,
-      "politicalActsPerTurn": 0.7092511013215859,
+      "round": 42,
+      "winner": "lakers",
+      "ending": "submission",
+      "aiTurns": 212,
+      "actsPerTurn": 0.5,
+      "politicalActsPerTurn": 0.6839622641509434,
       "branchMix": {
         "court": 48,
-        "denounce": 30,
-        "amends": 58,
-        "vassalize": 13,
-        "approach-human": 4,
-        "gift": 3,
-        "intrigue": 5
+        "amends": 11,
+        "denounce": 28,
+        "vassalize": 19,
+        "approach-human": 13,
+        "pact": 3,
+        "intrigue": 3,
+        "answer-ultimatum": 1,
+        "enforce-ultimatum": 2,
+        "gift": 17
       },
-      "denounceShare": 0.3409090909090909,
-      "wars": 30,
-      "surpriseOpenings": 11,
-      "opsRun": 5,
+      "denounceShare": 0.2641509433962264,
+      "wars": 33,
+      "surpriseOpenings": 14,
+      "opsRun": 3,
       "opsBackfired": 0,
       "sabotageTraced": 0,
       "courtOpened": 48,
-      "coalitions": 4,
-      "minors": {
-        "allied": 0,
-        "vassal": 0,
-        "dead": 3,
-        "everCourted": 4,
-        "total": 4
-      },
-      "endScrap": [
-        {
-          "pid": "versari",
-          "scrap": 15,
-          "techLevel": 2,
-          "nodes": 1,
-          "locs": 3
-        },
-        {
-          "pid": "goldgrass",
-          "scrap": 27,
-          "techLevel": 3,
-          "nodes": 1,
-          "locs": 2
-        },
-        {
-          "pid": "lakers",
-          "scrap": 13,
-          "techLevel": 1,
-          "nodes": 0,
-          "locs": 0
-        },
-        {
-          "pid": "plainers",
-          "scrap": 32,
-          "techLevel": 5,
-          "nodes": 4,
-          "locs": 1
-        }
-      ],
-      "emptyWheels": 1,
-      "emptyWheelsLandless": 1,
-      "emptyWheelsWithLand": 0,
-      "delayedPurchases": 29,
-      "supplyRefusals": 0,
-      "chipUpgrades": 32,
-      "pressureEvents": 9,
-      "occupationCharges": 67,
-      "sway": {
-        "minMinor": 20,
-        "maxMajor": null,
-        "atCapShare": 0.2175925925925926,
-        "lapsedCourtships": 1
-      },
-      "ms": 3305
-    },
-    {
-      "seed": 123456,
-      "round": 67,
-      "winner": "lakers",
-      "ending": "conquest",
-      "aiTurns": 293,
-      "actsPerTurn": 0.6279863481228669,
-      "politicalActsPerTurn": 0.6962457337883959,
-      "branchMix": {
-        "court": 62,
-        "denounce": 26,
-        "amends": 56,
-        "approach-human": 6,
-        "vassalize": 31,
-        "pact": 1,
-        "intrigue": 5,
-        "gift": 16,
-        "enforce-ultimatum": 1
-      },
-      "denounceShare": 0.14130434782608695,
-      "wars": 67,
-      "surpriseOpenings": 33,
-      "opsRun": 5,
-      "opsBackfired": 1,
-      "sabotageTraced": 1,
-      "courtOpened": 62,
-      "coalitions": 5,
-      "minors": {
-        "allied": 0,
-        "vassal": 0,
-        "dead": 4,
-        "everCourted": 4,
-        "total": 4
-      },
-      "endScrap": [
-        {
-          "pid": "versari",
-          "scrap": 12,
-          "techLevel": 1,
-          "nodes": 0,
-          "locs": 3
-        },
-        {
-          "pid": "goldgrass",
-          "scrap": 23,
-          "techLevel": 2,
-          "nodes": 1,
-          "locs": 2
-        },
-        {
-          "pid": "lakers",
-          "scrap": 28,
-          "techLevel": 3,
-          "nodes": 2,
-          "locs": 2
-        },
-        {
-          "pid": "plainers",
-          "scrap": 34,
-          "techLevel": 1,
-          "nodes": 0,
-          "locs": 0
-        }
-      ],
-      "emptyWheels": 2,
-      "emptyWheelsLandless": 1,
-      "emptyWheelsWithLand": 1,
-      "delayedPurchases": 18,
-      "supplyRefusals": 0,
-      "chipUpgrades": 37,
-      "pressureEvents": 27,
-      "occupationCharges": 69,
-      "sway": {
-        "minMinor": null,
-        "maxMajor": 32,
-        "atCapShare": 0.31902985074626866,
-        "lapsedCourtships": 0
-      },
-      "ms": 4116
-    },
-    {
-      "seed": 2026,
-      "round": 46,
-      "winner": "plainers",
-      "ending": "conquest",
-      "aiTurns": 200,
-      "actsPerTurn": 0.56,
-      "politicalActsPerTurn": 0.665,
-      "branchMix": {
-        "court": 47,
-        "amends": 35,
-        "denounce": 18,
-        "vassalize": 12,
-        "approach-human": 13,
-        "pact": 1,
-        "answer-ultimatum": 2,
-        "enforce-ultimatum": 4,
-        "war-talk": 1
-      },
-      "denounceShare": 0.16071428571428573,
-      "wars": 49,
-      "surpriseOpenings": 21,
-      "opsRun": 0,
-      "opsBackfired": 0,
-      "sabotageTraced": 0,
-      "courtOpened": 47,
-      "coalitions": 4,
-      "minors": {
-        "allied": 1,
-        "vassal": 0,
-        "dead": 4,
-        "everCourted": 4,
-        "total": 4
-      },
-      "endScrap": [
-        {
-          "pid": "versari",
-          "scrap": 21,
-          "techLevel": 1,
-          "nodes": 0,
-          "locs": 0
-        },
-        {
-          "pid": "goldgrass",
-          "scrap": 27,
-          "techLevel": 2,
-          "nodes": 1,
-          "locs": 0
-        },
-        {
-          "pid": "lakers",
-          "scrap": 30,
-          "techLevel": 2,
-          "nodes": 1,
-          "locs": 1
-        },
-        {
-          "pid": "plainers",
-          "scrap": 28,
-          "techLevel": 3,
-          "nodes": 2,
-          "locs": 1
-        }
-      ],
-      "emptyWheels": 1,
-      "emptyWheelsLandless": 1,
-      "emptyWheelsWithLand": 0,
-      "delayedPurchases": 3,
-      "supplyRefusals": 0,
-      "chipUpgrades": 17,
-      "pressureEvents": 33,
-      "occupationCharges": 54,
-      "sway": {
-        "minMinor": null,
-        "maxMajor": 26,
-        "atCapShare": 0.2418478260869565,
-        "lapsedCourtships": 3
-      },
-      "ms": 2460
-    },
-    {
-      "seed": 606,
-      "round": 37,
-      "winner": "lakers",
-      "ending": "conquest",
-      "aiTurns": 173,
-      "actsPerTurn": 0.3236994219653179,
-      "politicalActsPerTurn": 0.5895953757225434,
-      "branchMix": {
-        "court": 46,
-        "denounce": 9,
-        "amends": 22,
-        "vassalize": 7,
-        "approach-human": 12,
-        "pact": 3,
-        "gift": 3
-      },
-      "denounceShare": 0.16071428571428573,
-      "wars": 20,
-      "surpriseOpenings": 13,
-      "opsRun": 0,
-      "opsBackfired": 0,
-      "sabotageTraced": 0,
-      "courtOpened": 46,
       "coalitions": 1,
-      "minors": {
-        "allied": 0,
-        "vassal": 0,
-        "dead": 4,
-        "everCourted": 4,
-        "total": 4
+      "board": {
+        "total": 8,
+        "dead": 6,
+        "bound": 2
       },
-      "endScrap": [
-        {
-          "pid": "versari",
-          "scrap": 0,
-          "techLevel": 1,
-          "nodes": 0,
-          "locs": 0
-        },
-        {
-          "pid": "goldgrass",
-          "scrap": 26,
-          "techLevel": 1,
-          "nodes": 0,
-          "locs": 0
-        },
-        {
-          "pid": "lakers",
-          "scrap": 26,
-          "techLevel": 5,
-          "nodes": 4,
-          "locs": 3
-        },
-        {
-          "pid": "plainers",
-          "scrap": 52,
-          "techLevel": 2,
-          "nodes": 1,
-          "locs": 0
-        }
-      ],
-      "emptyWheels": 2,
-      "emptyWheelsLandless": 2,
-      "emptyWheelsWithLand": 0,
-      "delayedPurchases": 1,
-      "supplyRefusals": 0,
-      "chipUpgrades": 12,
-      "pressureEvents": 1,
-      "occupationCharges": 16,
-      "sway": {
-        "minMinor": null,
-        "maxMajor": 32,
-        "atCapShare": 0.2668918918918919,
-        "lapsedCourtships": 2
-      },
-      "ms": 2124
-    },
-    {
-      "seed": 77,
-      "round": 70,
-      "winner": "plainers",
-      "ending": "conquest",
-      "aiTurns": 263,
-      "actsPerTurn": 0.6045627376425855,
-      "politicalActsPerTurn": 0.6349809885931559,
-      "branchMix": {
-        "court": 45,
-        "denounce": 17,
-        "amends": 62,
-        "vassalize": 19,
-        "approach-human": 10,
-        "intrigue": 1,
-        "gift": 11,
-        "war-talk": 2
-      },
-      "denounceShare": 0.1069182389937107,
-      "wars": 59,
-      "surpriseOpenings": 30,
-      "opsRun": 1,
-      "opsBackfired": 3,
-      "sabotageTraced": 3,
-      "courtOpened": 45,
-      "coalitions": 4,
-      "minors": {
-        "allied": 0,
-        "vassal": 0,
-        "dead": 4,
-        "everCourted": 4,
-        "total": 4
-      },
-      "endScrap": [
-        {
-          "pid": "versari",
-          "scrap": 0,
-          "techLevel": 1,
-          "nodes": 0,
-          "locs": 0
-        },
-        {
-          "pid": "goldgrass",
-          "scrap": 24,
-          "techLevel": 1,
-          "nodes": 0,
-          "locs": 2
-        },
-        {
-          "pid": "lakers",
-          "scrap": 36,
-          "techLevel": 5,
-          "nodes": 3,
-          "locs": 2
-        },
-        {
-          "pid": "plainers",
-          "scrap": 27,
-          "techLevel": 3,
-          "nodes": 2,
-          "locs": 2
-        }
-      ],
-      "emptyWheels": 2,
-      "emptyWheelsLandless": 1,
-      "emptyWheelsWithLand": 1,
-      "delayedPurchases": 46,
-      "supplyRefusals": 0,
-      "chipUpgrades": 41,
-      "pressureEvents": 20,
-      "occupationCharges": 89,
-      "sway": {
-        "minMinor": null,
-        "maxMajor": 26,
-        "atCapShare": 0.30178571428571427,
-        "lapsedCourtships": 0
-      },
-      "ms": 4141
-    },
-    {
-      "seed": 31415,
-      "round": 31,
-      "winner": "versari",
-      "ending": "diplomacy",
-      "aiTurns": 149,
-      "actsPerTurn": 0.33557046979865773,
-      "politicalActsPerTurn": 0.825503355704698,
-      "branchMix": {
-        "court": 57,
-        "amends": 32,
-        "denounce": 14,
-        "vassalize": 8,
-        "pact": 3,
-        "approach-human": 6,
-        "answer-ultimatum": 1,
-        "gift": 2
-      },
-      "denounceShare": 0.28,
-      "wars": 23,
-      "surpriseOpenings": 11,
-      "opsRun": 0,
-      "opsBackfired": 0,
-      "sabotageTraced": 0,
-      "courtOpened": 57,
-      "coalitions": 3,
-      "minors": {
-        "allied": 0,
-        "vassal": 0,
-        "dead": 4,
-        "everCourted": 4,
-        "total": 4
-      },
-      "endScrap": [
-        {
-          "pid": "versari",
-          "scrap": 8,
-          "techLevel": 1,
-          "nodes": 0,
-          "locs": 1
-        },
-        {
-          "pid": "goldgrass",
-          "scrap": 16,
-          "techLevel": 2,
-          "nodes": 1,
-          "locs": 0
-        },
-        {
-          "pid": "lakers",
-          "scrap": 66,
-          "techLevel": 1,
-          "nodes": 0,
-          "locs": 0
-        },
-        {
-          "pid": "plainers",
-          "scrap": 6,
-          "techLevel": 4,
-          "nodes": 3,
-          "locs": 4
-        }
-      ],
-      "emptyWheels": 2,
-      "emptyWheelsLandless": 1,
-      "emptyWheelsWithLand": 1,
-      "delayedPurchases": 7,
-      "supplyRefusals": 0,
-      "chipUpgrades": 9,
-      "pressureEvents": 15,
-      "occupationCharges": 18,
-      "sway": {
-        "minMinor": null,
-        "maxMajor": 28,
-        "atCapShare": 0.22580645161290322,
-        "lapsedCourtships": 0
-      },
-      "ms": 1546
-    },
-    {
-      "seed": 487565508,
-      "round": 80,
-      "winner": "lakers",
-      "ending": "submission",
-      "aiTurns": 267,
-      "actsPerTurn": 0.602996254681648,
-      "politicalActsPerTurn": 0.6217228464419475,
-      "branchMix": {
-        "court": 54,
-        "denounce": 31,
-        "amends": 38,
-        "vassalize": 15,
-        "approach-human": 11,
-        "answer-ultimatum": 2,
-        "gift": 12,
-        "intrigue": 1,
-        "war-talk": 2
-      },
-      "denounceShare": 0.19254658385093168,
-      "wars": 56,
-      "surpriseOpenings": 19,
-      "opsRun": 1,
-      "opsBackfired": 2,
-      "sabotageTraced": 2,
-      "courtOpened": 54,
-      "coalitions": 3,
-      "minors": {
-        "allied": 2,
-        "vassal": 0,
-        "dead": 4,
-        "everCourted": 4,
-        "total": 4
-      },
-      "endScrap": [
-        {
-          "pid": "versari",
-          "scrap": 0,
-          "techLevel": 1,
-          "nodes": 0,
-          "locs": 0
-        },
-        {
-          "pid": "goldgrass",
-          "scrap": 43,
-          "techLevel": 4,
-          "nodes": 3,
-          "locs": 1
-        },
-        {
-          "pid": "lakers",
-          "scrap": 8,
-          "techLevel": 2,
-          "nodes": 1,
-          "locs": 3
-        },
-        {
-          "pid": "plainers",
-          "scrap": 12,
-          "techLevel": 5,
-          "nodes": 3,
-          "locs": 3
-        }
-      ],
-      "emptyWheels": 1,
-      "emptyWheelsLandless": 1,
-      "emptyWheelsWithLand": 0,
-      "delayedPurchases": 4,
-      "supplyRefusals": 0,
-      "chipUpgrades": 34,
-      "pressureEvents": 31,
-      "occupationCharges": 114,
-      "sway": {
-        "minMinor": null,
-        "maxMajor": 32,
-        "atCapShare": 0.28125,
-        "lapsedCourtships": 0
-      },
-      "ms": 3473
-    },
-    {
-      "seed": 1890501568,
-      "round": 44,
-      "winner": "plainers",
-      "ending": "conquest",
-      "aiTurns": 211,
-      "actsPerTurn": 0.5497630331753555,
-      "politicalActsPerTurn": 0.7109004739336493,
-      "branchMix": {
-        "court": 63,
-        "amends": 30,
-        "vassalize": 19,
-        "denounce": 21,
-        "approach-human": 7,
-        "enforce-ultimatum": 1,
-        "pact": 1,
-        "intrigue": 4,
-        "answer-ultimatum": 1,
-        "war-talk": 1,
-        "gift": 2
-      },
-      "denounceShare": 0.1810344827586207,
-      "wars": 46,
-      "surpriseOpenings": 26,
-      "opsRun": 4,
-      "opsBackfired": 2,
-      "sabotageTraced": 2,
-      "courtOpened": 63,
-      "coalitions": 2,
-      "minors": {
-        "allied": 0,
-        "vassal": 0,
-        "dead": 4,
-        "everCourted": 4,
-        "total": 4
-      },
-      "endScrap": [
-        {
-          "pid": "versari",
-          "scrap": 2,
-          "techLevel": 1,
-          "nodes": 0,
-          "locs": 1
-        },
-        {
-          "pid": "goldgrass",
-          "scrap": 21,
-          "techLevel": 1,
-          "nodes": 0,
-          "locs": 1
-        },
-        {
-          "pid": "lakers",
-          "scrap": 78,
-          "techLevel": 3,
-          "nodes": 2,
-          "locs": 1
-        },
-        {
-          "pid": "plainers",
-          "scrap": 32,
-          "techLevel": 5,
-          "nodes": 4,
-          "locs": 3
-        }
-      ],
-      "emptyWheels": 2,
-      "emptyWheelsLandless": 0,
-      "emptyWheelsWithLand": 2,
-      "delayedPurchases": 6,
-      "supplyRefusals": 0,
-      "chipUpgrades": 27,
-      "pressureEvents": 28,
-      "occupationCharges": 65,
-      "sway": {
-        "minMinor": null,
-        "maxMajor": 26,
-        "atCapShare": 0.3380681818181818,
-        "lapsedCourtships": 0
-      },
-      "ms": 2431
-    },
-    {
-      "seed": 1619921152,
-      "round": 56,
-      "winner": "plainers",
-      "ending": "conquest",
-      "aiTurns": 233,
-      "actsPerTurn": 0.48068669527896996,
-      "politicalActsPerTurn": 0.759656652360515,
-      "branchMix": {
-        "court": 59,
-        "amends": 49,
-        "denounce": 26,
-        "vassalize": 13,
-        "gift": 23,
-        "approach-human": 3,
-        "intrigue": 1,
-        "war-talk": 3
-      },
-      "denounceShare": 0.23214285714285715,
-      "wars": 43,
-      "surpriseOpenings": 21,
-      "opsRun": 1,
-      "opsBackfired": 22,
-      "sabotageTraced": 22,
-      "courtOpened": 59,
-      "coalitions": 3,
-      "minors": {
-        "allied": 2,
-        "vassal": 0,
-        "dead": 4,
-        "everCourted": 4,
-        "total": 4
-      },
-      "endScrap": [
-        {
-          "pid": "versari",
-          "scrap": 0,
-          "techLevel": 1,
-          "nodes": 0,
-          "locs": 0
-        },
-        {
-          "pid": "goldgrass",
-          "scrap": 29,
-          "techLevel": 4,
-          "nodes": 3,
-          "locs": 2
-        },
-        {
-          "pid": "lakers",
-          "scrap": 11,
-          "techLevel": 3,
-          "nodes": 2,
-          "locs": 2
-        },
-        {
-          "pid": "plainers",
-          "scrap": 23,
-          "techLevel": 3,
-          "nodes": 2,
-          "locs": 2
-        }
-      ],
-      "emptyWheels": 1,
-      "emptyWheelsLandless": 1,
-      "emptyWheelsWithLand": 0,
-      "delayedPurchases": 13,
-      "supplyRefusals": 0,
-      "chipUpgrades": 18,
-      "pressureEvents": 12,
-      "occupationCharges": 21,
-      "sway": {
-        "minMinor": null,
-        "maxMajor": 26,
-        "atCapShare": 0.32142857142857145,
-        "lapsedCourtships": 0
-      },
-      "ms": 2888
-    },
-    {
-      "seed": 1496843520,
-      "round": 45,
-      "winner": "lakers",
-      "ending": "submission",
-      "aiTurns": 193,
-      "actsPerTurn": 0.6373056994818653,
-      "politicalActsPerTurn": 0.6476683937823834,
-      "branchMix": {
-        "court": 53,
-        "amends": 11,
-        "denounce": 19,
-        "vassalize": 20,
-        "gift": 17,
-        "war-talk": 1,
-        "approach-human": 4
-      },
-      "denounceShare": 0.15447154471544716,
-      "wars": 58,
-      "surpriseOpenings": 24,
-      "opsRun": 0,
-      "opsBackfired": 1,
-      "sabotageTraced": 1,
-      "courtOpened": 53,
-      "coalitions": 5,
       "minors": {
         "allied": 0,
         "vassal": 1,
@@ -1578,251 +841,98 @@
       "endScrap": [
         {
           "pid": "versari",
-          "scrap": 11,
-          "techLevel": 3,
-          "nodes": 2,
-          "locs": 2
+          "scrap": 12,
+          "techLevel": 1,
+          "nodes": 0,
+          "locs": 1
         },
         {
           "pid": "goldgrass",
-          "scrap": 7,
+          "scrap": 40,
           "techLevel": 2,
           "nodes": 1,
           "locs": 1
         },
         {
           "pid": "lakers",
-          "scrap": 18,
+          "scrap": 35,
           "techLevel": 2,
           "nodes": 1,
-          "locs": 2
+          "locs": 3
         },
         {
           "pid": "plainers",
-          "scrap": 19,
-          "techLevel": 1,
-          "nodes": 0,
+          "scrap": 22,
+          "techLevel": 5,
+          "nodes": 2,
           "locs": 2
         }
       ],
       "emptyWheels": 1,
       "emptyWheelsLandless": 0,
       "emptyWheelsWithLand": 1,
-      "delayedPurchases": 18,
+      "delayedPurchases": 1,
       "supplyRefusals": 0,
-      "chipUpgrades": 32,
-      "pressureEvents": 17,
-      "occupationCharges": 62,
-      "sway": {
-        "minMinor": null,
-        "maxMajor": 41,
-        "atCapShare": 0.25277777777777777,
-        "lapsedCourtships": 0
-      },
-      "ms": 2620
-    },
-    {
-      "seed": 1818251520,
-      "round": 36,
-      "winner": "goldgrass",
-      "ending": "mixed",
-      "aiTurns": 221,
-      "actsPerTurn": 0.3665158371040724,
-      "politicalActsPerTurn": 0.6018099547511312,
-      "branchMix": {
-        "court": 62,
-        "amends": 40,
-        "denounce": 16,
-        "vassalize": 11,
-        "approach-human": 2,
-        "pact": 1,
-        "gift": 1
-      },
-      "denounceShare": 0.19753086419753085,
-      "wars": 33,
-      "surpriseOpenings": 22,
-      "opsRun": 0,
-      "opsBackfired": 1,
-      "sabotageTraced": 1,
-      "courtOpened": 62,
-      "coalitions": 4,
-      "minors": {
-        "allied": 1,
-        "vassal": 3,
-        "dead": 2,
-        "everCourted": 4,
-        "total": 4
-      },
-      "endScrap": [
-        {
-          "pid": "versari",
-          "scrap": 3,
-          "techLevel": 1,
-          "nodes": 0,
-          "locs": 0
-        },
-        {
-          "pid": "goldgrass",
-          "scrap": 36,
-          "techLevel": 3,
-          "nodes": 2,
-          "locs": 2
-        },
-        {
-          "pid": "lakers",
-          "scrap": 21,
-          "techLevel": 1,
-          "nodes": 0,
-          "locs": 0
-        },
-        {
-          "pid": "plainers",
-          "scrap": 21,
-          "techLevel": 2,
-          "nodes": 1,
-          "locs": 1
-        }
-      ],
-      "emptyWheels": 2,
-      "emptyWheelsLandless": 2,
-      "emptyWheelsWithLand": 0,
-      "delayedPurchases": 17,
-      "supplyRefusals": 0,
-      "chipUpgrades": 14,
-      "pressureEvents": 13,
-      "occupationCharges": 50,
-      "sway": {
-        "minMinor": 9,
-        "maxMajor": 41,
-        "atCapShare": 0.2534722222222222,
-        "lapsedCourtships": 13
-      },
-      "ms": 2865
-    },
-    {
-      "seed": 598781184,
-      "round": 38,
-      "winner": "plainers",
-      "ending": "conquest",
-      "aiTurns": 196,
-      "actsPerTurn": 0.3163265306122449,
-      "politicalActsPerTurn": 0.5663265306122449,
-      "branchMix": {
-        "court": 59,
-        "amends": 15,
-        "approach-human": 6,
-        "denounce": 14,
-        "vassalize": 9,
-        "pact": 1,
-        "war-talk": 2,
-        "gift": 5
-      },
-      "denounceShare": 0.22580645161290322,
-      "wars": 26,
-      "surpriseOpenings": 15,
-      "opsRun": 0,
-      "opsBackfired": 0,
-      "sabotageTraced": 0,
-      "courtOpened": 59,
-      "coalitions": 3,
-      "minors": {
-        "allied": 0,
-        "vassal": 0,
-        "dead": 4,
-        "everCourted": 4,
-        "total": 4
-      },
-      "endScrap": [
-        {
-          "pid": "versari",
-          "scrap": 0,
-          "techLevel": 1,
-          "nodes": 0,
-          "locs": 0
-        },
-        {
-          "pid": "goldgrass",
-          "scrap": 18,
-          "techLevel": 1,
-          "nodes": 0,
-          "locs": 0
-        },
-        {
-          "pid": "lakers",
-          "scrap": 33,
-          "techLevel": 1,
-          "nodes": 0,
-          "locs": 1
-        },
-        {
-          "pid": "plainers",
-          "scrap": 26,
-          "techLevel": 3,
-          "nodes": 2,
-          "locs": 4
-        }
-      ],
-      "emptyWheels": 3,
-      "emptyWheelsLandless": 2,
-      "emptyWheelsWithLand": 1,
-      "delayedPurchases": 6,
-      "supplyRefusals": 0,
-      "chipUpgrades": 15,
-      "pressureEvents": 16,
+      "chipUpgrades": 25,
+      "pressureEvents": 14,
       "occupationCharges": 37,
       "sway": {
         "minMinor": null,
-        "maxMajor": 26,
-        "atCapShare": 0.2565789473684211,
-        "lapsedCourtships": 1
+        "maxMajor": 35,
+        "atCapShare": 0.24404761904761904,
+        "lapsedCourtships": 0
       },
-      "ms": 1985
+      "ms": 2837
     },
     {
-      "seed": 1425004800,
-      "round": 65,
-      "winner": "steeltraders",
-      "ending": "conquest",
-      "aiTurns": 249,
-      "actsPerTurn": 0.30120481927710846,
-      "politicalActsPerTurn": 0.8192771084337349,
+      "seed": 90210,
+      "round": 48,
+      "winner": "plainers",
+      "ending": "diplomacy",
+      "aiTurns": 242,
+      "actsPerTurn": 0.4297520661157025,
+      "politicalActsPerTurn": 0.768595041322314,
       "branchMix": {
-        "court": 53,
-        "amends": 107,
-        "denounce": 19,
-        "vassalize": 7,
-        "approach-human": 3,
-        "answer-ultimatum": 1,
-        "gift": 12,
-        "intrigue": 1,
-        "war-talk": 1
+        "court": 63,
+        "denounce": 26,
+        "amends": 65,
+        "vassalize": 16,
+        "approach-human": 6,
+        "pact": 1,
+        "war-talk": 5,
+        "gift": 4
       },
-      "denounceShare": 0.25333333333333335,
-      "wars": 30,
-      "surpriseOpenings": 18,
-      "opsRun": 1,
-      "opsBackfired": 0,
-      "sabotageTraced": 0,
-      "courtOpened": 53,
-      "coalitions": 3,
+      "denounceShare": 0.25,
+      "wars": 36,
+      "surpriseOpenings": 17,
+      "opsRun": 0,
+      "opsBackfired": 3,
+      "sabotageTraced": 3,
+      "courtOpened": 63,
+      "coalitions": 4,
+      "board": {
+        "total": 8,
+        "dead": 6,
+        "bound": 2
+      },
       "minors": {
         "allied": 1,
         "vassal": 0,
         "dead": 3,
-        "everCourted": 2,
+        "everCourted": 4,
         "total": 4
       },
       "endScrap": [
         {
           "pid": "versari",
-          "scrap": 11,
-          "techLevel": 1,
-          "nodes": 0,
-          "locs": 1
+          "scrap": 8,
+          "techLevel": 2,
+          "nodes": 1,
+          "locs": 2
         },
         {
           "pid": "goldgrass",
-          "scrap": 37,
+          "scrap": 35,
           "techLevel": 2,
           "nodes": 1,
           "locs": 1
@@ -1836,770 +946,63 @@
         },
         {
           "pid": "plainers",
-          "scrap": 14,
-          "techLevel": 1,
-          "nodes": 0,
-          "locs": 0
-        }
-      ],
-      "emptyWheels": 3,
-      "emptyWheelsLandless": 2,
-      "emptyWheelsWithLand": 1,
-      "delayedPurchases": 5,
-      "supplyRefusals": 0,
-      "chipUpgrades": 32,
-      "pressureEvents": 10,
-      "occupationCharges": 46,
-      "sway": {
-        "minMinor": 26,
-        "maxMajor": null,
-        "atCapShare": 0.24807692307692308,
-        "lapsedCourtships": 1
-      },
-      "ms": 2535
-    },
-    {
-      "seed": 339580160,
-      "round": 18,
-      "winner": "goldgrass",
-      "ending": "mixed",
-      "aiTurns": 113,
-      "actsPerTurn": 0.4690265486725664,
-      "politicalActsPerTurn": 0.6991150442477876,
-      "branchMix": {
-        "court": 37,
-        "amends": 11,
-        "approach-human": 3,
-        "vassalize": 7,
-        "denounce": 16,
-        "pact": 1,
-        "gift": 2,
-        "intrigue": 2
-      },
-      "denounceShare": 0.3018867924528302,
-      "wars": 15,
-      "surpriseOpenings": 10,
-      "opsRun": 2,
-      "opsBackfired": 0,
-      "sabotageTraced": 0,
-      "courtOpened": 37,
-      "coalitions": 3,
-      "minors": {
-        "allied": 0,
-        "vassal": 3,
-        "dead": 4,
-        "everCourted": 3,
-        "total": 4
-      },
-      "endScrap": [
-        {
-          "pid": "versari",
-          "scrap": 8,
-          "techLevel": 3,
-          "nodes": 2,
-          "locs": 2
-        },
-        {
-          "pid": "goldgrass",
-          "scrap": 26,
-          "techLevel": 4,
-          "nodes": 3,
-          "locs": 3
-        },
-        {
-          "pid": "lakers",
-          "scrap": 11,
-          "techLevel": 3,
-          "nodes": 2,
-          "locs": 2
-        },
-        {
-          "pid": "plainers",
-          "scrap": 18,
-          "techLevel": 2,
-          "nodes": 1,
-          "locs": 1
-        }
-      ],
-      "emptyWheels": 0,
-      "emptyWheelsLandless": 0,
-      "emptyWheelsWithLand": 0,
-      "delayedPurchases": 1,
-      "supplyRefusals": 0,
-      "chipUpgrades": 5,
-      "pressureEvents": 9,
-      "occupationCharges": 11,
-      "sway": {
-        "minMinor": null,
-        "maxMajor": 45,
-        "atCapShare": 0.1875,
-        "lapsedCourtships": 0
-      },
-      "ms": 1175
-    },
-    {
-      "seed": 530489664,
-      "round": 41,
-      "winner": "versari",
-      "ending": "submission",
-      "aiTurns": 204,
-      "actsPerTurn": 0.4362745098039216,
-      "politicalActsPerTurn": 0.6715686274509803,
-      "branchMix": {
-        "court": 56,
-        "amends": 37,
-        "denounce": 21,
-        "vassalize": 17,
-        "approach-human": 3,
-        "intrigue": 1,
-        "gift": 2
-      },
-      "denounceShare": 0.23595505617977527,
-      "wars": 38,
-      "surpriseOpenings": 18,
-      "opsRun": 1,
-      "opsBackfired": 6,
-      "sabotageTraced": 6,
-      "courtOpened": 56,
-      "coalitions": 3,
-      "minors": {
-        "allied": 0,
-        "vassal": 2,
-        "dead": 3,
-        "everCourted": 4,
-        "total": 4
-      },
-      "endScrap": [
-        {
-          "pid": "versari",
-          "scrap": 3,
-          "techLevel": 1,
-          "nodes": 0,
-          "locs": 1
-        },
-        {
-          "pid": "goldgrass",
-          "scrap": 17,
-          "techLevel": 1,
-          "nodes": 0,
-          "locs": 1
-        },
-        {
-          "pid": "lakers",
-          "scrap": 37,
-          "techLevel": 3,
-          "nodes": 1,
-          "locs": 2
-        },
-        {
-          "pid": "plainers",
-          "scrap": 17,
-          "techLevel": 1,
-          "nodes": 0,
-          "locs": 0
-        }
-      ],
-      "emptyWheels": 3,
-      "emptyWheelsLandless": 1,
-      "emptyWheelsWithLand": 2,
-      "delayedPurchases": 3,
-      "supplyRefusals": 0,
-      "chipUpgrades": 13,
-      "pressureEvents": 15,
-      "occupationCharges": 40,
-      "sway": {
-        "minMinor": 10,
-        "maxMajor": 38,
-        "atCapShare": 0.25914634146341464,
-        "lapsedCourtships": 6
-      },
-      "ms": 2365
-    },
-    {
-      "seed": 1126979584,
-      "round": 50,
-      "winner": "goldgrass",
-      "ending": "mixed",
-      "aiTurns": 275,
-      "actsPerTurn": 0.3418181818181818,
-      "politicalActsPerTurn": 0.6145454545454545,
-      "branchMix": {
-        "court": 76,
-        "amends": 32,
-        "denounce": 25,
-        "vassalize": 11,
-        "approach-human": 8,
-        "pact": 6,
-        "intrigue": 5,
-        "war-talk": 3,
-        "gift": 3
-      },
-      "denounceShare": 0.26595744680851063,
-      "wars": 31,
-      "surpriseOpenings": 21,
-      "opsRun": 5,
-      "opsBackfired": 2,
-      "sabotageTraced": 2,
-      "courtOpened": 76,
-      "coalitions": 1,
-      "minors": {
-        "allied": 1,
-        "vassal": 1,
-        "dead": 2,
-        "everCourted": 4,
-        "total": 4
-      },
-      "endScrap": [
-        {
-          "pid": "versari",
-          "scrap": 2,
-          "techLevel": 1,
-          "nodes": 0,
-          "locs": 0
-        },
-        {
-          "pid": "goldgrass",
-          "scrap": 23,
-          "techLevel": 2,
-          "nodes": 1,
-          "locs": 2
-        },
-        {
-          "pid": "lakers",
-          "scrap": 33,
-          "techLevel": 2,
-          "nodes": 1,
-          "locs": 1
-        },
-        {
-          "pid": "plainers",
           "scrap": 31,
-          "techLevel": 1,
-          "nodes": 0,
-          "locs": 1
-        }
-      ],
-      "emptyWheels": 2,
-      "emptyWheelsLandless": 1,
-      "emptyWheelsWithLand": 1,
-      "delayedPurchases": 15,
-      "supplyRefusals": 0,
-      "chipUpgrades": 24,
-      "pressureEvents": 16,
-      "occupationCharges": 35,
-      "sway": {
-        "minMinor": 9,
-        "maxMajor": 33,
-        "atCapShare": 0.325,
-        "lapsedCourtships": 0
-      },
-      "ms": 3608
-    },
-    {
-      "seed": 749840384,
-      "round": 36,
-      "winner": "goldgrass",
-      "ending": "diplomacy",
-      "aiTurns": 165,
-      "actsPerTurn": 0.6424242424242425,
-      "politicalActsPerTurn": 0.6848484848484848,
-      "branchMix": {
-        "court": 49,
-        "denounce": 18,
-        "vassalize": 17,
-        "amends": 10,
-        "approach-human": 4,
-        "pact": 1,
-        "gift": 13,
-        "enforce-ultimatum": 1
-      },
-      "denounceShare": 0.16981132075471697,
-      "wars": 40,
-      "surpriseOpenings": 21,
-      "opsRun": 0,
-      "opsBackfired": 0,
-      "sabotageTraced": 0,
-      "courtOpened": 49,
-      "coalitions": 3,
-      "minors": {
-        "allied": 0,
-        "vassal": 0,
-        "dead": 4,
-        "everCourted": 4,
-        "total": 4
-      },
-      "endScrap": [
-        {
-          "pid": "versari",
-          "scrap": 7,
-          "techLevel": 2,
-          "nodes": 1,
-          "locs": 2
-        },
-        {
-          "pid": "goldgrass",
-          "scrap": 16,
-          "techLevel": 3,
-          "nodes": 2,
-          "locs": 2
-        },
-        {
-          "pid": "lakers",
-          "scrap": 39,
-          "techLevel": 4,
+          "techLevel": 5,
           "nodes": 3,
-          "locs": 3
-        },
-        {
-          "pid": "plainers",
-          "scrap": 13,
-          "techLevel": 2,
-          "nodes": 1,
-          "locs": 1
+          "locs": 2
         }
       ],
-      "emptyWheels": 0,
-      "emptyWheelsLandless": 0,
-      "emptyWheelsWithLand": 0,
-      "delayedPurchases": 3,
-      "supplyRefusals": 0,
-      "chipUpgrades": 22,
-      "pressureEvents": 12,
-      "occupationCharges": 41,
-      "sway": {
-        "minMinor": null,
-        "maxMajor": 32,
-        "atCapShare": 0.2534722222222222,
-        "lapsedCourtships": 0
-      },
-      "ms": 1881
-    },
-    {
-      "seed": 416593920,
-      "round": 67,
-      "winner": "steeltraders",
-      "ending": "conquest",
-      "aiTurns": 245,
-      "actsPerTurn": 0.47346938775510206,
-      "politicalActsPerTurn": 0.7836734693877551,
-      "branchMix": {
-        "court": 59,
-        "denounce": 14,
-        "amends": 71,
-        "vassalize": 21,
-        "approach-human": 4,
-        "war-talk": 1,
-        "intrigue": 2,
-        "gift": 19,
-        "enforce-ultimatum": 1
-      },
-      "denounceShare": 0.1206896551724138,
-      "wars": 47,
-      "surpriseOpenings": 24,
-      "opsRun": 2,
-      "opsBackfired": 26,
-      "sabotageTraced": 26,
-      "courtOpened": 59,
-      "coalitions": 2,
-      "minors": {
-        "allied": 0,
-        "vassal": 0,
-        "dead": 3,
-        "everCourted": 3,
-        "total": 4
-      },
-      "endScrap": [
-        {
-          "pid": "versari",
-          "scrap": 16,
-          "techLevel": 1,
-          "nodes": 0,
-          "locs": 0
-        },
-        {
-          "pid": "goldgrass",
-          "scrap": 15,
-          "techLevel": 3,
-          "nodes": 2,
-          "locs": 4
-        },
-        {
-          "pid": "lakers",
-          "scrap": 0,
-          "techLevel": 1,
-          "nodes": 0,
-          "locs": 0
-        },
-        {
-          "pid": "plainers",
-          "scrap": 9,
-          "techLevel": 2,
-          "nodes": 1,
-          "locs": 1
-        }
-      ],
-      "emptyWheels": 2,
-      "emptyWheelsLandless": 2,
-      "emptyWheelsWithLand": 0,
-      "delayedPurchases": 16,
-      "supplyRefusals": 0,
-      "chipUpgrades": 28,
-      "pressureEvents": 13,
-      "occupationCharges": 51,
-      "sway": {
-        "minMinor": 26,
-        "maxMajor": null,
-        "atCapShare": 0.22201492537313433,
-        "lapsedCourtships": 2
-      },
-      "ms": 3324
-    },
-    {
-      "seed": 849512512,
-      "round": 32,
-      "winner": "lakers",
-      "ending": "submission",
-      "aiTurns": 164,
-      "actsPerTurn": 0.42073170731707316,
-      "politicalActsPerTurn": 0.7560975609756098,
-      "branchMix": {
-        "court": 54,
-        "denounce": 16,
-        "amends": 27,
-        "approach-human": 4,
-        "vassalize": 16,
-        "gift": 5,
-        "war-talk": 2
-      },
-      "denounceShare": 0.2318840579710145,
-      "wars": 28,
-      "surpriseOpenings": 15,
-      "opsRun": 0,
-      "opsBackfired": 0,
-      "sabotageTraced": 0,
-      "courtOpened": 54,
-      "coalitions": 1,
-      "minors": {
-        "allied": 0,
-        "vassal": 3,
-        "dead": 3,
-        "everCourted": 4,
-        "total": 4
-      },
-      "endScrap": [
-        {
-          "pid": "versari",
-          "scrap": 0,
-          "techLevel": 1,
-          "nodes": 0,
-          "locs": 1
-        },
-        {
-          "pid": "goldgrass",
-          "scrap": 14,
-          "techLevel": 2,
-          "nodes": 1,
-          "locs": 0
-        },
-        {
-          "pid": "lakers",
-          "scrap": 35,
-          "techLevel": 2,
-          "nodes": 1,
-          "locs": 3
-        },
-        {
-          "pid": "plainers",
-          "scrap": 24,
-          "techLevel": 1,
-          "nodes": 0,
-          "locs": 0
-        }
-      ],
-      "emptyWheels": 2,
+      "emptyWheels": 1,
       "emptyWheelsLandless": 1,
-      "emptyWheelsWithLand": 1,
-      "delayedPurchases": 2,
-      "supplyRefusals": 0,
-      "chipUpgrades": 13,
-      "pressureEvents": 8,
-      "occupationCharges": 37,
-      "sway": {
-        "minMinor": 17,
-        "maxMajor": 41,
-        "atCapShare": 0.25,
-        "lapsedCourtships": 0
-      },
-      "ms": 1891
-    },
-    {
-      "seed": 909619968,
-      "round": 81,
-      "winner": null,
-      "ending": "unresolved",
-      "aiTurns": 262,
-      "actsPerTurn": 0.7251908396946565,
-      "politicalActsPerTurn": 0.7709923664122137,
-      "branchMix": {
-        "court": 53,
-        "denounce": 11,
-        "amends": 64,
-        "vassalize": 54,
-        "approach-human": 3,
-        "war-talk": 1,
-        "gift": 16
-      },
-      "denounceShare": 0.05789473684210526,
-      "wars": 91,
-      "surpriseOpenings": 29,
-      "opsRun": 0,
-      "opsBackfired": 22,
-      "sabotageTraced": 22,
-      "courtOpened": 53,
-      "coalitions": 7,
-      "minors": {
-        "allied": 0,
-        "vassal": 2,
-        "dead": 4,
-        "everCourted": 4,
-        "total": 4
-      },
-      "endScrap": [
-        {
-          "pid": "versari",
-          "scrap": 17,
-          "techLevel": 2,
-          "nodes": 1,
-          "locs": 3
-        },
-        {
-          "pid": "goldgrass",
-          "scrap": 24,
-          "techLevel": 1,
-          "nodes": 0,
-          "locs": 0
-        },
-        {
-          "pid": "lakers",
-          "scrap": 49,
-          "techLevel": 2,
-          "nodes": 1,
-          "locs": 1
-        },
-        {
-          "pid": "plainers",
-          "scrap": 33,
-          "techLevel": 1,
-          "nodes": 0,
-          "locs": 0
-        }
-      ],
-      "emptyWheels": 2,
-      "emptyWheelsLandless": 2,
       "emptyWheelsWithLand": 0,
       "delayedPurchases": 27,
       "supplyRefusals": 0,
-      "chipUpgrades": 47,
-      "pressureEvents": 12,
-      "occupationCharges": 12,
+      "chipUpgrades": 24,
+      "pressureEvents": 18,
+      "occupationCharges": 42,
       "sway": {
-        "minMinor": null,
-        "maxMajor": 31,
-        "atCapShare": 0.28858024691358025,
-        "lapsedCourtships": 0
+        "minMinor": 11,
+        "maxMajor": 29,
+        "atCapShare": 0.2578125,
+        "lapsedCourtships": 6
       },
-      "ms": 3627
+      "ms": 3241
     },
     {
-      "seed": 4286208,
-      "round": 45,
-      "winner": "plainers",
-      "ending": "conquest",
-      "aiTurns": 205,
-      "actsPerTurn": 0.2926829268292683,
-      "politicalActsPerTurn": 0.7317073170731707,
-      "branchMix": {
-        "court": 56,
-        "denounce": 11,
-        "amends": 36,
-        "approach-human": 5,
-        "pact": 1,
-        "vassalize": 13,
-        "enforce-ultimatum": 2,
-        "gift": 22,
-        "war-talk": 4
-      },
-      "denounceShare": 0.18333333333333332,
-      "wars": 30,
-      "surpriseOpenings": 15,
-      "opsRun": 0,
-      "opsBackfired": 13,
-      "sabotageTraced": 13,
-      "courtOpened": 56,
-      "coalitions": 2,
-      "minors": {
-        "allied": 0,
-        "vassal": 0,
-        "dead": 4,
-        "everCourted": 2,
-        "total": 4
-      },
-      "endScrap": [
-        {
-          "pid": "versari",
-          "scrap": 6,
-          "techLevel": 3,
-          "nodes": 1,
-          "locs": 3
-        },
-        {
-          "pid": "goldgrass",
-          "scrap": 23,
-          "techLevel": 3,
-          "nodes": 2,
-          "locs": 3
-        },
-        {
-          "pid": "lakers",
-          "scrap": 0,
-          "techLevel": 1,
-          "nodes": 0,
-          "locs": 0
-        },
-        {
-          "pid": "plainers",
-          "scrap": 11,
-          "techLevel": 3,
-          "nodes": 2,
-          "locs": 1
-        }
-      ],
-      "emptyWheels": 1,
-      "emptyWheelsLandless": 1,
-      "emptyWheelsWithLand": 0,
-      "delayedPurchases": 12,
-      "supplyRefusals": 0,
-      "chipUpgrades": 20,
-      "pressureEvents": 10,
-      "occupationCharges": 57,
-      "sway": {
-        "minMinor": null,
-        "maxMajor": 22,
-        "atCapShare": 0.2611111111111111,
-        "lapsedCourtships": 0
-      },
-      "ms": 2593
-    },
-    {
-      "seed": 859507513,
-      "round": 59,
-      "winner": "croppers",
-      "ending": "conquest",
-      "aiTurns": 284,
-      "actsPerTurn": 0.3732394366197183,
-      "politicalActsPerTurn": 0.7640845070422535,
-      "branchMix": {
-        "court": 75,
-        "amends": 80,
-        "denounce": 21,
-        "vassalize": 12,
-        "gift": 18,
-        "intrigue": 2,
-        "approach-human": 6,
-        "answer-ultimatum": 1,
-        "war-talk": 2
-      },
-      "denounceShare": 0.19811320754716982,
-      "wars": 42,
-      "surpriseOpenings": 24,
-      "opsRun": 2,
-      "opsBackfired": 22,
-      "sabotageTraced": 22,
-      "courtOpened": 75,
-      "coalitions": 5,
-      "minors": {
-        "allied": 0,
-        "vassal": 0,
-        "dead": 3,
-        "everCourted": 3,
-        "total": 4
-      },
-      "endScrap": [
-        {
-          "pid": "versari",
-          "scrap": 13,
-          "techLevel": 1,
-          "nodes": 0,
-          "locs": 1
-        },
-        {
-          "pid": "goldgrass",
-          "scrap": 28,
-          "techLevel": 4,
-          "nodes": 2,
-          "locs": 2
-        },
-        {
-          "pid": "lakers",
-          "scrap": 15,
-          "techLevel": 2,
-          "nodes": 1,
-          "locs": 0
-        },
-        {
-          "pid": "plainers",
-          "scrap": 26,
-          "techLevel": 1,
-          "nodes": 0,
-          "locs": 1
-        }
-      ],
-      "emptyWheels": 2,
-      "emptyWheelsLandless": 0,
-      "emptyWheelsWithLand": 2,
-      "delayedPurchases": 14,
-      "supplyRefusals": 0,
-      "chipUpgrades": 27,
-      "pressureEvents": 27,
-      "occupationCharges": 76,
-      "sway": {
-        "minMinor": 26,
-        "maxMajor": null,
-        "atCapShare": 0.3029661016949153,
-        "lapsedCourtships": 2
-      },
-      "ms": 3409
-    },
-    {
-      "seed": 1956992384,
-      "round": 37,
+      "seed": 123456,
+      "round": 26,
       "winner": "lakers",
-      "ending": "conquest",
-      "aiTurns": 182,
-      "actsPerTurn": 0.46703296703296704,
-      "politicalActsPerTurn": 0.7362637362637363,
+      "ending": "submission",
+      "aiTurns": 151,
+      "actsPerTurn": 0.46357615894039733,
+      "politicalActsPerTurn": 0.7682119205298014,
       "branchMix": {
-        "court": 51,
-        "amends": 21,
-        "denounce": 24,
-        "approach-human": 9,
-        "vassalize": 17,
-        "gift": 10,
+        "court": 60,
+        "denounce": 11,
+        "amends": 29,
+        "vassalize": 10,
+        "intrigue": 1,
         "war-talk": 1,
-        "answer-ultimatum": 1
+        "approach-human": 3,
+        "gift": 1
       },
-      "denounceShare": 0.2823529411764706,
-      "wars": 28,
-      "surpriseOpenings": 14,
-      "opsRun": 0,
+      "denounceShare": 0.15714285714285714,
+      "wars": 25,
+      "surpriseOpenings": 19,
+      "opsRun": 1,
       "opsBackfired": 0,
       "sabotageTraced": 0,
-      "courtOpened": 51,
+      "courtOpened": 60,
       "coalitions": 2,
+      "board": {
+        "total": 8,
+        "dead": 5,
+        "bound": 3
+      },
       "minors": {
         "allied": 0,
-        "vassal": 1,
-        "dead": 4,
+        "vassal": 2,
+        "dead": 3,
         "everCourted": 4,
         "total": 4
       },
@@ -2609,659 +1012,28 @@
           "scrap": 2,
           "techLevel": 1,
           "nodes": 0,
-          "locs": 1
-        },
-        {
-          "pid": "goldgrass",
-          "scrap": 6,
-          "techLevel": 1,
-          "nodes": 0,
-          "locs": 1
-        },
-        {
-          "pid": "lakers",
-          "scrap": 32,
-          "techLevel": 4,
-          "nodes": 3,
-          "locs": 2
-        },
-        {
-          "pid": "plainers",
-          "scrap": 34,
-          "techLevel": 2,
-          "nodes": 1,
-          "locs": 0
-        }
-      ],
-      "emptyWheels": 2,
-      "emptyWheelsLandless": 0,
-      "emptyWheelsWithLand": 2,
-      "delayedPurchases": 17,
-      "supplyRefusals": 0,
-      "chipUpgrades": 18,
-      "pressureEvents": 12,
-      "occupationCharges": 42,
-      "sway": {
-        "minMinor": null,
-        "maxMajor": 29,
-        "atCapShare": 0.28378378378378377,
-        "lapsedCourtships": 0
-      },
-      "ms": 2193
-    },
-    {
-      "seed": 728930304,
-      "round": 46,
-      "winner": "goldgrass",
-      "ending": "diplomacy",
-      "aiTurns": 235,
-      "actsPerTurn": 0.4808510638297872,
-      "politicalActsPerTurn": 0.7914893617021277,
-      "branchMix": {
-        "court": 64,
-        "amends": 62,
-        "denounce": 19,
-        "vassalize": 20,
-        "approach-human": 3,
-        "gift": 14,
-        "war-talk": 1,
-        "intrigue": 3
-      },
-      "denounceShare": 0.168141592920354,
-      "wars": 47,
-      "surpriseOpenings": 19,
-      "opsRun": 3,
-      "opsBackfired": 5,
-      "sabotageTraced": 5,
-      "courtOpened": 64,
-      "coalitions": 4,
-      "minors": {
-        "allied": 0,
-        "vassal": 2,
-        "dead": 4,
-        "everCourted": 4,
-        "total": 4
-      },
-      "endScrap": [
-        {
-          "pid": "versari",
-          "scrap": 11,
-          "techLevel": 2,
-          "nodes": 1,
-          "locs": 2
-        },
-        {
-          "pid": "goldgrass",
-          "scrap": 36,
-          "techLevel": 3,
-          "nodes": 2,
-          "locs": 1
-        },
-        {
-          "pid": "lakers",
-          "scrap": 21,
-          "techLevel": 1,
-          "nodes": 0,
-          "locs": 1
-        },
-        {
-          "pid": "plainers",
-          "scrap": 26,
-          "techLevel": 3,
-          "nodes": 1,
-          "locs": 2
-        }
-      ],
-      "emptyWheels": 1,
-      "emptyWheelsLandless": 0,
-      "emptyWheelsWithLand": 1,
-      "delayedPurchases": 16,
-      "supplyRefusals": 0,
-      "chipUpgrades": 23,
-      "pressureEvents": 17,
-      "occupationCharges": 69,
-      "sway": {
-        "minMinor": null,
-        "maxMajor": 36,
-        "atCapShare": 0.24456521739130435,
-        "lapsedCourtships": 3
-      },
-      "ms": 3136
-    },
-    {
-      "seed": 2048583680,
-      "round": 26,
-      "winner": "plainers",
-      "ending": "conquest",
-      "aiTurns": 137,
-      "actsPerTurn": 0.5255474452554745,
-      "politicalActsPerTurn": 0.8175182481751825,
-      "branchMix": {
-        "court": 59,
-        "denounce": 12,
-        "amends": 21,
-        "approach-human": 2,
-        "vassalize": 7,
-        "intrigue": 1,
-        "gift": 10
-      },
-      "denounceShare": 0.16666666666666666,
-      "wars": 33,
-      "surpriseOpenings": 18,
-      "opsRun": 1,
-      "opsBackfired": 0,
-      "sabotageTraced": 0,
-      "courtOpened": 59,
-      "coalitions": 3,
-      "minors": {
-        "allied": 0,
-        "vassal": 0,
-        "dead": 4,
-        "everCourted": 3,
-        "total": 4
-      },
-      "endScrap": [
-        {
-          "pid": "versari",
-          "scrap": 6,
-          "techLevel": 1,
-          "nodes": 0,
           "locs": 0
         },
         {
           "pid": "goldgrass",
-          "scrap": 29,
-          "techLevel": 3,
-          "nodes": 2,
-          "locs": 1
-        },
-        {
-          "pid": "lakers",
-          "scrap": 46,
-          "techLevel": 2,
-          "nodes": 1,
-          "locs": 0
-        },
-        {
-          "pid": "plainers",
-          "scrap": 0,
-          "techLevel": 5,
-          "nodes": 3,
-          "locs": 6
-        }
-      ],
-      "emptyWheels": 1,
-      "emptyWheelsLandless": 1,
-      "emptyWheelsWithLand": 0,
-      "delayedPurchases": 2,
-      "supplyRefusals": 0,
-      "chipUpgrades": 11,
-      "pressureEvents": 8,
-      "occupationCharges": 40,
-      "sway": {
-        "minMinor": null,
-        "maxMajor": 26,
-        "atCapShare": 0.22596153846153846,
-        "lapsedCourtships": 0
-      },
-      "ms": 1278
-    },
-    {
-      "seed": 539293696,
-      "round": 45,
-      "winner": "lakers",
-      "ending": "conquest",
-      "aiTurns": 217,
-      "actsPerTurn": 0.42857142857142855,
-      "politicalActsPerTurn": 0.6129032258064516,
-      "branchMix": {
-        "court": 49,
-        "denounce": 18,
-        "amends": 37,
-        "vassalize": 18,
-        "approach-human": 6,
-        "pact": 1,
-        "gift": 4
-      },
-      "denounceShare": 0.1935483870967742,
-      "wars": 38,
-      "surpriseOpenings": 18,
-      "opsRun": 0,
-      "opsBackfired": 0,
-      "sabotageTraced": 0,
-      "courtOpened": 49,
-      "coalitions": 1,
-      "minors": {
-        "allied": 0,
-        "vassal": 0,
-        "dead": 4,
-        "everCourted": 4,
-        "total": 4
-      },
-      "endScrap": [
-        {
-          "pid": "versari",
-          "scrap": 0,
-          "techLevel": 1,
-          "nodes": 0,
-          "locs": 0
-        },
-        {
-          "pid": "goldgrass",
-          "scrap": 7,
-          "techLevel": 1,
-          "nodes": 0,
-          "locs": 0
-        },
-        {
-          "pid": "lakers",
-          "scrap": 30,
-          "techLevel": 5,
-          "nodes": 4,
-          "locs": 3
-        },
-        {
-          "pid": "plainers",
-          "scrap": 22,
-          "techLevel": 2,
-          "nodes": 1,
-          "locs": 1
-        }
-      ],
-      "emptyWheels": 2,
-      "emptyWheelsLandless": 2,
-      "emptyWheelsWithLand": 0,
-      "delayedPurchases": 11,
-      "supplyRefusals": 0,
-      "chipUpgrades": 25,
-      "pressureEvents": 8,
-      "occupationCharges": 49,
-      "sway": {
-        "minMinor": null,
-        "maxMajor": 32,
-        "atCapShare": 0.3472222222222222,
-        "lapsedCourtships": 1
-      },
-      "ms": 2453
-    },
-    {
-      "seed": 1129170944,
-      "round": 81,
-      "winner": null,
-      "ending": "unresolved",
-      "aiTurns": 276,
-      "actsPerTurn": 0.5,
-      "politicalActsPerTurn": 0.782608695652174,
-      "branchMix": {
-        "court": 63,
-        "amends": 105,
-        "denounce": 12,
-        "vassalize": 17,
-        "intrigue": 1,
-        "approach-human": 5,
-        "gift": 12,
-        "war-talk": 1
-      },
-      "denounceShare": 0.08695652173913043,
-      "wars": 50,
-      "surpriseOpenings": 29,
-      "opsRun": 1,
-      "opsBackfired": 15,
-      "sabotageTraced": 15,
-      "courtOpened": 63,
-      "coalitions": 3,
-      "minors": {
-        "allied": 0,
-        "vassal": 0,
-        "dead": 4,
-        "everCourted": 3,
-        "total": 4
-      },
-      "endScrap": [
-        {
-          "pid": "versari",
-          "scrap": 18,
-          "techLevel": 1,
-          "nodes": 0,
-          "locs": 1
-        },
-        {
-          "pid": "goldgrass",
-          "scrap": 28,
-          "techLevel": 3,
-          "nodes": 2,
-          "locs": 3
-        },
-        {
-          "pid": "lakers",
-          "scrap": 18,
-          "techLevel": 2,
-          "nodes": 1,
-          "locs": 0
-        },
-        {
-          "pid": "plainers",
-          "scrap": 38,
-          "techLevel": 4,
-          "nodes": 3,
-          "locs": 1
-        }
-      ],
-      "emptyWheels": 1,
-      "emptyWheelsLandless": 0,
-      "emptyWheelsWithLand": 1,
-      "delayedPurchases": 34,
-      "supplyRefusals": 0,
-      "chipUpgrades": 51,
-      "pressureEvents": 40,
-      "occupationCharges": 84,
-      "sway": {
-        "minMinor": null,
-        "maxMajor": 26,
-        "atCapShare": 0.2515432098765432,
-        "lapsedCourtships": 0
-      },
-      "ms": 3177
-    },
-    {
-      "seed": 185489408,
-      "round": 52,
-      "winner": "goldgrass",
-      "ending": "submission",
-      "aiTurns": 232,
-      "actsPerTurn": 0.46551724137931033,
-      "politicalActsPerTurn": 0.6594827586206896,
-      "branchMix": {
-        "court": 52,
-        "denounce": 25,
-        "approach-human": 8,
-        "amends": 48,
-        "vassalize": 17,
-        "intrigue": 1,
-        "gift": 2
-      },
-      "denounceShare": 0.23148148148148148,
-      "wars": 34,
-      "surpriseOpenings": 14,
-      "opsRun": 1,
-      "opsBackfired": 8,
-      "sabotageTraced": 8,
-      "courtOpened": 52,
-      "coalitions": 2,
-      "minors": {
-        "allied": 1,
-        "vassal": 0,
-        "dead": 4,
-        "everCourted": 4,
-        "total": 4
-      },
-      "endScrap": [
-        {
-          "pid": "versari",
-          "scrap": 0,
-          "techLevel": 1,
-          "nodes": 0,
-          "locs": 0
-        },
-        {
-          "pid": "goldgrass",
-          "scrap": 15,
+          "scrap": 5,
           "techLevel": 4,
           "nodes": 3,
           "locs": 2
         },
         {
           "pid": "lakers",
-          "scrap": 43,
-          "techLevel": 3,
-          "nodes": 2,
-          "locs": 0
-        },
-        {
-          "pid": "plainers",
           "scrap": 33,
-          "techLevel": 3,
-          "nodes": 2,
-          "locs": 2
-        }
-      ],
-      "emptyWheels": 1,
-      "emptyWheelsLandless": 1,
-      "emptyWheelsWithLand": 0,
-      "delayedPurchases": 17,
-      "supplyRefusals": 0,
-      "chipUpgrades": 24,
-      "pressureEvents": 8,
-      "occupationCharges": 42,
-      "sway": {
-        "minMinor": null,
-        "maxMajor": 32,
-        "atCapShare": 0.28125,
-        "lapsedCourtships": 0
-      },
-      "ms": 2722
-    },
-    {
-      "seed": 602646592,
-      "round": 31,
-      "winner": "lakers",
-      "ending": "submission",
-      "aiTurns": 160,
-      "actsPerTurn": 0.5625,
-      "politicalActsPerTurn": 0.8125,
-      "branchMix": {
-        "court": 58,
-        "denounce": 22,
-        "vassalize": 13,
-        "amends": 17,
-        "approach-human": 10,
-        "answer-ultimatum": 1,
-        "gift": 4,
-        "enforce-ultimatum": 5
-      },
-      "denounceShare": 0.24444444444444444,
-      "wars": 29,
-      "surpriseOpenings": 12,
-      "opsRun": 0,
-      "opsBackfired": 0,
-      "sabotageTraced": 0,
-      "courtOpened": 58,
-      "coalitions": 1,
-      "minors": {
-        "allied": 0,
-        "vassal": 1,
-        "dead": 4,
-        "everCourted": 4,
-        "total": 4
-      },
-      "endScrap": [
-        {
-          "pid": "versari",
-          "scrap": 12,
-          "techLevel": 1,
-          "nodes": 0,
-          "locs": 0
-        },
-        {
-          "pid": "goldgrass",
-          "scrap": 16,
-          "techLevel": 1,
-          "nodes": 0,
-          "locs": 0
-        },
-        {
-          "pid": "lakers",
-          "scrap": 23,
-          "techLevel": 3,
-          "nodes": 2,
-          "locs": 2
-        },
-        {
-          "pid": "plainers",
-          "scrap": 32,
-          "techLevel": 1,
-          "nodes": 0,
-          "locs": 1
-        }
-      ],
-      "emptyWheels": 3,
-      "emptyWheelsLandless": 2,
-      "emptyWheelsWithLand": 1,
-      "delayedPurchases": 11,
-      "supplyRefusals": 0,
-      "chipUpgrades": 21,
-      "pressureEvents": 3,
-      "occupationCharges": 50,
-      "sway": {
-        "minMinor": null,
-        "maxMajor": 35,
-        "atCapShare": 0.1935483870967742,
-        "lapsedCourtships": 1
-      },
-      "ms": 1757
-    },
-    {
-      "seed": 2048545536,
-      "round": 46,
-      "winner": "lakers",
-      "ending": "submission",
-      "aiTurns": 243,
-      "actsPerTurn": 0.4279835390946502,
-      "politicalActsPerTurn": 0.6172839506172839,
-      "branchMix": {
-        "court": 67,
-        "amends": 25,
-        "denounce": 17,
-        "vassalize": 19,
-        "pact": 3,
-        "approach-human": 8,
-        "answer-ultimatum": 2,
-        "gift": 9
-      },
-      "denounceShare": 0.16346153846153846,
-      "wars": 37,
-      "surpriseOpenings": 21,
-      "opsRun": 0,
-      "opsBackfired": 0,
-      "sabotageTraced": 0,
-      "courtOpened": 67,
-      "coalitions": 1,
-      "minors": {
-        "allied": 0,
-        "vassal": 1,
-        "dead": 3,
-        "everCourted": 4,
-        "total": 4
-      },
-      "endScrap": [
-        {
-          "pid": "versari",
-          "scrap": 9,
-          "techLevel": 1,
-          "nodes": 0,
-          "locs": 1
-        },
-        {
-          "pid": "goldgrass",
-          "scrap": 19,
-          "techLevel": 1,
-          "nodes": 0,
-          "locs": 0
-        },
-        {
-          "pid": "lakers",
-          "scrap": 38,
-          "techLevel": 5,
-          "nodes": 4,
-          "locs": 2
-        },
-        {
-          "pid": "plainers",
-          "scrap": 19,
-          "techLevel": 1,
-          "nodes": 0,
-          "locs": 1
-        }
-      ],
-      "emptyWheels": 3,
-      "emptyWheelsLandless": 1,
-      "emptyWheelsWithLand": 2,
-      "delayedPurchases": 9,
-      "supplyRefusals": 0,
-      "chipUpgrades": 23,
-      "pressureEvents": 12,
-      "occupationCharges": 48,
-      "sway": {
-        "minMinor": 15,
-        "maxMajor": 35,
-        "atCapShare": 0.2717391304347826,
-        "lapsedCourtships": 5
-      },
-      "ms": 3142
-    },
-    {
-      "seed": 880772864,
-      "round": 54,
-      "winner": "plainers",
-      "ending": "conquest",
-      "aiTurns": 210,
-      "actsPerTurn": 0.32857142857142857,
-      "politicalActsPerTurn": 0.5619047619047619,
-      "branchMix": {
-        "court": 42,
-        "amends": 31,
-        "denounce": 24,
-        "approach-human": 5,
-        "vassalize": 9,
-        "gift": 2,
-        "war-talk": 1,
-        "answer-ultimatum": 2,
-        "enforce-ultimatum": 1,
-        "pact": 1
-      },
-      "denounceShare": 0.34782608695652173,
-      "wars": 30,
-      "surpriseOpenings": 15,
-      "opsRun": 0,
-      "opsBackfired": 0,
-      "sabotageTraced": 0,
-      "courtOpened": 42,
-      "coalitions": 3,
-      "minors": {
-        "allied": 0,
-        "vassal": 0,
-        "dead": 4,
-        "everCourted": 3,
-        "total": 4
-      },
-      "endScrap": [
-        {
-          "pid": "versari",
-          "scrap": 4,
-          "techLevel": 1,
-          "nodes": 0,
-          "locs": 0
-        },
-        {
-          "pid": "goldgrass",
-          "scrap": 13,
           "techLevel": 2,
           "nodes": 1,
-          "locs": 0
-        },
-        {
-          "pid": "lakers",
-          "scrap": 47,
-          "techLevel": 1,
-          "nodes": 0,
-          "locs": 0
+          "locs": 3
         },
         {
           "pid": "plainers",
-          "scrap": 11,
-          "techLevel": 4,
-          "nodes": 3,
-          "locs": 2
+          "scrap": 37,
+          "techLevel": 1,
+          "nodes": 0,
+          "locs": 0
         }
       ],
       "emptyWheels": 2,
@@ -3269,44 +1041,45 @@
       "emptyWheelsWithLand": 0,
       "delayedPurchases": 7,
       "supplyRefusals": 0,
-      "chipUpgrades": 14,
-      "pressureEvents": 11,
-      "occupationCharges": 0,
+      "chipUpgrades": 10,
+      "pressureEvents": 13,
+      "occupationCharges": 27,
       "sway": {
-        "minMinor": null,
-        "maxMajor": 26,
-        "atCapShare": 0.22685185185185186,
-        "lapsedCourtships": 0
+        "minMinor": 15,
+        "maxMajor": 38,
+        "atCapShare": 0.11538461538461539,
+        "lapsedCourtships": 4
       },
-      "ms": 1738
+      "ms": 1936
     },
     {
-      "seed": 527346432,
-      "round": 81,
-      "winner": null,
-      "ending": "unresolved",
-      "aiTurns": 260,
-      "actsPerTurn": 0.2923076923076923,
-      "politicalActsPerTurn": 0.5807692307692308,
+      "seed": 2026,
+      "round": 74,
+      "winner": "dambarans",
+      "ending": "conquest",
+      "aiTurns": 256,
+      "actsPerTurn": 0.296875,
+      "politicalActsPerTurn": 0.703125,
       "branchMix": {
-        "court": 47,
-        "denounce": 10,
-        "amends": 50,
-        "vassalize": 17,
-        "approach-human": 12,
-        "gift": 11,
-        "pact": 2,
-        "war-talk": 1,
-        "intrigue": 1
+        "court": 50,
+        "amends": 101,
+        "denounce": 14,
+        "vassalize": 9,
+        "approach-human": 6
       },
-      "denounceShare": 0.13157894736842105,
-      "wars": 31,
-      "surpriseOpenings": 10,
-      "opsRun": 1,
+      "denounceShare": 0.18421052631578946,
+      "wars": 35,
+      "surpriseOpenings": 18,
+      "opsRun": 0,
       "opsBackfired": 0,
       "sabotageTraced": 0,
-      "courtOpened": 47,
-      "coalitions": 3,
+      "courtOpened": 50,
+      "coalitions": 2,
+      "board": {
+        "total": 8,
+        "dead": 7,
+        "bound": 0
+      },
       "minors": {
         "allied": 0,
         "vassal": 0,
@@ -3317,80 +1090,85 @@
       "endScrap": [
         {
           "pid": "versari",
-          "scrap": 2,
+          "scrap": 1,
           "techLevel": 1,
           "nodes": 0,
           "locs": 0
         },
         {
           "pid": "goldgrass",
-          "scrap": 48,
-          "techLevel": 3,
-          "nodes": 2,
-          "locs": 1
+          "scrap": 13,
+          "techLevel": 1,
+          "nodes": 0,
+          "locs": 0
         },
         {
           "pid": "lakers",
-          "scrap": 29,
-          "techLevel": 3,
-          "nodes": 2,
-          "locs": 2
+          "scrap": 30,
+          "techLevel": 4,
+          "nodes": 3,
+          "locs": 3
         },
         {
           "pid": "plainers",
-          "scrap": 48,
-          "techLevel": 1,
-          "nodes": 0,
+          "scrap": 8,
+          "techLevel": 2,
+          "nodes": 1,
           "locs": 0
         }
       ],
       "emptyWheels": 2,
       "emptyWheelsLandless": 2,
       "emptyWheelsWithLand": 0,
-      "delayedPurchases": 12,
+      "delayedPurchases": 1,
       "supplyRefusals": 0,
-      "chipUpgrades": 24,
-      "pressureEvents": 19,
-      "occupationCharges": 21,
+      "chipUpgrades": 38,
+      "pressureEvents": 10,
+      "occupationCharges": 53,
       "sway": {
         "minMinor": 26,
-        "maxMajor": 17,
-        "atCapShare": 0.2191358024691358,
-        "lapsedCourtships": 2
+        "maxMajor": null,
+        "atCapShare": 0.22128378378378377,
+        "lapsedCourtships": 13
       },
-      "ms": 3419
+      "ms": 2808
     },
     {
-      "seed": 1547239168,
-      "round": 59,
-      "winner": "plainers",
-      "ending": "conquest",
-      "aiTurns": 230,
-      "actsPerTurn": 0.3652173913043478,
-      "politicalActsPerTurn": 0.7347826086956522,
+      "seed": 606,
+      "round": 81,
+      "winner": null,
+      "ending": "unresolved",
+      "aiTurns": 267,
+      "actsPerTurn": 0.449438202247191,
+      "politicalActsPerTurn": 0.599250936329588,
       "branchMix": {
-        "court": 65,
-        "amends": 57,
-        "denounce": 21,
-        "vassalize": 6,
-        "pact": 3,
-        "approach-human": 2,
-        "intrigue": 8,
-        "gift": 6,
-        "war-talk": 1
+        "court": 53,
+        "denounce": 17,
+        "amends": 50,
+        "vassalize": 18,
+        "pact": 6,
+        "approach-human": 8,
+        "war-talk": 1,
+        "intrigue": 1,
+        "gift": 6
       },
-      "denounceShare": 0.25,
-      "wars": 30,
-      "surpriseOpenings": 15,
-      "opsRun": 8,
-      "opsBackfired": 1,
-      "sabotageTraced": 1,
-      "courtOpened": 65,
-      "coalitions": 4,
+      "denounceShare": 0.14166666666666666,
+      "wars": 45,
+      "surpriseOpenings": 23,
+      "opsRun": 1,
+      "opsBackfired": 4,
+      "sabotageTraced": 4,
+      "courtOpened": 53,
+      "coalitions": 2,
+      "board": {
+        "total": 8,
+        "dead": 6,
+        "bound": 0
+      },
       "minors": {
         "allied": 0,
         "vassal": 0,
-        "dead": 4,
+        "dead": 3,
         "everCourted": 3,
         "total": 4
       },
@@ -3404,70 +1182,74 @@
         },
         {
           "pid": "goldgrass",
-          "scrap": 26,
-          "techLevel": 4,
-          "nodes": 3,
-          "locs": 2
+          "scrap": 28,
+          "techLevel": 3,
+          "nodes": 2,
+          "locs": 1
         },
         {
           "pid": "lakers",
-          "scrap": 35,
-          "techLevel": 1,
-          "nodes": 0,
-          "locs": 0
+          "scrap": 38,
+          "techLevel": 5,
+          "nodes": 3,
+          "locs": 3
         },
         {
           "pid": "plainers",
-          "scrap": 16,
-          "techLevel": 5,
-          "nodes": 4,
-          "locs": 2
+          "scrap": 57,
+          "techLevel": 4,
+          "nodes": 3,
+          "locs": 0
         }
       ],
-      "emptyWheels": 2,
-      "emptyWheelsLandless": 2,
+      "emptyWheels": 1,
+      "emptyWheelsLandless": 1,
       "emptyWheelsWithLand": 0,
-      "delayedPurchases": 28,
+      "delayedPurchases": 47,
       "supplyRefusals": 0,
-      "chipUpgrades": 28,
+      "chipUpgrades": 40,
       "pressureEvents": 15,
-      "occupationCharges": 40,
+      "occupationCharges": 51,
       "sway": {
-        "minMinor": null,
-        "maxMajor": 26,
-        "atCapShare": 0.21398305084745764,
-        "lapsedCourtships": 0
+        "minMinor": 24,
+        "maxMajor": 20,
+        "atCapShare": 0.2361111111111111,
+        "lapsedCourtships": 7
       },
-      "ms": 2520
+      "ms": 3688
     },
     {
-      "seed": 1542898432,
-      "round": 37,
+      "seed": 77,
+      "round": 73,
       "winner": "goldgrass",
-      "ending": "diplomacy",
-      "aiTurns": 162,
-      "actsPerTurn": 0.5987654320987654,
-      "politicalActsPerTurn": 0.7469135802469136,
+      "ending": "submission",
+      "aiTurns": 281,
+      "actsPerTurn": 0.697508896797153,
+      "politicalActsPerTurn": 0.5587188612099644,
       "branchMix": {
-        "court": 39,
-        "denounce": 24,
-        "amends": 14,
-        "vassalize": 20,
-        "approach-human": 5,
-        "pact": 1,
-        "intrigue": 5,
-        "war-talk": 4,
-        "gift": 7,
-        "enforce-ultimatum": 2
+        "court": 49,
+        "denounce": 17,
+        "amends": 35,
+        "vassalize": 34,
+        "approach-human": 13,
+        "answer-ultimatum": 2,
+        "gift": 5,
+        "intrigue": 1,
+        "war-talk": 1
       },
-      "denounceShare": 0.24742268041237114,
-      "wars": 32,
-      "surpriseOpenings": 14,
-      "opsRun": 5,
-      "opsBackfired": 0,
-      "sabotageTraced": 0,
-      "courtOpened": 39,
+      "denounceShare": 0.08673469387755102,
+      "wars": 72,
+      "surpriseOpenings": 33,
+      "opsRun": 1,
+      "opsBackfired": 7,
+      "sabotageTraced": 7,
+      "courtOpened": 49,
       "coalitions": 2,
+      "board": {
+        "total": 8,
+        "dead": 6,
+        "bound": 2
+      },
       "minors": {
         "allied": 0,
         "vassal": 2,
@@ -3479,76 +1261,1341 @@
         {
           "pid": "versari",
           "scrap": 5,
+          "techLevel": 2,
+          "nodes": 1,
+          "locs": 2
+        },
+        {
+          "pid": "goldgrass",
+          "scrap": 29,
+          "techLevel": 1,
+          "nodes": 0,
+          "locs": 1
+        },
+        {
+          "pid": "lakers",
+          "scrap": 27,
+          "techLevel": 4,
+          "nodes": 2,
+          "locs": 3
+        },
+        {
+          "pid": "plainers",
+          "scrap": 33,
+          "techLevel": 3,
+          "nodes": 2,
+          "locs": 1
+        }
+      ],
+      "emptyWheels": 1,
+      "emptyWheelsLandless": 0,
+      "emptyWheelsWithLand": 1,
+      "delayedPurchases": 38,
+      "supplyRefusals": 0,
+      "chipUpgrades": 54,
+      "pressureEvents": 16,
+      "occupationCharges": 149,
+      "sway": {
+        "minMinor": null,
+        "maxMajor": 41,
+        "atCapShare": 0.3099315068493151,
+        "lapsedCourtships": 0
+      },
+      "ms": 4327
+    },
+    {
+      "seed": 31415,
+      "round": 24,
+      "winner": "versari",
+      "ending": "mixed",
+      "aiTurns": 135,
+      "actsPerTurn": 0.42962962962962964,
+      "politicalActsPerTurn": 0.7555555555555555,
+      "branchMix": {
+        "court": 44,
+        "denounce": 15,
+        "amends": 21,
+        "vassalize": 10,
+        "pact": 2,
+        "approach-human": 3,
+        "gift": 6,
+        "war-talk": 1
+      },
+      "denounceShare": 0.25862068965517243,
+      "wars": 30,
+      "surpriseOpenings": 11,
+      "opsRun": 0,
+      "opsBackfired": 0,
+      "sabotageTraced": 0,
+      "courtOpened": 44,
+      "coalitions": 5,
+      "board": {
+        "total": 8,
+        "dead": 5,
+        "bound": 3
+      },
+      "minors": {
+        "allied": 0,
+        "vassal": 1,
+        "dead": 4,
+        "everCourted": 3,
+        "total": 4
+      },
+      "endScrap": [
+        {
+          "pid": "versari",
+          "scrap": 18,
           "techLevel": 1,
           "nodes": 0,
           "locs": 1
         },
         {
           "pid": "goldgrass",
-          "scrap": 20,
+          "scrap": 34,
           "techLevel": 3,
-          "nodes": 1,
-          "locs": 3
+          "nodes": 2,
+          "locs": 1
         },
         {
           "pid": "lakers",
-          "scrap": 28,
-          "techLevel": 5,
-          "nodes": 4,
-          "locs": 2
-        },
-        {
-          "pid": "plainers",
-          "scrap": 18,
+          "scrap": 55,
           "techLevel": 1,
           "nodes": 0,
           "locs": 0
+        },
+        {
+          "pid": "plainers",
+          "scrap": 3,
+          "techLevel": 5,
+          "nodes": 4,
+          "locs": 4
         }
       ],
       "emptyWheels": 2,
       "emptyWheelsLandless": 1,
       "emptyWheelsWithLand": 1,
-      "delayedPurchases": 12,
+      "delayedPurchases": 7,
+      "supplyRefusals": 0,
+      "chipUpgrades": 6,
+      "pressureEvents": 14,
+      "occupationCharges": 13,
+      "sway": {
+        "minMinor": null,
+        "maxMajor": 31,
+        "atCapShare": 0.22395833333333334,
+        "lapsedCourtships": 0
+      },
+      "ms": 1351
+    },
+    {
+      "seed": 487565508,
+      "round": 66,
+      "winner": "plainers",
+      "ending": "conquest",
+      "aiTurns": 257,
+      "actsPerTurn": 0.5136186770428015,
+      "politicalActsPerTurn": 0.6342412451361867,
+      "branchMix": {
+        "court": 42,
+        "denounce": 11,
+        "amends": 55,
+        "vassalize": 11,
+        "approach-human": 4,
+        "answer-ultimatum": 2,
+        "gift": 30,
+        "intrigue": 5,
+        "war-talk": 3
+      },
+      "denounceShare": 0.08333333333333333,
+      "wars": 47,
+      "surpriseOpenings": 29,
+      "opsRun": 5,
+      "opsBackfired": 30,
+      "sabotageTraced": 30,
+      "courtOpened": 42,
+      "coalitions": 3,
+      "board": {
+        "total": 8,
+        "dead": 7,
+        "bound": 0
+      },
+      "minors": {
+        "allied": 0,
+        "vassal": 0,
+        "dead": 4,
+        "everCourted": 4,
+        "total": 4
+      },
+      "endScrap": [
+        {
+          "pid": "versari",
+          "scrap": 7,
+          "techLevel": 1,
+          "nodes": 0,
+          "locs": 1
+        },
+        {
+          "pid": "goldgrass",
+          "scrap": 35,
+          "techLevel": 4,
+          "nodes": 3,
+          "locs": 1
+        },
+        {
+          "pid": "lakers",
+          "scrap": 30,
+          "techLevel": 3,
+          "nodes": 2,
+          "locs": 2
+        },
+        {
+          "pid": "plainers",
+          "scrap": 24,
+          "techLevel": 3,
+          "nodes": 2,
+          "locs": 2
+        }
+      ],
+      "emptyWheels": 1,
+      "emptyWheelsLandless": 0,
+      "emptyWheelsWithLand": 1,
+      "delayedPurchases": 4,
+      "supplyRefusals": 0,
+      "chipUpgrades": 25,
+      "pressureEvents": 14,
+      "occupationCharges": 62,
+      "sway": {
+        "minMinor": null,
+        "maxMajor": 26,
+        "atCapShare": 0.2784090909090909,
+        "lapsedCourtships": 0
+      },
+      "ms": 3613
+    },
+    {
+      "seed": 1890501568,
+      "round": 60,
+      "winner": "plainers",
+      "ending": "conquest",
+      "aiTurns": 269,
+      "actsPerTurn": 0.5241635687732342,
+      "politicalActsPerTurn": 0.6988847583643123,
+      "branchMix": {
+        "court": 74,
+        "amends": 51,
+        "vassalize": 20,
+        "denounce": 26,
+        "approach-human": 4,
+        "war-talk": 1,
+        "answer-ultimatum": 1,
+        "gift": 7,
+        "intrigue": 4
+      },
+      "denounceShare": 0.18439716312056736,
+      "wars": 56,
+      "surpriseOpenings": 31,
+      "opsRun": 4,
+      "opsBackfired": 4,
+      "sabotageTraced": 4,
+      "courtOpened": 74,
+      "coalitions": 3,
+      "board": {
+        "total": 8,
+        "dead": 7,
+        "bound": 0
+      },
+      "minors": {
+        "allied": 0,
+        "vassal": 0,
+        "dead": 4,
+        "everCourted": 4,
+        "total": 4
+      },
+      "endScrap": [
+        {
+          "pid": "versari",
+          "scrap": 8,
+          "techLevel": 1,
+          "nodes": 0,
+          "locs": 1
+        },
+        {
+          "pid": "goldgrass",
+          "scrap": 24,
+          "techLevel": 1,
+          "nodes": 0,
+          "locs": 1
+        },
+        {
+          "pid": "lakers",
+          "scrap": 27,
+          "techLevel": 3,
+          "nodes": 2,
+          "locs": 2
+        },
+        {
+          "pid": "plainers",
+          "scrap": 18,
+          "techLevel": 2,
+          "nodes": 1,
+          "locs": 1
+        }
+      ],
+      "emptyWheels": 2,
+      "emptyWheelsLandless": 0,
+      "emptyWheelsWithLand": 2,
+      "delayedPurchases": 29,
+      "supplyRefusals": 0,
+      "chipUpgrades": 25,
+      "pressureEvents": 32,
+      "occupationCharges": 78,
+      "sway": {
+        "minMinor": null,
+        "maxMajor": 26,
+        "atCapShare": 0.19583333333333333,
+        "lapsedCourtships": 10
+      },
+      "ms": 3935
+    },
+    {
+      "seed": 1619921152,
+      "round": 36,
+      "winner": "goldgrass",
+      "ending": "submission",
+      "aiTurns": 163,
+      "actsPerTurn": 0.4723926380368098,
+      "politicalActsPerTurn": 0.852760736196319,
+      "branchMix": {
+        "court": 59,
+        "amends": 40,
+        "denounce": 15,
+        "vassalize": 9,
+        "pact": 2,
+        "approach-human": 4,
+        "intrigue": 1,
+        "answer-ultimatum": 1,
+        "gift": 8
+      },
+      "denounceShare": 0.19480519480519481,
+      "wars": 29,
+      "surpriseOpenings": 15,
+      "opsRun": 1,
+      "opsBackfired": 7,
+      "sabotageTraced": 7,
+      "courtOpened": 59,
+      "coalitions": 4,
+      "board": {
+        "total": 8,
+        "dead": 6,
+        "bound": 2
+      },
+      "minors": {
+        "allied": 0,
+        "vassal": 0,
+        "dead": 4,
+        "everCourted": 4,
+        "total": 4
+      },
+      "endScrap": [
+        {
+          "pid": "versari",
+          "scrap": 14,
+          "techLevel": 1,
+          "nodes": 0,
+          "locs": 1
+        },
+        {
+          "pid": "goldgrass",
+          "scrap": 3,
+          "techLevel": 4,
+          "nodes": 3,
+          "locs": 5
+        },
+        {
+          "pid": "lakers",
+          "scrap": 22,
+          "techLevel": 1,
+          "nodes": 0,
+          "locs": 0
+        },
+        {
+          "pid": "plainers",
+          "scrap": 27,
+          "techLevel": 4,
+          "nodes": 3,
+          "locs": 1
+        }
+      ],
+      "emptyWheels": 2,
+      "emptyWheelsLandless": 1,
+      "emptyWheelsWithLand": 1,
+      "delayedPurchases": 8,
       "supplyRefusals": 0,
       "chipUpgrades": 21,
-      "pressureEvents": 8,
+      "pressureEvents": 9,
+      "occupationCharges": 40,
+      "sway": {
+        "minMinor": null,
+        "maxMajor": 32,
+        "atCapShare": 0.1875,
+        "lapsedCourtships": 1
+      },
+      "ms": 2119
+    },
+    {
+      "seed": 1496843520,
+      "round": 19,
+      "winner": "versari",
+      "ending": "submission",
+      "aiTurns": 115,
+      "actsPerTurn": 0.5217391304347826,
+      "politicalActsPerTurn": 0.7652173913043478,
+      "branchMix": {
+        "court": 50,
+        "amends": 8,
+        "denounce": 16,
+        "approach-human": 3,
+        "vassalize": 8,
+        "pact": 3
+      },
+      "denounceShare": 0.26666666666666666,
+      "wars": 21,
+      "surpriseOpenings": 10,
+      "opsRun": 0,
+      "opsBackfired": 0,
+      "sabotageTraced": 0,
+      "courtOpened": 50,
+      "coalitions": 3,
+      "board": {
+        "total": 8,
+        "dead": 4,
+        "bound": 4
+      },
+      "minors": {
+        "allied": 1,
+        "vassal": 2,
+        "dead": 3,
+        "everCourted": 4,
+        "total": 4
+      },
+      "endScrap": [
+        {
+          "pid": "versari",
+          "scrap": 26,
+          "techLevel": 2,
+          "nodes": 0,
+          "locs": 2
+        },
+        {
+          "pid": "goldgrass",
+          "scrap": 18,
+          "techLevel": 2,
+          "nodes": 1,
+          "locs": 1
+        },
+        {
+          "pid": "lakers",
+          "scrap": 55,
+          "techLevel": 1,
+          "nodes": 0,
+          "locs": 0
+        },
+        {
+          "pid": "plainers",
+          "scrap": 33,
+          "techLevel": 2,
+          "nodes": 1,
+          "locs": 1
+        }
+      ],
+      "emptyWheels": 2,
+      "emptyWheelsLandless": 1,
+      "emptyWheelsWithLand": 1,
+      "delayedPurchases": 3,
+      "supplyRefusals": 0,
+      "chipUpgrades": 7,
+      "pressureEvents": 5,
+      "occupationCharges": 6,
+      "sway": {
+        "minMinor": 12,
+        "maxMajor": 44,
+        "atCapShare": 0.07894736842105263,
+        "lapsedCourtships": 0
+      },
+      "ms": 1251
+    },
+    {
+      "seed": 1818251520,
+      "round": 30,
+      "winner": "lakers",
+      "ending": "conquest",
+      "aiTurns": 184,
+      "actsPerTurn": 0.45652173913043476,
+      "politicalActsPerTurn": 0.6195652173913043,
+      "branchMix": {
+        "court": 59,
+        "amends": 11,
+        "denounce": 23,
+        "vassalize": 10,
+        "gift": 3,
+        "approach-human": 8
+      },
+      "denounceShare": 0.27380952380952384,
+      "wars": 31,
+      "surpriseOpenings": 21,
+      "opsRun": 0,
+      "opsBackfired": 0,
+      "sabotageTraced": 0,
+      "courtOpened": 59,
+      "coalitions": 2,
+      "board": {
+        "total": 8,
+        "dead": 7,
+        "bound": 1
+      },
+      "minors": {
+        "allied": 2,
+        "vassal": 0,
+        "dead": 4,
+        "everCourted": 4,
+        "total": 4
+      },
+      "endScrap": [
+        {
+          "pid": "versari",
+          "scrap": 6,
+          "techLevel": 2,
+          "nodes": 0,
+          "locs": 2
+        },
+        {
+          "pid": "goldgrass",
+          "scrap": 55,
+          "techLevel": 1,
+          "nodes": 0,
+          "locs": 0
+        },
+        {
+          "pid": "lakers",
+          "scrap": 30,
+          "techLevel": 2,
+          "nodes": 0,
+          "locs": 2
+        },
+        {
+          "pid": "plainers",
+          "scrap": 21,
+          "techLevel": 3,
+          "nodes": 2,
+          "locs": 0
+        }
+      ],
+      "emptyWheels": 3,
+      "emptyWheelsLandless": 1,
+      "emptyWheelsWithLand": 2,
+      "delayedPurchases": 0,
+      "supplyRefusals": 0,
+      "chipUpgrades": 7,
+      "pressureEvents": 4,
+      "occupationCharges": 3,
+      "sway": {
+        "minMinor": null,
+        "maxMajor": 29,
+        "atCapShare": 0.15833333333333333,
+        "lapsedCourtships": 3
+      },
+      "ms": 2023
+    },
+    {
+      "seed": 598781184,
+      "round": 56,
+      "winner": "plainers",
+      "ending": "conquest",
+      "aiTurns": 258,
+      "actsPerTurn": 0.4069767441860465,
+      "politicalActsPerTurn": 0.5775193798449613,
+      "branchMix": {
+        "court": 50,
+        "amends": 32,
+        "approach-human": 7,
+        "denounce": 18,
+        "vassalize": 16,
+        "gift": 25,
+        "war-talk": 1
+      },
+      "denounceShare": 0.17142857142857143,
+      "wars": 42,
+      "surpriseOpenings": 21,
+      "opsRun": 0,
+      "opsBackfired": 5,
+      "sabotageTraced": 5,
+      "courtOpened": 50,
+      "coalitions": 3,
+      "board": {
+        "total": 8,
+        "dead": 7,
+        "bound": 0
+      },
+      "minors": {
+        "allied": 0,
+        "vassal": 0,
+        "dead": 4,
+        "everCourted": 3,
+        "total": 4
+      },
+      "endScrap": [
+        {
+          "pid": "versari",
+          "scrap": 0,
+          "techLevel": 1,
+          "nodes": 0,
+          "locs": 1
+        },
+        {
+          "pid": "goldgrass",
+          "scrap": 8,
+          "techLevel": 3,
+          "nodes": 2,
+          "locs": 2
+        },
+        {
+          "pid": "lakers",
+          "scrap": 19,
+          "techLevel": 2,
+          "nodes": 1,
+          "locs": 0
+        },
+        {
+          "pid": "plainers",
+          "scrap": 28,
+          "techLevel": 4,
+          "nodes": 3,
+          "locs": 2
+        }
+      ],
+      "emptyWheels": 1,
+      "emptyWheelsLandless": 0,
+      "emptyWheelsWithLand": 1,
+      "delayedPurchases": 17,
+      "supplyRefusals": 0,
+      "chipUpgrades": 20,
+      "pressureEvents": 21,
+      "occupationCharges": 50,
+      "sway": {
+        "minMinor": null,
+        "maxMajor": 26,
+        "atCapShare": 0.27232142857142855,
+        "lapsedCourtships": 0
+      },
+      "ms": 3835
+    },
+    {
+      "seed": 1425004800,
+      "round": 42,
+      "winner": "dambarans",
+      "ending": "conquest",
+      "aiTurns": 197,
+      "actsPerTurn": 0.36548223350253806,
+      "politicalActsPerTurn": 0.7563451776649747,
+      "branchMix": {
+        "court": 52,
+        "amends": 55,
+        "denounce": 15,
+        "vassalize": 14,
+        "approach-human": 2,
+        "gift": 8,
+        "intrigue": 3
+      },
+      "denounceShare": 0.20833333333333334,
+      "wars": 39,
+      "surpriseOpenings": 19,
+      "opsRun": 3,
+      "opsBackfired": 0,
+      "sabotageTraced": 0,
+      "courtOpened": 52,
+      "coalitions": 3,
+      "board": {
+        "total": 8,
+        "dead": 7,
+        "bound": 0
+      },
+      "minors": {
+        "allied": 0,
+        "vassal": 0,
+        "dead": 3,
+        "everCourted": 3,
+        "total": 4
+      },
+      "endScrap": [
+        {
+          "pid": "versari",
+          "scrap": 3,
+          "techLevel": 1,
+          "nodes": 0,
+          "locs": 2
+        },
+        {
+          "pid": "goldgrass",
+          "scrap": 32,
+          "techLevel": 2,
+          "nodes": 1,
+          "locs": 1
+        },
+        {
+          "pid": "lakers",
+          "scrap": 14,
+          "techLevel": 1,
+          "nodes": 0,
+          "locs": 0
+        },
+        {
+          "pid": "plainers",
+          "scrap": 14,
+          "techLevel": 1,
+          "nodes": 0,
+          "locs": 0
+        }
+      ],
+      "emptyWheels": 3,
+      "emptyWheelsLandless": 2,
+      "emptyWheelsWithLand": 1,
+      "delayedPurchases": 8,
+      "supplyRefusals": 0,
+      "chipUpgrades": 22,
+      "pressureEvents": 10,
+      "occupationCharges": 41,
+      "sway": {
+        "minMinor": 19,
+        "maxMajor": null,
+        "atCapShare": 0.19345238095238096,
+        "lapsedCourtships": 8
+      },
+      "ms": 2368
+    },
+    {
+      "seed": 339580160,
+      "round": 51,
+      "winner": "goldgrass",
+      "ending": "diplomacy",
+      "aiTurns": 212,
+      "actsPerTurn": 0.5801886792452831,
+      "politicalActsPerTurn": 0.5613207547169812,
+      "branchMix": {
+        "court": 41,
+        "amends": 35,
+        "approach-human": 10,
+        "vassalize": 22,
+        "denounce": 8,
+        "intrigue": 2,
+        "enforce-ultimatum": 1
+      },
+      "denounceShare": 0.06504065040650407,
+      "wars": 44,
+      "surpriseOpenings": 20,
+      "opsRun": 2,
+      "opsBackfired": 2,
+      "sabotageTraced": 2,
+      "courtOpened": 41,
+      "coalitions": 3,
+      "board": {
+        "total": 8,
+        "dead": 6,
+        "bound": 2
+      },
+      "minors": {
+        "allied": 0,
+        "vassal": 1,
+        "dead": 4,
+        "everCourted": 4,
+        "total": 4
+      },
+      "endScrap": [
+        {
+          "pid": "versari",
+          "scrap": 10,
+          "techLevel": 1,
+          "nodes": 0,
+          "locs": 1
+        },
+        {
+          "pid": "goldgrass",
+          "scrap": 44,
+          "techLevel": 5,
+          "nodes": 2,
+          "locs": 3
+        },
+        {
+          "pid": "lakers",
+          "scrap": 13,
+          "techLevel": 3,
+          "nodes": 2,
+          "locs": 2
+        },
+        {
+          "pid": "plainers",
+          "scrap": 12,
+          "techLevel": 2,
+          "nodes": 1,
+          "locs": 2
+        }
+      ],
+      "emptyWheels": 1,
+      "emptyWheelsLandless": 0,
+      "emptyWheelsWithLand": 1,
+      "delayedPurchases": 10,
+      "supplyRefusals": 0,
+      "chipUpgrades": 29,
+      "pressureEvents": 17,
+      "occupationCharges": 56,
+      "sway": {
+        "minMinor": null,
+        "maxMajor": 28,
+        "atCapShare": 0.2696078431372549,
+        "lapsedCourtships": 2
+      },
+      "ms": 2724
+    },
+    {
+      "seed": 530489664,
+      "round": 76,
+      "winner": "plainers",
+      "ending": "conquest",
+      "aiTurns": 289,
+      "actsPerTurn": 0.5916955017301038,
+      "politicalActsPerTurn": 0.8166089965397924,
+      "branchMix": {
+        "court": 64,
+        "amends": 60,
+        "denounce": 30,
+        "vassalize": 28,
+        "approach-human": 9,
+        "pact": 9,
+        "war-talk": 2,
+        "answer-ultimatum": 2,
+        "intrigue": 1,
+        "gift": 31
+      },
+      "denounceShare": 0.17543859649122806,
+      "wars": 56,
+      "surpriseOpenings": 26,
+      "opsRun": 1,
+      "opsBackfired": 1,
+      "sabotageTraced": 1,
+      "courtOpened": 64,
+      "coalitions": 3,
+      "board": {
+        "total": 8,
+        "dead": 7,
+        "bound": 0
+      },
+      "minors": {
+        "allied": 2,
+        "vassal": 0,
+        "dead": 4,
+        "everCourted": 4,
+        "total": 4
+      },
+      "endScrap": [
+        {
+          "pid": "versari",
+          "scrap": 15,
+          "techLevel": 1,
+          "nodes": 0,
+          "locs": 1
+        },
+        {
+          "pid": "goldgrass",
+          "scrap": 34,
+          "techLevel": 2,
+          "nodes": 1,
+          "locs": 1
+        },
+        {
+          "pid": "lakers",
+          "scrap": 39,
+          "techLevel": 1,
+          "nodes": 0,
+          "locs": 0
+        },
+        {
+          "pid": "plainers",
+          "scrap": 3,
+          "techLevel": 1,
+          "nodes": 0,
+          "locs": 2
+        }
+      ],
+      "emptyWheels": 3,
+      "emptyWheelsLandless": 1,
+      "emptyWheelsWithLand": 2,
+      "delayedPurchases": 4,
+      "supplyRefusals": 0,
+      "chipUpgrades": 25,
+      "pressureEvents": 20,
+      "occupationCharges": 68,
+      "sway": {
+        "minMinor": null,
+        "maxMajor": 26,
+        "atCapShare": 0.20065789473684212,
+        "lapsedCourtships": 19
+      },
+      "ms": 4050
+    },
+    {
+      "seed": 1126979584,
+      "round": 59,
+      "winner": "lakers",
+      "ending": "submission",
+      "aiTurns": 305,
+      "actsPerTurn": 0.3704918032786885,
+      "politicalActsPerTurn": 0.5409836065573771,
+      "branchMix": {
+        "court": 66,
+        "amends": 20,
+        "denounce": 29,
+        "vassalize": 22,
+        "approach-human": 4,
+        "pact": 9,
+        "intrigue": 3,
+        "gift": 12
+      },
+      "denounceShare": 0.25663716814159293,
+      "wars": 43,
+      "surpriseOpenings": 21,
+      "opsRun": 3,
+      "opsBackfired": 0,
+      "sabotageTraced": 0,
+      "courtOpened": 66,
+      "coalitions": 3,
+      "board": {
+        "total": 8,
+        "dead": 5,
+        "bound": 3
+      },
+      "minors": {
+        "allied": 0,
+        "vassal": 3,
+        "dead": 4,
+        "everCourted": 4,
+        "total": 4
+      },
+      "endScrap": [
+        {
+          "pid": "versari",
+          "scrap": 4,
+          "techLevel": 1,
+          "nodes": 0,
+          "locs": 0
+        },
+        {
+          "pid": "goldgrass",
+          "scrap": 18,
+          "techLevel": 2,
+          "nodes": 1,
+          "locs": 1
+        },
+        {
+          "pid": "lakers",
+          "scrap": 42,
+          "techLevel": 1,
+          "nodes": 0,
+          "locs": 1
+        },
+        {
+          "pid": "plainers",
+          "scrap": 42,
+          "techLevel": 1,
+          "nodes": 0,
+          "locs": 1
+        }
+      ],
+      "emptyWheels": 3,
+      "emptyWheelsLandless": 1,
+      "emptyWheelsWithLand": 2,
+      "delayedPurchases": 11,
+      "supplyRefusals": 0,
+      "chipUpgrades": 24,
+      "pressureEvents": 27,
+      "occupationCharges": 67,
+      "sway": {
+        "minMinor": null,
+        "maxMajor": 38,
+        "atCapShare": 0.2097457627118644,
+        "lapsedCourtships": 10
+      },
+      "ms": 4211
+    },
+    {
+      "seed": 749840384,
+      "round": 32,
+      "winner": "goldgrass",
+      "ending": "diplomacy",
+      "aiTurns": 159,
+      "actsPerTurn": 0.6918238993710691,
+      "politicalActsPerTurn": 0.6666666666666666,
+      "branchMix": {
+        "court": 48,
+        "denounce": 23,
+        "vassalize": 17,
+        "amends": 9,
+        "approach-human": 6,
+        "gift": 2,
+        "war-talk": 1
+      },
+      "denounceShare": 0.20909090909090908,
+      "wars": 37,
+      "surpriseOpenings": 18,
+      "opsRun": 0,
+      "opsBackfired": 0,
+      "sabotageTraced": 0,
+      "courtOpened": 48,
+      "coalitions": 3,
+      "board": {
+        "total": 8,
+        "dead": 6,
+        "bound": 2
+      },
+      "minors": {
+        "allied": 0,
+        "vassal": 3,
+        "dead": 4,
+        "everCourted": 4,
+        "total": 4
+      },
+      "endScrap": [
+        {
+          "pid": "versari",
+          "scrap": 5,
+          "techLevel": 2,
+          "nodes": 1,
+          "locs": 2
+        },
+        {
+          "pid": "goldgrass",
+          "scrap": 26,
+          "techLevel": 3,
+          "nodes": 2,
+          "locs": 2
+        },
+        {
+          "pid": "lakers",
+          "scrap": 25,
+          "techLevel": 4,
+          "nodes": 3,
+          "locs": 3
+        },
+        {
+          "pid": "plainers",
+          "scrap": 13,
+          "techLevel": 2,
+          "nodes": 1,
+          "locs": 1
+        }
+      ],
+      "emptyWheels": 0,
+      "emptyWheelsLandless": 0,
+      "emptyWheelsWithLand": 0,
+      "delayedPurchases": 5,
+      "supplyRefusals": 0,
+      "chipUpgrades": 16,
+      "pressureEvents": 13,
       "occupationCharges": 37,
       "sway": {
         "minMinor": null,
         "maxMajor": 32,
-        "atCapShare": 0.28378378378378377,
+        "atCapShare": 0.21484375,
         "lapsedCourtships": 0
       },
-      "ms": 1673
+      "ms": 1900
     },
     {
-      "seed": 695940864,
-      "round": 26,
-      "winner": "plainers",
-      "ending": "diplomacy",
-      "aiTurns": 155,
-      "actsPerTurn": 0.3548387096774194,
-      "politicalActsPerTurn": 0.7419354838709677,
+      "seed": 416593920,
+      "round": 81,
+      "winner": null,
+      "ending": "unresolved",
+      "aiTurns": 260,
+      "actsPerTurn": 0.41923076923076924,
+      "politicalActsPerTurn": 0.7961538461538461,
       "branchMix": {
-        "court": 71,
-        "denounce": 18,
-        "amends": 10,
-        "vassalize": 9,
+        "court": 51,
+        "denounce": 12,
+        "amends": 107,
+        "vassalize": 17,
         "approach-human": 3,
-        "pact": 3,
-        "answer-ultimatum": 1
+        "gift": 17
       },
-      "denounceShare": 0.32727272727272727,
-      "wars": 17,
-      "surpriseOpenings": 9,
+      "denounceShare": 0.11009174311926606,
+      "wars": 44,
+      "surpriseOpenings": 24,
       "opsRun": 0,
-      "opsBackfired": 0,
-      "sabotageTraced": 0,
-      "courtOpened": 71,
-      "coalitions": 2,
+      "opsBackfired": 13,
+      "sabotageTraced": 13,
+      "courtOpened": 51,
+      "coalitions": 3,
+      "board": {
+        "total": 8,
+        "dead": 6,
+        "bound": 1
+      },
       "minors": {
         "allied": 1,
-        "vassal": 3,
+        "vassal": 0,
+        "dead": 3,
+        "everCourted": 3,
+        "total": 4
+      },
+      "endScrap": [
+        {
+          "pid": "versari",
+          "scrap": 3,
+          "techLevel": 1,
+          "nodes": 0,
+          "locs": 0
+        },
+        {
+          "pid": "goldgrass",
+          "scrap": 14,
+          "techLevel": 4,
+          "nodes": 2,
+          "locs": 3
+        },
+        {
+          "pid": "lakers",
+          "scrap": 0,
+          "techLevel": 1,
+          "nodes": 0,
+          "locs": 0
+        },
+        {
+          "pid": "plainers",
+          "scrap": 51,
+          "techLevel": 1,
+          "nodes": 0,
+          "locs": 0
+        }
+      ],
+      "emptyWheels": 3,
+      "emptyWheelsLandless": 3,
+      "emptyWheelsWithLand": 0,
+      "delayedPurchases": 8,
+      "supplyRefusals": 0,
+      "chipUpgrades": 28,
+      "pressureEvents": 14,
+      "occupationCharges": 32,
+      "sway": {
+        "minMinor": 26,
+        "maxMajor": 9,
+        "atCapShare": 0.20833333333333334,
+        "lapsedCourtships": 4
+      },
+      "ms": 4322
+    },
+    {
+      "seed": 849512512,
+      "round": 73,
+      "winner": "versari",
+      "ending": "submission",
+      "aiTurns": 268,
+      "actsPerTurn": 0.585820895522388,
+      "politicalActsPerTurn": 0.6343283582089553,
+      "branchMix": {
+        "court": 56,
+        "denounce": 13,
+        "amends": 41,
+        "approach-human": 9,
+        "vassalize": 44,
+        "gift": 1,
+        "pact": 1,
+        "answer-ultimatum": 2,
+        "war-talk": 2,
+        "enforce-ultimatum": 1
+      },
+      "denounceShare": 0.08280254777070063,
+      "wars": 65,
+      "surpriseOpenings": 25,
+      "opsRun": 0,
+      "opsBackfired": 12,
+      "sabotageTraced": 12,
+      "courtOpened": 56,
+      "coalitions": 2,
+      "board": {
+        "total": 8,
+        "dead": 6,
+        "bound": 2
+      },
+      "minors": {
+        "allied": 0,
+        "vassal": 2,
+        "dead": 4,
+        "everCourted": 4,
+        "total": 4
+      },
+      "endScrap": [
+        {
+          "pid": "versari",
+          "scrap": 11,
+          "techLevel": 1,
+          "nodes": 0,
+          "locs": 1
+        },
+        {
+          "pid": "goldgrass",
+          "scrap": 17,
+          "techLevel": 2,
+          "nodes": 1,
+          "locs": 0
+        },
+        {
+          "pid": "lakers",
+          "scrap": 31,
+          "techLevel": 3,
+          "nodes": 2,
+          "locs": 2
+        },
+        {
+          "pid": "plainers",
+          "scrap": 26,
+          "techLevel": 2,
+          "nodes": 0,
+          "locs": 1
+        }
+      ],
+      "emptyWheels": 2,
+      "emptyWheelsLandless": 0,
+      "emptyWheelsWithLand": 2,
+      "delayedPurchases": 12,
+      "supplyRefusals": 0,
+      "chipUpgrades": 33,
+      "pressureEvents": 17,
+      "occupationCharges": 25,
+      "sway": {
+        "minMinor": null,
+        "maxMajor": 41,
+        "atCapShare": 0.23972602739726026,
+        "lapsedCourtships": 6
+      },
+      "ms": 3206
+    },
+    {
+      "seed": 909619968,
+      "round": 52,
+      "winner": "lakers",
+      "ending": "conquest",
+      "aiTurns": 224,
+      "actsPerTurn": 0.5178571428571429,
+      "politicalActsPerTurn": 0.7276785714285714,
+      "branchMix": {
+        "court": 56,
+        "denounce": 20,
+        "amends": 19,
+        "vassalize": 32,
+        "approach-human": 2,
+        "war-talk": 4,
+        "gift": 29,
+        "intrigue": 1
+      },
+      "denounceShare": 0.1724137931034483,
+      "wars": 48,
+      "surpriseOpenings": 20,
+      "opsRun": 1,
+      "opsBackfired": 6,
+      "sabotageTraced": 6,
+      "courtOpened": 56,
+      "coalitions": 2,
+      "board": {
+        "total": 8,
+        "dead": 7,
+        "bound": 1
+      },
+      "minors": {
+        "allied": 0,
+        "vassal": 0,
+        "dead": 4,
+        "everCourted": 4,
+        "total": 4
+      },
+      "endScrap": [
+        {
+          "pid": "versari",
+          "scrap": 22,
+          "techLevel": 3,
+          "nodes": 0,
+          "locs": 2
+        },
+        {
+          "pid": "goldgrass",
+          "scrap": 27,
+          "techLevel": 1,
+          "nodes": 0,
+          "locs": 1
+        },
+        {
+          "pid": "lakers",
+          "scrap": 47,
+          "techLevel": 3,
+          "nodes": 1,
+          "locs": 1
+        },
+        {
+          "pid": "plainers",
+          "scrap": 35,
+          "techLevel": 1,
+          "nodes": 0,
+          "locs": 0
+        }
+      ],
+      "emptyWheels": 3,
+      "emptyWheelsLandless": 1,
+      "emptyWheelsWithLand": 2,
+      "delayedPurchases": 1,
+      "supplyRefusals": 0,
+      "chipUpgrades": 28,
+      "pressureEvents": 4,
+      "occupationCharges": 66,
+      "sway": {
+        "minMinor": null,
+        "maxMajor": 29,
+        "atCapShare": 0.21153846153846154,
+        "lapsedCourtships": 0
+      },
+      "ms": 2918
+    },
+    {
+      "seed": 4286208,
+      "round": 38,
+      "winner": "plainers",
+      "ending": "diplomacy",
+      "aiTurns": 192,
+      "actsPerTurn": 0.328125,
+      "politicalActsPerTurn": 0.7604166666666666,
+      "branchMix": {
+        "court": 54,
+        "denounce": 17,
+        "amends": 47,
+        "approach-human": 4,
+        "answer-ultimatum": 1,
+        "war-talk": 2,
+        "vassalize": 12,
+        "pact": 3,
+        "enforce-ultimatum": 1,
+        "gift": 5
+      },
+      "denounceShare": 0.2698412698412698,
+      "wars": 29,
+      "surpriseOpenings": 16,
+      "opsRun": 0,
+      "opsBackfired": 1,
+      "sabotageTraced": 1,
+      "courtOpened": 54,
+      "coalitions": 2,
+      "board": {
+        "total": 8,
+        "dead": 6,
+        "bound": 2
+      },
+      "minors": {
+        "allied": 2,
+        "vassal": 0,
         "dead": 3,
         "everCourted": 4,
         "total": 4
@@ -3563,72 +2610,831 @@
         },
         {
           "pid": "goldgrass",
-          "scrap": 19,
+          "scrap": 12,
           "techLevel": 3,
           "nodes": 2,
-          "locs": 1
+          "locs": 2
         },
         {
           "pid": "lakers",
-          "scrap": 45,
+          "scrap": 24,
           "techLevel": 1,
           "nodes": 0,
           "locs": 0
         },
         {
           "pid": "plainers",
-          "scrap": 19,
-          "techLevel": 5,
+          "scrap": 10,
+          "techLevel": 4,
           "nodes": 3,
-          "locs": 1
+          "locs": 3
         }
       ],
       "emptyWheels": 2,
       "emptyWheelsLandless": 1,
       "emptyWheelsWithLand": 1,
-      "delayedPurchases": 0,
+      "delayedPurchases": 14,
       "supplyRefusals": 0,
-      "chipUpgrades": 7,
-      "pressureEvents": 9,
-      "occupationCharges": 0,
+      "chipUpgrades": 19,
+      "pressureEvents": 11,
+      "occupationCharges": 30,
       "sway": {
         "minMinor": 10,
-        "maxMajor": 24,
-        "atCapShare": 0.20673076923076922,
-        "lapsedCourtships": 0
+        "maxMajor": 32,
+        "atCapShare": 0.17105263157894737,
+        "lapsedCourtships": 4
       },
-      "ms": 1588
+      "ms": 2349
     },
     {
-      "seed": 1043897088,
+      "seed": 859507513,
       "round": 30,
-      "winner": "lakers",
-      "ending": "submission",
-      "aiTurns": 145,
-      "actsPerTurn": 0.5241379310344828,
-      "politicalActsPerTurn": 0.7034482758620689,
+      "winner": "plainers",
+      "ending": "diplomacy",
+      "aiTurns": 166,
+      "actsPerTurn": 0.4578313253012048,
+      "politicalActsPerTurn": 0.6506024096385542,
       "branchMix": {
-        "court": 49,
-        "denounce": 23,
-        "vassalize": 11,
-        "approach-human": 4,
-        "amends": 8,
-        "war-talk": 1,
-        "gift": 6
+        "court": 52,
+        "amends": 21,
+        "denounce": 17,
+        "vassalize": 6,
+        "approach-human": 6,
+        "answer-ultimatum": 1,
+        "pact": 2,
+        "gift": 2,
+        "enforce-ultimatum": 1
       },
-      "denounceShare": 0.3026315789473684,
-      "wars": 26,
-      "surpriseOpenings": 14,
+      "denounceShare": 0.2236842105263158,
+      "wars": 32,
+      "surpriseOpenings": 19,
       "opsRun": 0,
-      "opsBackfired": 3,
-      "sabotageTraced": 3,
-      "courtOpened": 49,
-      "coalitions": 1,
+      "opsBackfired": 0,
+      "sabotageTraced": 0,
+      "courtOpened": 52,
+      "coalitions": 3,
+      "board": {
+        "total": 8,
+        "dead": 6,
+        "bound": 2
+      },
+      "minors": {
+        "allied": 1,
+        "vassal": 0,
+        "dead": 3,
+        "everCourted": 3,
+        "total": 4
+      },
+      "endScrap": [
+        {
+          "pid": "versari",
+          "scrap": 3,
+          "techLevel": 1,
+          "nodes": 0,
+          "locs": 1
+        },
+        {
+          "pid": "goldgrass",
+          "scrap": 14,
+          "techLevel": 1,
+          "nodes": 0,
+          "locs": 0
+        },
+        {
+          "pid": "lakers",
+          "scrap": 17,
+          "techLevel": 2,
+          "nodes": 0,
+          "locs": 0
+        },
+        {
+          "pid": "plainers",
+          "scrap": 40,
+          "techLevel": 2,
+          "nodes": 0,
+          "locs": 3
+        }
+      ],
+      "emptyWheels": 4,
+      "emptyWheelsLandless": 2,
+      "emptyWheelsWithLand": 2,
+      "delayedPurchases": 1,
+      "supplyRefusals": 0,
+      "chipUpgrades": 9,
+      "pressureEvents": 12,
+      "occupationCharges": 30,
+      "sway": {
+        "minMinor": 12,
+        "maxMajor": 29,
+        "atCapShare": 0.175,
+        "lapsedCourtships": 1
+      },
+      "ms": 1886
+    },
+    {
+      "seed": 1956992384,
+      "round": 31,
+      "winner": "lakers",
+      "ending": "conquest",
+      "aiTurns": 167,
+      "actsPerTurn": 0.5748502994011976,
+      "politicalActsPerTurn": 0.7544910179640718,
+      "branchMix": {
+        "court": 50,
+        "amends": 14,
+        "denounce": 20,
+        "approach-human": 8,
+        "vassalize": 15,
+        "pact": 3,
+        "gift": 13,
+        "war-talk": 1,
+        "enforce-ultimatum": 2
+      },
+      "denounceShare": 0.20833333333333334,
+      "wars": 35,
+      "surpriseOpenings": 16,
+      "opsRun": 0,
+      "opsBackfired": 0,
+      "sabotageTraced": 0,
+      "courtOpened": 50,
+      "coalitions": 2,
+      "board": {
+        "total": 8,
+        "dead": 7,
+        "bound": 1
+      },
+      "minors": {
+        "allied": 0,
+        "vassal": 0,
+        "dead": 4,
+        "everCourted": 4,
+        "total": 4
+      },
+      "endScrap": [
+        {
+          "pid": "versari",
+          "scrap": 8,
+          "techLevel": 1,
+          "nodes": 0,
+          "locs": 1
+        },
+        {
+          "pid": "goldgrass",
+          "scrap": 20,
+          "techLevel": 1,
+          "nodes": 0,
+          "locs": 2
+        },
+        {
+          "pid": "lakers",
+          "scrap": 23,
+          "techLevel": 4,
+          "nodes": 3,
+          "locs": 3
+        },
+        {
+          "pid": "plainers",
+          "scrap": 11,
+          "techLevel": 1,
+          "nodes": 0,
+          "locs": 1
+        }
+      ],
+      "emptyWheels": 3,
+      "emptyWheelsLandless": 0,
+      "emptyWheelsWithLand": 3,
+      "delayedPurchases": 11,
+      "supplyRefusals": 0,
+      "chipUpgrades": 15,
+      "pressureEvents": 12,
+      "occupationCharges": 45,
+      "sway": {
+        "minMinor": null,
+        "maxMajor": 29,
+        "atCapShare": 0.23387096774193547,
+        "lapsedCourtships": 0
+      },
+      "ms": 1792
+    },
+    {
+      "seed": 728930304,
+      "round": 33,
+      "winner": "versari",
+      "ending": "submission",
+      "aiTurns": 171,
+      "actsPerTurn": 0.4093567251461988,
+      "politicalActsPerTurn": 0.7309941520467836,
+      "branchMix": {
+        "court": 60,
+        "amends": 29,
+        "denounce": 18,
+        "vassalize": 14,
+        "approach-human": 2,
+        "gift": 1,
+        "intrigue": 1
+      },
+      "denounceShare": 0.2571428571428571,
+      "wars": 29,
+      "surpriseOpenings": 13,
+      "opsRun": 1,
+      "opsBackfired": 4,
+      "sabotageTraced": 4,
+      "courtOpened": 60,
+      "coalitions": 4,
+      "board": {
+        "total": 8,
+        "dead": 6,
+        "bound": 2
+      },
       "minors": {
         "allied": 0,
         "vassal": 1,
+        "dead": 3,
+        "everCourted": 4,
+        "total": 4
+      },
+      "endScrap": [
+        {
+          "pid": "versari",
+          "scrap": 19,
+          "techLevel": 3,
+          "nodes": 1,
+          "locs": 2
+        },
+        {
+          "pid": "goldgrass",
+          "scrap": 29,
+          "techLevel": 2,
+          "nodes": 1,
+          "locs": 0
+        },
+        {
+          "pid": "lakers",
+          "scrap": 12,
+          "techLevel": 1,
+          "nodes": 0,
+          "locs": 0
+        },
+        {
+          "pid": "plainers",
+          "scrap": 24,
+          "techLevel": 2,
+          "nodes": 1,
+          "locs": 0
+        }
+      ],
+      "emptyWheels": 1,
+      "emptyWheelsLandless": 1,
+      "emptyWheelsWithLand": 0,
+      "delayedPurchases": 5,
+      "supplyRefusals": 0,
+      "chipUpgrades": 7,
+      "pressureEvents": 13,
+      "occupationCharges": 36,
+      "sway": {
+        "minMinor": 9,
+        "maxMajor": 35,
+        "atCapShare": 0.14015151515151514,
+        "lapsedCourtships": 14
+      },
+      "ms": 1971
+    },
+    {
+      "seed": 2048583680,
+      "round": 65,
+      "winner": "plainers",
+      "ending": "conquest",
+      "aiTurns": 237,
+      "actsPerTurn": 0.5864978902953587,
+      "politicalActsPerTurn": 0.6751054852320675,
+      "branchMix": {
+        "court": 59,
+        "denounce": 19,
+        "amends": 53,
+        "vassalize": 20,
+        "approach-human": 4,
+        "intrigue": 1,
+        "gift": 4
+      },
+      "denounceShare": 0.1366906474820144,
+      "wars": 60,
+      "surpriseOpenings": 33,
+      "opsRun": 1,
+      "opsBackfired": 0,
+      "sabotageTraced": 0,
+      "courtOpened": 59,
+      "coalitions": 3,
+      "board": {
+        "total": 8,
+        "dead": 7,
+        "bound": 0
+      },
+      "minors": {
+        "allied": 2,
+        "vassal": 0,
         "dead": 4,
         "everCourted": 4,
+        "total": 4
+      },
+      "endScrap": [
+        {
+          "pid": "versari",
+          "scrap": 2,
+          "techLevel": 1,
+          "nodes": 0,
+          "locs": 1
+        },
+        {
+          "pid": "goldgrass",
+          "scrap": 32,
+          "techLevel": 2,
+          "nodes": 1,
+          "locs": 1
+        },
+        {
+          "pid": "lakers",
+          "scrap": 42,
+          "techLevel": 4,
+          "nodes": 3,
+          "locs": 2
+        },
+        {
+          "pid": "plainers",
+          "scrap": 19,
+          "techLevel": 5,
+          "nodes": 3,
+          "locs": 4
+        }
+      ],
+      "emptyWheels": 1,
+      "emptyWheelsLandless": 0,
+      "emptyWheelsWithLand": 1,
+      "delayedPurchases": 12,
+      "supplyRefusals": 0,
+      "chipUpgrades": 19,
+      "pressureEvents": 29,
+      "occupationCharges": 91,
+      "sway": {
+        "minMinor": null,
+        "maxMajor": 26,
+        "atCapShare": 0.20384615384615384,
+        "lapsedCourtships": 0
+      },
+      "ms": 2869
+    },
+    {
+      "seed": 539293696,
+      "round": 39,
+      "winner": "goldgrass",
+      "ending": "diplomacy",
+      "aiTurns": 200,
+      "actsPerTurn": 0.41,
+      "politicalActsPerTurn": 0.645,
+      "branchMix": {
+        "court": 58,
+        "denounce": 14,
+        "amends": 36,
+        "vassalize": 15,
+        "approach-human": 5,
+        "pact": 1
+      },
+      "denounceShare": 0.17073170731707318,
+      "wars": 30,
+      "surpriseOpenings": 15,
+      "opsRun": 0,
+      "opsBackfired": 3,
+      "sabotageTraced": 3,
+      "courtOpened": 58,
+      "coalitions": 2,
+      "board": {
+        "total": 8,
+        "dead": 6,
+        "bound": 2
+      },
+      "minors": {
+        "allied": 1,
+        "vassal": 1,
+        "dead": 3,
+        "everCourted": 4,
+        "total": 4
+      },
+      "endScrap": [
+        {
+          "pid": "versari",
+          "scrap": 0,
+          "techLevel": 1,
+          "nodes": 0,
+          "locs": 0
+        },
+        {
+          "pid": "goldgrass",
+          "scrap": 12,
+          "techLevel": 1,
+          "nodes": 0,
+          "locs": 2
+        },
+        {
+          "pid": "lakers",
+          "scrap": 34,
+          "techLevel": 4,
+          "nodes": 3,
+          "locs": 1
+        },
+        {
+          "pid": "plainers",
+          "scrap": 26,
+          "techLevel": 3,
+          "nodes": 2,
+          "locs": 2
+        }
+      ],
+      "emptyWheels": 2,
+      "emptyWheelsLandless": 1,
+      "emptyWheelsWithLand": 1,
+      "delayedPurchases": 6,
+      "supplyRefusals": 0,
+      "chipUpgrades": 17,
+      "pressureEvents": 13,
+      "occupationCharges": 26,
+      "sway": {
+        "minMinor": 10,
+        "maxMajor": 35,
+        "atCapShare": 0.27884615384615385,
+        "lapsedCourtships": 7
+      },
+      "ms": 2647
+    },
+    {
+      "seed": 1129170944,
+      "round": 52,
+      "winner": "goldgrass",
+      "ending": "diplomacy",
+      "aiTurns": 251,
+      "actsPerTurn": 0.6653386454183267,
+      "politicalActsPerTurn": 0.7370517928286853,
+      "branchMix": {
+        "court": 66,
+        "amends": 22,
+        "denounce": 26,
+        "vassalize": 26,
+        "approach-human": 14,
+        "pact": 2,
+        "war-talk": 3,
+        "gift": 18,
+        "enforce-ultimatum": 3,
+        "intrigue": 4,
+        "answer-ultimatum": 1
+      },
+      "denounceShare": 0.15568862275449102,
+      "wars": 63,
+      "surpriseOpenings": 25,
+      "opsRun": 4,
+      "opsBackfired": 1,
+      "sabotageTraced": 1,
+      "courtOpened": 66,
+      "coalitions": 5,
+      "board": {
+        "total": 8,
+        "dead": 6,
+        "bound": 2
+      },
+      "minors": {
+        "allied": 1,
+        "vassal": 3,
+        "dead": 4,
+        "everCourted": 4,
+        "total": 4
+      },
+      "endScrap": [
+        {
+          "pid": "versari",
+          "scrap": 11,
+          "techLevel": 1,
+          "nodes": 0,
+          "locs": 1
+        },
+        {
+          "pid": "goldgrass",
+          "scrap": 24,
+          "techLevel": 5,
+          "nodes": 3,
+          "locs": 2
+        },
+        {
+          "pid": "lakers",
+          "scrap": 38,
+          "techLevel": 4,
+          "nodes": 2,
+          "locs": 2
+        },
+        {
+          "pid": "plainers",
+          "scrap": 22,
+          "techLevel": 3,
+          "nodes": 2,
+          "locs": 1
+        }
+      ],
+      "emptyWheels": 1,
+      "emptyWheelsLandless": 0,
+      "emptyWheelsWithLand": 1,
+      "delayedPurchases": 14,
+      "supplyRefusals": 0,
+      "chipUpgrades": 32,
+      "pressureEvents": 24,
+      "occupationCharges": 90,
+      "sway": {
+        "minMinor": null,
+        "maxMajor": 35,
+        "atCapShare": 0.22355769230769232,
+        "lapsedCourtships": 2
+      },
+      "ms": 2979
+    },
+    {
+      "seed": 185489408,
+      "round": 20,
+      "winner": "goldgrass",
+      "ending": "mixed",
+      "aiTurns": 133,
+      "actsPerTurn": 0.2706766917293233,
+      "politicalActsPerTurn": 0.6842105263157895,
+      "branchMix": {
+        "court": 52,
+        "denounce": 11,
+        "approach-human": 3,
+        "amends": 18,
+        "pact": 2,
+        "vassalize": 5
+      },
+      "denounceShare": 0.3055555555555556,
+      "wars": 10,
+      "surpriseOpenings": 8,
+      "opsRun": 0,
+      "opsBackfired": 0,
+      "sabotageTraced": 0,
+      "courtOpened": 52,
+      "coalitions": 1,
+      "board": {
+        "total": 8,
+        "dead": 3,
+        "bound": 5
+      },
+      "minors": {
+        "allied": 0,
+        "vassal": 4,
+        "dead": 1,
+        "everCourted": 4,
+        "total": 4
+      },
+      "endScrap": [
+        {
+          "pid": "versari",
+          "scrap": 0,
+          "techLevel": 1,
+          "nodes": 0,
+          "locs": 0
+        },
+        {
+          "pid": "goldgrass",
+          "scrap": 10,
+          "techLevel": 3,
+          "nodes": 1,
+          "locs": 2
+        },
+        {
+          "pid": "lakers",
+          "scrap": 25,
+          "techLevel": 1,
+          "nodes": 0,
+          "locs": 0
+        },
+        {
+          "pid": "plainers",
+          "scrap": 21,
+          "techLevel": 3,
+          "nodes": 2,
+          "locs": 1
+        }
+      ],
+      "emptyWheels": 2,
+      "emptyWheelsLandless": 2,
+      "emptyWheelsWithLand": 0,
+      "delayedPurchases": 6,
+      "supplyRefusals": 0,
+      "chipUpgrades": 8,
+      "pressureEvents": 4,
+      "occupationCharges": 11,
+      "sway": {
+        "minMinor": 10,
+        "maxMajor": 36,
+        "atCapShare": 0.15,
+        "lapsedCourtships": 2
+      },
+      "ms": 1640
+    },
+    {
+      "seed": 602646592,
+      "round": 63,
+      "winner": "plainers",
+      "ending": "conquest",
+      "aiTurns": 223,
+      "actsPerTurn": 0.5291479820627802,
+      "politicalActsPerTurn": 0.7085201793721974,
+      "branchMix": {
+        "court": 58,
+        "denounce": 15,
+        "vassalize": 23,
+        "amends": 53,
+        "approach-human": 6,
+        "war-talk": 2,
+        "gift": 1
+      },
+      "denounceShare": 0.1271186440677966,
+      "wars": 50,
+      "surpriseOpenings": 25,
+      "opsRun": 0,
+      "opsBackfired": 0,
+      "sabotageTraced": 0,
+      "courtOpened": 58,
+      "coalitions": 2,
+      "board": {
+        "total": 8,
+        "dead": 7,
+        "bound": 0
+      },
+      "minors": {
+        "allied": 0,
+        "vassal": 0,
+        "dead": 4,
+        "everCourted": 3,
+        "total": 4
+      },
+      "endScrap": [
+        {
+          "pid": "versari",
+          "scrap": 0,
+          "techLevel": 1,
+          "nodes": 0,
+          "locs": 0
+        },
+        {
+          "pid": "goldgrass",
+          "scrap": 2,
+          "techLevel": 1,
+          "nodes": 0,
+          "locs": 0
+        },
+        {
+          "pid": "lakers",
+          "scrap": 81,
+          "techLevel": 3,
+          "nodes": 2,
+          "locs": 1
+        },
+        {
+          "pid": "plainers",
+          "scrap": 15,
+          "techLevel": 5,
+          "nodes": 4,
+          "locs": 4
+        }
+      ],
+      "emptyWheels": 2,
+      "emptyWheelsLandless": 2,
+      "emptyWheelsWithLand": 0,
+      "delayedPurchases": 5,
+      "supplyRefusals": 0,
+      "chipUpgrades": 23,
+      "pressureEvents": 14,
+      "occupationCharges": 73,
+      "sway": {
+        "minMinor": null,
+        "maxMajor": 26,
+        "atCapShare": 0.20238095238095238,
+        "lapsedCourtships": 4
+      },
+      "ms": 3450
+    },
+    {
+      "seed": 2048545536,
+      "round": 81,
+      "winner": null,
+      "ending": "unresolved",
+      "aiTurns": 350,
+      "actsPerTurn": 0.3485714285714286,
+      "politicalActsPerTurn": 0.6514285714285715,
+      "branchMix": {
+        "court": 72,
+        "amends": 70,
+        "denounce": 27,
+        "vassalize": 14,
+        "approach-human": 5,
+        "pact": 3,
+        "gift": 29,
+        "war-talk": 6,
+        "intrigue": 2
+      },
+      "denounceShare": 0.22131147540983606,
+      "wars": 45,
+      "surpriseOpenings": 30,
+      "opsRun": 2,
+      "opsBackfired": 5,
+      "sabotageTraced": 5,
+      "courtOpened": 72,
+      "coalitions": 2,
+      "board": {
+        "total": 8,
+        "dead": 6,
+        "bound": 0
+      },
+      "minors": {
+        "allied": 0,
+        "vassal": 0,
+        "dead": 3,
+        "everCourted": 2,
+        "total": 4
+      },
+      "endScrap": [
+        {
+          "pid": "versari",
+          "scrap": 0,
+          "techLevel": 1,
+          "nodes": 0,
+          "locs": 1
+        },
+        {
+          "pid": "goldgrass",
+          "scrap": 28,
+          "techLevel": 2,
+          "nodes": 0,
+          "locs": 1
+        },
+        {
+          "pid": "lakers",
+          "scrap": 44,
+          "techLevel": 1,
+          "nodes": 0,
+          "locs": 1
+        },
+        {
+          "pid": "plainers",
+          "scrap": 19,
+          "techLevel": 2,
+          "nodes": 1,
+          "locs": 0
+        }
+      ],
+      "emptyWheels": 3,
+      "emptyWheelsLandless": 0,
+      "emptyWheelsWithLand": 3,
+      "delayedPurchases": 8,
+      "supplyRefusals": 0,
+      "chipUpgrades": 29,
+      "pressureEvents": 47,
+      "occupationCharges": 31,
+      "sway": {
+        "minMinor": 8,
+        "maxMajor": 13,
+        "atCapShare": 0.2839506172839506,
+        "lapsedCourtships": 3
+      },
+      "ms": 5721
+    },
+    {
+      "seed": 880772864,
+      "round": 81,
+      "winner": null,
+      "ending": "unresolved",
+      "aiTurns": 257,
+      "actsPerTurn": 0.6575875486381323,
+      "politicalActsPerTurn": 0.7276264591439688,
+      "branchMix": {
+        "court": 50,
+        "denounce": 25,
+        "amends": 66,
+        "pact": 1,
+        "vassalize": 35,
+        "gift": 10
+      },
+      "denounceShare": 0.14792899408284024,
+      "wars": 71,
+      "surpriseOpenings": 31,
+      "opsRun": 0,
+      "opsBackfired": 13,
+      "sabotageTraced": 13,
+      "courtOpened": 50,
+      "coalitions": 4,
+      "board": {
+        "total": 8,
+        "dead": 6,
+        "bound": 1
+      },
+      "minors": {
+        "allied": 0,
+        "vassal": 0,
+        "dead": 3,
+        "everCourted": 3,
         "total": 4
       },
       "endScrap": [
@@ -3641,41 +3447,460 @@
         },
         {
           "pid": "goldgrass",
-          "scrap": 26,
-          "techLevel": 4,
-          "nodes": 2,
+          "scrap": 44,
+          "techLevel": 2,
+          "nodes": 1,
           "locs": 1
         },
         {
           "pid": "lakers",
-          "scrap": 19,
-          "techLevel": 5,
-          "nodes": 4,
-          "locs": 3
+          "scrap": 16,
+          "techLevel": 1,
+          "nodes": 0,
+          "locs": 0
         },
         {
           "pid": "plainers",
-          "scrap": 22,
-          "techLevel": 2,
-          "nodes": 1,
+          "scrap": 4,
+          "techLevel": 4,
+          "nodes": 3,
           "locs": 1
         }
       ],
-      "emptyWheels": 1,
-      "emptyWheelsLandless": 1,
+      "emptyWheels": 2,
+      "emptyWheelsLandless": 2,
       "emptyWheelsWithLand": 0,
+      "delayedPurchases": 30,
+      "supplyRefusals": 0,
+      "chipUpgrades": 34,
+      "pressureEvents": 34,
+      "occupationCharges": 26,
+      "sway": {
+        "minMinor": 9,
+        "maxMajor": 32,
+        "atCapShare": 0.22839506172839505,
+        "lapsedCourtships": 0
+      },
+      "ms": 4162
+    },
+    {
+      "seed": 527346432,
+      "round": 45,
+      "winner": "goldgrass",
+      "ending": "submission",
+      "aiTurns": 191,
+      "actsPerTurn": 0.44502617801047123,
+      "politicalActsPerTurn": 0.6073298429319371,
+      "branchMix": {
+        "court": 50,
+        "denounce": 11,
+        "amends": 30,
+        "vassalize": 20,
+        "approach-human": 5
+      },
+      "denounceShare": 0.12941176470588237,
+      "wars": 38,
+      "surpriseOpenings": 15,
+      "opsRun": 0,
+      "opsBackfired": 8,
+      "sabotageTraced": 8,
+      "courtOpened": 50,
+      "coalitions": 2,
+      "board": {
+        "total": 8,
+        "dead": 6,
+        "bound": 2
+      },
+      "minors": {
+        "allied": 0,
+        "vassal": 2,
+        "dead": 3,
+        "everCourted": 4,
+        "total": 4
+      },
+      "endScrap": [
+        {
+          "pid": "versari",
+          "scrap": 0,
+          "techLevel": 1,
+          "nodes": 0,
+          "locs": 0
+        },
+        {
+          "pid": "goldgrass",
+          "scrap": 9,
+          "techLevel": 4,
+          "nodes": 2,
+          "locs": 4
+        },
+        {
+          "pid": "lakers",
+          "scrap": 36,
+          "techLevel": 3,
+          "nodes": 2,
+          "locs": 1
+        },
+        {
+          "pid": "plainers",
+          "scrap": 71,
+          "techLevel": 1,
+          "nodes": 0,
+          "locs": 0
+        }
+      ],
+      "emptyWheels": 2,
+      "emptyWheelsLandless": 2,
+      "emptyWheelsWithLand": 0,
+      "delayedPurchases": 9,
+      "supplyRefusals": 0,
+      "chipUpgrades": 31,
+      "pressureEvents": 12,
+      "occupationCharges": 22,
+      "sway": {
+        "minMinor": 10,
+        "maxMajor": 38,
+        "atCapShare": 0.21388888888888888,
+        "lapsedCourtships": 11
+      },
+      "ms": 3084
+    },
+    {
+      "seed": 1547239168,
+      "round": 48,
+      "winner": "goldgrass",
+      "ending": "submission",
+      "aiTurns": 200,
+      "actsPerTurn": 0.39,
+      "politicalActsPerTurn": 0.68,
+      "branchMix": {
+        "court": 60,
+        "amends": 36,
+        "denounce": 10,
+        "vassalize": 19,
+        "pact": 3,
+        "intrigue": 2,
+        "approach-human": 4,
+        "gift": 2
+      },
+      "denounceShare": 0.1282051282051282,
+      "wars": 29,
+      "surpriseOpenings": 11,
+      "opsRun": 2,
+      "opsBackfired": 7,
+      "sabotageTraced": 7,
+      "courtOpened": 60,
+      "coalitions": 2,
+      "board": {
+        "total": 8,
+        "dead": 6,
+        "bound": 2
+      },
+      "minors": {
+        "allied": 0,
+        "vassal": 3,
+        "dead": 3,
+        "everCourted": 4,
+        "total": 4
+      },
+      "endScrap": [
+        {
+          "pid": "versari",
+          "scrap": 8,
+          "techLevel": 1,
+          "nodes": 0,
+          "locs": 0
+        },
+        {
+          "pid": "goldgrass",
+          "scrap": 16,
+          "techLevel": 2,
+          "nodes": 1,
+          "locs": 2
+        },
+        {
+          "pid": "lakers",
+          "scrap": 14,
+          "techLevel": 1,
+          "nodes": 0,
+          "locs": 0
+        },
+        {
+          "pid": "plainers",
+          "scrap": 27,
+          "techLevel": 1,
+          "nodes": 0,
+          "locs": 1
+        }
+      ],
+      "emptyWheels": 3,
+      "emptyWheelsLandless": 2,
+      "emptyWheelsWithLand": 1,
+      "delayedPurchases": 7,
+      "supplyRefusals": 0,
+      "chipUpgrades": 30,
+      "pressureEvents": 8,
+      "occupationCharges": 21,
+      "sway": {
+        "minMinor": 11,
+        "maxMajor": 38,
+        "atCapShare": 0.2526041666666667,
+        "lapsedCourtships": 2
+      },
+      "ms": 2463
+    },
+    {
+      "seed": 1542898432,
+      "round": 47,
+      "winner": "versari",
+      "ending": "submission",
+      "aiTurns": 207,
+      "actsPerTurn": 0.5990338164251208,
+      "politicalActsPerTurn": 0.7101449275362319,
+      "branchMix": {
+        "court": 43,
+        "denounce": 24,
+        "amends": 37,
+        "vassalize": 26,
+        "approach-human": 2,
+        "war-talk": 4,
+        "pact": 1,
+        "intrigue": 2,
+        "gift": 8
+      },
+      "denounceShare": 0.1935483870967742,
+      "wars": 46,
+      "surpriseOpenings": 24,
+      "opsRun": 2,
+      "opsBackfired": 3,
+      "sabotageTraced": 3,
+      "courtOpened": 43,
+      "coalitions": 3,
+      "board": {
+        "total": 8,
+        "dead": 6,
+        "bound": 2
+      },
+      "minors": {
+        "allied": 1,
+        "vassal": 0,
+        "dead": 4,
+        "everCourted": 4,
+        "total": 4
+      },
+      "endScrap": [
+        {
+          "pid": "versari",
+          "scrap": 10,
+          "techLevel": 2,
+          "nodes": 0,
+          "locs": 2
+        },
+        {
+          "pid": "goldgrass",
+          "scrap": 23,
+          "techLevel": 1,
+          "nodes": 0,
+          "locs": 1
+        },
+        {
+          "pid": "lakers",
+          "scrap": 22,
+          "techLevel": 5,
+          "nodes": 4,
+          "locs": 2
+        },
+        {
+          "pid": "plainers",
+          "scrap": 16,
+          "techLevel": 1,
+          "nodes": 0,
+          "locs": 0
+        }
+      ],
+      "emptyWheels": 3,
+      "emptyWheelsLandless": 1,
+      "emptyWheelsWithLand": 2,
       "delayedPurchases": 12,
       "supplyRefusals": 0,
-      "chipUpgrades": 6,
-      "pressureEvents": 18,
-      "occupationCharges": 30,
+      "chipUpgrades": 26,
+      "pressureEvents": 8,
+      "occupationCharges": 60,
       "sway": {
         "minMinor": null,
-        "maxMajor": 33,
-        "atCapShare": 0.20833333333333334,
-        "lapsedCourtships": 1
+        "maxMajor": 41,
+        "atCapShare": 0.300531914893617,
+        "lapsedCourtships": 2
       },
-      "ms": 1398
+      "ms": 2809
+    },
+    {
+      "seed": 695940864,
+      "round": 38,
+      "winner": "goldgrass",
+      "ending": "diplomacy",
+      "aiTurns": 204,
+      "actsPerTurn": 0.4803921568627451,
+      "politicalActsPerTurn": 0.6323529411764706,
+      "branchMix": {
+        "court": 55,
+        "denounce": 24,
+        "amends": 17,
+        "vassalize": 14,
+        "approach-human": 7,
+        "pact": 4,
+        "gift": 5,
+        "answer-ultimatum": 1,
+        "enforce-ultimatum": 2
+      },
+      "denounceShare": 0.24489795918367346,
+      "wars": 28,
+      "surpriseOpenings": 13,
+      "opsRun": 0,
+      "opsBackfired": 0,
+      "sabotageTraced": 0,
+      "courtOpened": 55,
+      "coalitions": 1,
+      "board": {
+        "total": 8,
+        "dead": 5,
+        "bound": 3
+      },
+      "minors": {
+        "allied": 2,
+        "vassal": 1,
+        "dead": 4,
+        "everCourted": 4,
+        "total": 4
+      },
+      "endScrap": [
+        {
+          "pid": "versari",
+          "scrap": 19,
+          "techLevel": 1,
+          "nodes": 0,
+          "locs": 1
+        },
+        {
+          "pid": "goldgrass",
+          "scrap": 23,
+          "techLevel": 4,
+          "nodes": 3,
+          "locs": 1
+        },
+        {
+          "pid": "lakers",
+          "scrap": 35,
+          "techLevel": 1,
+          "nodes": 0,
+          "locs": 1
+        },
+        {
+          "pid": "plainers",
+          "scrap": 28,
+          "techLevel": 2,
+          "nodes": 0,
+          "locs": 1
+        }
+      ],
+      "emptyWheels": 3,
+      "emptyWheelsLandless": 0,
+      "emptyWheelsWithLand": 3,
+      "delayedPurchases": 3,
+      "supplyRefusals": 0,
+      "chipUpgrades": 20,
+      "pressureEvents": 9,
+      "occupationCharges": 24,
+      "sway": {
+        "minMinor": null,
+        "maxMajor": 38,
+        "atCapShare": 0.2598684210526316,
+        "lapsedCourtships": 0
+      },
+      "ms": 2353
+    },
+    {
+      "seed": 1043897088,
+      "round": 23,
+      "winner": "lakers",
+      "ending": "submission",
+      "aiTurns": 117,
+      "actsPerTurn": 0.5042735042735043,
+      "politicalActsPerTurn": 0.7777777777777778,
+      "branchMix": {
+        "court": 46,
+        "denounce": 19,
+        "vassalize": 10,
+        "amends": 9,
+        "war-talk": 1,
+        "approach-human": 3,
+        "gift": 1,
+        "enforce-ultimatum": 2
+      },
+      "denounceShare": 0.3220338983050847,
+      "wars": 19,
+      "surpriseOpenings": 10,
+      "opsRun": 0,
+      "opsBackfired": 0,
+      "sabotageTraced": 0,
+      "courtOpened": 46,
+      "coalitions": 1,
+      "board": {
+        "total": 8,
+        "dead": 6,
+        "bound": 2
+      },
+      "minors": {
+        "allied": 1,
+        "vassal": 0,
+        "dead": 4,
+        "everCourted": 4,
+        "total": 4
+      },
+      "endScrap": [
+        {
+          "pid": "versari",
+          "scrap": 0,
+          "techLevel": 1,
+          "nodes": 0,
+          "locs": 0
+        },
+        {
+          "pid": "goldgrass",
+          "scrap": 27,
+          "techLevel": 1,
+          "nodes": 0,
+          "locs": 0
+        },
+        {
+          "pid": "lakers",
+          "scrap": 17,
+          "techLevel": 5,
+          "nodes": 4,
+          "locs": 7
+        },
+        {
+          "pid": "plainers",
+          "scrap": 7,
+          "techLevel": 1,
+          "nodes": 0,
+          "locs": 1
+        }
+      ],
+      "emptyWheels": 3,
+      "emptyWheelsLandless": 2,
+      "emptyWheelsWithLand": 1,
+      "delayedPurchases": 0,
+      "supplyRefusals": 0,
+      "chipUpgrades": 9,
+      "pressureEvents": 10,
+      "occupationCharges": 53,
+      "sway": {
+        "minMinor": null,
+        "maxMajor": 35,
+        "atCapShare": 0.043478260869565216,
+        "lapsedCourtships": 2
+      },
+      "ms": 1157
     }
   ]
 }

@@ -1125,6 +1125,23 @@ export const CONFIG = {
     // At 6 the floor buys exactly one courtship, always, for everybody. A
     // second one has to be paid for out of ground or agreements.
     courtUpkeep: 6,
+    // §B4 — WHAT AN ACTIVE WAR COSTS THE POLITICAL POOL, per war per round,
+    // billed FIRST in `chargeSwayUpkeep` — before occupation, before
+    // courtships — because a war is the one commitment that cannot lapse.
+    // 0 is the no-op: the two loops go back to never competing for anything,
+    // which is how a conqueror ran a full political program for free.
+    //
+    // MEASURED — see the fuller note on `warmDriftEvery`, whose verdict this
+    // shares. AI-vs-AI (suite baseline 0.31 mix-share / 5 unresolved at n=45):
+    //   alone at 1   0.27 / 9        alone at 2   0.38 / 9, dead 0.74, bound 0.22
+    //   package at n=90   0.34 / 21 against 0.40 / 14 — worse, honestly stated.
+    // The player-shaped probe is why it ships: a scripted pacifist under this
+    // rule alone holds 1.3 Locations instead of 0.7 — the first thing in two
+    // days of measurement to move that number — and under the full package
+    // wins 3 of 15 games instead of 1. Warmongers now bleed the pool that
+    // courtship, gifts and the close-out spend, which is felt most by the
+    // factions fighting the peaceful player's wars FOR them.
+    warUpkeep: 2,
     // Per +1 Standing from a gift. Replaces the scrap gift outright.
     perStanding: 8,
     // REPARATIONS. Courting has a Standing floor and always will — you cannot
@@ -1326,6 +1343,46 @@ export const CONFIG = {
     pactStandingReq: 6, // §18.7 Standing needed to form a pact (Friendly+)
     driftPerRound: 1, // §18.5 Standing drifts toward its BASELINE when unreinforced…
     grudgeDriftScale: 1, // …modulated by the faction's grudge (high grudge → slower fade)
+    // §B1 — WARMTH DECAYS SLOWER THAN CONTEMPT HEALS. Standing ABOVE its
+    // baseline (a warm relationship cooling) only drifts every this-many
+    // rounds; Standing below it (a cold one recovering) keeps the full rate.
+    // 1 is the no-op and restores the symmetric decay exactly.
+    //
+    // This is the ratchet the ledger was missing. Conquest banks progress
+    // permanently; diplomacy paid a ≥1/round tax on everything it earned
+    // against a pact bar of +6, so a pair needed +2/round of continuous
+    // attention just to stand still. Measured consequence: 6.4 eliminations
+    // per game against 1.5 pacts, first kill at median round 10, and 18
+    // vassalizations per game of which ~1 survives to the end — the one
+    // diplomatic verb that fired constantly did not STICK.
+    //
+    // MEASURED, and THE TWO INSTRUMENTS DISAGREE — which the method doc says
+    // is the finding, not something to average. AI-vs-AI first (mix-share /
+    // median / unresolved, suite baseline 0.31 / 45.5 / 5 at n=45 and
+    // 0.40 / 45 / 14 at n=90):
+    //
+    //   n=45  alone at 2   0.24 / 42 / 10
+    //   n=45  alone at 3   0.36 / 40 / 12
+    //   n=45  with warUpkeep 2 + blood 2   0.42 / 42 / 6
+    //   n=90  with warUpkeep 2 + blood 2   0.34 / 42 / 21
+    //
+    // The n=45 combo reading was the small sample doing the arguing — fourth
+    // time this project has caught that — and at n=90 the package costs seven
+    // unresolved games and six of the mix. The board rows barely move (dead
+    // 0.76 -> 0.76, bound 0.19 -> 0.19).
+    //
+    // THE OTHER INSTRUMENT is the reason this ships at 3 anyway. The suite
+    // can only measure a world where everybody plays `takeAITurn`; the
+    // scripted-pacifist probe exists precisely because of that limit, and it
+    // is the shape of the complaint this rule answers ("conquest is a simple
+    // loop, diplomacy is insanely complicated, and diplomatic wins never
+    // happen"). Under this rule alone, wars declared ON a peaceful player
+    // fall 11.1 -> 6.3; under the full package the pacifist WINS 3 of 15
+    // games instead of 1, holding 1.3 Locations instead of 0.7. A rule that
+    // makes earned warmth durable is worth little to eight AIs grinding each
+    // other, and a great deal to the one player at the table trying to be
+    // liked. The AI-vs-AI cost is real and is accepted, on the owner's call.
+    warmDriftEvery: 3,
     seedJitter: 3, // §18.4.1 per-seed jitter on seeded faction↔faction standing
 
     // Standing baselines — history leaves a mark. Drift pulls Standing toward
@@ -1341,6 +1398,29 @@ export const CONFIG = {
     },
 
     // §18.5 Menace — reputation for UNJUSTIFIED aggression, scored vs target.
+    // §B-blood — THE BLOOD PRICE. Every faction you were at war with at the
+    // moment it died leaves a permanent mark, and `menaceOf` never lets your
+    // Menace decay below marks × menacePerKill (capped at menace.max). One
+    // rule, priced everywhere Menace already is: `passesRepGates` reads it
+    // against tolerance on both sides of every pact and courtship, so a
+    // faction that spent the game eliminating rivals finds the alliance door
+    // priced accordingly — permanently, because the dead do not come back.
+    // The player's own record is priced the same way. 0 switches it off.
+    //
+    // MEASURED at n=45 and n=90, alone: flat on every suite row (0.40 mix /
+    // 15 unresolved / dead 0.75 at n=90, all within noise of baseline), and
+    // the probe of WHY is the interesting part. The marks fire — 7 per game,
+    // six of eight winners carrying them — and the floor never fails a live
+    // gate against an AI winner, because an AI exterminator wins through
+    // conquest and CORNERED SUBMISSION (`aiAcceptsVassalage`), and neither
+    // door ever asks to be liked. One seed's winner sat at Menace 21 and
+    // still took a submission ending. So this is a PLAYER-FACING rule at
+    // zero AI-vs-AI cost: a human who plays exterminator finds courting,
+    // pacts and the close-out priced against their record, permanently,
+    // exactly as asked — "harder to make an alliance if you've spent the
+    // whole game eliminating factions." Surrender-at-swordpoint staying open
+    // to a butcher is coherent and deliberate.
+    bloodPrice: { menacePerKill: 2 },
     menace: {
       base: 3, // magnitude of a single attack's Menace swing
       // Declaring an UNJUSTIFIED war is itself unjustified aggression, and

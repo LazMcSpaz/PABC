@@ -290,6 +290,19 @@ function summarise(g, { aiTurns, snapshot, seed }) {
     if (Object.keys(g.players).some((f) => f !== m && arePacted(g, f, m))) minorsAllied += 1;
   }
 
+  // --- THE WHOLE BOARD, brought in or killed. The governing ending-mix row
+  // counts the label on the winner's final handshake, and the labels lie:
+  // measured, a "submission" win averages 5.9 of 8 factions dead and 1.1
+  // sworn in, a "diplomacy" win 5.5 dead and 1.5 allied. These two rows
+  // measure the thing the labels were being read as: at the end of the game,
+  // what share of the board is DEAD, and what share ends BOUND to somebody —
+  // allied or sworn — rather than dead or estranged. Any change sold as
+  // making the game less exterminatory has to move these, not the labels.
+  const allIds = Object.keys(g.players);
+  const deadAtEnd = allIds.filter((f) => g.players[f]?.eliminated).length;
+  const boundAtEnd = allIds.filter((f) => !g.players[f]?.eliminated
+    && (vassalLord(g, f) || allIds.some((o) => o !== f && arePacted(g, o, f)))).length;
+
   // --- Sway. Read defensively off the player record: the currency does not
   // exist yet, so every row is zero until economy stage 4 lands. The rows are
   // here from day one so the baseline commit shows what "before" looked like
@@ -326,6 +339,9 @@ function summarise(g, { aiTurns, snapshot, seed }) {
     surpriseOpenings: surprises,
     opsRun, opsBackfired, sabotageTraced, courtOpened,
     coalitions: evName(g, "coalition_formed").length,
+    board: {
+      total: allIds.length, dead: deadAtEnd, bound: boundAtEnd,
+    },
     minors: {
       allied: minorsAllied, vassal: minorsVassal, dead: minorsDead,
       everCourted: everCourted.size, total: minorIds.length,
@@ -429,6 +445,10 @@ const report = {
     covertActsSeenThrough: r2(mean(ok.map((g) => g.opsBackfired))),
     sabotageTracedPerGame: r2(mean(ok.map((g) => g.sabotageTraced))),
     // At the final board — a snapshot, and confounded by the war rate.
+    // The whole-board rows — see the note where they are read. Shares of all
+    // factions in the game, dead and bound (allied or sworn) at the end.
+    boardDeadAtEndShare: r2(mean(ok.map((g) => g.board.dead / g.board.total))),
+    boardBoundAtEndShare: r2(mean(ok.map((g) => g.board.bound / g.board.total))),
     minorsAlliedOrVassalisedAtEnd: r2(mean(ok.map((g) => g.minors.allied + g.minors.vassal))),
     // Ever, from the log. THIS is §15's row: was the faction reachable by
     // something other than an army at any point in the game.

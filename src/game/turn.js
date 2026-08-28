@@ -422,6 +422,21 @@ function sweepEliminations(state) {
       Object.values(state.locations).some((l) => l.controller === pid) ||
       Object.values(state.units).some((u) => u.owner === pid);
     if (!holdsAnything) {
+      // §B-blood — THE KILL LEAVES A MARK ON THE KILLERS. Every faction at
+      // war with the dead one at the moment it dies is complicit in the
+      // elimination, and carries a permanent `bloodMarks` for it — read by
+      // `menaceOf` as a floor Menace can never decay below. Stamped HERE,
+      // before `releaseFromDiplomacy` wipes the war list, because afterwards
+      // nobody was ever at war with the corpse. A faction that starved on its
+      // own with no wars running marks nobody.
+      if (state.diplomacy?.wars?.length) {
+        for (const w of state.diplomacy.wars) {
+          const other = w.a === pid ? w.b : w.b === pid ? w.a : null;
+          if (!other || !state.players[other] || state.players[other].eliminated) continue;
+          state.players[other].bloodMarks = (state.players[other].bloodMarks || 0) + 1;
+          emit(state, "blood_marked", { player: other, victim: pid, marks: state.players[other].bloodMarks });
+        }
+      }
       p.eliminated = true;
       emit(state, "faction_eliminated", { player: pid });
       // A DEAD FACTION LEAVES THE DIPLOMACY GRAPH. Without this it keeps its

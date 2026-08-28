@@ -7125,7 +7125,13 @@ line("\n  [Phase 11] text-token resolver");
   check("drift: standing below its baseline climbs toward it",
     getStanding(g3, "versari", other19) > 0 && getStanding(g3, "versari", other19) <= target);
   setStanding(g3, "versari", other19, CONFIG.diplomacy.tiers.friendly - 1, "test"); // above baseline
+  // The claim here is WHERE decay stops, not how fast it gets there — §B1's
+  // warm-drift ratchet slows the rate, so pin it to the symmetric no-op for
+  // this fixture and let its own checks own the rate.
+  const wdSave19 = CONFIG.diplomacy.warmDriftEvery;
+  CONFIG.diplomacy.warmDriftEvery = 1;
   for (let i = 0; i < 6; i++) runDiplomacyRound(g3);
+  CONFIG.diplomacy.warmDriftEvery = wdSave19;
   check("drift: standing settles AT the baseline instead of fading to zero",
     getStanding(g3, "versari", other19) === target);
 
@@ -7518,6 +7524,113 @@ line("\n  [Phase 11] text-token resolver");
   check("every branch in the chain has a distinct name",
     new Set(DIPLOMACY_BRANCH_ORDER).size === DIPLOMACY_BRANCH_ORDER.length
     && DIPLOMACY_BRANCH_ORDER.every((id) => typeof id === "string" && id.length > 0));
+
+  // --- §B — the three balance rules, as mechanisms ------------------
+  //
+  // Built against the finding that a full game produces 6.4 eliminations and
+  // 1.5 pacts: conquest banks progress forever while diplomacy pays a
+  // ≥1/round decay tax, war never bills the pool diplomacy spends, and a
+  // faction that exterminates half the board walks up to the survivor with a
+  // clean face. Each rule ships behind a no-op; each check here asserts the
+  // MECHANISM and that the no-op really is one.
+
+  // §B1 — warmth decays slower than contempt heals.
+  //
+  // Measured on DRIFT-CAUSED changes only, with the SAME observer for both
+  // pairs: the step is scaled by the observer's grudge, so comparing
+  // goldgrass→lakers against lakers→goldgrass compares two factions'
+  // temperaments, not the rule. Other political events also move Standing
+  // during a round, so the deltas are read off the drift receipts rather
+  // than the totals.
+  {
+    // Drift moves through `setStanding`, which emits `delta: null` — so the
+    // movement is read as a TICK COUNT. Same observer means the same
+    // grudge-scaled step for both pairs, so ticks compare exactly.
+    const driftTicks = (g, from, a, b) => g.log.slice(from)
+      .filter((e) => e.name === "standing_changed" && e.payload.cause === "drift"
+        && e.payload.faction === a && e.payload.player === b).length;
+    const runPair = (every) => {
+      const g = createGame({ seed: 2081 });
+      ensureDiplomacy(g);
+      const evSave = CONFIG.diplomacy.warmDriftEvery;
+      CONFIG.diplomacy.warmDriftEvery = every;
+      setStanding(g, "goldgrass", "lakers", 9, "test");     // far above any baseline
+      setStanding(g, "goldgrass", "plainers", -9, "test");  // far below it
+      const from = g.log.length;
+      for (let i = 0; i < 4; i++) { g.round += 1; runDiplomacyRound(g); }
+      CONFIG.diplomacy.warmDriftEvery = evSave;
+      return {
+        warmLost: driftTicks(g, from, "goldgrass", "lakers"),
+        coldGained: driftTicks(g, from, "goldgrass", "plainers"),
+      };
+    };
+    const ratcheted = runPair(3);
+    check("warm Standing decays slower than cold Standing recovers",
+      ratcheted.warmLost < ratcheted.coldGained && ratcheted.warmLost > 0);
+    const symmetric = runPair(1);
+    check("warmDriftEvery 1 restores the symmetric decay exactly",
+      symmetric.warmLost === symmetric.coldGained && symmetric.warmLost > 0);
+  }
+
+  // §B4 — war bills the political pool, first and uncancellably.
+  {
+    const g7c = createGame({ seed: 2082 });
+    ensureDiplomacy(g7c);
+    const rateSave = CONFIG.sway.warUpkeep;
+    CONFIG.sway.warUpkeep = 2;
+    declareWar(g7c, "goldgrass", "lakers", "test");
+    declareWar(g7c, "goldgrass", "plainers", "test");
+    g7c.players.goldgrass.sway = 10;
+    g7c.round += 1; runDiplomacyRound(g7c);
+    const paidWars = g7c.log.filter((e) => e.name === "sway_spent"
+      && e.payload.player === "goldgrass" && e.payload.cause === "war-upkeep")
+      .reduce((n, e) => n + e.payload.amount, 0);
+    check("two wars bill the pool at the per-war rate", paidWars === 4);
+    // A shallow pool pays what it has rather than going negative.
+    g7c.players.goldgrass.sway = 1;
+    g7c.round += 1; runDiplomacyRound(g7c);
+    check("…and a shallow pool drains to zero, never below",
+      g7c.players.goldgrass.sway >= 0);
+    // no-op: at 0 no war-upkeep line ever appears — set explicitly, because
+    // the SHIPPED value is no longer 0 and this claim is about the switch.
+    CONFIG.sway.warUpkeep = 0;
+    const g7d = createGame({ seed: 2082 });
+    ensureDiplomacy(g7d);
+    declareWar(g7d, "goldgrass", "lakers", "test");
+    g7d.round += 1; runDiplomacyRound(g7d);
+    check("warUpkeep 0 bills nothing",
+      !g7d.log.some((e) => e.name === "sway_spent" && e.payload.cause === "war-upkeep"));
+    CONFIG.sway.warUpkeep = rateSave;
+  }
+
+  // §B-blood — the kill leaves a permanent mark on the killers.
+  {
+    const g7e = createGame({ seed: 2083 });
+    ensureDiplomacy(g7e);
+    const perSave = CONFIG.diplomacy.bloodPrice.menacePerKill;
+    CONFIG.diplomacy.bloodPrice.menacePerKill = 3;
+    declareWar(g7e, "goldgrass", "lakers", "test");
+    // Strip the victim while the war stands, then let the sweep find it.
+    for (const l of Object.values(g7e.locations)) if (l.controller === "lakers") l.controller = null;
+    for (const u of Object.values(g7e.units)) if (u.owner === "lakers") delete g7e.units[u.uid];
+    endTurn(g7e);
+    check("a faction at war with the dead one carries the mark",
+      g7e.players.goldgrass.bloodMarks === 1
+      && g7e.log.some((e) => e.name === "blood_marked" && e.payload.player === "goldgrass"));
+    check("…and the mark floors its Menace through every rep gate",
+      menaceOf(g7e, "goldgrass") >= 3);
+    // Permanent: decay runs every round and the floor holds.
+    for (let i = 0; i < 12; i++) { g7e.round += 1; runDiplomacyRound(g7e); }
+    check("…and twelve rounds of decay cannot wash it off",
+      menaceOf(g7e, "goldgrass") >= 3);
+    // A bystander at peace with the dead faction is not marked.
+    check("a faction not at war with them is not marked",
+      !g7e.players.plainers.bloodMarks);
+    CONFIG.diplomacy.bloodPrice.menacePerKill = 0;
+    check("menacePerKill 0 switches the floor off entirely — the marks stay recorded, the price does not",
+      menaceOf(g7e, "goldgrass") <= (g7e.players.goldgrass.menace || 0));
+    CONFIG.diplomacy.bloodPrice.menacePerKill = perSave;
+  }
 
   // --- §5 — the faction with no ground, and the hole it sits in ------
   //

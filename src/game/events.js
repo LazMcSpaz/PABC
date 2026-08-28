@@ -70,6 +70,9 @@ export const EVENT_NAMES = new Set([
   // take one back; `faction_collapsed` is that deadline expiring, and the
   // ordinary elimination sweep retires it a moment later on its own rule.
   "landless_clock_started", "landless_clock_cleared", "faction_collapsed",
+  // §B-blood — a faction was at war with somebody at the moment they died.
+  // The mark is permanent and sets the floor under the killer's Menace.
+  "blood_marked",
   "influence_pressure",
   // §19 Exploration, Vision & Fog of War (APPEND-ONLY — distinct keys).
   "hex_explored", "unit_spotted", "unit_lost_sight", "ambush_triggered",
