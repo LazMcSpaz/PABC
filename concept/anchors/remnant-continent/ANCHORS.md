@@ -289,6 +289,12 @@ rather than as improvisation. Salvaged pre-collapse steel appears only as
 Rule 2 wants it, re-milled into standard stock rather than nailed on as
 found objects.
 
+## dambaran-entryway-01.png
+URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/dambaran-entryway-01.png
+Use for: a Dambaran wall opening, distinct from Korad per the user — coursed pale stone in irregular blocks rather than cast rubble-aggregate, a single massive lintel, iron ring-bolts along the top course, and door and jamb protection built as riveted flat steel straps rather than cast or cut plate. First Dambaran anchor in the registry; note it predates PABC's timeline, where §11 has the Dambarans as a people distinct from the Versari, so treat this as their own architectural language rather than early Versari work
+Do not use for: roof, massing or overall building form, which this crop does not show; also not for Korad work, which the user has drawn as a separate vocabulary from this
+Added: 2026-08-28
+
 ## korad-terrace-row-01.jpg
 URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/korad-terrace-row-01.jpg
 Use for: repetition as the civilization signal — a row of identical two-storey units stepping down a slope, every window and door the same size and spacing, one parapet profile carried across all of them, external downpipes to a shared line. The cleanest statement of §3 Rule 1 in the set, and free of lettering
