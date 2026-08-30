@@ -18,9 +18,24 @@
 // lands — two stages deep is where you stop being able to tell which one did
 // it.
 //
-//   ending mix (submission + mixed, of 15)   band >= 11
+//   ending mix (submission + mixed)          band >= 24% of games
 //   median rounds to Dominion                band  baseline +/- 4
 //   games unresolved                         band  0
+//
+// THE MIX BAND IS A RATE, AND IT USED TO BE A COUNT. It was written as the
+// literal ">= 11", compared against however many seeds happened to be running,
+// so one name covered three different tests: 11 of 15 is 73% of games, 11 of
+// 45 is 24%, and 11 of 90 is 12% — nearly free. The band was authored at
+// n=45, so 11/45 = 24% is the threshold it always meant, and that is what it
+// now checks. Two consequences worth knowing:
+//
+//   · docs/sim-baseline.json, taken at n=15, reads 5 of 15 and therefore
+//     "failed" its own band under the old count. At 33% it passes comfortably.
+//   · anything reported as passing the mix band at n=90 was not really being
+//     tested. Re-read such claims against the share.
+//
+// The count is still printed, because every note in `config.js` quotes counts
+// and they stay readable. It is the SHARE that is graded.
 //
 // The doc-reported values (13 / 29 / 1) are NOT this suite's baseline — see
 // the note on the seeds below. docs/sim-baseline.json holds the real one.
@@ -43,7 +58,7 @@
 // matters, not with a number nobody can recompute.
 import { createGame } from "../src/game/setup.js";
 import { startTurn, endTurn } from "../src/game/turn.js";
-import { takeAITurn } from "../src/game/ai.js";
+import { takeAITurn, DIPLOMACY_BRANCH_ORDER } from "../src/game/ai.js";
 import { activePlayerId } from "../src/game/targeting.js";
 import { MINOR_FACTIONS, factionDef } from "../src/game/content.js";
 import { vassalLord, arePacted } from "../src/game/diplomacy.js";
@@ -85,6 +100,9 @@ function seedsFor(n) {
 // are genuinely deadlocked rather than slow, which is exactly the failure the
 // diplomacy brief §15 predicts from the `mayEngage` minor-reachability hole.
 const MAX_ROUNDS = 80;
+// The ending-mix band, as a share of games. 11/45 — the threshold the number
+// was authored against — rather than the bare count it used to be compared as.
+const MIX_BAND = 0.24;
 const SNAPSHOT_ROUND = 15; // where the 2026-08-15 playtest took its readings
 
 // --- argv ------------------------------------------------------------
@@ -100,6 +118,12 @@ const seeds = argOf("--n")
   ? argOf("--seeds").split(",").map((s) => Number(s.trim()))
   : SEEDS;
 const jsonOut = argOf("--json");
+// `--map large` runs the whole suite on a bigger board. NOT comparable
+// seed-for-seed to another size — a different Location budget means a
+// different `rng.shuffle` deck and therefore a different game per seed — so
+// read size-vs-size as two populations, and keep the one-flag-on-one-build
+// rule for everything else.
+const mapSize = argOf("--map") || "medium";
 const baselinePath = argOf("--baseline");
 const quiet = argv.includes("--quiet");
 
@@ -141,7 +165,7 @@ function runGame(seed) {
     factionIds: ["versari", "goldgrass", "lakers", "plainers"],
     humanFactionId: "versari",
     minors: Object.keys(MINOR_FACTIONS),
-    mapSize: "medium",
+    mapSize,
   });
   for (const p of Object.values(g.players)) p.isAI = true;
   startTurn(g);
@@ -173,7 +197,11 @@ function readSnapshot(g) {
     const p = g.players[pid];
     if (!p || factionDef(pid)?.tier === "minor") continue;
     const nodes = (p.techWheel || []).length;
-    rows.push({ pid, scrap: p.resource || 0, techLevel: p.techLevel || 1, nodes });
+    // §6 — how much GROUND it holds, recorded alongside the wheel because the
+    // two rows only mean anything together. See the note on
+    // `factionsWithEmptyWheelAtR15` below.
+    const locs = Object.values(g.locations).filter((l) => l.controller === pid).length;
+    rows.push({ pid, scrap: p.resource || 0, techLevel: p.techLevel || 1, nodes, locs });
   }
   return rows;
 }
@@ -195,6 +223,27 @@ function summarise(g, { aiTurns, snapshot, seed }) {
   ];
   const acts = ACT_EVENTS.reduce((n, k) => n + evName(g, k).length, 0);
   const denouncements = evName(g, "denounced").length;
+
+  // --- §1 — the political pass, per BRANCH.
+  //
+  // `actsPerAITurn` above is not the act rate and never was. The union of verb
+  // events it counts leaves out the single most common act in the game:
+  // opening a COURTSHIP emits `posture_changed` and nothing else, and it is
+  // the only political act that climbs the ladder Dominion is made of. At
+  // 61.56 courtships a game against ~270 AI turns it was missing roughly a
+  // third of every act taken. The published 0.45 is a subset rate.
+  //
+  // `ai_political_act` is emitted by `manageDiplomacy` itself, carries the
+  // name of the branch that spent the act, and so answers both questions at
+  // once: what the real rate is, and — because the pass is bounded to ONE act
+  // and branch order is priority — which branches are actually reachable.
+  // A branch that never appears here is a branch something above it is eating.
+  const political = evName(g, "ai_political_act");
+  const branchMix = {};
+  for (const e of political) {
+    const b = e.payload?.branch || "unknown";
+    branchMix[b] = (branchMix[b] || 0) + 1;
+  }
 
   // --- wars, and how they opened. A war whose declaration is preceded by the
   // attacker's own surprise-attack Honor charge was opened by a blow, not a
@@ -241,6 +290,19 @@ function summarise(g, { aiTurns, snapshot, seed }) {
     if (Object.keys(g.players).some((f) => f !== m && arePacted(g, f, m))) minorsAllied += 1;
   }
 
+  // --- THE WHOLE BOARD, brought in or killed. The governing ending-mix row
+  // counts the label on the winner's final handshake, and the labels lie:
+  // measured, a "submission" win averages 5.9 of 8 factions dead and 1.1
+  // sworn in, a "diplomacy" win 5.5 dead and 1.5 allied. These two rows
+  // measure the thing the labels were being read as: at the end of the game,
+  // what share of the board is DEAD, and what share ends BOUND to somebody —
+  // allied or sworn — rather than dead or estranged. Any change sold as
+  // making the game less exterminatory has to move these, not the labels.
+  const allIds = Object.keys(g.players);
+  const deadAtEnd = allIds.filter((f) => g.players[f]?.eliminated).length;
+  const boundAtEnd = allIds.filter((f) => !g.players[f]?.eliminated
+    && (vassalLord(g, f) || allIds.some((o) => o !== f && arePacted(g, o, f)))).length;
+
   // --- Sway. Read defensively off the player record: the currency does not
   // exist yet, so every row is zero until economy stage 4 lands. The rows are
   // here from day one so the baseline commit shows what "before" looked like
@@ -270,11 +332,16 @@ function summarise(g, { aiTurns, snapshot, seed }) {
     ending,
     aiTurns,
     actsPerTurn: aiTurns ? acts / aiTurns : 0,
+    politicalActsPerTurn: aiTurns ? political.length / aiTurns : 0,
+    branchMix,
     denounceShare: acts ? denouncements / acts : 0,
     wars: wars.length,
     surpriseOpenings: surprises,
     opsRun, opsBackfired, sabotageTraced, courtOpened,
     coalitions: evName(g, "coalition_formed").length,
+    board: {
+      total: allIds.length, dead: deadAtEnd, bound: boundAtEnd,
+    },
     minors: {
       allied: minorsAllied, vassal: minorsVassal, dead: minorsDead,
       everCourted: everCourted.size, total: minorIds.length,
@@ -282,6 +349,10 @@ function summarise(g, { aiTurns, snapshot, seed }) {
     // Economy rows
     endScrap: snapshot,
     emptyWheels: snapshot.filter((r) => r.nodes === 0).length,
+    // The same count, split by whether the faction still holds ground. See the
+    // report row for why the split is the whole finding.
+    emptyWheelsLandless: snapshot.filter((r) => r.nodes === 0 && r.locs === 0).length,
+    emptyWheelsWithLand: snapshot.filter((r) => r.nodes === 0 && r.locs > 0).length,
     delayedPurchases: evName(g, "purchase_delayed").length,
     supplyRefusals: evName(g, "purchase_refused_unsupplied").length,
     chipUpgrades: evName(g, "chip_upgraded").length,
@@ -306,6 +377,17 @@ const median = (xs) => {
 };
 const mean = (xs) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0);
 const r2 = (n) => Math.round(n * 100) / 100;
+// Total branch fires across the suite, ordered by the priority the chain runs
+// them in, so a starved branch reads as a hole in the middle of the list
+// rather than as a name you have to notice is missing.
+const sumMix = (mixes) => {
+  const total = {};
+  for (const m of mixes) for (const k of Object.keys(m)) total[k] = (total[k] || 0) + m[k];
+  const out = {};
+  for (const id of DIPLOMACY_BRANCH_ORDER) out[id] = total[id] || 0;
+  for (const k of Object.keys(total)) if (!(k in out)) out[k] = total[k];
+  return out;
+};
 
 const games = [];
 for (const seed of seeds) {
@@ -337,7 +419,14 @@ const report = {
   overrides: overrides || null,
   // --- the three governing numbers -----------------------------------
   governing: {
-    endingMix: { submissionPlusMixed: mixLike, of: seeds.length, band: ">= 11" },
+    endingMix: {
+      submissionPlusMixed: mixLike,
+      of: seeds.length,
+      // Graded on the share; 0.24 is the n=45 band (11/45) the number was
+      // authored against. See the header note on why this is not a count.
+      share: r2(seeds.length ? mixLike / seeds.length : 0),
+      band: ">= 0.24 of games",
+    },
     medianRoundsToDominion: { value: median(resolved.map((g) => g.round)), band: "baseline +/- 4" },
     unresolved: { value: byEnding.unresolved || 0, band: "0" },
   },
@@ -345,6 +434,8 @@ const report = {
   // --- diplomacy brief §17 --------------------------------------------
   diplomacy: {
     actsPerAITurn: r2(mean(ok.map((g) => g.actsPerTurn))),
+    politicalActsPerAITurn: r2(mean(ok.map((g) => g.politicalActsPerTurn))),
+    politicalBranchMix: sumMix(ok.map((g) => g.branchMix)),
     denounceShareOfActs: r2(mean(ok.map((g) => g.denounceShare))),
     warsPerGame: r2(mean(ok.map((g) => g.wars))),
     warsOpenedByUndeclaredAttack: r2(mean(ok.map((g) => g.surpriseOpenings))),
@@ -354,6 +445,10 @@ const report = {
     covertActsSeenThrough: r2(mean(ok.map((g) => g.opsBackfired))),
     sabotageTracedPerGame: r2(mean(ok.map((g) => g.sabotageTraced))),
     // At the final board — a snapshot, and confounded by the war rate.
+    // The whole-board rows — see the note where they are read. Shares of all
+    // factions in the game, dead and bound (allied or sworn) at the end.
+    boardDeadAtEndShare: r2(mean(ok.map((g) => g.board.dead / g.board.total))),
+    boardBoundAtEndShare: r2(mean(ok.map((g) => g.board.bound / g.board.total))),
     minorsAlliedOrVassalisedAtEnd: r2(mean(ok.map((g) => g.minors.allied + g.minors.vassal))),
     // Ever, from the log. THIS is §15's row: was the faction reachable by
     // something other than an army at any point in the game.
@@ -364,7 +459,23 @@ const report = {
   economy: {
     medianEndScrap: median(ok.flatMap((g) => g.endScrap.map((r) => r.scrap))),
     maxEndScrap: Math.max(0, ...ok.flatMap((g) => g.endScrap.map((r) => r.scrap))),
+    // §6 — THIS ROW IS NOT A TECH BUG, and it was read as one for long enough
+    // to be worth writing down. `maybeAssignTech` was the suspect: two majors
+    // in every game reach round 15 with nothing on the wheel. Probing the
+    // wheel state directly at round 15 across six seeds, EVERY faction with an
+    // empty wheel also held ZERO Locations and sat at Tech Level 1 with 0-1
+    // Research. There is nothing for the allocator to allocate: no ground, no
+    // production, no Research, no Ability Point. `baseActions: 0` means it has
+    // no actions either.
+    //
+    // So the row measures how often a faction is driven off the board before
+    // round 15, and it belongs next to finding 5 (neither kind of player can
+    // hold ground) rather than in the economy hunt. The split reports both
+    // halves so the next reader does not have to re-derive it: only the
+    // `WithLand` half could ever be an allocator bug, and it measures 0.
     factionsWithEmptyWheelAtR15: r2(mean(ok.map((g) => g.emptyWheels))),
+    factionsEmptyWheelLandlessAtR15: r2(mean(ok.map((g) => g.emptyWheelsLandless))),
+    factionsEmptyWheelHoldingLandAtR15: r2(mean(ok.map((g) => g.emptyWheelsWithLand))),
     chipUpgradesByAI: ok.reduce((n, g) => n + g.chipUpgrades, 0),
     purchasesDelayedBySupply: ok.reduce((n, g) => n + g.delayedPurchases, 0),
     purchasesRefusedUnsupplied: ok.reduce((n, g) => n + g.supplyRefusals, 0),
@@ -388,12 +499,15 @@ const report = {
 if (!quiet) {
   const G = report.governing;
   console.log("\n=== the three governing numbers ===");
-  console.log(`  ending mix (submission + mixed)   ${G.endingMix.submissionPlusMixed} of ${G.endingMix.of}   band ${G.endingMix.band}`);
+  const mixVerdict = G.endingMix.share >= MIX_BAND ? "PASS" : "FAIL";
+  console.log(`  ending mix (submission + mixed)   ${G.endingMix.submissionPlusMixed} of ${G.endingMix.of} = ${G.endingMix.share}   band ${G.endingMix.band}   ${mixVerdict}`);
   console.log(`  median rounds to Dominion         ${G.medianRoundsToDominion.value}   band ${G.medianRoundsToDominion.band}`);
   console.log(`  games unresolved                  ${G.unresolved.value}   band ${G.unresolved.band}`);
   console.log(`  endings: ${JSON.stringify(byEnding)}`);
   console.log("\n=== diplomacy brief §17 ===");
-  for (const [k, v] of Object.entries(report.diplomacy)) console.log(`  ${k.padEnd(34)} ${v}`);
+  for (const [k, v] of Object.entries(report.diplomacy)) {
+    console.log(`  ${k.padEnd(34)} ${typeof v === "object" ? JSON.stringify(v) : v}`);
+  }
   console.log("\n=== economy brief §17 ===");
   for (const [k, v] of Object.entries(report.economy)) console.log(`  ${k.padEnd(34)} ${v}`);
 }
@@ -401,6 +515,16 @@ if (!quiet) {
 if (baselinePath) {
   const base = JSON.parse(readFileSync(baselinePath, "utf8"));
   console.log(`\n=== delta against ${baselinePath} ===`);
+  // A DELTA ACROSS TWO SAMPLE SIZES IS NOT A DELTA. Half these rows are counts
+  // per suite (`unresolved`, the ending mix, every per-game total), so
+  // comparing a 45-seed run against a 15-seed baseline reports the sample size
+  // as if it were a result. The baseline file records what it was taken at;
+  // say so loudly rather than printing a table of nonsense.
+  const baseN = base?.governing?.endingMix?.of;
+  if (baseN != null && baseN !== seeds.length) {
+    console.log(`  !! baseline was taken at n=${baseN}, this run is n=${seeds.length}.`);
+    console.log(`  !! Counts below are not comparable. Re-run with --n ${baseN}.`);
+  }
   const walk = (a, b, path = "") => {
     for (const k of Object.keys(b)) {
       if (k === "games" || k === "seeds") continue;

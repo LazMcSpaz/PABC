@@ -363,6 +363,20 @@ export function beginCourtship(state, observer, subject) {
 // Warm pairs first, sociable factions keener, and a faction that would
 // actually complete the win condition with this partner keenest of all —
 // courting somebody you are already going to have to fight is not a plan.
+//
+// THAT LAST CLAUSE WAS A COMMENT AND NOTHING ELSE until §2. The body read
+// `sociability * warmth` and no more, which is close to the exact inverse of
+// what Dominion asks for: the AI courted whoever it already liked most rather
+// than whoever it still had to deal with, and a partner it was already allied
+// to scored HIGHER than an outstanding rival, because being allied is what
+// makes a pair warm. Sixty-one courtships opened per game against 1.6 minors
+// allied or sworn at the end is what that looks like from the outside.
+//
+// `dominionValue` is the missing half: 0 for a faction already allied, sworn
+// or dead, and cheapness-scaled in (0,1] for one still outstanding. The blend
+// is written so `dominionWeight` 0 restores the old expression EXACTLY rather
+// than approximately, and 1 hands the whole selection to the win condition
+// with warmth left as the tie-break inside it.
 export function courtshipScore(state, observer, subject) {
   if (!mayBeginCourtship(state, observer, subject)) return 0;
   const def = factionDef(observer) || {};
@@ -370,7 +384,10 @@ export function courtshipScore(state, observer, subject) {
   const span = Math.max(1, D().pactStandingReq - D().tiers.neutral);
   // Closeness to the bar, in [0,1].
   const warmth = Math.max(0, Math.min(1, (s - D().tiers.neutral) / span));
-  return (0.4 + (def.sociability ?? 0.5)) * (0.35 + warmth);
+  const appetite = (0.4 + (def.sociability ?? 0.5)) * (0.35 + warmth);
+  const w = CONFIG.ai?.dominionWeight ?? 0;
+  if (!w || !R.dominionValue) return appetite;
+  return appetite * ((1 - w) + w * R.dominionValue(state, observer, subject));
 }
 
 // --- speaking ---------------------------------------------------------

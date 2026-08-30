@@ -66,6 +66,13 @@ export const EVENT_NAMES = new Set([
   "build_started", "build_completed", "chip_upgraded",
   "chip_dormant", "chip_reactivated", "slider_changed", "garrison_erosion",
   "chip_activated", "chip_granted", "chip_removed", "faction_eliminated", "faction_released",
+  // §5 — the landless clock. A faction with no Locations has a deadline to
+  // take one back; `faction_collapsed` is that deadline expiring, and the
+  // ordinary elimination sweep retires it a moment later on its own rule.
+  "landless_clock_started", "landless_clock_cleared", "faction_collapsed",
+  // §B-blood — a faction was at war with somebody at the moment they died.
+  // The mark is permanent and sets the floor under the killer's Menace.
+  "blood_marked",
   "influence_pressure",
   // §19 Exploration, Vision & Fog of War (APPEND-ONLY — distinct keys).
   "hex_explored", "unit_spotted", "unit_lost_sight", "ambush_triggered",
@@ -115,6 +122,12 @@ export const EVENT_NAMES = new Set([
   "standing_baseline_changed", "recognition_summit",
   // Precursor warnings — AI telegraphs trouble to the human before acting.
   "diplomatic_warning",
+  // §1 — WHICH BRANCH OF THE POLITICAL PASS SPENT THE ACT. `manageDiplomacy`
+  // is bounded to one act a turn and branch order is priority, so the only
+  // way to see a new branch starving an old one is to record which one fired.
+  // Twice now that has been discovered instead by measuring an unrelated
+  // number and noticing it had moved.
+  "ai_political_act",
   // §5 posture — where a faction stands, and the moment it says so out loud.
   // `posture_changed` is the computed transition; `posture_stated` is the
   // faction actually announcing it, which is the one that gates acting on it.

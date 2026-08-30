@@ -50,6 +50,8 @@ import {
   // §8 what a fight costs your name
   diplomaticPrice, attackIsWorthIt,
   giftCost, cleanHandsSurcharge,
+  // §6 Sway — the pool a gift must never spend out from under a courtship.
+  swayOf, courtingList,
   // §9 grounds for a rising, and one faction's appetite for it
   coalitionGrounds, coalitionJoinScore, coalitionAgainst,
 } from "./diplomacy.js";
@@ -74,7 +76,8 @@ import { resolveTokens } from "./textTokens.js";
 import { evalCond, evalStrength } from "./dsl.js";
 import { registerQuest } from "./quests.js";
 import { CONFIG } from "./config.js";
-import { takeAITurn, maybeAssignTech, warPeaceTerms, manageDiplomacy } from "./ai.js";
+import { takeAITurn, maybeAssignTech, warPeaceTerms, manageDiplomacy,
+  DIPLOMACY_BRANCH_ORDER, runDiplomacyBranch, landlessBlockerHexes, giftBudget } from "./ai.js";
 import { enforceLoyaltySlotCap, chargeChipUpkeep, slotCapacity, effectiveBuildCost, buildableChips, applyOutputAndBuilds, locationOutput, unitUpkeepFor, chargeUnitUpkeep, chipsHeldBy, chipUpkeepFor, slotExpansionCost, completeBuildIfDone } from "./economy.js";
 
 const seed = Number(process.argv[2]) || 42;
@@ -4497,12 +4500,42 @@ line("\n  [§6.4] no faction buys goodwill with coin — the AI included");
     bought.length === 0, );
 }
 {
-  // …and the switch that would let the AI gift again is off, deliberately.
-  // The measured table is in the config comment: the scrap breach read best
-  // (mix 9, unresolved 1) and still cannot stay, and every Sway-priced version
-  // reads worse than removing it because a gift competes with COURTSHIP for
-  // the same pool.
-  check("the AI's gift branch ships switched off", CONFIG.ai.giftAboveShareOfCap >= 1);
+  // THIS USED TO PIN THE BRANCH SHUT — `giftAboveShareOfCap >= 1` — and that
+  // was a check on a VERDICT rather than on a rule. The verdict has since
+  // flipped: re-measured alongside `ai.dominionWeight: 1`, the gift buys back
+  // the whole ending mix the landless clock cost (0.32 -> 0.40 at n=90) with
+  // `unresolved` flat, and it now ships at 0.8. A check that asserts today's
+  // setting fails the day somebody re-measures honestly, which is the opposite
+  // of what it is for.
+  //
+  // What replaces it is the rule the branch has to obey at ANY setting, and
+  // the one whose breach was actually measured: A GIFT MUST NEVER COST A
+  // COURTSHIP. Letting a gift eat the pool took the ending mix from 9 to 5 and
+  // unresolved from 1 to 6, because `chargeSwayUpkeep` then called the running
+  // courtships off and lapses went 3.9 to 6.4. Commitments first, surplus
+  // second — for however many rounds `giftReserveRounds` asks for.
+  const g6g = createGame({ seed: 2071, humanFactionId: "versari" });
+  ensureDiplomacy(g6g);
+  const SW = CONFIG.sway;
+  g6g.players.goldgrass.sway = SW.cap;
+  // Warm enough to be SEEN courting them — the courtship floor is Neutral, and
+  // at this seed Goldgrass starts below it toward both.
+  for (const f of ["lakers", "plainers"]) {
+    setStanding(g6g, "goldgrass", f, CONFIG.diplomacy.tiers.friendly, "test");
+  }
+  const openedCourtships = ["lakers", "plainers"].filter((f) =>
+    performDiplomacy(g6g, "goldgrass", "court", { faction: f }).ok === true).length;
+  check("the courtship fixture opened something to protect",
+    openedCourtships > 0 && courtingList(g6g, "goldgrass").length === openedCourtships);
+  const owed = openedCourtships * SW.courtUpkeep * (CONFIG.ai.giftReserveRounds ?? 2);
+  check("a gift never spends what a running courtship is owed",
+    giftBudget(g6g, "goldgrass") <= swayOf(g6g, "goldgrass") - owed);
+  // …and the no-op is still a no-op, whatever the shipped value happens to be.
+  const shareSave6g = CONFIG.ai.giftAboveShareOfCap;
+  CONFIG.ai.giftAboveShareOfCap = 1;
+  check("share 1 still shuts the branch completely",
+    giftBudget(g6g, "goldgrass") === 0);
+  CONFIG.ai.giftAboveShareOfCap = shareSave6g;
   // The human's, of course, does not.
   const g = createGame({ seed }); ensureDiplomacy(g);
   g.players.versari.sway = 200;
@@ -7092,7 +7125,13 @@ line("\n  [Phase 11] text-token resolver");
   check("drift: standing below its baseline climbs toward it",
     getStanding(g3, "versari", other19) > 0 && getStanding(g3, "versari", other19) <= target);
   setStanding(g3, "versari", other19, CONFIG.diplomacy.tiers.friendly - 1, "test"); // above baseline
+  // The claim here is WHERE decay stops, not how fast it gets there — §B1's
+  // warm-drift ratchet slows the rate, so pin it to the symmetric no-op for
+  // this fixture and let its own checks own the rate.
+  const wdSave19 = CONFIG.diplomacy.warmDriftEvery;
+  CONFIG.diplomacy.warmDriftEvery = 1;
   for (let i = 0; i < 6; i++) runDiplomacyRound(g3);
+  CONFIG.diplomacy.warmDriftEvery = wdSave19;
   check("drift: standing settles AT the baseline instead of fading to zero",
     getStanding(g3, "versari", other19) === target);
 
@@ -7362,6 +7401,348 @@ line("\n  [Phase 11] text-token resolver");
   CONFIG.ai.giftAboveShareOfCap = shareSave;
   check("…and with nothing to answer, it gifts — even where it could not court",
     g5h.log.slice(before5i).some((e) => e.payload?.cause === "gift"));
+
+  // --- §1 — BRANCH ORDER IS PRIORITY, AND NOW SOMETHING CHECKS IT -----
+  //
+  // The pass is bounded to one act, so whatever fires first silences the rest.
+  // That has cost two regressions (both recorded on the branches themselves),
+  // and both were found by measuring an unrelated number weeks later and
+  // noticing it had moved. The check above pins ONE pair — the gift against
+  // the denouncement — which is the pair that bit last time and no help at all
+  // against the pair that bites next.
+  //
+  // This checks the RULE instead of a pair: whatever set of branches is live
+  // on a given board, the act goes to the highest one of them. It cannot be
+  // fitted to an observation and it does not need updating when a branch is
+  // added — `DIPLOMACY_BRANCH_ORDER` is the chain itself, so a branch inserted
+  // in the wrong place fails here on the first board where both are live.
+  //
+  // Liveness is asked of each branch on its OWN freshly-built board, because
+  // running a branch spends the act and moves the position. That is what makes
+  // the scenarios below builders rather than states.
+  const chainScenarios = [
+    {
+      name: "a mid-game board, no human in the room",
+      pid: "goldgrass",
+      build: () => {
+        const g = createGame({ seed: 3301 });
+        ensureDiplomacy(g);
+        for (let i = 0; i < 24; i++) takeAITurn(g);
+        return g;
+      },
+    },
+    {
+      name: "…and one with a player seat in it",
+      pid: "goldgrass",
+      build: () => {
+        const g = createGame({ seed: 3302, humanFactionId: "versari" });
+        ensureDiplomacy(g);
+        for (let i = 0; i < 18; i++) { if (activePlayerId(g) === "versari") endTurn(g); else takeAITurn(g); }
+        return g;
+      },
+    },
+    {
+      name: "…and a warlord holding an ultimatum somebody defied",
+      pid: "plainers",
+      build: () => {
+        const g = createGame({ seed: 3303 });
+        ensureDiplomacy(g);
+        for (let i = 0; i < 12; i++) takeAITurn(g);
+        return g;
+      },
+    },
+  ];
+  for (const sc of chainScenarios) {
+    const live = DIPLOMACY_BRANCH_ORDER.filter((id) => runDiplomacyBranch(sc.build(), sc.pid, id));
+    const fired = manageDiplomacy(sc.build(), sc.pid);
+    check(`branch order: ${sc.name} — the act goes to the highest live branch`,
+      fired === (live.length ? live[0] : null));
+  }
+
+  // …and the rule has to have something to bite on: a run where NO branch is
+  // ever live proves nothing, so assert the scenarios are doing work. Counting
+  // that at least one board had a live branch is a MECHANISM claim (the check
+  // above is not vacuous), not a rate fitted to this sample.
+  check("…and those boards actually had political acts available to starve",
+    chainScenarios.some((sc) =>
+      DIPLOMACY_BRANCH_ORDER.some((id) => runDiplomacyBranch(sc.build(), sc.pid, id))));
+
+  // …and the ordering itself, as CONSTRAINTS rather than as the order.
+  //
+  // The check above is worth having — it proves the chain runs in its declared
+  // order and that the branch it names is the branch that acted — but on its
+  // own it is a tautology about priority: it reads `DIPLOMACY_BRANCH_ORDER` to
+  // test a chain built from `DIPLOMACY_BRANCH_ORDER`, so moving the gift to
+  // the top moves both and it still passes. It cannot catch the hazard that
+  // has actually bitten twice.
+  //
+  // What catches that is naming the positions that are load-bearing, one pair
+  // at a time, each with the measurement that put it there. These fail if the
+  // chain is reordered, which is the entire point. Every pair below is a
+  // reading somebody paid for.
+  const PRIORITY_RULES = [
+    // A gift is the only act in the pass that answers nothing on the board.
+    // It sat above `warTalk` once and returned on every turn a sociable
+    // faction took, which made the branch that ENDS WARS unreachable.
+    ["war-talk", "gift", "a gift never speaks over the branch that ends a war"],
+    // …and at position 3 it starved the denouncement, taking a pacifist's
+    // Honor from 8.3 to 4.1 — the stat `declareOnCleanHands` prices its
+    // safety in. It was buying warmth with its armour.
+    ["denounce", "gift", "…nor over naming a faction that has earned it"],
+    // A faction that gifts a stranger while owing its neighbour blood reads
+    // as having no memory.
+    ["amends", "gift", "…nor over a debt it already owes"],
+    // Talking to the party you are actually fighting outranks courting a
+    // stranger; the settle branch was hoisted over the same obstacle.
+    ["war-talk", "pact", "the war you are in outranks shopping for new friends"],
+    ["amends", "pact", "…and so does the debt you already owe"],
+    // An ultimatum you let lapse costs Honor publicly. Following through is
+    // an obligation, and obligations outrank discretionary spending.
+    ["enforce-ultimatum", "gift", "your own standing threat outranks a gift"],
+    // The close-out spends Sway on the last faction between it and the win.
+    // It sits below every reply — putting it at the top of the chain measured
+    // 12 / 43.5 / 23 against 21 / 45 / 16 by starving `amends`, `vassalize`
+    // and `warTalk`, which is the same hazard for the third time. It outranks
+    // the denouncement because naming the faction you need an alliance with
+    // moves the pair the wrong way.
+    ["amends", "close-out", "a reply on the board outranks closing the game out"],
+    ["war-talk", "close-out", "…and so does the war you are already in"],
+    ["answer-ultimatum", "close-out", "…and so does a threat standing over you"],
+    ["close-out", "denounce", "but closing the game out outranks naming the partner you need"],
+    ["close-out", "gift", "…and outranks warming somebody who is not in the way"],
+    ["answer-ultimatum", "gift", "…and so does a threat standing over you"],
+  ];
+  const pos = (id) => DIPLOMACY_BRANCH_ORDER.indexOf(id);
+  for (const [higher, lower, why] of PRIORITY_RULES) {
+    check(`priority: ${why}`,
+      pos(higher) >= 0 && pos(lower) >= 0 && pos(higher) < pos(lower));
+  }
+
+  // Every branch id the chain runs is one `sim-suite` will report, and one the
+  // event carries. A branch added without a name is a branch that goes back to
+  // being invisible, which is the whole defect.
+  check("every branch in the chain has a distinct name",
+    new Set(DIPLOMACY_BRANCH_ORDER).size === DIPLOMACY_BRANCH_ORDER.length
+    && DIPLOMACY_BRANCH_ORDER.every((id) => typeof id === "string" && id.length > 0));
+
+  // --- §B — the three balance rules, as mechanisms ------------------
+  //
+  // Built against the finding that a full game produces 6.4 eliminations and
+  // 1.5 pacts: conquest banks progress forever while diplomacy pays a
+  // ≥1/round decay tax, war never bills the pool diplomacy spends, and a
+  // faction that exterminates half the board walks up to the survivor with a
+  // clean face. Each rule ships behind a no-op; each check here asserts the
+  // MECHANISM and that the no-op really is one.
+
+  // §B1 — warmth decays slower than contempt heals.
+  //
+  // Measured on DRIFT-CAUSED changes only, with the SAME observer for both
+  // pairs: the step is scaled by the observer's grudge, so comparing
+  // goldgrass→lakers against lakers→goldgrass compares two factions'
+  // temperaments, not the rule. Other political events also move Standing
+  // during a round, so the deltas are read off the drift receipts rather
+  // than the totals.
+  {
+    // Drift moves through `setStanding`, which emits `delta: null` — so the
+    // movement is read as a TICK COUNT. Same observer means the same
+    // grudge-scaled step for both pairs, so ticks compare exactly.
+    const driftTicks = (g, from, a, b) => g.log.slice(from)
+      .filter((e) => e.name === "standing_changed" && e.payload.cause === "drift"
+        && e.payload.faction === a && e.payload.player === b).length;
+    const runPair = (every) => {
+      const g = createGame({ seed: 2081 });
+      ensureDiplomacy(g);
+      const evSave = CONFIG.diplomacy.warmDriftEvery;
+      CONFIG.diplomacy.warmDriftEvery = every;
+      setStanding(g, "goldgrass", "lakers", 9, "test");     // far above any baseline
+      setStanding(g, "goldgrass", "plainers", -9, "test");  // far below it
+      const from = g.log.length;
+      for (let i = 0; i < 4; i++) { g.round += 1; runDiplomacyRound(g); }
+      CONFIG.diplomacy.warmDriftEvery = evSave;
+      return {
+        warmLost: driftTicks(g, from, "goldgrass", "lakers"),
+        coldGained: driftTicks(g, from, "goldgrass", "plainers"),
+      };
+    };
+    const ratcheted = runPair(3);
+    check("warm Standing decays slower than cold Standing recovers",
+      ratcheted.warmLost < ratcheted.coldGained && ratcheted.warmLost > 0);
+    const symmetric = runPair(1);
+    check("warmDriftEvery 1 restores the symmetric decay exactly",
+      symmetric.warmLost === symmetric.coldGained && symmetric.warmLost > 0);
+  }
+
+  // §B4 — war bills the political pool, first and uncancellably.
+  {
+    const g7c = createGame({ seed: 2082 });
+    ensureDiplomacy(g7c);
+    const rateSave = CONFIG.sway.warUpkeep;
+    CONFIG.sway.warUpkeep = 2;
+    declareWar(g7c, "goldgrass", "lakers", "test");
+    declareWar(g7c, "goldgrass", "plainers", "test");
+    g7c.players.goldgrass.sway = 10;
+    g7c.round += 1; runDiplomacyRound(g7c);
+    const paidWars = g7c.log.filter((e) => e.name === "sway_spent"
+      && e.payload.player === "goldgrass" && e.payload.cause === "war-upkeep")
+      .reduce((n, e) => n + e.payload.amount, 0);
+    check("two wars bill the pool at the per-war rate", paidWars === 4);
+    // A shallow pool pays what it has rather than going negative.
+    g7c.players.goldgrass.sway = 1;
+    g7c.round += 1; runDiplomacyRound(g7c);
+    check("…and a shallow pool drains to zero, never below",
+      g7c.players.goldgrass.sway >= 0);
+    // no-op: at 0 no war-upkeep line ever appears — set explicitly, because
+    // the SHIPPED value is no longer 0 and this claim is about the switch.
+    CONFIG.sway.warUpkeep = 0;
+    const g7d = createGame({ seed: 2082 });
+    ensureDiplomacy(g7d);
+    declareWar(g7d, "goldgrass", "lakers", "test");
+    g7d.round += 1; runDiplomacyRound(g7d);
+    check("warUpkeep 0 bills nothing",
+      !g7d.log.some((e) => e.name === "sway_spent" && e.payload.cause === "war-upkeep"));
+    CONFIG.sway.warUpkeep = rateSave;
+  }
+
+  // §B-blood — the kill leaves a permanent mark on the killers.
+  {
+    const g7e = createGame({ seed: 2083 });
+    ensureDiplomacy(g7e);
+    const perSave = CONFIG.diplomacy.bloodPrice.menacePerKill;
+    CONFIG.diplomacy.bloodPrice.menacePerKill = 3;
+    declareWar(g7e, "goldgrass", "lakers", "test");
+    // Strip the victim while the war stands, then let the sweep find it.
+    for (const l of Object.values(g7e.locations)) if (l.controller === "lakers") l.controller = null;
+    for (const u of Object.values(g7e.units)) if (u.owner === "lakers") delete g7e.units[u.uid];
+    endTurn(g7e);
+    check("a faction at war with the dead one carries the mark",
+      g7e.players.goldgrass.bloodMarks === 1
+      && g7e.log.some((e) => e.name === "blood_marked" && e.payload.player === "goldgrass"));
+    check("…and the mark floors its Menace through every rep gate",
+      menaceOf(g7e, "goldgrass") >= 3);
+    // Permanent: decay runs every round and the floor holds.
+    for (let i = 0; i < 12; i++) { g7e.round += 1; runDiplomacyRound(g7e); }
+    check("…and twelve rounds of decay cannot wash it off",
+      menaceOf(g7e, "goldgrass") >= 3);
+    // A bystander at peace with the dead faction is not marked.
+    check("a faction not at war with them is not marked",
+      !g7e.players.plainers.bloodMarks);
+    CONFIG.diplomacy.bloodPrice.menacePerKill = 0;
+    check("menacePerKill 0 switches the floor off entirely — the marks stay recorded, the price does not",
+      menaceOf(g7e, "goldgrass") <= (g7e.players.goldgrass.menace || 0));
+    CONFIG.diplomacy.bloodPrice.menacePerKill = perSave;
+  }
+
+  // --- §5 — the faction with no ground, and the hole it sits in ------
+  //
+  // Three claims, and the first two are RULES this codebase already has. They
+  // are pinned here because the third depends on them and because together
+  // they are the reason a game can be won by nobody: a faction reduced to
+  // wandering units is alive, is counted by the win condition, and is invisible
+  // to the only targeting the AI has.
+  const g5z = createGame({ seed: 2061 });
+  ensureDiplomacy(g5z);
+  // Strip Goldgrass of every Location but leave it a unit.
+  for (const l of Object.values(g5z.locations)) if (l.controller === "goldgrass") l.controller = null;
+  const zombieUnit = Object.values(g5z.units).find((u) => u.owner === "goldgrass");
+  check("a faction can hold no ground and still have units",
+    !!zombieUnit && !Object.values(g5z.locations).some((l) => l.controller === "goldgrass"));
+  // …and the elimination sweep keeps it alive, because it wants BOTH gone.
+  endTurn(g5z);
+  check("…and it is not eliminated, because elimination wants no ground AND no units",
+    g5z.players.goldgrass.eliminated !== true);
+  // …so the win condition still counts it.
+  check("…so it still stands between somebody and Dominion",
+    dominionStanding(g5z, "versari").outstanding.includes("goldgrass"));
+
+  // --- §5 — the landless clock -------------------------------------
+  //
+  // The rule the three claims above describe the hole for. A faction with no
+  // Locations has `landlessGraceRounds` to take one back; on expiry its units
+  // are destroyed and the ordinary elimination sweep retires it. Asserted as
+  // the mechanism — the clock starts, holds, clears and expires — rather than
+  // as a round number fitted to one run.
+  const GRACE = CONFIG.victory.landlessGraceRounds;
+  check("the landless clock is on, and a faction may hold no ground for a while",
+    GRACE > 0);
+  // It survives the whole grace window, and the deadline is announced.
+  const g5y = createGame({ seed: 2062 });
+  ensureDiplomacy(g5y);
+  for (const l of Object.values(g5y.locations)) if (l.controller === "goldgrass") l.controller = null;
+  const startRound = g5y.round;
+  endTurn(g5y);
+  check("…and losing its last Location starts a clock, with the deadline stated",
+    g5y.log.some((e) => e.name === "landless_clock_started"
+      && e.payload.player === "goldgrass" && e.payload.deadline === startRound + GRACE));
+  // Hold it there. `state.round` is what the rule reads, so drive rounds
+  // rather than turns and stop one short of the deadline.
+  let spun = 0;
+  // The deadline is the round the clock EXPIRES on, so the last round it is
+  // still alive is the one before.
+  while (g5y.round < startRound + GRACE - 1 && spun++ < 400) endTurn(g5y);
+  check("…and it is still in the game right up to the deadline",
+    g5y.players.goldgrass.eliminated !== true
+    && Object.values(g5y.units).some((u) => u.owner === "goldgrass"));
+  while (g5y.round < startRound + GRACE && spun++ < 400) endTurn(g5y);
+  check("…and past it the units are destroyed and the faction is out",
+    g5y.log.some((e) => e.name === "faction_collapsed" && e.payload.player === "goldgrass")
+    && !Object.values(g5y.units).some((u) => u.owner === "goldgrass")
+    && g5y.players.goldgrass.eliminated === true);
+  // A DEADLINE, NOT A DEATH SENTENCE: taking ground back stops the clock, and
+  // says so. This is the half that makes the rule survivable.
+  const g5w = createGame({ seed: 2063 });
+  ensureDiplomacy(g5w);
+  const hadLoc = Object.values(g5w.locations).find((l) => l.controller === "goldgrass");
+  hadLoc.controller = null;
+  endTurn(g5w);
+  check("a faction that takes ground back clears its clock",
+    g5w.players.goldgrass.landlessSince != null);
+  hadLoc.controller = "goldgrass";
+  endTurn(g5w);
+  check("…and the board is told the clock stopped",
+    g5w.players.goldgrass.landlessSince == null
+    && g5w.log.some((e) => e.name === "landless_clock_cleared" && e.payload.player === "goldgrass"));
+  // …and 0 restores the old behaviour exactly: no clock ever runs.
+  const graceSave = CONFIG.victory.landlessGraceRounds;
+  CONFIG.victory.landlessGraceRounds = 0;
+  const g5v = createGame({ seed: 2064 });
+  ensureDiplomacy(g5v);
+  for (const l of Object.values(g5v.locations)) if (l.controller === "goldgrass") l.controller = null;
+  let spun2 = 0;
+  const until = g5v.round + graceSave + 2;
+  while (g5v.round < until && spun2++ < 400) endTurn(g5v);
+  check("landlessGraceRounds 0 restores the old immortality exactly",
+    g5v.players.goldgrass.eliminated !== true
+    && g5v.players.goldgrass.landlessSince == null
+    && !g5v.log.some((e) => e.name === "landless_clock_started"));
+  CONFIG.victory.landlessGraceRounds = graceSave;
+
+  // The targeting hole itself, asserted as the RULE rather than as a hex list:
+  // with the switch off the goal set is Locations only, so a landless faction
+  // contributes nothing; with it on, its units are goals. `wouldFight` still
+  // governs, so this can never send a faction at somebody it would refuse to
+  // fight on arrival.
+  const huntSave = CONFIG.ai.huntLandlessBlocker;
+  CONFIG.ai.huntLandlessBlocker = 0;
+  check("with the hunt off, a landless faction is not a goal at all",
+    landlessBlockerHexes(g5z, "versari").length === 0);
+  CONFIG.ai.huntLandlessBlocker = 1;
+  setStanding(g5z, "versari", "goldgrass", CONFIG.diplomacy.tiers.wary, "test"); // …and worth fighting
+  // FAIR FOG, NO CHEATS, and it is the half worth asserting first: a unit the
+  // hunter cannot see is not a goal, however badly the win condition wants it
+  // dealt with.
+  check("…and with it on, a landless faction it cannot SEE is still not a goal",
+    !landlessBlockerHexes(g5z, "versari").includes(zombieUnit.node));
+  g5z.visibility.versari.visible.add(zombieUnit.node);
+  const hunted = landlessBlockerHexes(g5z, "versari");
+  check("…and once it can see them, its surviving units are goals",
+    hunted.includes(zombieUnit.node));
+  // A rival that still HOLDS ground is reached through `knownGoalHexes` and
+  // must not be double-counted here — the branch is for the hole, not for
+  // every enemy unit on the map.
+  check("…while a faction that still holds ground is left to the Location goals",
+    Object.values(g5z.units).filter((u) => u.owner === "lakers")
+      .every((u) => !hunted.includes(u.node) || g5z.locations[u.node]));
+  CONFIG.ai.huntLandlessBlocker = huntSave;
 
   // --- a clean record is armour: the Honor-gap Menace surcharge ---
   //

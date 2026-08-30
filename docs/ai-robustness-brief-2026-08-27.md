@@ -1,5 +1,23 @@
 # Brief: make the opponent robust
 
+> **SUPERSEDED, 2026-08-27, by `docs/ai-robustness-findings-2026-08-27.md`.**
+> The instruments, the method rules and the traps in this brief are all still
+> correct and still worth reading first. **Four of its findings are not**, and
+> the findings doc has the measurements:
+>
+> | this brief says | the measurement says |
+> |---|---|
+> | §2 — the AI ignores the win condition and behaves in character until the clock runs out | The unresolved games are boards fought down to 2–4 survivors, most of them **one handshake** from Dominion and locked out of it. `courtshipScore` really did read warmth alone, and fixing it measured **worse** — it ranks a pool a Standing floor has already filtered. |
+> | §3 — an alliance with the AI is one-way; they never call the human | **AI→human pact calls work and always have.** `queueHumanPactCalls` runs every round and the drawer answers it. The real gap is AI→AI, which measured worse when opened. |
+> | §6 — `factionsWithEmptyWheelAtR15` is a bug hunt in `maybeAssignTech` | Not a tech bug. Every empty wheel belongs to a faction holding **zero Locations** at Tech 1. There is nothing to allocate. |
+> | §1 — `actsPerAITurn` is 0.45 | 0.45 counts a union of verb events that omits opening a courtship, the most common political act. The real rate is **0.61**. |
+>
+> The headline defect has moved since this was written. `unresolved` was 16 of
+> 45; the landless clock (`victory.landlessGraceRounds`) took it to 8, and the
+> three governing numbers are now graded against `docs/sim-baseline.json` at
+> n=45, not against the 21 / 45 / 16 quoted throughout below. **Every number in
+> this brief is a reading of `b33d1ee` and should be treated as history.**
+
 For the agent picking up `src/game/ai.js` after the diplomacy/economy rework.
 Everything here was measured on `main` at `b33d1ee` on 2026-08-27. Where a
 number appears, the command that produced it appears next to it.

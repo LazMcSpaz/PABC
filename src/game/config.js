@@ -35,6 +35,69 @@ export const CONFIG = {
     // It only applies while rivals are still ALIVE to break it. Kill everyone
     // and you have won; there is nothing left to hold against.
     holdRounds: 3,
+    // §5 — HOW LONG A FACTION MAY HOLD NO GROUND. When a faction's last
+    // Location goes it has this many rounds to take one back; on expiry its
+    // surviving units are destroyed and the ordinary elimination sweep retires
+    // it. 0 switches the rule off and restores the old behaviour exactly:
+    // elimination wants no Locations AND no units, so a faction reduced to a
+    // few wandering units lived forever.
+    //
+    // The reason this is a rule and not an AI setting is that a landless
+    // faction was immortal and inert at the same time. `baseActions: 0` means
+    // actions come from ground, so it had no actions, no production, no
+    // Research and no Sway income — no way to fight back, court anybody, or
+    // put anything on a table — while `dominionStanding` went on counting it
+    // as a faction somebody had to deal with. Measured at the round limit,
+    // EIGHT of twenty-eight blocked outstanding factions held zero Locations;
+    // in one seed a faction holding SEVEN of the map's eight could not win
+    // because a rival with no ground and five units would not go away.
+    //
+    // The clock is a deadline, not a death sentence: it starts when the last
+    // Location goes, CLEARS the moment one is retaken, and is announced both
+    // ways (`landless_clock_started` / `_cleared`) so the board can see it.
+    //
+    // MEASURED at n=45 (mix / median / unresolved, baseline 21 / 45 / 16):
+    //   grace   mix  median  unresolved   wars/game   minorsKilled
+    //   0 (old)   21   45      16           45.49       3.20
+    //   3         13   36.5     9           35.02       3.71
+    //   5         10   37       8           36.13       3.71
+    //   8         12   42       8           37.89       3.67
+    //   12        16   44      12           41.38       3.49
+    //   16        19   45      12           42.76       3.42
+    //
+    // A clean monotone trade: the shorter the rope, the fewer games run out
+    // the clock and the fewer of them end in submission. 8 IS THE ONLY SETTING
+    // THAT CLEARS BOTH BANDS AT THE BEST AVAILABLE `unresolved` — 5 ties it at
+    // 8 games but drops the ending mix to 10 against a band of 11, and 3 pulls
+    // the median to 36.5 against a band of 41-49. 12 and 16 buy the mix back
+    // and give up four games to the round limit.
+    //
+    // CONFIRMED at n=90, because the last two things measured here shrank when
+    // the sample grew:
+    //
+    //   0:  36 mix / 43   median / 33 unresolved / 51.26 wars
+    //   8:  30 mix / 41.5 median / 22 unresolved / 43.74 wars
+    //
+    // It holds. Unresolved games fall by a THIRD, and the ending mix costs
+    // less than the n=45 reading suggested (40% -> 33% of games, against
+    // 47% -> 27% at n=45). Nothing else measured against this brief moves the
+    // headline defect remotely this far.
+    //
+    // Two second-order effects worth knowing, both good and neither aimed at:
+    // the war rate falls 51.3 -> 43.7, because a faction that can be finished
+    // stops being a permanent open front; and the scripted pacifist — the
+    // instrument that exists because the suite cannot see a player who does
+    // not play like the AI — holds MORE ground, not less: mean Locations held
+    // 0.5 -> 1.2, wars declared on it 11.6 -> 8.4, all four claims still
+    // passing. The rule reads like it should punish the weak and measures the
+    // opposite way, because what it actually removes is the permanently
+    // unfinishable opponent.
+    //
+    // The cost is honest and worth stating plainly: the unresolved games
+    // become CONQUESTS (4 -> 15 at n=45), minors are killed slightly more
+    // often (3.20 -> 3.67) and brought in slightly less (1.60 -> 1.33). This
+    // is the §15 tension, priced. Raise to 12 or 16 to buy the mix back.
+    landlessGraceRounds: 8,
     // Score, purely for the end-of-game standing. Nothing here wins anything.
     // Both are HELD, like territory: you show them while the relationship
     // stands and lose them when it doesn't.
@@ -252,7 +315,38 @@ export const CONFIG = {
     // Sway not spent on the ladder, and the ladder is what ends games. The
     // surplus at the ceiling is still real (about a third of all rounds) and
     // still wants a sink that is not this one.
-    giftAboveShareOfCap: 1,
+    //
+    // RE-MEASURED A FOURTH TIME on the post-landless-clock board (baseline
+    // 12 / 0.27 / 42 / 8): 0.8 reads 11 / 0.24 / 42 / 11. Three unresolved
+    // games worse and sitting exactly ON the mix band. The verdict survived
+    // four boards.
+    //
+    // AND THEN A FIFTH TIME, ALONGSIDE `dominionWeight: 1`, WHERE IT FLIPS.
+    // The fourth reading above was taken with `dominionWeight` still at 0, so
+    // it expired the moment that shipped. Against the current build:
+    //
+    //   n=45   dark  12 / 0.27 / 45 /  6      0.8 -> 14 / 0.31 / 45.5 /  5
+    //   n=90   dark  29 / 0.32 / 45 / 13      0.8 -> 36 / 0.40 / 45   / 14
+    //
+    // The ENDING MIX gains and holds — 0.27 -> 0.31 and 0.32 -> 0.40, the same
+    // direction and a growing margin at the larger sample — while `unresolved`
+    // is flat within noise (one game better at n=45, one worse at n=90; 19 of
+    // 135 either way). Wars fall 43.1 -> 41.1.
+    //
+    // WHAT IT IS ACTUALLY DOING, and why it could not do it before. The mix is
+    // the number `victory.landlessGraceRounds` cost: 0.40 -> 0.32 at n=90. This
+    // buys back exactly that, to the hundredth, without giving the unresolved
+    // games back. And the reason a branch condemned four times suddenly pays is
+    // not the branch — it is that `dominionOrder` now runs inside it. At
+    // `dominionWeight: 0` the gift walked the other factions in faction-id
+    // order and warmed whoever came first; at 1 it warms the factions that
+    // still stand between this one and Dominion. The same Sway, aimed.
+    //
+    // Note the gift is still ONE point (`giftStanding`), which drift cancels —
+    // so what it is buying is not permanent Standing, it is the right target
+    // at the right moment. Worth re-reading the treadmill note there against
+    // this: the mechanism claim stands and it was never the whole story.
+    giftAboveShareOfCap: 0.8,
     // How many rounds of every RUNNING courtship's upkeep `giftBudget` sets
     // aside before it will consider a gift at all. This is the real rule the
     // guard above was reaching for: courtship is the ladder and must never be
@@ -291,6 +385,273 @@ export const CONFIG = {
     // is the Sway sink the pool has been waiting for since phase 3. Combined
     // with either of the others it gets worse, so the others stay dark.
     intrigue: 1,
+    // §2 — HOW MUCH THE WIN CONDITION GETS TO SAY. 0 is the no-op and is
+    // exactly the behaviour that shipped at b33d1ee: `courtshipScore` reads
+    // sociability times warmth and every branch that walks the other factions
+    // walks them in faction-id order.
+    //
+    // At 1 the selection is handed to `dominionValue` — a faction already
+    // allied, sworn or dead scores 0 however warm it is, and warmth survives
+    // only as the tie-break among the factions still outstanding. Anything
+    // between blends the two.
+    //
+    // The defect this exists for is the headline one: 16 of 45 games reach the
+    // round limit unwon, and the AI has never read the win condition at all.
+    // `checkDominion` appears twice in `ai.js` and both are detection AFTER a
+    // handshake — nothing anywhere read DISTANCE.
+    //
+    // MEASURED at n=45, everything else identical (mix / median / unresolved,
+    // against a baseline of 21 / 45 / 16):
+    //
+    //   0     21   45   16      (baseline, the shipped behaviour)
+    //   0.5   17   42   18
+    //   1     16   46   19
+    //
+    // IT SHIPPED DARK ON THAT READING AND IT SHIPS ON AT 1 NOW. The verdict
+    // flipped, and it flipped because the BOARD changed, not because anything
+    // here did. Re-measured after `victory.landlessGraceRounds` landed, against
+    // the current baseline of 12 mix / 0.27 share / 42 median / 8 unresolved:
+    //
+    //   n=45   0.5   10 / 0.22 / 44 / 10      <- mix now under the band
+    //   n=45   1     12 / 0.27 / 45 /  6
+    //   n=90   0     30 / 0.33 / 41.5 / 22    (baseline)
+    //   n=90   1     29 / 0.32 / 45   / 13    <- unresolved down 41%
+    //
+    // At n=90 it takes unresolved games from 22 to 13 for essentially nothing:
+    // the ending mix moves 0.33 -> 0.32, the war rate is flat (43.7 -> 43.1),
+    // and the median lands at 45 against a band of 41.5 ±4. Nothing else
+    // measured against this brief comes close on the number that is failing.
+    //
+    // WHY THE OLD READING WAS RIGHT AND THE OLD REASON WAS WRONG, which is the
+    // part worth keeping. The note below concluded that the bottleneck is
+    // CONVERSION rather than selection — that `courtshipScore` only ranks
+    // candidates a Standing floor has already filtered, so re-ranking them
+    // moves the AI off the partner it could convert and onto one it cannot.
+    // That was true, and the reason the pool was full of unconvertible
+    // partners was the landless factions: frozen, unreachable by any verb, and
+    // counted by the win condition anyway. Remove them and the pool becomes
+    // worth ranking. The brief called this "the single highest-value change";
+    // it was right about the change and wrong about the order of operations.
+    //
+    // The original reading, kept because it is why this is at 1 and not 0.5,
+    // and because the mechanism in it is still the thing to argue with:
+    // brief that asked for this called it "the single highest-value change",
+    // on the argument that `courtshipScore` courts whoever it likes most
+    // rather than whoever it still has to deal with. The argument is correct
+    // about the code and wrong about the consequence, because it aims at the
+    // wrong stage: `courtshipScore` only RANKS candidates that already passed
+    // `mayBeginCourtship`, which has a Neutral Standing floor. The factions
+    // standing between a faction and Dominion are, at the point it matters,
+    // BELOW that floor and therefore not in the pool being ranked at all.
+    // Re-ranking the pool just moves the AI off the partner it could have
+    // converted onto one it cannot — `courtshipsOpenedPerGame` barely moves
+    // (61.6 -> 62.1) and `minorsAlliedOrVassalisedAtEnd` barely moves
+    // (1.60 -> 1.67) while `warsPerGame` rises 45.5 -> 48.4.
+    //
+    // The bottleneck is CONVERSION, not selection. See `closeOutWithin` for
+    // where the measurement went next, and `docs/ai-robustness-findings-
+    // 2026-08-27.md` for what the endgame actually looks like.
+    //
+    // 0.5 is NOT a safe middle: on the current board it reads 0.22 on the mix
+    // share, under the 0.24 band, while 1 clears it. The blend is not monotone
+    // in the weight — set this to 0 or to 1.
+    dominionWeight: 1,
+    // §3 — whether the AI calls its OWN allies into its wars. 0 is the no-op:
+    // the `pact-call` verb keeps working for the player and the AI→human
+    // inbox (`queueHumanPactCalls`) is untouched either way, because that path
+    // never went through here.
+    //
+    // What this opens is AI→AI, which has never happened once: the verb has no
+    // caller in `ai.js` at all, so an alliance between two AI factions has
+    // been a line in a drawer. The branch asks `evaluatePactCall` first and
+    // only calls where the answer is yes, so it cannot bleed Standing on
+    // refusals.
+    //
+    // MEASURED at n=45 (mix / median / unresolved, baseline 21 / 45 / 16):
+    //   0   21   45   16
+    //   1   17   46   16      217 calls made, warsPerGame 45.5 -> 50.5
+    //
+    // IT SHIPS DARK. The calls land — 217 of them, all honored, because the
+    // branch consults `evaluatePactCall` first — and they buy nothing:
+    // `unresolved` does not move and the ending mix costs four. The mechanism
+    // is not mysterious. A pact call is a machine for STARTING wars, wars are
+    // what block Dominion, and the board is already at 45 declarations a game.
+    // Turning allies into co-belligerents on a board that cannot finish its
+    // existing wars adds belligerence to the thing that was already stuck.
+    //
+    // The branch stays because the ASYMMETRY it fixes is real and is worth
+    // reaching for again if the war rate ever comes down: an AI that can be
+    // called to arms and can never call is a partner in name.
+    //
+    // RE-MEASURED on the post-landless-clock board (baseline 12 / 0.27 / 42 /
+    // 8): 13 / 0.29 / 45 / 10, wars 37.9 -> 43.8. The verdict holds and the
+    // reason holds with it — it is still a machine for starting wars, and the
+    // war rate is still what blocks Dominion.
+    pactCall: 0,
+    // §2 — HOW CLOSE TO WINNING BEFORE THE AI PLAYS FOR THE WIN. Act when this
+    // many factions or fewer are still outstanding; 0 is the no-op and is the
+    // behaviour that shipped at b33d1ee.
+    //
+    // The reading this exists for, taken by walking the eight unresolved seeds
+    // to the round limit: those games are not milling about. They are down to
+    // 2-4 survivors, thirteen of twenty surviving faction-games have exactly
+    // ONE faction left outstanding, and twenty of twenty-eight outstanding
+    // pairs are blocked on nothing but Standing — around -3 against a pact bar
+    // of 6, not at war, with every door out of the position shut: the
+    // courtship floor is above them, the pact bar is above them, and the gift
+    // is dark board-wide.
+    //
+    // 1 is the tightest possible scope — only the very last faction, and only
+    // once everybody else is an ally, a vassal or dead — which is exactly the
+    // board on which `giftAboveShareOfCap`'s argument (Sway spent on warmth is
+    // Sway not spent on the ladder) has stopped applying, because there is no
+    // ladder left.
+    //
+    // MEASURED at n=45 (mix / median / unresolved, baseline 21 / 45 / 16):
+    //   0   21   45   16      (baseline)
+    //   1   17   44   18
+    //   2   19   51   18
+    //   5   16   49   17
+    //
+    // (Those three are with the branch at its FINAL position, below every
+    // reply. With it at the top of the chain — where the first draft put it —
+    // the same sweep read 20/48.5/17, 12/43.5/23 and 14/52/22, and the branch
+    // histogram named the cause in one line: it was starving `amends`,
+    // `vassalize` and `warTalk`. See the note on `branchCloseOut`.)
+    //
+    // IT SHIPS DARK, and it is the most interesting dark switch here because
+    // it demonstrably WORKS and still does not pay. Probing the same eight
+    // unresolved seeds to the round limit with it on: two of them now resolve,
+    // and the endgame Standing gaps close visibly — seed 31337's last pair
+    // goes from -2 and -4 against a bar of 6 to +3 and +2. It does the thing
+    // it was built to do.
+    //
+    // It does not pay because Standing is only one of FOUR walls in front of
+    // that last handshake, and it can only take down the one. Of 28 blocked
+    // outstanding pairs at the round limit: 18 blocked on Standing, 4 at war,
+    // 4 failing the reputation gates (one pair at Menace 11 against tolerance
+    // 9.6 AND Honor -9.5 against a trust floor of 3.1), 2 unreachable under
+    // §15. Pull down the Standing wall and the pairs walk into the next one.
+    //
+    // RE-MEASURED on the post-landless-clock board (baseline 12 / 0.27 / 42 /
+    // 8): at 2 it reads 10 / 0.22 / 45.5 / 7 — one unresolved game bought, and
+    // the ending-mix share falls UNDER the 0.24 band to do it. Still dark, and
+    // now largely redundant besides: `ai.dominionWeight: 1` reaches the same
+    // endgame through the branch that was already there.
+    closeOutWithin: 0,
+    // How big a close-out gift is. 2 rather than 1 is load-bearing rather than
+    // a tuning choice: `driftStanding` pulls an unpacted, un-warring,
+    // un-courted pair back toward its baseline by at least a full point every
+    // round, and `gift.baselineWarmth` only moves the baseline when a gift
+    // lands two or more. At 1 the branch pays Sway to stand still — measured,
+    // 639 fires across 45 games bought one game. Set to 1 to reproduce that.
+    closeOutGiftStanding: 2,
+    // How big `branchGift`'s gift is. 1 is the no-op and is what every reading
+    // on `giftAboveShareOfCap` was taken at — including the three that
+    // condemned the branch. See the note there: at 1 a gift is exactly
+    // cancelled by `driftStanding` and never reaches the two points
+    // `gift.baselineWarmth` needs, so it buys nothing permanent at any price.
+    //
+    // MEASURED at n=45 (mix / median / unresolved, baseline 21 / 45 / 16):
+    //   share 0.8, size 2   21 / 45   / 16   — branch never affords to fire
+    //   share 0.6, size 2   16 / 43.5 / 21
+    //
+    // against the size-1 readings already on `giftAboveShareOfCap` (0.8 ->
+    // 18/44/20, 0.6 -> 16/44/18). SO THE TREADMILL IS REAL AND FIXING IT IS
+    // WORSE, which is worth separating carefully. The mechanism claim stands:
+    // at 1 the gift cannot move a relationship, and every reading that
+    // condemned the branch was taken on a gift that could not work. The
+    // INFERENCE drawn from it — that a working gift would therefore pay — is
+    // false. A 2-point gift costs twice the Sway, so at 0.8 the branch can
+    // never afford to fire at all (0 fires, identical to baseline) and at 0.6
+    // it fires 484 times and lands three unresolved games worse than the
+    // 1-point version at the same share.
+    giftStanding: 1,
+    // §4 — whether two AIs may end a war on terms that hand over no CITY.
+    // 0 is the no-op and reproduces the old refusal exactly.
+    //
+    // This is a bug switch rather than a tuning dial. `warTalk`'s AI-to-AI
+    // path meant to skip the WINNING side's terms (a demand for somebody's
+    // homeland, priced far past what peace is worth) and tested for it on the
+    // wrong side of the deal — `give` rather than `get` — which also, and
+    // accidentally, required the LOSING side to be squatting on one of the
+    // winner's cities before it could sue for peace at all.
+    //
+    // The stalemate seeds are that condition biting. Seed 4711 at round 81:
+    // war exhaustion 73.5 and 108.5 against a losing gate of 4.8, Standing -10
+    // both ways, `warPeaceTerms` returning terms for both sides and
+    // `wouldAccept` returning true for both. A peace both parties would sign,
+    // refused because neither occupies the other.
+    //
+    // MEASURED at n=45 (mix / median / unresolved, baseline 21 / 45 / 16):
+    //   0   21   45   16      warTalk fires 98,  warsPerGame 45.5
+    //   1   13   50.5 17      warTalk fires 362, warsPerGame 55.4
+    //
+    // IT SHIPS DARK, AND THE BUG IS STILL A BUG. The fix does exactly what it
+    // should — peace between two AIs happens 3.7x as often — and the board
+    // gets worse: the ending mix falls eight and wars per game RISE ten.
+    // Cheap peace makes war cheap. A faction that can always buy its way out
+    // of a war is never cornered, and being cornered is what produces the
+    // submission endings the mix is counting; meanwhile each settled war frees
+    // both parties to start another. The inability to make peace without a
+    // cession turns out to have been load-bearing.
+    //
+    // Left off rather than repaired-and-shipped because the repair is not the
+    // interesting part: what this measures is that the war rate is held down
+    // by friction rather than by anybody deciding anything, which is the same
+    // thing finding 4 says from the other side.
+    //
+    // RE-MEASURED on the post-landless-clock board (baseline 12 / 0.27 / 42 /
+    // 8): 13 / 0.29 / 44 / 10, wars 37.9 -> 43.2. Unchanged in shape — cheap
+    // peace still makes war cheap, and the war rate still rises by five.
+    settleWithoutCession: 0,
+    // §5 — whether the AI will march on a faction that holds no ground.
+    // 0 is the no-op: the goal list is exactly `knownGoalHexes` as before.
+    //
+    // A landless faction is not eliminated (`sweepEliminations` wants no
+    // Locations AND no units), gets no actions (`baseActions: 0`), no
+    // production, no Research and no Sway — and still counts as outstanding
+    // for Dominion. It is frozen and it is in the way. Eight of the
+    // twenty-eight blocked outstanding factions at the round limit hold zero
+    // Locations; in seed 8123 one faction holds seven of the map's eight and
+    // still cannot win.
+    //
+    // MEASURED at n=45 (mix / median / unresolved, baseline 21 / 45 / 16):
+    //   n=45   0: 21/45 of 45/16     1: 16/48 of 45/12
+    //   n=90   0: 36/43 of 90/33     1: 25/46.5 of 90/28
+    //
+    // THIS IS THE ONLY SWITCH IN THIS FILE THAT MOVES THE HEADLINE DEFECT, and
+    // it ships dark anyway. Both halves of that need saying.
+    //
+    // It works, and not by belligerence: at n=90 unresolved games fall 33 -> 28
+    // while wars per game FALL 51.3 -> 49.7. Nothing else measured here has
+    // moved `unresolved` down at all. All three bands hold at both sample
+    // sizes.
+    //
+    // It ships dark on the house rule — the ending mix is a governing number
+    // and it gets worse, 36 -> 25 of 90 — and on a design question that is not
+    // the AI author's to answer. The branch's answer to a frozen faction is to
+    // kill it: `minorsKilledPerGame` rises 3.33 -> 3.64 and
+    // `minorsAlliedOrVassalisedAtEnd` falls 1.59 -> 1.48. §15 exists precisely
+    // because "the only remaining answer was genocide" was judged the wrong
+    // answer once already. Whether hunting a landless faction down is a
+    // legitimate ending or the same mistake in a new place is a call about the
+    // game, not about the opponent.
+    //
+    // Note also how the effect SHRANK with the sample: 16->12 at n=45 read as
+    // a 9-point drop, 33->28 at n=90 reads as 5.6. Same lesson as the one on
+    // `intrigue` — the smaller sample was doing some of the arguing.
+    //
+    // RE-MEASURED on the post-landless-clock board, and BOTH of its readings
+    // reversed sign (baseline 12 / 0.27 / 42 / 8): it now reads 19 / 0.42 / 42
+    // / 10. The ending mix, which it used to cost a third of, is now the best
+    // of anything measured; `unresolved`, which it used to be the only thing
+    // to improve, gets two games worse. That is what redundancy looks like —
+    // `victory.landlessGraceRounds` removes the blocker this existed to chase,
+    // so all that is left is the marching. Alongside `dominionWeight: 1` it is
+    // worse again (15 / 0.33 / 42.5 / 9 against 12 / 0.27 / 45 / 6). Dark, and
+    // now dark for a good reason rather than a reluctant one.
+    huntLandlessBlocker: 0,
   },
 
   // §17 Tech Wheel. Research fills a bar; Tech Level is a derived band
@@ -764,6 +1125,23 @@ export const CONFIG = {
     // At 6 the floor buys exactly one courtship, always, for everybody. A
     // second one has to be paid for out of ground or agreements.
     courtUpkeep: 6,
+    // §B4 — WHAT AN ACTIVE WAR COSTS THE POLITICAL POOL, per war per round,
+    // billed FIRST in `chargeSwayUpkeep` — before occupation, before
+    // courtships — because a war is the one commitment that cannot lapse.
+    // 0 is the no-op: the two loops go back to never competing for anything,
+    // which is how a conqueror ran a full political program for free.
+    //
+    // MEASURED — see the fuller note on `warmDriftEvery`, whose verdict this
+    // shares. AI-vs-AI (suite baseline 0.31 mix-share / 5 unresolved at n=45):
+    //   alone at 1   0.27 / 9        alone at 2   0.38 / 9, dead 0.74, bound 0.22
+    //   package at n=90   0.34 / 21 against 0.40 / 14 — worse, honestly stated.
+    // The player-shaped probe is why it ships: a scripted pacifist under this
+    // rule alone holds 1.3 Locations instead of 0.7 — the first thing in two
+    // days of measurement to move that number — and under the full package
+    // wins 3 of 15 games instead of 1. Warmongers now bleed the pool that
+    // courtship, gifts and the close-out spend, which is felt most by the
+    // factions fighting the peaceful player's wars FOR them.
+    warUpkeep: 2,
     // Per +1 Standing from a gift. Replaces the scrap gift outright.
     perStanding: 8,
     // REPARATIONS. Courting has a Standing floor and always will — you cannot
@@ -965,6 +1343,46 @@ export const CONFIG = {
     pactStandingReq: 6, // §18.7 Standing needed to form a pact (Friendly+)
     driftPerRound: 1, // §18.5 Standing drifts toward its BASELINE when unreinforced…
     grudgeDriftScale: 1, // …modulated by the faction's grudge (high grudge → slower fade)
+    // §B1 — WARMTH DECAYS SLOWER THAN CONTEMPT HEALS. Standing ABOVE its
+    // baseline (a warm relationship cooling) only drifts every this-many
+    // rounds; Standing below it (a cold one recovering) keeps the full rate.
+    // 1 is the no-op and restores the symmetric decay exactly.
+    //
+    // This is the ratchet the ledger was missing. Conquest banks progress
+    // permanently; diplomacy paid a ≥1/round tax on everything it earned
+    // against a pact bar of +6, so a pair needed +2/round of continuous
+    // attention just to stand still. Measured consequence: 6.4 eliminations
+    // per game against 1.5 pacts, first kill at median round 10, and 18
+    // vassalizations per game of which ~1 survives to the end — the one
+    // diplomatic verb that fired constantly did not STICK.
+    //
+    // MEASURED, and THE TWO INSTRUMENTS DISAGREE — which the method doc says
+    // is the finding, not something to average. AI-vs-AI first (mix-share /
+    // median / unresolved, suite baseline 0.31 / 45.5 / 5 at n=45 and
+    // 0.40 / 45 / 14 at n=90):
+    //
+    //   n=45  alone at 2   0.24 / 42 / 10
+    //   n=45  alone at 3   0.36 / 40 / 12
+    //   n=45  with warUpkeep 2 + blood 2   0.42 / 42 / 6
+    //   n=90  with warUpkeep 2 + blood 2   0.34 / 42 / 21
+    //
+    // The n=45 combo reading was the small sample doing the arguing — fourth
+    // time this project has caught that — and at n=90 the package costs seven
+    // unresolved games and six of the mix. The board rows barely move (dead
+    // 0.76 -> 0.76, bound 0.19 -> 0.19).
+    //
+    // THE OTHER INSTRUMENT is the reason this ships at 3 anyway. The suite
+    // can only measure a world where everybody plays `takeAITurn`; the
+    // scripted-pacifist probe exists precisely because of that limit, and it
+    // is the shape of the complaint this rule answers ("conquest is a simple
+    // loop, diplomacy is insanely complicated, and diplomatic wins never
+    // happen"). Under this rule alone, wars declared ON a peaceful player
+    // fall 11.1 -> 6.3; under the full package the pacifist WINS 3 of 15
+    // games instead of 1, holding 1.3 Locations instead of 0.7. A rule that
+    // makes earned warmth durable is worth little to eight AIs grinding each
+    // other, and a great deal to the one player at the table trying to be
+    // liked. The AI-vs-AI cost is real and is accepted, on the owner's call.
+    warmDriftEvery: 3,
     seedJitter: 3, // §18.4.1 per-seed jitter on seeded faction↔faction standing
 
     // Standing baselines — history leaves a mark. Drift pulls Standing toward
@@ -980,6 +1398,29 @@ export const CONFIG = {
     },
 
     // §18.5 Menace — reputation for UNJUSTIFIED aggression, scored vs target.
+    // §B-blood — THE BLOOD PRICE. Every faction you were at war with at the
+    // moment it died leaves a permanent mark, and `menaceOf` never lets your
+    // Menace decay below marks × menacePerKill (capped at menace.max). One
+    // rule, priced everywhere Menace already is: `passesRepGates` reads it
+    // against tolerance on both sides of every pact and courtship, so a
+    // faction that spent the game eliminating rivals finds the alliance door
+    // priced accordingly — permanently, because the dead do not come back.
+    // The player's own record is priced the same way. 0 switches it off.
+    //
+    // MEASURED at n=45 and n=90, alone: flat on every suite row (0.40 mix /
+    // 15 unresolved / dead 0.75 at n=90, all within noise of baseline), and
+    // the probe of WHY is the interesting part. The marks fire — 7 per game,
+    // six of eight winners carrying them — and the floor never fails a live
+    // gate against an AI winner, because an AI exterminator wins through
+    // conquest and CORNERED SUBMISSION (`aiAcceptsVassalage`), and neither
+    // door ever asks to be liked. One seed's winner sat at Menace 21 and
+    // still took a submission ending. So this is a PLAYER-FACING rule at
+    // zero AI-vs-AI cost: a human who plays exterminator finds courting,
+    // pacts and the close-out priced against their record, permanently,
+    // exactly as asked — "harder to make an alliance if you've spent the
+    // whole game eliminating factions." Surrender-at-swordpoint staying open
+    // to a butcher is coherent and deliberate.
+    bloodPrice: { menacePerKill: 2 },
     menace: {
       base: 3, // magnitude of a single attack's Menace swing
       // Declaring an UNJUSTIFIED war is itself unjustified aggression, and
@@ -1272,6 +1713,35 @@ export const CONFIG = {
       // it is worse again (15 / 52 / 19 against intrigue's own 17 / 52 / 13).
       // The rule is built, fixtured and switchable; it is not yet worth its
       // price to the AI.
+      //
+      // RE-MEASURED A THIRD TIME (2026-08-27), because the robustness brief
+      // asked for it and because there is now a MECHANISM argument for it that
+      // the earlier readings did not have. Honor is not only a defensive stat:
+      // `passesRepGates` hard-gates the alliance door on it, and walking the
+      // unresolved seeds to the round limit turns up survivors sitting at
+      // Honor -9.5 against a trust floor of 3.1 — one handshake from Dominion
+      // and permanently ineligible for it. An AI that surprise-attacks its way
+      // to -9.5 Honor has disqualified itself from the win condition.
+      //
+      // So the hope was that the bill would pay for itself further downstream
+      // than the undeclared-attack row can see. At n=45 on the current build,
+      // against a baseline of 21 / 45 / 16 with 22.04 undeclared:
+      //
+      //   0.6   16 / 48.5 / 17, 20.80 undeclared
+      //
+      // It bites slightly harder than it did (22.04 -> 20.80, 5.6%) and the
+      // verdict is unchanged: one unresolved game and five of the ending mix.
+      // The rep-gate argument is real but only 4 of 28 blocked endgame pairs
+      // fail on reputation, so fixing it perfectly could not have paid for the
+      // ending mix. Left off.
+      //
+      // RE-MEASURED A FOURTH TIME on the post-landless-clock board, where the
+      // war rate is 37.9 rather than 45.5 and the ending mix is the number
+      // under pressure (baseline 12 / 0.27 / 42 / 8): 0.6 reads 13 / 0.29 /
+      // 40.5 / 9. It is now very nearly free — a point of mix for a game — and
+      // still not a reason to turn it on, because it still does not buy
+      // anything. This is the closest it has come to paying in four readings;
+      // worth re-asking if the war rate falls further.
       //
       // The original note, kept because the raid-branch finding in it is still
       // true and still load-bearing:

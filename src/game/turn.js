@@ -21,7 +21,7 @@ import {
   checkDominion, dominionStanding,
 } from "./diplomacy.js";
 import { holdsLocation, syncControlHistory } from "./control.js";
-import { absorbLocation } from "./contest.js";
+import { absorbLocation, destroyUnit } from "./contest.js";
 import { adjustStanding } from "./standing.js";
 import { pressureSource, claimStrength, strongestRivalAt } from "./influence.js";
 import { hasTechNode } from "./tech.js";
@@ -360,7 +360,61 @@ function releaseFromDiplomacy(state, pid) {
   emit(state, "faction_released", { player: pid });
 }
 
+// §5 — THE LANDLESS CLOCK. A faction that holds no Locations has `graceRounds`
+// to take one back; when the clock runs out its surviving units are destroyed
+// and it leaves the game.
+//
+// This exists because a landless faction was previously IMMORTAL and INERT at
+// the same time, which is the worst pair of properties a blocker can have.
+// Elimination below wants no Locations AND no units, so a faction reduced to a
+// few wandering units survives indefinitely; `baseActions: 0` means actions
+// come from ground, so it has no actions, no production, no Research and no
+// Sway income, and therefore no way to fight back, court anybody, or bring
+// anything to a deal. And `dominionStanding` counts every survivor, so it goes
+// on blocking a win it can no longer participate in.
+//
+// Measured before this rule: EIGHT of the twenty-eight blocked outstanding
+// factions at the round limit held zero Locations. Seed 8123 had one faction
+// holding SEVEN of the map's eight Locations, unable to win, because a rival
+// with no ground and five units would not go away.
+//
+// The clock is a DEADLINE, not a death sentence: it starts when the last
+// Location goes, clears the moment one is retaken, and is announced both ways
+// so the board can see it running. `landlessGraceRounds: 0` switches the whole
+// rule off and restores the old behaviour exactly.
+function sweepLandlessClocks(state) {
+  const grace = CONFIG.victory?.landlessGraceRounds ?? 0;
+  for (const pid of state.turnOrder) {
+    const p = state.players[pid];
+    if (!p || p.eliminated) continue;
+    const holdsGround = Object.values(state.locations).some((l) => l.controller === pid);
+    if (holdsGround) {
+      if (p.landlessSince != null) {
+        p.landlessSince = null;
+        emit(state, "landless_clock_cleared", { player: pid });
+      }
+      continue;
+    }
+    if (!grace) continue;                       // rule off — clock never runs
+    if (p.landlessSince == null) {
+      p.landlessSince = state.round;
+      emit(state, "landless_clock_started", { player: pid, deadline: state.round + grace });
+      continue;
+    }
+    if (state.round - p.landlessSince < grace) continue;
+    // Out of time. The units go first, so the ordinary elimination sweep below
+    // retires the faction on the rule it already had rather than on a second,
+    // parallel one — there is one definition of "out of the game" and this
+    // rule feeds it rather than competing with it.
+    emit(state, "faction_collapsed", { player: pid, landlessSince: p.landlessSince });
+    for (const u of Object.values(state.units)) {
+      if (u.owner === pid) destroyUnit(state, u.uid, null, { cause: "landless-collapse" });
+    }
+  }
+}
+
 function sweepEliminations(state) {
+  sweepLandlessClocks(state);
   for (const pid of state.turnOrder) {
     const p = state.players[pid];
     if (!p || p.eliminated) continue;
@@ -368,6 +422,21 @@ function sweepEliminations(state) {
       Object.values(state.locations).some((l) => l.controller === pid) ||
       Object.values(state.units).some((u) => u.owner === pid);
     if (!holdsAnything) {
+      // §B-blood — THE KILL LEAVES A MARK ON THE KILLERS. Every faction at
+      // war with the dead one at the moment it dies is complicit in the
+      // elimination, and carries a permanent `bloodMarks` for it — read by
+      // `menaceOf` as a floor Menace can never decay below. Stamped HERE,
+      // before `releaseFromDiplomacy` wipes the war list, because afterwards
+      // nobody was ever at war with the corpse. A faction that starved on its
+      // own with no wars running marks nobody.
+      if (state.diplomacy?.wars?.length) {
+        for (const w of state.diplomacy.wars) {
+          const other = w.a === pid ? w.b : w.b === pid ? w.a : null;
+          if (!other || !state.players[other] || state.players[other].eliminated) continue;
+          state.players[other].bloodMarks = (state.players[other].bloodMarks || 0) + 1;
+          emit(state, "blood_marked", { player: other, victim: pid, marks: state.players[other].bloodMarks });
+        }
+      }
       p.eliminated = true;
       emit(state, "faction_eliminated", { player: pid });
       // A DEAD FACTION LEAVES THE DIPLOMACY GRAPH. Without this it keeps its
