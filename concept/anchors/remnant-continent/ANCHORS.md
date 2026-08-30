@@ -203,6 +203,12 @@ Use for: pre-collapse manufacture at large scale, and §3's rule that advanced t
 Do not use for: any faction's fabrication logic — it is deliberately outside all four, so it will erase Versari faceting and Laker casting alike if allowed to lead; also not for weathering, since the only aging here is the rust bleed at the band joints
 Added: 2026-08-11
 
+## oldworld-lockpick-01.png
+URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/oldworld-lockpick-01.png
+Use for: pre-collapse precision at hand scale, the small-object counterpart to `oldworld-weather-machine-01.jpg` — a seamless machined cylinder, a counterbore socket at one end, a single milled slot, and plain grip bands with no maker's mark or fastener anywhere. Factionless per the author; nothing about it should be read as belonging to any of the four
+Do not use for: large-scale or architectural work, and not for anything that needs visible wear beyond the light scoring already on the surface — it reads closer to maintained than salvaged
+Added: 2026-08-30
+
 ## goldgrass-quilted-cuirass-03.jpg
 URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/goldgrass-quilted-cuirass-03.jpg
 Use for: the core Goldgrass statement in §4 — thickness built in layers of quilted cloth rather than plate, soft bulky outline, no hard edge anywhere; the concealed-plate rule read exactly right, a salvaged panel sandwiched inside the quilting and betrayed only by its stitched outline and two rows of rivet heads; madder-and-gold woven geometric banding at collar, armscye and hem; the warm ochre-to-cream palette that makes Goldgrass the only faction with color; front and side pairing
@@ -239,6 +245,12 @@ Use for: §10's lift emitter — sealed truncated cone, flat dull-black featurel
 Do not use for: **TEXT** — a full callout layer with a title block, the heaviest lettering in the set. Also not for the painted-sheet rendering style, since the annotation flattens it
 Added: 2026-08-11
 
+## versari-emitter-glove-02.png
+URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/versari-emitter-glove-02.png
+Use for: cut-and-bolted logic on a small powered device — flat faceted plates bolted in regular rows onto the back of a worn leather work glove, a machined mechanism block, and an armored hose and braided cable tethering it to an off-body power source. Wrist strap-and-buckle mounting matches the rest of the Versari kit
+Do not use for: settled canon on powered wearables — §5 Rule 5 states soldiers are entirely unpowered and power lives on vehicles or fixed installations, so this glove sits right at that boundary. Treat it as provisional until the art direction doc confirms whether a tethered hand tool is meant to be an exception. Numbered 02 — an 01 exists on the author's side but is not yet in this registry
+Added: 2026-08-30
+
 ## versari-sword-01.jpg
 URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/versari-sword-01.jpg
 Use for: §10's sword — blade cut from flat plate at constant thickness, hard-edged bevels, machined channel with square shoulders, cut-angle tip, bolted hardwood scales on an exposed flat tang, and the single unused bolt hole from the plate's previous life. The clearest statement of cut-and-bolted in the set
@@ -250,6 +262,24 @@ URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remna
 Use for: crew-served weapon staging — two figures working one machine at consistent scale; armored conduit and cable runs as a visual element; the wheeled plate carriage; ammunition crates as set dressing
 Do not use for: the §7 medieval trap — the bow-limb form is the one object here that risks reading as a siege engine, and it should not be anchored to anything that could tip that way; also not for §5.1's one-subject rule
 Added: 2026-08-11
+
+## dambaran-helm-02.png
+URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/dambaran-helm-02.png
+Use for: the source of the lineage detail §10 calls out on the Versari helmet — this is the Dambaran original the single right-side hinged cheek plate was inherited from. Full horned brow flanges, mottled hammered surface rather than laminated flat plate, hinged cheek, horizontal vision slot, leather chin strap
+Do not use for: interchangeably with `versari-helmet-01.jpg` or `-02.jpg` — the silhouettes read close enough at a glance that a prompt or a viewer could mix them up, so name the faction explicitly whenever this one is in play. Numbered 02 — an 01 exists on the author's side but is not yet in this registry
+Added: 2026-08-30
+
+## dambaran-armor-pair-01.png
+URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/dambaran-armor-pair-01.png
+Use for: Dambaran metalwork on the body — a rounded dome pauldron and a chamfered-block vambrace, both in the same mottled hammered finish as `dambaran-helm-02.png`, strap-and-buckle mounting throughout. Establishes that Dambaran fabrication tolerates compound curves the way Versari's cut-and-bolted logic does not, despite the two sharing the cheek-hinge lineage detail
+Do not use for: a single generation — two objects share this sheet against §5.1's one-per-generation rule, so treat the pauldron and vambrace as separate subjects when prompting from it
+Added: 2026-08-30
+
+## dambaran-carbon-shield-03.png
+URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/dambaran-carbon-shield-03.png
+Use for: a salvaged rusted plate, riveted at its edges, mounted on a black herringbone-woven backing with the fabric fraying and torn at the edges — reuse of what the name implies is an old-world composite material as a shield backing
+Do not use for: settled canon on Rule 2 — salvage-vs-quarry says the old world is milled into new stock, not nailed on as a found object, and this piece reads as the found-object version. Confirm with the author whether the Dambarans get an exception to that rule before treating this as settled rather than provisional. Numbered 03 — 01 and 02 exist on the author's side but are not yet in this registry
+Added: 2026-08-30
 
 ## versari-helmet-01.jpg
 URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/versari-helmet-01.jpg
