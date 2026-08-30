@@ -42,6 +42,12 @@ is bad at is what stops it being attached to a shot it will drag off-target.
 > faction one so they cannot be mistaken for canon later. Attach them for the
 > one mechanical idea they get right and say what that is; never let one stand
 > alone on an approved shot.
+>
+> **Anchors marked VERSION N, NOT FINAL** are a legitimate design pass, usable
+> as an anchor now, but the author has flagged it as provisional rather than
+> settled. Unlike NOT CANON, these keep their faction prefix — they may well
+> become canon once refined. Treat anything they establish as subject to
+> change until a later-numbered version confirms or supersedes it.
 
 Entry format:
 
@@ -179,12 +185,6 @@ Use for: accretion at object scale — a timber frame with steel corner straps a
 Do not use for: symmetry or matched sets of any kind; also not for Versari or Laker construction, which it will scruff up on contact
 Added: 2026-08-11
 
-## plainer-building-01.jpg
-URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/plainer-building-01.jpg
-Use for: Plainer construction at building scale — board siding against corrugated sheet on the same structure, a canvas awning on lashed timber poles as a bolted-on later addition, plain strap hinges and shuttered openings. Maintained and weathertight, which is the §4 distinction that keeps it out of shantytown territory
-Do not use for: the accretion depth §4 asks for — this is a single tidy structure without the three-generations-of-additions read, so it understates the logic and should be paired with `plainer-cart-01.jpg` rather than anchoring a settlement alone
-Added: 2026-08-11
-
 ## wip-weather-machine-active-04.jpg
 URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/wip-weather-machine-active-04.jpg
 Use for: **NOT CANON, TEMPORARY** — the same object as `oldworld-weather-machine-01.jpg`, stood on end, installed and running. Kept as a working reference while the design changes; the number follows the author's own iteration, so a later pass lands as `-05`. What holds up: the seamless cone against a hand-built cradle of copper bus bars and ceramic insulators, the scale figures at the base, and the storm answering overhead
@@ -279,6 +279,74 @@ Added: 2026-08-11
 URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/versari-sunhauler-01.jpg
 Use for: the Sunhauler — the heavy four-wheel plate-body counterpart to the Sunrunner; exposed battery bank with copper bus bars and ceramic insulators at vehicle scale; telescoping canopy stanchions; heavy spoked wheels
 Do not use for: the running gear, which is closer to a horse-drawn wagon than the Sunrunner's engineered frame and will pull output pre-industrial; figure scale
+Added: 2026-08-11
+
+---
+
+## Architecture
+
+Korad building work is its own vocabulary, distinct from both Versari object
+fabrication and Dambaran terrain: cast rubble-aggregate block in grey-buff,
+flat roofs behind parapets, plain string courses at floor lines, small
+repeated openings, and rough timber with hand-rolled steel for lintels and
+canopies. §3's Rule 1 does the heavy lifting — identical windows and uniform
+courses are what make it read as a workshop that made a hundred of them
+rather than as improvisation. Salvaged pre-collapse steel appears only as
+Rule 2 wants it, re-milled into standard stock rather than nailed on as
+found objects.
+
+## dambaran-entryway-01.png
+URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/dambaran-entryway-01.png
+Use for: a Dambaran wall opening, distinct from Korad per the user — coursed pale stone in irregular blocks rather than cast rubble-aggregate, a single massive lintel, iron ring-bolts along the top course, and door and jamb protection built as riveted flat steel straps rather than cast or cut plate. First Dambaran anchor in the registry; note it predates PABC's timeline, where §11 has the Dambarans as a people distinct from the Versari, so treat this as their own architectural language rather than early Versari work
+Do not use for: roof, massing or overall building form, which this crop does not show; also not for Korad work, which the user has drawn as a separate vocabulary from this
+Added: 2026-08-28
+
+## dambaran-hall-01.png
+URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/dambaran-hall-01.png
+Use for: **VERSION 1, NOT FINAL** — per the user, this is a first pass, expect it to be superseded by `dambaran-hall-02.png` or later. Until then it is the only Dambaran anchor at hall scale: a colonnaded open interior in the same pale coursed stone as the entryway and tower, plain square piers with the vocabulary's iron ring-bolts repeated down each one, a stepped sunken floor area, and a single framed door of pierced ironwork facing into the room. Boulder base at the near corner ties it to the same construction as the tower
+Do not use for: settled Dambaran canon — treat anything decided here as provisional until a later version confirms or changes it. Also not for exterior massing, since this is an interior cutaway with the near long wall removed
+Added: 2026-08-28
+
+## dambaran-tower-01.png
+URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/dambaran-tower-01.png
+Use for: the Dambaran vertical type, matching `dambaran-entryway-01.png`'s vocabulary at building scale — coursed pale stone giving way to massive uncoursed boulder at the base, iron ring-bolts along the roof parapet, a barred iron gate with riveted steel jamb straps identical to the entryway's, small punched window openings, and a corbelled wooden lookout box jettied off the upper wall. The base-to-ashlar transition is the clearest single cue that separates this from Korad's uniform cast block
+Do not use for: a freestanding design on its own — treat it as the taller companion to the entryway rather than a separate structure. Compare against `korad-tower-01.jpg` when the two need to be told apart in a prompt
+Added: 2026-08-28
+
+## korad-terrace-row-01.jpg
+URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/korad-terrace-row-01.jpg
+Use for: repetition as the civilization signal — a row of identical two-storey units stepping down a slope, every window and door the same size and spacing, one parapet profile carried across all of them, external downpipes to a shared line. The cleanest statement of §3 Rule 1 in the set, and free of lettering
+Do not use for: monumental or civic scale, since this is ordinary housing; also not for interiors
+Added: 2026-08-11
+
+## korad-courtyard-block-01.jpg
+URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/korad-courtyard-block-01.jpg
+Use for: the courtyard plan — a solid defensible block turned inward around an open court, one heavy timber cart gate as the only wide opening, roofs pitched inward, clerestory strips under the eaves, small barred windows outside. Cutaway from above so the plan reads. Also free of lettering
+Do not use for: street frontage or facade design, since the point of this building is that it presents a blank wall outward
+Added: 2026-08-11
+
+## korad-column-block-01.jpg
+URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/korad-column-block-01.jpg
+Use for: the one piece showing salvaged pre-collapse structure in a building — three storeys of cast block carried on a colonnade of re-milled steel columns with seamless joints and no visible fastener, sitting on plain block pads. §3 Rules 2 and 3 at architectural scale, and a taller massing than the rest
+Do not use for: **TEXT** — a full callout layer, much of it corrupted into non-words ("neve-buff tones", "No nein of, handi screos"). Anchor the massing and the colonnade, never the sheet
+Added: 2026-08-11
+
+## korad-tower-01.jpg
+URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/korad-tower-01.jpg
+Use for: the vertical type — a battered square tower in banded courses with a string course per floor, a rooftop parapet, an access hatch, and a hand-rolled steel mast. Useful as a landmark silhouette against open country
+Do not use for: **TEXT** — callouts plus a title block, and the title has invented a garbled proper noun for the building type. That name is not canon and should not be adopted from this image
+Added: 2026-08-11
+
+## korad-water-catchment-01.jpg
+URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/korad-water-catchment-01.jpg
+Use for: infrastructure rather than a building — stepped hillside catchment aprons in the same block, channels and stairs between terraces, small valve houses, and a covered cistern structure at the foot. Shows the civil-engineering side of the vocabulary, which nothing else in the registry covers
+Do not use for: **TEXT** — a title and a garbled descriptive paragraph across the top, plus lettered ELEVATION and SECTION insets. Also a grey panel ground rather than §15's clean sheet
+Added: 2026-08-11
+
+## plainer-building-01.jpg
+URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/plainer-building-01.jpg
+Use for: Plainer construction at building scale — board siding against corrugated sheet on the same structure, a canvas awning on lashed timber poles as a bolted-on later addition, plain strap hinges and shuttered openings. Maintained and weathertight, which is the §4 distinction that keeps it out of shantytown territory
+Do not use for: the accretion depth §4 asks for — this is a single tidy structure without the three-generations-of-additions read, so it understates the logic and should be paired with `plainer-cart-01.jpg` rather than anchoring a settlement alone
 Added: 2026-08-11
 
 ---
