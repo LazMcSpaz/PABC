@@ -97,6 +97,12 @@ Use for: proportion and pose only — a bare neutral base mesh, arms spread, no 
 Do not use for: **FRAMING** — the ground is dark charcoal rather than §15's pale flat grey, and it will darken anything it leads; pair with a clean anchor. Also carries no faction whatsoever, no clothing, no material, and the wide arms-out pose does not match how any figure in this registry is actually posed, so do not expect it to fix a stance, only a build
 Added: 2026-08-30
 
+## dambaran-son-01.png
+URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/dambaran-son-01.png
+Use for: a young Dambaran male, per the author — build and face only, arms spread for proportion the way `base-figure-01.png` works for a generic body. Bald/buzzed hair, lean rather than heavy build, unmarked skin
+Do not use for: **FRAMING** — flat cel-shaded vector rendering, a different illustration style from every painted sheet in this registry; it will pull line and shading toward that style if it leads a generation. Also not for garment reference — the dark trunks are a modern real-world underwear silhouette with no in-world manufacture behind them, so take face and proportion from this and nothing from the waist covering. Not clothed or armored in any Dambaran material, so it establishes no fabrication logic on its own
+Added: 2026-08-30
+
 ## plainer-figure-01.jpg
 URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/plainer-figure-01.jpg
 Use for: §4's accretion logic proven on a body — a sound leather coat with three generations of mismatched panels patched and riveted onto it, salvaged plate bolted flat over a shirt with no attempt to fit it, one lone pauldron with no partner, chain-and-shackle hardware doing a belt's job. Competent and maintained, not ragged: this is the anchor that keeps the Plainers out of shantytown territory
