@@ -91,6 +91,12 @@ Added: 2026-08-11
 
 ## Figures
 
+## base-figure-01.png
+URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/base-figure-01.png
+Use for: proportion and pose only — a bare neutral base mesh, arms spread, no faction, no clothing, no armor. Attach this first on any figure generation the way `landship-base-01.jpg` anchors vessel hulls, then spend the prompt on what dresses it, not on the body underneath
+Do not use for: **FRAMING** — the ground is dark charcoal rather than §15's pale flat grey, and it will darken anything it leads; pair with a clean anchor. Also carries no faction whatsoever, no clothing, no material, and the wide arms-out pose does not match how any figure in this registry is actually posed, so do not expect it to fix a stance, only a build
+Added: 2026-08-30
+
 ## plainer-figure-01.jpg
 URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/plainer-figure-01.jpg
 Use for: §4's accretion logic proven on a body — a sound leather coat with three generations of mismatched panels patched and riveted onto it, salvaged plate bolted flat over a shirt with no attempt to fit it, one lone pauldron with no partner, chain-and-shackle hardware doing a belt's job. Competent and maintained, not ragged: this is the anchor that keeps the Plainers out of shantytown territory
@@ -279,6 +285,12 @@ Added: 2026-08-30
 URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/dambaran-carbon-shield-03.png
 Use for: a salvaged rusted plate, riveted at its edges, mounted on a black herringbone-woven backing with the fabric fraying and torn at the edges — reuse of what the name implies is an old-world composite material as a shield backing
 Do not use for: settled canon on Rule 2 — salvage-vs-quarry says the old world is milled into new stock, not nailed on as a found object, and this piece reads as the found-object version. Confirm with the author whether the Dambarans get an exception to that rule before treating this as settled rather than provisional. Numbered 03 — 01 and 02 exist on the author's side but are not yet in this registry
+Added: 2026-08-30
+
+## dambaran-machete-01.png
+URL: https://raw.githubusercontent.com/LazMcSpaz/PABC/main/concept/anchors/remnant-continent/dambaran-machete-01.png
+Use for: a Dambaran edged weapon — thick flat blade with a squared cleaver-like tip, a fuller cut down each face, the same mottled hammered finish as `dambaran-helm-02.png` and `dambaran-armor-pair-01.png`, a cord-wrapped grip, and an integrated squared pommel in one piece with the blade. A small numeral marking near the ricasso is the good version of §13 — numerals only, no words
+Do not use for: a bladesmithing tradition distinct from Versari's — compare against `versari-sword-01.jpg` to keep the two apart: that one is cut from flat plate with bolted hardwood scales on an exposed tang, this one reads as a single forged and finished piece with no visible fastener at the grip
 Added: 2026-08-30
 
 ## versari-helmet-01.jpg
