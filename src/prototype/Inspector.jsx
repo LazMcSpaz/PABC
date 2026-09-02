@@ -112,6 +112,8 @@ function locationModel(state, hex, actions) {
               sections={control.sections}
               loyalty={control.loyalty}
               danger={control.loyaltyDanger}
+              pressureBy={control.pressureBy}
+              pending={control.pending}
               size={96}
             />
             <div style={{ display: "flex", flexDirection: "column", gap: 7, flex: 1 }}>
@@ -256,43 +258,6 @@ function locationModel(state, hex, actions) {
   };
 }
 
-function encounterModel(state, hex, actions) {
-  const { isYourTurn, selectedUnitId, onSelectUnit } = actions;
-  const unit = hex.unitId ? state.units[hex.unitId] : null;
-  const cooldownUntil = state.engineState?.world?.encounterHexCooldowns?.[hex.id] || 0;
-  const onCooldown = cooldownUntil > state.engineState.round;
-  const tabs = [
-    {
-      id: "encounter",
-      label: "Encounter",
-      render: () => (
-        <div className="pc-prose" style={PROSE}>
-          {onCooldown ? (
-            <>
-              This encounter site is in cooldown — already drawn this run. It
-              will refresh and deliver a new card starting on round{" "}
-              <strong style={{ color: theme.accent }}>{cooldownUntil}</strong>.
-            </>
-          ) : (
-            <>
-              A unit that ends its Move here draws the top card of the
-              encounter deck and resolves it — a challenge, a buff, or a
-              setback. The site then enters a short cooldown before another
-              card can be drawn.
-            </>
-          )}
-        </div>
-      ),
-    },
-  ];
-  // Unit details live in the floating UnitPanel.
-  return {
-    title: "Encounter",
-    subtitle: onCooldown ? `Cooldown — refreshes round ${cooldownUntil}` : "Unresolved",
-    tabs,
-  };
-}
-
 function terrainModel() {
   return {
     title: "Wasteland",
@@ -336,8 +301,9 @@ export default function Inspector({
   const actions = { isYourTurn, selectedUnitId, onSelectUnit, onContest, onActivate, onRecruit };
 
   let model;
+  // No encounter branch: the adapter reports an encounter hex as terrain, so
+  // opening one describes open ground like any other tile.
   if (hex.type === "location") model = locationModel(state, hex, actions);
-  else if (hex.type === "encounter") model = encounterModel(state, hex, actions);
   else model = terrainModel();
 
   const { title, subtitle, tabs } = model;

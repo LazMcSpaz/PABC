@@ -4,6 +4,7 @@
 // board content. This module maps hexes → content-space coordinates and eases
 // the content translate so a target hex sits at the viewport centre.
 import { HEX_W, HEX_H } from "../hexDims.js";
+import { buildHexGeometry as buildHoloGeometry } from "../hexProjection.js";
 
 // Layout constants mirrored from the render tree:
 //   Prototype wraps the board in a `padding: 30` relative div,
@@ -17,7 +18,23 @@ const ROW_STEP = HEX_H - ROW_OVERLAP;
 // Map every hexId → its centre point in the un-transformed board content
 // space (the same space BoardViewport translates/scales). `rows` is the
 // adapter's `state.rows` ([[hexId, …], …], top-to-bottom, left-to-right).
-export function buildHexGeometry(rows) {
+//
+// The two boards project hexes completely differently — the flat one tiles
+// pointy-top rows, the holographic one transposes engine rows into flat-top
+// screen columns — so the camera has to be told which one it is flying over.
+// Getting this wrong doesn't break anything visibly; it just pans the replay
+// camera to the wrong hex, which is why it's a parameter and not a guess.
+export function buildHexGeometry(rows, { holo = false } = {}) {
+  if (holo) {
+    // Shift by the same `padding: 30` wrapper the flat board is offset by, so
+    // both geometries speak the same content-space coordinates.
+    const g = buildHoloGeometry(rows);
+    for (const id in g.centers) {
+      g.centers[id].x += WRAP_PAD;
+      g.centers[id].y += WRAP_PAD;
+    }
+    return { ...g, width: g.width + WRAP_PAD * 2, height: g.height + WRAP_PAD * 2 };
+  }
   const centers = {};
   const maxLen = rows.reduce((m, r) => Math.max(m, r.length), 0);
   const boardWidth = maxLen * HEX_W;

@@ -5,41 +5,103 @@
 // the occupied/enemy hex but stop there (a chokepoint blockade). Enemy-
 // controlled Location hexes block the same way.
 import { CONFIG } from "./config.js";
-import { movementField, movementRoute } from "./board.js";
-import { CHIPS, ABILITIES } from "./content.js";
-import { getStanding } from "./standing.js";
-import { arePacted, vassalLord } from "./diplomacy.js";
+import { bfsDistances, movementField, movementRoute } from "./board.js";
+import { CHIPS, ABILITIES, chipBlocksRail } from "./content.js";
+// `passesFreely` and `supplyCutter` are pure diplomacy questions — who may
+// pass whom, and what severs a line — so they live in diplomacy.js and are
+// re-exported here, where every mover already looks for them.
+export { passesFreely, supplyCutter, hasRailAccess } from "./diplomacy.js";
+import { passesFreely, hasRailAccess } from "./diplomacy.js";
+import { isHexExplored, isHexVisible, isUnitVisibleTo, canSeeUnitAt } from "./visibility.js";
+import { hasTechNode } from "./tech.js";
 
 const BIG_BUDGET = 999; // budget-agnostic routing for display
 
-// May `a`'s units move freely THROUGH `b`'s units / Locations? True for the
-// same faction, an alliance (pact or vassalage either way), or MUTUAL Friendly+
-// Standing. Neutral/wary/hostile all block, so a single unit can hold a pass.
-export function passesFreely(state, a, b) {
-  if (!a || !b || a === b) return true;
-  if (arePacted(state, a, b)) return true;
-  if (vassalLord(state, a) === b || vassalLord(state, b) === a) return true;
-  const need = CONFIG.diplomacy.tiers.friendly;
-  return getStanding(state, a, b) >= need && getStanding(state, b, a) >= need;
-}
 
 // The set of hexes that HALT `ownerId`'s movement on entry (§16.2 blockade):
 // any hex holding a non-passing foreign unit, plus any enemy-controlled
 // Location hex (you can't freely march through a hostile city).
-export function movementBlockers(state, ownerId, { ignoreUnits } = {}) {
+// One scan, two answers, so they can never drift apart:
+//
+//   blocked   every hex that halts `ownerId` on entry (ground truth).
+//   unseen    the subset whose blocker `ownerId` cannot currently perceive.
+//
+// The second is what lets a mover keep its movement after walking into an
+// ambush (board.js `surprise`). Note it is a strict subset: a hex holding both
+// a visible and a hidden blocker is NOT a surprise — you could see a reason to
+// stop there, so stopping costs you the advance as usual.
+function blockerScan(state, ownerId, { ignoreUnits, mover } = {}) {
   const blocked = new Set();
+  const hidden = new Set();
+  const visible = new Set();
+  // Collected as two sets and differenced at the end rather than resolved as we
+  // go: a hex can carry several blockers in any order, and one visible blocker
+  // has to outrank any number of hidden ones however late it turns up.
+  const note = (hex, seen) => {
+    blocked.add(hex);
+    (seen ? visible : hidden).add(hex);
+  };
+
   // Night March (chip `passThroughUnits`): foreign UNITS no longer halt
   // the mover; enemy Locations still do (a city is not a picket line).
   if (!ignoreUnits) for (const u of Object.values(state.units)) {
     if (u.owner === ownerId) continue;
-    if (!passesFreely(state, ownerId, u.owner)) blocked.add(u.node);
+    if (!passesFreely(state, ownerId, u.owner)) {
+      // Concealment-aware: a stealthed unit on a hex you CAN see is still a
+      // surprise, which is exactly what isUnitVisibleTo already answers.
+      note(u.node, isUnitVisibleTo(state, ownerId, u));
+    }
   }
   for (const loc of Object.values(state.locations)) {
     if (loc.controller && loc.controller !== ownerId && !passesFreely(state, ownerId, loc.controller)) {
-      blocked.add(loc.hexId);
+      // A city is remembered once explored — you do not forget where it is or
+      // roughly whose it is — so an explored Location never ambushes anyone.
+      note(loc.hexId, isHexExplored(state, ownerId, loc.hexId));
     }
   }
-  return blocked;
+  // Rail doc §3 — a COMPLETED enemy blockade halts a mover the same way a unit
+  // does. This is the point of the structure: it holds a road without pinning a
+  // unit there forever. A construction site is not a blockade yet and blocks
+  // nothing; the unit standing on it does that, above, as an ordinary unit.
+  //
+  // Night March (`ignoreUnits`) is about picket lines, not fortifications, so a
+  // blockade still stops it — the same reasoning that keeps enemy Locations
+  // blocking above.
+  for (const b of Object.values(state.world?.blockades || {})) {
+    // `paid === false` is a dormant position — standing, but unmanned, so the
+    // road is open through it until its owner clears the arrears.
+    if (!b.done || b.paid === false || b.owner === ownerId) continue;
+    if (!passesFreely(state, ownerId, b.owner)) {
+      // Rail doc Part 1 — a blockade is a GARRISON, not a wall. It only halts
+      // a mover its owner can actually SEE arriving, asked at the blockade's
+      // own hex (the position being entered, not wherever the mover is
+      // standing while the field is computed). A stealthed unit therefore
+      // walks straight through unless the owner has Detection covering that
+      // hex — Signal Mast is what buys it.
+      //
+      // With no `mover` this stays ground truth: `movementBlockers(state, fid)`
+      // is a "what would stop this faction" query with no particular unit in
+      // hand, and answering it with a guess would be worse than answering it
+      // with the map.
+      if (mover && !canSeeUnitAt(state, b.owner, mover, b.hex)) continue;
+      // Unlike a city, a blockade can go up (or come down) behind your back, so
+      // it takes LIVE sight rather than memory to count as seen.
+      note(b.hex, isHexVisible(state, ownerId, b.hex));
+    }
+  }
+  for (const hex of visible) hidden.delete(hex);
+  return { blocked, unseen: hidden };
+}
+
+export function movementBlockers(state, ownerId, opts) {
+  return blockerScan(state, ownerId, opts).blocked;
+}
+
+// The blockers `ownerId` cannot see. Halting on one of these keeps the mover's
+// remaining movement (board.js) — an ambush should cost you the advance, not
+// the whole turn.
+export function unseenBlockers(state, ownerId, opts) {
+  return blockerScan(state, ownerId, opts).unseen;
 }
 
 // Terrain-, road- and blockade-aware reachability for `unit` this turn →
@@ -77,14 +139,179 @@ export function tollTaxedHexes(state, ownerId) {
   return taxed;
 }
 
+// Economy brief §10.2 — ZoC COSTS MOVEMENT.
+//
+// The single most standard ZoC verb in the genre, and it was missing entirely:
+// `blockerScan` never consults `state.world.zoc` at all — it blocks on ground
+// truth (enemy units, enemy Location hexes, completed blockades). So the field
+// that defines "territory" for every DIPLOMATIC purpose — trespass, the
+// withdraw ultimatum, `unitsInTerritory` — had no effect whatever on walking
+// through it.
+//
+// This is the cheapest possible way to make the field something a player plays
+// AGAINST rather than merely receives, and it makes the dashed ring the board
+// already draws mean something at the moment of the move. It stays well clear
+// of contest maths, which `mechanical-spec` §18.3 deferred deliberately and
+// correctly: a border combat bonus makes the leader's border stronger with no
+// counterplay.
+//
+// Waived by `log-a2` Forward Supply, which already waives the supply wall in
+// `reinforcementRoute` — one node, one meaning: your columns move through
+// foreign ground as if it were open.
+//
+// `passesFreely` is the same predicate open borders and trespass read, so a
+// pact, a vassalage or genuinely warm relations all waive the toll. You are
+// not picking your way through a rival's country when you are welcome in it.
+export function zocTaxedHexes(state, ownerId) {
+  const taxed = new Map();
+  const cost = CONFIG.influence?.zocMoveCost || 0;
+  if (!cost) return taxed;                                  // 0 switches it off
+  if (hasTechNode(state, ownerId, "log-a2")) return taxed;   // Forward Supply
+  const zoc = state.world?.zoc || {};
+  // YOUR OWN DOORSTEP IS NEVER TAXED. A rival's zone can sit on top of ground
+  // you hold — that is the whole point of influence pressure — and charging
+  // you to move across your own Locations turns a border friction into an
+  // elimination ratchet. Measured: a faction cut down to one city recovered
+  // ground in 4 of 15 games with `zocMoveCost` off and 0 of 15 with it on,
+  // because the side with the furthest to march is always the side that is
+  // losing, and it paid for every hex of the march.
+  //
+  // This is the same exemption §8's attack price already makes for defence,
+  // and for the same reason: nobody reads clearing your own doorstep as an
+  // incursion.
+  const free = new Set();
+  if (CONFIG.influence?.zocFreeOnOwnGround) {
+    for (const loc of Object.values(state.locations || {})) {
+      if (loc.controller !== ownerId) continue;
+      free.add(loc.hexId);
+      for (const n of state.board?.adjacency?.[loc.hexId] || []) free.add(n);
+    }
+  }
+  for (const hex in zoc) {
+    const owner = zoc[hex];
+    if (!owner || owner === ownerId) continue;
+    if (free.has(hex)) continue;
+    if (passesFreely(state, ownerId, owner)) continue;
+    taxed.set(hex, cost);
+  }
+  return taxed;
+}
+
+// The two entry surcharges a mover faces, merged. A hex that is both a rival's
+// ZoC and inside a Toll Gate's ring costs BOTH — they are different things
+// being charged for (a border you are slipping across, and a gate you are
+// passing) and a max() would silently make one of them free.
+function entrySurcharges(state, ownerId) {
+  const toll = tollTaxedHexes(state, ownerId);
+  const zoc = zocTaxedHexes(state, ownerId);
+  if (!zoc.size) return toll;
+  const merged = new Map(toll);
+  for (const [hex, c] of zoc) merged.set(hex, (merged.get(hex) || 0) + c);
+  return merged;
+}
+
+// Rail hops this unit may take (docs/rail-road-blockade-design.md §2.1/2.3),
+// as a Map hexId -> [reachable hexIds]. Three gates, all from the doc:
+//   * the unit must not carry a rail-incompatible chip (2-slot chips — a
+//     Landship or a Bombard does not go on a train);
+//   * the mover must control BOTH endpoint settlements, since rail is not
+//     built and so has no owner other than whoever holds its stations;
+//   * an enemy blockade anywhere along the line cuts it for that faction.
+// Returns null when the unit can use no rail at all, so the search skips the
+// whole mechanism rather than walking an empty map.
+export function unitRailEdges(state, unit) {
+  const links = state.board.rails;
+  if (!links || !links.length) return null;
+  const barred = unit.chips.some(
+    (c) => !state.chips[c]?.disabled && chipBlocksRail(state.chips[c]?.chipId),
+  );
+  if (barred) return null;
+
+  // Rail doc §2.3 — you may work a station you hold, or one whose holder has
+  // granted you running rights (a pact grants them implicitly). Unheld track
+  // is nobody's to close. This is what turns rail from a purely territorial
+  // asset into something diplomacy can open.
+  const controls = (hexId) => {
+    const holder = state.locations[hexId]?.controller;
+    if (!holder) return true;
+    return holder === unit.owner || hasRailAccess(state, unit.owner, holder);
+  };
+  // A hex is cut for this mover if a unit it cannot pass freely stands there.
+  const hostile = new Set();
+  for (const u of Object.values(state.units)) {
+    if (u.owner === unit.owner) continue;
+    if (!passesFreely(state, unit.owner, u.owner)) hostile.add(u.node);
+  }
+
+  const edges = new Map();
+  for (const link of links) {
+    if (!controls(link.a) || !controls(link.b)) continue;
+    if (link.path.some((h) => hostile.has(h))) continue; // line is cut
+    if (!edges.has(link.a)) edges.set(link.a, []);
+    if (!edges.has(link.b)) edges.set(link.b, []);
+    edges.get(link.a).push(link.b);
+    edges.get(link.b).push(link.a);
+  }
+  return edges.size ? edges : null;
+}
+
+// Once an unseen blocker has checked a unit's advance it keeps its movement,
+// but only to fall back or sidestep — not to press on past the thing that
+// stopped it. "Press on" is measured as distance from where its turn began, so
+// the rule needs no notion of facing: a hex further from the start than the
+// unit currently stands is closed to it for the rest of the turn.
+//
+// Without this the refund would gut blocking entirely — a mover could walk into
+// an ambush, stop, and carry straight on for the price of one movement point,
+// which would make advancing blind strictly better than scouting.
+function restrictToFallback(state, unit, field) {
+  const dist = bfsDistances(state.board.adjacency, unit.turnStartNode);
+  const here = dist[unit.node] ?? 0;
+  const out = {};
+  for (const hex in field) if ((dist[hex] ?? Infinity) <= here) out[hex] = field[hex];
+  return out;
+}
+
+// --- stacking ---------------------------------------------------------
+// How many units stand on `hex`, every owner counted. Enemies only share a hex
+// in passing (arriving on one starts a contest), so this is normally one side's
+// stack, but the cap is on the tile rather than on a player: it exists because
+// the tile runs out of room to draw them, and the board does not care who owns
+// what it cannot show.
+export function unitsOnHex(state, hex, exclude = null) {
+  let n = 0;
+  for (const u of Object.values(state.units)) {
+    if (u.node === hex && u.uid !== exclude) n++;
+  }
+  return n;
+}
+
+// Is `hex` full? `exclude` lets a unit already standing there be discounted, so
+// a mover never blocks itself.
+export function hexIsFull(state, hex, exclude = null) {
+  return unitsOnHex(state, hex, exclude) >= CONFIG.hexUnitCap;
+}
+
 export function unitReach(state, unit) {
   if (!unit) return {};
   const budget = unit.moveRemaining ?? unit.movement ?? 0;
-  return movementField(state, unit.node, budget, {
-    blockedThrough: movementBlockers(state, unit.owner, { ignoreUnits: unitPassesThroughUnits(state, unit) }),
+  const opts = { ignoreUnits: unitPassesThroughUnits(state, unit), mover: unit };
+  const scan = blockerScan(state, unit.owner, opts);
+  const field = movementField(state, unit.node, budget, {
+    blockedThrough: scan.blocked,
+    surprise: scan.unseen,
     ignoreTerrain: unitIgnoresTerrain(state, unit),
-    extraCost: tollTaxedHexes(state, unit.owner),
+    extraCost: entrySurcharges(state, unit.owner),
+    railEdges: unitRailEdges(state, unit),
   });
+  // A full hex may still be walked THROUGH — the cap is about what can stand
+  // on a tile, not about the road across it — so this prunes destinations after
+  // the field is built rather than treating a full hex as impassable.
+  for (const hex in field) {
+    if (hexIsFull(state, hex, unit.uid)) delete field[hex];
+  }
+  if (!unit.checked || !unit.turnStartNode) return field;
+  return restrictToFallback(state, unit, field);
 }
 
 // The exact ROUTE `unit` takes to reach `dest` this turn (same rules as
@@ -93,9 +320,12 @@ export function unitMovePath(state, unit, dest) {
   if (!unit) return null;
   const budget = unit.moveRemaining ?? unit.movement ?? 0;
   return movementRoute(state, unit.node, budget, dest, {
-    blockedThrough: movementBlockers(state, unit.owner, { ignoreUnits: unitPassesThroughUnits(state, unit) }),
+    blockedThrough: movementBlockers(state, unit.owner, {
+      ignoreUnits: unitPassesThroughUnits(state, unit), mover: unit,
+    }),
     ignoreTerrain: unitIgnoresTerrain(state, unit),
-    extraCost: tollTaxedHexes(state, unit.owner),
+    extraCost: entrySurcharges(state, unit.owner),
+    railEdges: unitRailEdges(state, unit),
   });
 }
 

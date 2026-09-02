@@ -1,5 +1,5 @@
 /**
- * TitleScreen.jsx — Main menu / title screen for Ashland Conquest.
+ * TitleScreen.jsx — Main menu / title screen for The Remnant Continent.
  *
  * This is the first thing the player sees before the SetupScreen. It renders
  * the game title, a placeholder splash-art region, and a vertical navigation
@@ -221,8 +221,8 @@ export default function TitleScreen({
             gap:            isPhone ? 16 : 28,
             flex:           "0 0 auto",
             width:          isPhone ? "100%" : "auto",
-            // Caps the title at "Ashland" / "Conquest" wrapping to two
-            // lines instead of one very wide line — without this, the
+            // Caps the title at "The Remnant" / "Continent" wrapping to
+            // two lines instead of one very wide line — without this, the
             // one-line title's intrinsic width (~820px at this font
             // size) plus the menu column's 320px minWidth exceeds the
             // 1100px container at any viewport ≥1100px wide, and the
@@ -266,14 +266,14 @@ export default function TitleScreen({
               textShadow:    `0 0 18px ${C.holo}55, 0 0 38px ${C.holo}30`,
             }}
           >
-            Ashland{" "}
+            The Remnant{" "}
             <span
               style={{
                 color:      C.holo,
                 textShadow: `0 0 18px ${C.holoHi}88, 0 0 36px ${C.holo}66`,
               }}
             >
-              Conquest
+              Continent
             </span>
           </motion.div>
 
@@ -290,14 +290,14 @@ export default function TitleScreen({
               color:         `rgba(143,246,234,0.50)`,
             }}
           >
-            Lead one faction · twelve VP claim the wasteland
+            Lead one faction · ally, subdue or bury the rest
           </motion.div>
 
           {/* ──────────────────────────────────────────────────────────────
               SPLASH IMAGE PLACEHOLDER
               When art is ready:
                 1. Remove the inner placeholder <div> below.
-                2. Add: <img src={yourSplashUrl} alt="Ashland Conquest splash"
+                2. Add: <img src={yourSplashUrl} alt="Remnant Continent splash"
                               style={{ width: "100%", height: "100%",
                                        objectFit: "cover", borderRadius: 6 }} />
                 3. Optionally keep the CornerBrackets overlay.
@@ -486,7 +486,7 @@ export default function TitleScreen({
           pointerEvents: "none",
         }}
       >
-        ▸ Ashland Conquest · {version} · Holographic Build
+        ▸ The Remnant Continent · {version} · Holographic Build
       </motion.div>
     </div>
   );

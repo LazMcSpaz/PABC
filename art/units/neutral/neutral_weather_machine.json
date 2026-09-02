@@ -1,0 +1,26 @@
+{
+  "name": "neutral_weather_machine",
+  "frameWidth": 320,
+  "frameHeight": 256,
+  "frames": 10,
+  "fps": 3,
+  "loop": true,
+  "anchor": [
+    160,
+    176
+  ],
+  "rows": [
+    "s",
+    "se",
+    "e",
+    "ne",
+    "n",
+    "nw",
+    "w",
+    "sw"
+  ],
+  "sheetWidth": 3200,
+  "sheetHeight": 2048,
+  "footprintMetres": 14.4,
+  "pixelsPerMetre": 18.3
+}

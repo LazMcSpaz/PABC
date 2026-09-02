@@ -1,7 +1,7 @@
 # Hex Tile Asset Pipeline — Blender Instance Instructions
 
 Instructions for a Claude instance with Blender MCP access, producing pre-rendered
-isometric hex tile sprites for Ashland Conquest. Output is **baked 2D sprites**,
+isometric hex tile sprites for The Remnant Continent. Output is **baked 2D sprites**,
 not live 3D — this game's board (`src/prototype/HexBoard.jsx`) is plain 2D
 CSS/DOM with no WebGL. Poly counts below are for *your* iteration speed in
 Blender, not phone performance — there is no runtime GPU cost to any of this.

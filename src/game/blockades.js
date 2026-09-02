@@ -1,0 +1,456 @@
+// Blockade structures — docs/rail-road-blockade-design.md §3. A deliberate,
+// buildable alternative to "just stand on a hex": persistent, contestable, and
+// tied to a supply line rather than to the unit that raised it.
+//
+// This module owns the blockade STATE + LIFECYCLE (find / start / advance /
+// complete / destroy) and the road-supply question construction depends on.
+// The rest integrates at its natural sites, exactly as the Listening Post does
+// (§17.7, posts.js): the Build action in actions.js, blocking in movement.js,
+// Vision in visibility.js, destruction in contest.js, the tick in turn.js.
+//
+// Like posts.js this imports only config + events — no diplomacy, no movement.
+// That is not tidiness for its own sake: movement.js has to import THIS (a
+// completed blockade halts movers), so anything it needs from movement has to
+// arrive as a parameter instead. Hence the `isCut` predicate threaded through
+// the supply helpers rather than a `passesFreely` import.
+//
+// A hex carries ONE BLOCKADE PER ROAD leaving it, not one blockade. A tile the
+// road runs straight through has two roads and so takes two; a T-junction has
+// three and takes three; a dead-end takes one. That is the whole capacity rule
+// — you are closing a road, so the roads are what you have to close, and a hex
+// cannot hold more barricades than it has things to barricade.
+//
+// Records are therefore keyed `hex|edge`, where `edge` is the neighbouring hex
+// the road runs toward. `blockadeAt(state, hex)` still answers with one of them
+// so the many callers that only ask "is this tile held" keep working; anything
+// that needs the whole set asks `blockadesOn`.
+//
+// Blocking itself stays per HEX, not per edge: §3 makes a blockade a garrison
+// holding a tile rather than a gate on one border, and movement.js halts a
+// mover entering the hex. Two blockades on a junction therefore make it harder
+// to clear rather than differently shaped — each is separately contestable,
+// separately upgraded and separately paid for.
+//
+// A blockade lives in one of two phases in a single record:
+//
+//   done: false   under construction. Holds `progress` against `cost`, and the
+//                 uid of the unit pinned to the hex building it.
+//   done: true    a real structure. The builder is free to leave; the blockade
+//                 defends itself, sees for its owner, and halts enemy movement
+//                 — for as long as `paid` holds. A finished blockade costs
+//                 scrap every Upkeep; unpaid it goes dormant (paid: false) and
+//                 does none of those three things until the arrears clear.
+import { CONFIG } from "./config.js";
+import { CHIPS } from "./content.js";
+import { emit } from "./events.js";
+
+// The composite key a blockade is stored under.
+export function blockadeKey(hex, edge) {
+  return `${hex}|${edge}`;
+}
+
+// Which roads leave `hex` — the neighbouring hexes a road actually runs to.
+// Both ends have to carry road, exactly as the renderer decides where to draw
+// one, or a blockade could be built on a road that is not there.
+export function roadEdgesOf(state, hex) {
+  if (!state.board.hexes[hex]?.road) return [];
+  return (state.board.adjacency[hex] || [])
+    .filter((n) => state.board.hexes[n]?.road)
+    .sort();
+}
+
+// How many blockades this hex could ever hold: one per road.
+export function blockadeCapacity(state, hex) {
+  return roadEdgesOf(state, hex).length;
+}
+
+// Every blockade on `hex`, in a stable order.
+export function blockadesOn(state, hex) {
+  const all = state.world?.blockades || {};
+  return Object.keys(all)
+    .filter((k) => all[k].hex === hex)
+    .sort()
+    .map((k) => all[k]);
+}
+
+// The blockade on `hex`, or the one on a particular road if `edge` is given.
+//
+// Without an edge this answers with the first — which is what most callers
+// want, because they are asking "is this tile held", a question that does not
+// depend on which road. Callers that care about a specific barricade pass the
+// edge; callers that need all of them use `blockadesOn`.
+export function blockadeAt(state, hex, edge = null) {
+  if (edge != null) return state.world?.blockades?.[blockadeKey(hex, edge)] || null;
+  return blockadesOn(state, hex)[0] || null;
+}
+
+// The roads on `hex` with no blockade on them yet.
+export function freeRoadEdges(state, hex) {
+  const taken = new Set(blockadesOn(state, hex).map((b) => b.edge));
+  return roadEdgesOf(state, hex).filter((e) => !taken.has(e));
+}
+
+// Which road a blockade of `owner`'s should stand on: the one pointing HOME,
+// toward their nearest settlement by road.
+//
+// You barricade the near side of the tile, not the far side. Put it anywhere
+// else and a rival can build on the same hex BETWEEN your barricade and your
+// own settlement — sitting on your supply line, behind the thing you built to
+// protect it — which is nonsense. Facing home also means two factions
+// blockading the same junction naturally take different roads, because their
+// settlements lie in different directions.
+//
+// Falls back to any free road when there is no supply path (an unsupplied
+// blockade cannot be built through the action layer, but startBlockade is also
+// called by tests and scenarios) or when the home road is already closed.
+export function supplyEdgeFor(state, owner, hex) {
+  const free = freeRoadEdges(state, hex);
+  if (!free.length) return null;
+  // roadSupplyPath returns [hex, ...steps, settlement], so the first step is
+  // the neighbour the road runs to on the way home.
+  const path = roadSupplyPath(state, owner, hex);
+  const homeward = path && path.length > 1 ? path[1] : null;
+  if (homeward && free.includes(homeward)) return homeward;
+  return free[0];
+}
+
+// The blockade on `hex` only if it is finished AND paid — the phase that
+// actually blocks, defends and sees. Construction sites do none of those
+// things, and neither does a position whose upkeep went unpaid: an unpaid
+// blockade is DORMANT, still standing and still repairable, but the road is
+// open through it and it contributes no sight. Routing every consumer through
+// this one reader is what makes dormancy total rather than partial.
+export function activeBlockadesOn(state, hex) {
+  return blockadesOn(state, hex).filter((b) => b.done && b.paid !== false);
+}
+
+export function activeBlockadeAt(state, hex) {
+  return activeBlockadesOn(state, hex)[0] || null;
+}
+
+export function ownedBlockades(state, pid) {
+  const out = [];
+  const all = state.world?.blockades || {};
+  for (const hex in all) if (all[hex].owner === pid) out.push(all[hex]);
+  return out;
+}
+
+// Sum a numeric field across a blockade's installed, non-dormant chips —
+// the shared reader for every §3.2 upgrade, mirroring locChipSum in turn.js.
+function chipSum(state, b, field) {
+  let n = 0;
+  for (const c of b.chips || []) {
+    if (state.chips[c]?.disabled) continue; // §20.9 dormant — passives suppressed
+    n += CHIPS[state.chips[c]?.chipId]?.[field] || 0;
+  }
+  return n;
+}
+
+// §3.2 — static defense, plus whatever installed chips add (Palisade).
+export function blockadeDefense(state, b) {
+  return CONFIG.blockades.defense + chipSum(state, b, "blockadeDefense");
+}
+
+// §3.2 — its own sight footprint, plus chips (Signal Mast). Part 1's
+// vision-gating is not built yet, so today this is only what the blockade
+// contributes to its owner's fog; when gating lands it is also the range at
+// which the blockade may halt a mover.
+export function blockadeVision(state, b) {
+  return CONFIG.blockades.vision + chipSum(state, b, "blockadeVision");
+}
+
+// §3.2 Toll Booth — a mature blockade's own scrap income, independent of the
+// settlement that raised it. Summed per faction at Upkeep.
+// Economy brief §7.3 — A BLOCKADE DRAINS, IT DOES NOT TIP.
+//
+// The Toll Booth used to pay its owner a flat stipend. The first draft
+// proposed turning that into a tariff on passing trade, and that does not
+// work: overland routes go through `reinforcementRoute`, which treats a third
+// party's ZoC hex as a WALL — if you dominate the hex the route does not exist
+// to be taxed, it is severed. There is nothing passing to tax.
+//
+// The military version is better anyway, and it is what the research asks for:
+// economic strangulation needs an IMMEDIATE VISIBLE NUMBER, and the canonical
+// failure (Distant Worlds, EU4) is blockades that are mechanically real and
+// emotionally dead because "the impact isn't visually obvious, creating the
+// false impression that blockades don't work at all." So a completed, paid
+// blockade REDUCES THE BESIEGED LOCATION'S OUTPUT while it stands — a number
+// the victim watches fall — and the one "tax what passes" mechanic in the game
+// becomes an act of war rather than a stipend.
+//
+// Scoped to the Location's own hex and its ring: a barricade on your doorstep.
+// Local, legible, and already drawn on the board.
+export function blockadeDrainOn(state, loc) {
+  const cfg = CONFIG.blockades;
+  const holder = loc.controller;
+  if (!holder || !cfg?.drainOutput) return 0;
+  const ring = new Set([loc.hexId, ...(state.board.adjacency[loc.hexId] || [])]);
+  let drain = 0;
+  for (const b of Object.values(state.world?.blockades || {})) {
+    if (!b.done || b.paid === false) continue;   // a dormant barricade strangles nobody
+    if (b.owner === holder) continue;            // your own line does not choke you
+    if (!ring.has(b.hex)) continue;
+    // The base bite, plus whatever the barricade has been fitted with. A Toll
+    // Booth used to earn its owner scrap; it now costs its victim more.
+    drain += cfg.drainOutput + chipSum(state, b, "output");
+  }
+  return drain;
+}
+
+// Retired: the flat stipend a Toll Booth used to pay its owner. Kept as a
+// zero-returning shim only long enough for the ledger to stop asking; the
+// mechanic is `blockadeDrainOn` above.
+export function blockadeIncome() {
+  return 0;
+}
+
+// §3.1 — 1 scrap per finished blockade each Upkeep. Unaffordable → DORMANT
+// (blocks nobody, sees nothing, collects no toll) until it is paid again.
+// Emits only on transitions, and never destroys: arrears are recoverable.
+//
+// Ordering note: charged cheapest-first is meaningless here (every blockade
+// costs the same), so we walk them in hexId order for determinism — a player
+// who can only afford some of their line keeps the same ones each turn.
+export function chargeBlockadeUpkeep(state, pid) {
+  const player = state.players[pid];
+  if (!player) return;
+  const mine = ownedBlockades(state, pid)
+    .filter((b) => b.done)
+    .sort((a, b) => String(a.hex).localeCompare(String(b.hex)));
+  for (const b of mine) {
+    const was = b.paid !== false;
+    const due = CONFIG.blockades.upkeep;
+    if (player.resource >= due) {
+      player.resource -= due;
+      emit(state, "resource_spent", {
+        player: pid, resource: "Resource", amount: -due, source: "blockade-upkeep",
+      });
+      b.paid = true;
+      if (!was) emit(state, "blockade_paid", { owner: pid, hex: b.hex });
+    } else {
+      b.paid = false;
+      if (was) emit(state, "blockade_dormant", { owner: pid, hex: b.hex });
+    }
+  }
+}
+
+// Slots a blockade's installed chips occupy, against CONFIG.blockades.chipSlots.
+export function blockadeSlotsUsed(state, b) {
+  let n = 0;
+  for (const c of b.chips || []) n += CHIPS[state.chips[c]?.chipId]?.slots ?? 1;
+  return n;
+}
+
+// --- supply --------------------------------------------------------------
+// §3.1/§3.4 — the road path from `hex` to the NEAREST Location `pid` fully
+// controls, or null if there is no road route to one at all.
+//
+// Road-only BFS: a blockade is fed along road, not cross-country, which is what
+// makes cutting the road meaningful. The start hex is exempt from the road
+// requirement only in the sense that a blockade may only ever be built on a
+// road hex anyway (validated at the build site).
+//
+// Returned path includes both endpoints. Deterministic: ties break on hexId, so
+// two equidistant settlements always resolve the same way.
+export function roadSupplyPath(state, pid, hex) {
+  const hexes = state.board.hexes;
+  const adjacency = state.board.adjacency;
+  if (!hexes[hex]) return null;
+
+  const prev = { [hex]: null };
+  const queue = [hex];
+  let found = null;
+  for (let i = 0; i < queue.length; i++) {
+    const cur = queue[i];
+    // A Location of ours ends the search. Checked on dequeue rather than on
+    // discovery so the first hit is genuinely the nearest by road distance.
+    if (cur !== hex && state.locations[cur]?.controller === pid) { found = cur; break; }
+    const nbs = [...(adjacency[cur] || [])].sort();
+    for (const nb of nbs) {
+      if (prev[nb] !== undefined) continue;
+      // Travel only along road. A Location on the far end counts as reachable
+      // even if its own hex was never stamped `road` — a city is a terminus,
+      // not a stretch of track.
+      if (!hexes[nb]?.road && state.locations[nb]?.controller !== pid) continue;
+      prev[nb] = cur;
+      queue.push(nb);
+    }
+  }
+  if (!found) return null;
+  const path = [];
+  for (let c = found; c != null; c = prev[c]) path.unshift(c);
+  return path;
+}
+
+// Is `hex`'s supply line to its nearest owned settlement intact for `pid`?
+// `isCut(hexId)` is supplied by the caller and answers "does something hostile
+// to pid sit here" — it lives outside this module so movement.js can import
+// blockades.js without the reverse dependency (see the header).
+//
+// Returns { path, cut } so a caller can report WHERE it broke, not just that it
+// did — a supply line that silently fails is the kind of thing that reads as a
+// bug rather than as an enemy doing something to you.
+export function supplyStatus(state, pid, hex, isCut) {
+  const path = roadSupplyPath(state, pid, hex);
+  if (!path) return { path: null, cut: null, ok: false };
+  const cut = path.find((h) => h !== hex && isCut(h)) || null;
+  return { path, cut, ok: !cut };
+}
+
+// --- lifecycle -----------------------------------------------------------
+// §3.1 — begin construction. The caller (actions.js) validates the road hex,
+// the supply line, the builder and the cost; this creates the state.
+export function startBlockade(state, owner, hex, builderUid, edge = null) {
+  state.world.blockades = state.world.blockades || {};
+  // Callers that do not name a road get the one facing the owner's nearest
+  // settlement, so a barricade always stands on the near side of the tile.
+  const road = edge ?? supplyEdgeFor(state, owner, hex);
+  const b = {
+    owner,
+    hex,
+    edge: road,
+    done: false,
+    progress: 0,
+    cost: CONFIG.blockades.cost,
+    builder: builderUid,
+    chips: [],
+  };
+  state.world.blockades[blockadeKey(hex, road)] = b;
+  emit(state, "blockade_started", { owner, hex, edge: road, unit: builderUid, cost: b.cost });
+  return b;
+}
+
+// §3.1/§3.4 — which of `pid`'s construction sites may draw on a settlement this
+// Upkeep, and from WHICH settlement. Run once per Upkeep, before the economy
+// step spends anything, because it also resolves the two ways a site can stop
+// being fundable — and those are deliberately different:
+//
+//   * the builder is gone (dead, or it walked off)  → construction FAILS
+//     outright. No partial refund; §3.1 is explicit that the pinned unit is the
+//     real cost of choosing to build one.
+//   * the supply line is cut                        → no progress this turn.
+//     Construction stretches past the 2-turn floor rather than failing, and
+//     emits so the player can see why nothing moved.
+//
+// Returns [{ blockade, settlement }] — `settlement` is the hexId of the nearest
+// Location `pid` holds by road, which is the one that pays (§3.4). `isCut` is
+// threaded in by the caller, which knows about diplomacy.
+export function resolveBlockadeSites(state, pid, isCut) {
+  const sites = [];
+  for (const b of ownedBlockades(state, pid)) {
+    // A finished blockade only wants funding while a chip is queued on it; an
+    // idle one draws nothing, so its settlement keeps its whole output.
+    if (b.done && !b.build) continue;
+
+    // Only CONSTRUCTION pins a unit (§3.1). Once the structure stands, the
+    // builder is long gone and an upgrade needs only the supply line.
+    if (!b.done) {
+      const builder = state.units[b.builder];
+      if (!builder || builder.node !== b.hex || builder.owner !== pid) {
+        delete state.world.blockades[blockadeKey(b.hex, b.edge)];
+        emit(state, "blockade_failed", { owner: pid, hex: b.hex, edge: b.edge, reason: "builder left" });
+        continue;
+      }
+    }
+
+    const supply = supplyStatus(state, pid, b.hex, isCut);
+    if (!supply.ok) {
+      emit(state, "blockade_stalled", {
+        owner: pid, hex: b.hex,
+        reason: supply.path ? "supply line cut" : "no road to a held settlement",
+        at: supply.cut,
+      });
+      continue;
+    }
+
+    sites.push({ blockade: b, settlement: supply.path[supply.path.length - 1] });
+  }
+  // Deterministic, and nearest-first so a settlement funding two sites finishes
+  // the closer one first rather than dribbling into both.
+  sites.sort((x, y) => (x.blockade.hex < y.blockade.hex ? -1 : 1));
+  return sites;
+}
+
+// §3.1 — the most construction one site may absorb in a single Upkeep.
+//
+// This is what enforces §3.1's two-turn floor now that the rate comes from a
+// settlement's output rather than a constant: a rich city cannot raise a
+// blockade in one turn however much it produces. It also stops a blockade
+// swallowing a whole city's build capacity — whatever it cannot take flows on
+// to the city's own chip.
+export function creditCap(b) {
+  return Math.ceil(b.cost / Math.max(1, CONFIG.blockades.minTurns));
+}
+
+// §3.4 — put `amount` of a settlement's build output into a site. Returns what
+// it could NOT take, so the caller can pass the remainder along.
+//
+// Routes to whichever of the two things a blockade can be building: the
+// structure itself, or a §3.2 upgrade chip on a finished one. Only the
+// structure is floor-capped — an upgrade is ordinary construction and a rich
+// settlement may finish one in a turn, exactly as it can at a Location.
+export function creditBlockade(state, b, amount) {
+  if (b.done) return creditUpgrade(state, b, amount);
+
+  const want = Math.min(amount, creditCap(b), b.cost - b.progress);
+  if (want <= 0) return amount;
+
+  b.progress += want;
+  if (b.progress >= b.cost) {
+    b.done = true;
+    b.progress = b.cost;
+    b.builder = null; // §3.2 — the builder is free to leave the moment it lands
+    b.paid = true;    // manned from the day it opens; upkeep bites next Upkeep
+    emit(state, "blockade_completed", { owner: b.owner, hex: b.hex });
+  } else {
+    emit(state, "blockade_progressed", {
+      owner: b.owner, hex: b.hex, progress: b.progress, cost: b.cost,
+    });
+  }
+  return amount - want;
+}
+
+// §3.2 — advance a queued upgrade chip, installing it once paid for.
+function creditUpgrade(state, b, amount) {
+  const build = b.build;
+  if (!build) return amount;
+  const want = Math.min(amount, build.cost - build.progress);
+  if (want <= 0) return amount;
+
+  build.progress += want;
+  if (build.progress < build.cost) {
+    emit(state, "blockade_progressed", {
+      owner: b.owner, hex: b.hex, chipId: build.chipId,
+      progress: build.progress, cost: build.cost,
+    });
+    return amount - want;
+  }
+
+  const uid = state.nextId("chip");
+  state.chips[uid] = { uid, chipId: build.chipId };
+  b.chips.push(uid);
+  b.build = null;
+  emit(state, "build_completed", { hex: b.hex, chip: uid, chipId: build.chipId });
+  return amount - want;
+}
+
+// §3.3 — destroy-only. Unlike a Location a blockade has no VP or economic
+// identity worth inheriting, so a lost contest removes it rather than flipping
+// its controller.
+export function destroyBlockade(state, hex, by, edge = null) {
+  // Without an edge this takes the first blockade on the tile, matching
+  // blockadeAt: a contest fought on the hex brings down one barricade, not
+  // every barricade standing there.
+  const b = edge != null
+    ? state.world?.blockades?.[blockadeKey(hex, edge)]
+    : blockadesOn(state, hex)[0];
+  if (!b) return null;
+  delete state.world.blockades[blockadeKey(b.hex, b.edge)];
+  // Its chips go with it — a destroyed structure leaves no salvage, matching
+  // the demolished-in-place rule for Location chips.
+  for (const c of b.chips || []) state.removed.push(c);
+  emit(state, "blockade_destroyed", {
+    owner: b.owner, hex, edge: b.edge, by: by || null, wasComplete: !!b.done,
+  });
+  return b;
+}

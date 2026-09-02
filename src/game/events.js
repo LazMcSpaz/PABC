@@ -19,8 +19,21 @@ export const EVENT_NAMES = new Set([
   "contest_declared", "contest_won", "contest_lost",
   "obstacle_claimed", "encounter_resolved",
   "location_spawned", "section_flipped", "location_captured", "location_decayed",
+  // §3.2 — a city changing hands by treaty rather than by force. Its own
+  // name, because "Omara falls" and "Omara is signed away" are not the
+  // same thing to read in a feed, and only one of them is a conquest.
+  "location_ceded",
   // §18.2 Loyalty
   "loyalty_changed", "loyalty_failing", "control_peeled",
+  // A Location whose holder paid to widen it.
+  "slot_expanded",
+  // Ground drifting the OTHER way — a neutral section claimed by whoever
+  // dominates the hex, and the moment that finishes and the place is theirs.
+  // Separate names from the contest pair because none of this was fought
+  // over: "Dambar is absorbed" and "Dambar falls" should not read alike.
+  "control_claimed", "location_claimed", "claim_stalled",
+  // A site on the map that somebody now has a reason to know about.
+  "site_revealed",
   // §18.3 Influence & Zone of Control
   "zone_changed",
   "reward_granted",
@@ -32,18 +45,50 @@ export const EVENT_NAMES = new Set([
   // Layer 5 — encounter & quest system (spec §15.13)
   "encounter_delivered", "encounter_delivery_skipped", "trigger_fired",
   "quest_started", "quest_advanced", "quest_completed",
+  // Per-choice beat routing: which successor a choice selected, and the
+  // case where the named successor was not deliverable.
+  "quest_routed", "quest_route_missed",
+  // A beat that was ready but would have been the player's fourth this turn.
+  // Held, not dropped — it is offered again on the next pass.
+  "quest_beat_held",
+  // Authored resolution primitives (ROLL / CONTEST) and their consequences.
+  "roll_resolved", "narrative_contest_resolved", "deck_peeked",
+  "safe_passage_granted", "safe_passage_expired",
+  "unit_seconded", "unit_returned", "movement_overridden",
+  "dual_holding_established", "player_flag_expired",
   "standing_changed", "track_changed", "deferred_resolved",
+  // A deferred packet carrying `satisfiedIfFlag` is a visible deadline;
+  // these say which way it went when the clock ran out.
+  "deadline_met", "deadline_expired",
   // §20 Economy & City Development (APPEND-ONLY — distinct keys so a parallel
   // Influence branch never collides). The Market is retired, so `market_churned`
   // is dropped with it.
   "build_started", "build_completed", "chip_upgraded",
   "chip_dormant", "chip_reactivated", "slider_changed", "garrison_erosion",
-  "chip_activated", "chip_granted", "chip_removed", "faction_eliminated",
+  "chip_activated", "chip_granted", "chip_removed", "faction_eliminated", "faction_released",
+  // §5 — the landless clock. A faction with no Locations has a deadline to
+  // take one back; `faction_collapsed` is that deadline expiring, and the
+  // ordinary elimination sweep retires it a moment later on its own rule.
+  "landless_clock_started", "landless_clock_cleared", "faction_collapsed",
+  // §B-blood — a faction was at war with somebody at the moment they died.
+  // The mark is permanent and sets the floor under the killer's Menace.
+  "blood_marked",
   "influence_pressure",
   // §19 Exploration, Vision & Fog of War (APPEND-ONLY — distinct keys).
   "hex_explored", "unit_spotted", "unit_lost_sight", "ambush_triggered",
   // §17.7 Listening Post (Intelligence A2) lifecycle (APPEND-ONLY).
   "post_built", "post_destroyed", "post_dormant", "post_paid", "post_revealed",
+  // Blockade structures — rail doc §3 lifecycle (APPEND-ONLY).
+  "blockade_started", "blockade_progressed", "blockade_stalled",
+  "blockade_completed", "blockade_failed", "blockade_destroyed",
+  "blockade_paid", "blockade_dormant",
+  // Standing armies eat — 1 scrap per unit each Upkeep, 2 fully chipped.
+  "unit_unsupplied", "unit_supplied",
+  "build_priority_changed", "advance_checked",
+  // Rail doc §2.2 production pooling.
+  "production_pooled", "pool_interrupted", "pool_target_changed",
+  // VP is held, not banked — this fires whenever a total moves either way.
+  "vp_changed",
   // §18.4–§18.13 Diplomacy (APPEND-ONLY — distinct keys).
   "menace_changed", "honor_changed", "deal_struck", "deal_proposed",
   "war_declared", "peace_made",
@@ -53,18 +98,63 @@ export const EVENT_NAMES = new Set([
   "denounced", "mediated", "recognition_changed",
   // diplomacy-spec.md §6.4 — verbs, AI eval, war tracking, open borders.
   "surprise_attack_honor_lost",
+  "coalition_murmur",
+  "coalition_left",
+  "offer_countered",
+  "position_declared",
+  "position_withdrawn",
+  "position_broken",
+  "op_expose",
+  "op_forge",
+  "op_fabricate",
+  "op_backfired",
+  "sabotage_traced",
+  "forgeries_lapsed",
   "trading_pact_formed", "trading_pact_suspended", "trading_pact_resumed", "trading_pact_dissolved",
   "vassal_freed",
   "pact_call_requested", "pact_call_honored", "pact_call_declined",
   "tribute_demanded", "tribute_caved", "tribute_refused",
   "allied_vision_toggled", "open_borders_toggled", "gift_counter_decayed",
+  // Rail doc §2.3 — running rights over another faction's stations.
+  "rail_access_toggled",
   "territory_trespassed",
   // Diplomacy robustness pass — earned drift baselines + summit VP.
   "standing_baseline_changed", "recognition_summit",
   // Precursor warnings — AI telegraphs trouble to the human before acting.
   "diplomatic_warning",
+  // §1 — WHICH BRANCH OF THE POLITICAL PASS SPENT THE ACT. `manageDiplomacy`
+  // is bounded to one act a turn and branch order is priority, so the only
+  // way to see a new branch starving an old one is to record which one fired.
+  // Twice now that has been discovered instead by measuring an unrelated
+  // number and noticing it had moved.
+  "ai_political_act",
+  // §5 posture — where a faction stands, and the moment it says so out loud.
+  // `posture_changed` is the computed transition; `posture_stated` is the
+  // faction actually announcing it, which is the one that gates acting on it.
+  "posture_changed", "posture_stated", "posture_condition_broken",
+  // §6 Sway — political capacity. `sway_capped` fires when income is wasted
+  // against the ceiling, which is the signal that a faction should be
+  // spending; `courtship_lapsed` is a courtship dropped for want of capacity.
+  "sway_changed", "sway_spent", "sway_capped", "courtship_lapsed",
+  // §6.5 — the occupation bill, and the Standing it costs when unpayable.
+  "occupation_charged",
+  // §7.1 — a purchase paid for off-supply, and what became of it.
+  "purchase_delayed", "purchase_arrived", "purchase_lost",
   // Truces — peace is binding for a window; breaking it is treachery.
   "truce_broken",
+  // Deal flows run for a term and then lapse, honorably.
+  "agreement_expired",
+  // §6.10 the round trip — offers on the table, counters, and pestering.
+  "offer_tabled", "offer_accepted", "offer_declined", "offer_lapsed", "offer_pestered",
+  // The grievance ledger — what was done to you, and what it takes to settle.
+  "grievance_recorded", "grievances_settled",
+  // The win condition: every surviving faction eliminated, allied or vassal.
+  // `reached` starts the hold clock, `lost` stops it, `won` ends the game.
+  "dominion_reached", "dominion_lost", "dominion_won",
+  // Reputation is what the board saw. Some things it doesn't.
+  "attack_unwitnessed",
+  // §6.11 ultimatums — the verb between asking and attacking.
+  "ultimatum_issued", "ultimatum_complied", "ultimatum_defied", "ultimatum_bluffed",
 ]);
 
 // Resolve a chip / card instance uid to its content def. Covers Market

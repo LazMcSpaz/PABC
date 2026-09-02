@@ -1,5 +1,5 @@
-// LoreScreen.jsx — full-screen Lore / in-game wiki browser for Ashland Conquest.
-// Reads WIKI_ENTRIES from the auto-generated content file (currently empty {}).
+// LoreScreen.jsx — full-screen Lore / in-game wiki browser for The Remnant Continent.
+// Reads the merged WIKI_ENTRIES (repo-authored + editor-exported).
 // Renders a robust skeleton that degrades gracefully when empty and becomes a
 // fully functional two-column wiki browser as entries are authored in the
 // Encounter Builder.
@@ -12,7 +12,8 @@ import { useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { C, CornerBrackets } from "./HudChrome.jsx";
 import { WikiProvider, RichText } from "./RichText.jsx";
-import { WIKI_ENTRIES } from "../game/content/wiki.js";
+import { WIKI_ENTRIES } from "../game/content/wiki-repo.js";
+import { useIsPhone } from "./useViewport.js";
 import "./prototype.css";
 
 // Amber accent used for entry title/term headings — matching the existing wiki
@@ -54,6 +55,16 @@ function firstEntry(byCategory) {
 export default function LoreScreen({ onBack }) {
   const byCategory = useMemo(() => groupEntries(WIKI_ENTRIES), []);
   const isEmpty = byCategory.size === 0;
+  // PHONE LAYOUT — see the same note in WikiModal.jsx. This screen is a 260px
+  // term list beside a reader inside a 96vw frame; on a phone that leaves the
+  // reader about 110px wide, which is where the archive appeared to be cut
+  // off. The panes take turns instead of sharing the width.
+  //
+  // The list is the phone default here, unlike the modal. The modal is opened
+  // BY a word, so it already knows which entry you wanted; the archive is
+  // opened to browse, so it opens on what there is to browse.
+  const isPhone = useIsPhone();
+  const [phoneShowList, setPhoneShowList] = useState(true);
 
   // Default-select first entry when data is present
   const [selectedId, setSelectedId] = useState(() => {
@@ -70,6 +81,7 @@ export default function LoreScreen({ onBack }) {
   const selectedEntry = selectedId ? WIKI_ENTRIES[selectedId] ?? null : null;
 
   function selectEntry(id) {
+    setPhoneShowList(false);
     if (id === selectedId) return;
     if (selectedId) setBackStack((prev) => [...prev, selectedId]);
     setSelectedId(id);
@@ -83,9 +95,11 @@ export default function LoreScreen({ onBack }) {
   }
 
   return (
-    // Full-screen wrapper — same radial bg as SetupScreen / TitleScreen
+    // Full-screen wrapper — same radial bg as SetupScreen / TitleScreen.
+    // The scan raster lives on a dedicated overlay child below, NOT on this
+    // wrapper: .hud-screen-scan sets pointer-events:none, which on the
+    // container itself would make the whole screen unclickable.
     <div
-      className="hud-screen-scan"
       style={{
         position: "relative",
         width: "100vw",
@@ -99,10 +113,12 @@ export default function LoreScreen({ onBack }) {
         flexDirection: "column",
         alignItems: "center",
         justifyContent: "center",
-        padding: 20,
+        padding: isPhone ? "56px 8px 8px" : 20,
         boxSizing: "border-box",
       }}
     >
+      <div className="hud-screen-scan" />
+
       {/* ── page header ─────────────────────────────────────────────────── */}
       <motion.div
         initial={{ opacity: 0, y: -12 }}
@@ -110,10 +126,11 @@ export default function LoreScreen({ onBack }) {
         transition={{ duration: 0.45, ease: "easeOut" }}
         style={{
           textAlign: "center",
-          marginBottom: 20,
+          marginBottom: isPhone ? 8 : 20,
           zIndex: 1,
           userSelect: "none",
           flexShrink: 0,
+          display: isPhone ? "none" : undefined,
         }}
       >
         <div
@@ -127,7 +144,7 @@ export default function LoreScreen({ onBack }) {
             fontWeight: 600,
           }}
         >
-          ◇ Ashland Conquest · Intelligence Archive ◇
+          ◇ The Remnant Continent · Intelligence Archive ◇
         </div>
         <div
           style={{
@@ -166,11 +183,15 @@ export default function LoreScreen({ onBack }) {
         style={{
           position: "relative",
           zIndex: 1,
-          width: "min(1160px, 96vw)",
+          width: isPhone ? "100%" : "min(1160px, 96vw)",
           // Fill the remaining vertical space up to a comfortable max
-          height: "min(76vh, 820px)",
+          height: isPhone ? "100%" : "min(76vh, 820px)",
           display: "grid",
-          gridTemplateColumns: "260px 1fr",
+          gridTemplateColumns: isPhone ? "1fr" : "260px 1fr",
+          // See the same note in WikiModal.jsx — an `auto` row sizes to its
+          // content, so the sidebar overflowed the frame and was clipped by
+          // `overflow: hidden` rather than scrolling inside it.
+          gridTemplateRows: "minmax(0, 1fr)",
           background: PANEL_BG,
           border: `1px solid ${C.holo}`,
           borderRadius: 10,
@@ -209,6 +230,7 @@ export default function LoreScreen({ onBack }) {
           onFilterChange={setFilter}
           selectedId={selectedId}
           onSelect={selectEntry}
+          hidden={isPhone && !phoneShowList}
         />
 
         {/* ── RIGHT: reader pane ────────────────────────────────────────── */}
@@ -218,6 +240,8 @@ export default function LoreScreen({ onBack }) {
           backStack={backStack}
           onBack={navigateBack}
           onSelectEntry={selectEntry}
+          hidden={isPhone && phoneShowList}
+          onShowList={isPhone ? () => setPhoneShowList(true) : null}
         />
       </motion.div>
 
@@ -274,9 +298,10 @@ export default function LoreScreen({ onBack }) {
           zIndex: 1,
           flexShrink: 0,
           userSelect: "none",
+          display: isPhone ? "none" : undefined,
         }}
       >
-        ▸ Ashland Conquest · Lore Archive · Intelligence Database
+        ▸ The Remnant Continent · Lore Archive · Intelligence Database
       </div>
     </div>
   );
@@ -284,7 +309,7 @@ export default function LoreScreen({ onBack }) {
 
 // ─── Sidebar ────────────────────────────────────────────────────────────────
 
-function Sidebar({ byCategory, isEmpty, filter, filterLower, onFilterChange, selectedId, onSelect }) {
+function Sidebar({ byCategory, isEmpty, filter, filterLower, onFilterChange, selectedId, onSelect, hidden }) {
   const totalCount = Object.keys(WIKI_ENTRIES).length;
 
   return (
@@ -292,7 +317,7 @@ function Sidebar({ byCategory, isEmpty, filter, filterLower, onFilterChange, sel
       style={{
         position: "relative",
         borderRight: `1px solid ${BORDER_DIM}`,
-        display: "flex",
+        display: hidden ? "none" : "flex",
         flexDirection: "column",
         minHeight: 0,
         zIndex: 1,
@@ -427,8 +452,7 @@ function EmptySidebarNote() {
           fontFamily: "'Inter', system-ui, sans-serif",
         }}
       >
-        Categories appear here as entries are authored in the Encounter
-        Builder.
+        Nothing filed under any heading yet.
       </div>
     </div>
   );
@@ -542,13 +566,14 @@ function CategoryList({ byCategory, filterLower, selectedId, onSelect }) {
 
 // ─── ReaderPane ─────────────────────────────────────────────────────────────
 
-function ReaderPane({ entry, isEmpty, backStack, onBack, onSelectEntry }) {
+function ReaderPane({ entry, isEmpty, backStack, onBack, onSelectEntry, hidden, onShowList }) {
+  const isPhone = Boolean(onShowList);
   return (
     <WikiProvider entries={WIKI_ENTRIES} openEntry={onSelectEntry}>
       <div
         style={{
           position: "relative",
-          display: "flex",
+          display: hidden ? "none" : "flex",
           flexDirection: "column",
           minHeight: 0,
           zIndex: 1,
@@ -560,12 +585,37 @@ function ReaderPane({ entry, isEmpty, backStack, onBack, onSelectEntry }) {
             display: "flex",
             alignItems: "center",
             gap: 10,
-            padding: "12px 18px 10px",
+            flexWrap: isPhone ? "wrap" : "nowrap",
+            padding: isPhone ? "10px 12px 8px" : "12px 18px 10px",
             borderBottom: `1px solid ${BORDER_DIM}`,
             flexShrink: 0,
             minHeight: 52,
           }}
         >
+          {/* phone only: the way back to the term list, which is a whole
+              screen away rather than sitting beside the reader */}
+          {onShowList && (
+            <button
+              type="button"
+              onClick={onShowList}
+              title="All terms"
+              style={{
+                background: "transparent",
+                border: `1px solid ${BORDER}`,
+                color: C.text,
+                borderRadius: 4,
+                fontFamily: C.font,
+                fontSize: 10.5,
+                letterSpacing: 1.5,
+                padding: "3px 10px",
+                cursor: "pointer",
+                flexShrink: 0,
+              }}
+            >
+              ☰
+            </button>
+          )}
+
           {/* within-reader back button (cross-link history) */}
           <AnimatePresence>
             {backStack.length > 0 && (
@@ -600,9 +650,12 @@ function ReaderPane({ entry, isEmpty, backStack, onBack, onSelectEntry }) {
           {/* entry term title */}
           <div
             style={{
-              flex: 1,
+              flex: isPhone ? "1 0 100%" : 1,
+              minWidth: 0,
+              order: isPhone ? 2 : 0,
+              overflowWrap: "break-word",
               fontFamily: C.font,
-              fontSize: 18,
+              fontSize: isPhone ? 15 : 18,
               fontWeight: 700,
               letterSpacing: 1.4,
               textTransform: "uppercase",
@@ -616,7 +669,7 @@ function ReaderPane({ entry, isEmpty, backStack, onBack, onSelectEntry }) {
           </div>
 
           {/* category badge */}
-          {entry?.category && (
+          {entry?.category && !isPhone && (
             <span
               style={{
                 fontFamily: C.font,
@@ -637,7 +690,7 @@ function ReaderPane({ entry, isEmpty, backStack, onBack, onSelectEntry }) {
           )}
 
           {/* alias tags (if any) */}
-          {entry?.aliases?.length > 0 && (
+          {entry?.aliases?.length > 0 && !isPhone && (
             <div
               style={{
                 display: "flex",
@@ -722,7 +775,7 @@ function ReaderPane({ entry, isEmpty, backStack, onBack, onSelectEntry }) {
                   color: C.textDim,
                 }}
               >
-                ◇ No Lore Entries Yet ◇
+                ◇ The Archive Is Empty ◇
               </div>
               <div
                 style={{
@@ -734,13 +787,9 @@ function ReaderPane({ entry, isEmpty, backStack, onBack, onSelectEntry }) {
                   letterSpacing: 0.3,
                 }}
               >
-                Entries are authored in the{" "}
-                <span style={{ color: C.textDim }}>
-                  Encounter Builder
-                </span>{" "}
-                and will appear here once published. The archive is
-                skeleton-ready — add entries and they will populate the
-                sidebar and reader automatically.
+                Nothing has been recovered and filed here yet. What the
+                continent remembers of itself is still out on the map, in
+                the hands of people who have no reason to share it.
               </div>
 
               {/* decorative rule */}
@@ -763,7 +812,7 @@ function ReaderPane({ entry, isEmpty, backStack, onBack, onSelectEntry }) {
                   opacity: 0.6,
                 }}
               >
-                ▸ Archive awaiting content ingestion
+                ▸ No records on file
               </div>
             </motion.div>
           ) : entry ? (
@@ -784,6 +833,7 @@ function ReaderPane({ entry, isEmpty, backStack, onBack, onSelectEntry }) {
                 lineHeight: 1.7,
                 color: C.text,
                 whiteSpace: "pre-wrap",
+                overflowWrap: "anywhere",
               }}
             >
               <RichText>{entry.body}</RichText>

@@ -19,6 +19,20 @@ export default function ControlMeter({
   sections,
   loyalty,
   danger = false,
+  // §11 — who is out-projecting the holder on this city's own hex. Influence
+  // pressure bleeds a point of Loyalty every Upkeep and costs the presser
+  // Standing and Menace: a soft siege, and until now visible only as one line
+  // of feed text that scrolled away. A city being hollowed out says so.
+  pressureBy = null,
+  // Which third turns over at the next Upkeep, from the engine's own
+  // `pendingSectionChange` — `{ index, to, from, cause }`, or null.
+  //
+  // The wheel is where a player already looks to ask "who holds this", so it
+  // is the right place to answer "and what is about to change". Before this,
+  // influence taking a section and Loyalty losing one were both findable only
+  // by ending the turn and reading the feed — a warning arriving after the
+  // event.
+  pending = null,
   size = 44,
 }) {
   const cx = size / 2;
@@ -39,18 +53,48 @@ export default function ControlMeter({
         const a1 = -90 + (i + 1) * 120 - gap / 2;
         const neutral = !owner || owner === "neutral";
         const col = ownerColor(owner);
+        const turning = pending && pending.index === i;
         return (
-          <path
-            key={i}
-            d={wedgePath(cx, cy, r - 1, a0, a1)}
-            fill={col}
-            fillOpacity={neutral ? 0.06 : 0.24}
-            stroke={col}
-            strokeWidth={neutral ? 1 : 1.7}
-            strokeOpacity={neutral ? 0.45 : 1}
-            strokeLinejoin="round"
-            style={neutral ? undefined : { filter: `drop-shadow(0 0 ${glow}px ${col})` }}
-          />
+          <g key={i}>
+            <path
+              d={wedgePath(cx, cy, r - 1, a0, a1)}
+              fill={col}
+              fillOpacity={neutral ? 0.06 : 0.24}
+              stroke={col}
+              strokeWidth={neutral ? 1 : 1.7}
+              strokeOpacity={neutral ? 0.45 : 1}
+              strokeLinejoin="round"
+              style={neutral ? undefined : { filter: `drop-shadow(0 0 ${glow}px ${col})` }}
+            />
+            {/* The turning third, drawn as a SECOND wedge over the first in
+                the colour it is heading TOWARD — the claimant's when ground is
+                coming in, neutral's when it is falling away. A ghost of the
+                next state rather than a badge about it: the wheel is a picture
+                of who holds what, so the forecast should be a picture too.
+                The outline is white, and that is not a style choice. The first
+                version drew the losing wedge in warning red, which is invisible
+                on a red faction's own sections — the two things it most needed
+                to distinguish were the same colour. Fill carries the meaning
+                (whose it is becoming); a white edge carries the attention, and
+                white is the one value that reads against every faction colour
+                on the board and against the board itself. */}
+            {turning && size >= 20 && (
+              <path
+                className={pending.cause === "loyalty" ? "pc-wheel-losing" : "pc-wheel-gaining"}
+                d={wedgePath(cx, cy, r - 1, a0, a1)}
+                fill={pending.cause === "loyalty" ? ownerColor(null) : ownerColor(pending.to)}
+                fillOpacity={pending.cause === "loyalty" ? 0.22 : 0.55}
+                stroke="#ffffff"
+                strokeWidth={2.2}
+                strokeOpacity={0.95}
+                strokeLinejoin="round"
+                style={{
+                  pointerEvents: "none",
+                  filter: `drop-shadow(0 0 ${glow * 1.6}px #ffffff)`,
+                }}
+              />
+            )}
+          </g>
         );
       })}
       {/* centre disc — dark glass; glows in the controller's colour when fully held */}
@@ -63,6 +107,23 @@ export default function ControlMeter({
         strokeWidth={ctrl || danger ? 1.8 : 1}
         style={ctrl || danger ? { filter: `drop-shadow(0 0 ${glow}px ${danger ? "#d2453f" : ownerColor(ctrl)})` } : undefined}
       />
+      {/* The pressure arrow, biting into the ring from the presser's side, in
+          the presser's colour. Drawn over the sections and under the pie, so
+          it reads as something pushing IN on the city rather than as part of
+          the city's own state. Pulses, because it is happening now. */}
+      {pressureBy && size >= 24 && (
+        <g style={{ pointerEvents: "none" }} className="hud-breathe">
+          <path
+            d={`M ${cx - r * 0.92} ${cy} l ${r * 0.34} ${-r * 0.24} l 0 ${r * 0.14}
+                l ${r * 0.3} 0 l 0 ${r * 0.2} l ${-r * 0.3} 0 l 0 ${r * 0.14} Z`}
+            fill={ownerColor(pressureBy)}
+            fillOpacity={0.95}
+            stroke="rgba(5,12,13,0.9)"
+            strokeWidth={0.6}
+            style={{ filter: `drop-shadow(0 0 ${glow}px ${ownerColor(pressureBy)})` }}
+          />
+        </g>
+      )}
       {showPie ? (
         <LoyaltyPie
           value={loyalty}

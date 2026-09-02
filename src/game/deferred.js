@@ -22,16 +22,64 @@ export function sweepDeferred(state) {
   state.deferred = remaining;
 
   for (const packet of due) {
-    applyEffects(state, packet.effects, {
+    // A packet carrying `satisfiedIfFlag` is a DEADLINE: the player was
+    // racing a clock, and which branch runs depends on whether they beat it.
+    // Without the field this is exactly the old unconditional behaviour, so
+    // every existing packet is unaffected.
+    //
+    // This is what makes a visible countdown mean something. A timer that
+    // fires the same effects whether or not you acted is decoration; the
+    // missed branch is the mechanic.
+    const met = packet.satisfiedIfFlag
+      ? !!state.players?.[packet.originalActive]?.flags?.[packet.satisfiedIfFlag]?.value
+      : true;
+    const effects = met ? packet.effects : (packet.onMissed || []);
+    applyEffects(state, effects, {
       source: packet.source,
       deferredFrom: packet.queuedAt,
       sourcePlayer: packet.originalActive,
+      // The sweep runs from the round-end pipeline with seat 0 nominally
+      // active. Anything in the packet that still names `active` means the
+      // player who queued it, not whoever the clock happens to be on.
+      asPlayer: packet.originalActive,
     });
     emit(state, "deferred_resolved", {
       dueRound: packet.dueRound,
       queuedAt: packet.queuedAt,
-      effectCount: packet.effects.length,
+      effectCount: effects.length,
     });
+    if (packet.satisfiedIfFlag) {
+      emit(state, met ? "deadline_met" : "deadline_expired", {
+        player: packet.originalActive,
+        label: packet.label || null,
+        flag: packet.satisfiedIfFlag,
+        dueRound: packet.dueRound,
+      });
+    }
   }
   return due;
+}
+
+/**
+ * The deadlines `pid` can currently see, soonest first.
+ *
+ * Reads the same `state.deferred` queue the sweep resolves — there is no
+ * second list to keep in step. `roundsLeft` is in ROUNDS, which is the unit
+ * the rest of the HUD already uses for durations ("for N rounds" in the
+ * diplomacy drawer), so the number on screen is the number the player counts.
+ */
+export function activeDeadlines(state, pid) {
+  return (state.deferred || [])
+    .filter((p) => p.visible && (!pid || p.originalActive === pid))
+    .map((p) => ({
+      label: p.label,
+      player: p.originalActive,
+      dueRound: p.dueRound,
+      roundsLeft: Math.max(0, p.dueRound - state.round),
+      satisfiedIfFlag: p.satisfiedIfFlag || null,
+      met: p.satisfiedIfFlag
+        ? !!state.players?.[p.originalActive]?.flags?.[p.satisfiedIfFlag]?.value
+        : null,
+    }))
+    .sort((a, b) => a.dueRound - b.dueRound);
 }

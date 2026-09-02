@@ -22,6 +22,7 @@
 import { useEffect, useLayoutEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { C, CornerBrackets, useEscClose } from "./HudChrome.jsx";
+import { Term } from "./RichText.jsx";
 import { FACTIONS as UI_FACTIONS } from "./data.js";
 
 const A = import.meta.env.BASE_URL;
@@ -32,7 +33,7 @@ const LEADER_PORTRAIT = {
   plainers:  `${A}assets/portraits/factions/plainers/plainer_leader_1.webp`,
 };
 
-// Draw a dotted capital-to-capital line between two location ids by
+// Draw a dotted route line between two location ids by
 // querying the DOM for hex cells tagged data-loc=<id>. Re-measures on
 // resize/scroll so the line tracks pan/zoom.
 function TradingPactRouteLayer({ fromLocId, toLocId, status }) {
@@ -100,20 +101,26 @@ const TIER_COLOR = {
 // Verbs the drawer renders. Order = how they appear in the actions
 // menu. Each carries label / description / destructive flag.
 const VERB_META = {
-  "gift":                  { label: "Gift", body: "Send scrap. Raises their Standing toward you.", isPane: "gift" },
-  "propose-deal":          { label: "Custom Deal", body: "Build a give/get offer. Opens the deal builder.", isPane: "deal" },
+  // §5 — the overture. First in the list because it is now the only road to
+  // an alliance for anybody, and a player who cannot find it cannot form a
+  // pact at all.
+  "court":                 { label: "Open a Courtship", body: "State what you want of them and work the relationship in the open. Costs political capacity every round it runs — and an alliance needs a courtship behind it." },
+  "end-courtship":         { label: "Call It Off", body: "Stop courting them and free the capacity for somebody else.", destructive: true },
+  "gift":                  { label: "Gift", body: "Spend political capacity to raise their regard for you. Diminishing returns if you lean on them too often.", isPane: "gift" },
+  "propose-deal":          { label: "Custom Deal", body: "Scrap, streams, alliances, borders, non-aggression — build it and see what they say.", isPane: "deal" },
   "demand-tribute":        { label: "Demand Tribute", body: "Take, don't ask. Stains Honor if refused.", isPane: "tribute", destructive: true },
   "sue-for-peace":         { label: "Sue for Peace", body: "Offer terms alongside the peace promise.", isPane: "peace" },
   "propose-pact":          { label: "Propose Pact", body: "Mutual defence + Standing bonus on both sides." },
-  "make-peace":            { label: "Make Peace", body: "End the war, no terms attached." },
+  "make-peace":            { label: "Ask for a Ceasefire", body: "Offer to end the war with nothing attached. They take it only if they want out." },
   "mediate":               { label: "Mediate", body: "Broker peace between two warring factions.", isPane: "mediate" },
   "pact-call":             { label: "Call to Pact", body: "Call your ally into one of your wars.", isPane: "pact-call" },
   "vassalize":             { label: "Vassalize", body: "Bind them under your banner.", destructive: true },
   "free-vassal":           { label: "Free Vassal", body: "Release them. Honor rises; tribute stops.", destructive: true },
-  "denounce":              { label: "Denounce", body: "Public condemnation. Standing falls on both sides.", destructive: true },
+  "denounce":              { label: "Denounce", body: "Name them publicly. Warranted, it pays; baseless, it costs — and the board can tell.", destructive: true },
+  "issue-ultimatum":       { label: "Issue Ultimatum", body: "Name a demand and a deadline. Defiance makes your war just — backing down costs Honor.", isPane: "ultimatum", destructive: true },
   "declare-war":           { label: "Declare War", body: "Open hostilities. Menace rises immediately.", destructive: true },
   // §6 trade + passive toggles
-  "trading-pact":          { label: "Open Trading Pact", body: "Route between capitals — per-round scrap each side + permanent Research floor." },
+  "trading-pact":          { label: "Open Trading Pact", body: "Any city of yours reaching any of theirs — per-round scrap each side + permanent Research floor." },
   "dissolve-trading-pact": { label: "Close Trading Pact", body: "Closes the trade route. Keeps the Research floor.", destructive: true },
   "set-open-borders":      { label: "Open Borders", body: "Let them transit your territory; they may grant the reverse." },
   "toggle-open-borders":   { label: "Toggle Open Borders", body: "Flip your half of the open-borders agreement on or off." },
@@ -121,10 +128,12 @@ const VERB_META = {
 };
 
 const DESTRUCTIVE_PROMPT = {
-  "declare-war":            "Declare war? You'll lose Standing and gain Menace immediately. Their allies may join in.",
-  "denounce":               "Denounce publicly? Standing falls on both sides and your Honor takes a hit.",
+  "declare-war":            "Declare war? Standing collapses, and unless you have a grievance on record the declaration alone raises your Menace. Their allies may join in.",
+  "issue-ultimatum":        "Put your name to a demand with a deadline? If they defy you and you then do nothing, the whole board sees you back down.",
+  "denounce":               "Denounce publicly? The board judges the accusation, not the accused: with grounds it earns you Honor and allies, without them it marks you as the liar.",
   "vassalize":              "Take them under your banner? The cornered submit; a friendly minor may welcome a protector.",
   "free-vassal":            "Release this vassal? Your Honor rises, their tribute stops.",
+  "end-courtship":          "Call off the courtship? The Standing you have been earning stops accruing, and drift starts pulling the relationship back toward its baseline.",
   "demand-tribute":         "Demand tribute? Refusal will damage your Honor and could trigger war.",
   "dissolve-trading-pact":  "Close the trading pact? The per-round scrap flow stops; the permanent Research floor stays.",
 };
@@ -132,7 +141,7 @@ const DESTRUCTIVE_PROMPT = {
 // Loose match — used to skip a verb's `outcome` tooltip when it's a
 // near-paraphrase of the static body. Jaccard on long-enough word tokens;
 // ≥0.55 overlap is the empirical threshold that catches "Opens a route
-// between your capitals — …" vs. "Route between capitals — …" without
+// between you — …" vs. "Route between you — …" without
 // collapsing genuinely-different sentences like "Costs 5 scrap" vs.
 // "Will likely accept".
 function sameish(a, b) {
@@ -165,13 +174,24 @@ function Card({ children, accent = C.holo, style }) {
   );
 }
 
-function SectionLabel({ children, color = C.holoHi }) {
+// The four label primitives below all take an optional `term`, and that is
+// how the whole screen becomes clickable without touching a hundred call
+// sites: the vocabulary of this drawer lives almost entirely in section
+// headings, stat labels, status pills and section rules, so teaching those
+// four components to link is teaching the screen to link.
+//
+// `term` is a glossary id (see src/game/content/rules-glossary.js). Passing
+// one that does not resolve renders the label plainly — a missing entry
+// degrades to the old appearance rather than to a broken control — and
+// scripts/check-glossary.mjs fails the build if any `term=` on this screen
+// has no entry behind it.
+function SectionLabel({ children, color = C.holoHi, term }) {
   return (
     <div style={{
       fontFamily: C.font, fontSize: 10, fontWeight: 600,
       letterSpacing: 2, textTransform: "uppercase", color,
       marginBottom: 6,
-    }}>{children}</div>
+    }}>{term ? <Term id={term}>{children}</Term> : children}</div>
   );
 }
 
@@ -359,8 +379,695 @@ function btnHoloStyle() {
 // Landing view — §3.2
 // =======================================================================
 
+// Where your Menace and Honor came from. Both were floats with no history:
+// a player could watch the board turn on them with no way to learn which of
+// their own acts had done it.
+function Receipts({ receipts }) {
+  const [open, setOpen] = useState(false);
+  if (!receipts) return null;
+  const rows = [
+    ...receipts.menace.map((r) => ({ ...r, stat: "Menace", color: "#d2913c" })),
+    ...receipts.honor.map((r) => ({ ...r, stat: "Honor", color: "#5fc27a" })),
+  ].sort((a, b) => b.round - a.round);
+  if (!rows.length) return null;
+  return (
+    <Card>
+      <button
+        className="hud-int"
+        onClick={() => setOpen((v) => !v)}
+        style={{
+          width: "100%", textAlign: "left", background: "none", border: "none",
+          padding: 0, cursor: "pointer", color: C.holoHi,
+          fontFamily: C.font, fontSize: 10, fontWeight: 700,
+          letterSpacing: 1.6, textTransform: "uppercase",
+        }}
+      >{open ? "▾" : "▸"} How you got here · {rows.length}</button>
+      {open && (
+        <div style={{ marginTop: 7, display: "flex", flexDirection: "column", gap: 3 }}>
+          {rows.map((r, i) => (
+            <div key={i} className="pc-prose" style={{ fontSize: 11.5, lineHeight: 1.45 }}>
+              <span style={{
+                color: r.color, fontFamily: C.font, fontWeight: 700,
+                fontSize: 10, letterSpacing: 0.8, marginRight: 6,
+              }}>{r.stat}</span>
+              <span style={{ color: r.delta > 0 ? "#e8b467" : "rgba(207,214,220,0.8)" }}>{r.text}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+// §6/§11 — political capacity, itemised, with a ledger.
+//
+// Scrap buys what a faction HAS; Sway buys what a faction THINKS, and nothing
+// converts between them at any rate. That wall is the design: letting one
+// fungible currency buy both production and political outcomes is the genre's
+// most reliable way to make diplomacy feel bought, and it is the complaint
+// Civ V's gold-for-city-states and Civ VI's Diplomatic Favor both earned.
+//
+// Itemised because the territorial term is otherwise invisible: dominance is a
+// step function, so an extra point of Loyalty is worth zero hexes or twelve
+// and nothing in between, and a player who cannot see the breakdown reads that
+// as the game ignoring their investment.
+function SwayCard({ sway }) {
+  const [open, setOpen] = useState(false);
+  if (!sway) return null;
+  const p = sway.parts;
+  const atCap = sway.pool >= sway.cap;
+  const overspent = sway.net < 0;
+  const row = (label, value, note) => (
+    <div style={{ display: "flex", alignItems: "baseline", gap: 8, fontSize: 11.5, lineHeight: 1.6 }}>
+      <span style={{ color: "rgba(143,246,234,0.6)", minWidth: 96 }}>{label}</span>
+      <span style={{ fontFamily: C.font, fontWeight: 700, color: C.holoHi, minWidth: 28, textAlign: "right" }}>
+        {value >= 0 ? "+" : ""}{value}
+      </span>
+      {note && <span style={{ color: "rgba(207,214,220,0.6)", fontSize: 10.5 }}>{note}</span>}
+    </div>
+  );
+  return (
+    <Card accent={overspent ? "#d2453f" : atCap ? "#c9b24e" : C.holo}>
+      <SectionLabel color={overspent ? "#ffb4ae" : C.holo} term="r-sway">Political Capacity</SectionLabel>
+      <div style={{ display: "flex", alignItems: "flex-end", gap: 14, marginTop: 4 }}>
+        <div>
+          <div style={{
+            fontFamily: C.font, fontSize: 26, fontWeight: 700, lineHeight: 1,
+            color: atCap ? "#c9b24e" : C.holoHi,
+            textShadow: `0 0 10px ${atCap ? "#c9b24e" : C.holo}66`,
+          }}>{sway.pool}<span style={{ fontSize: 13, color: C.textFaint }}>/{sway.cap}</span></div>
+          <div style={{ fontFamily: C.font, fontSize: 8.5, letterSpacing: 1.4, textTransform: "uppercase", color: C.textFaint }}>
+            <Term id="r-sway">Sway held</Term>
+          </div>
+        </div>
+        <div>
+          <div style={{ fontFamily: C.font, fontSize: 17, fontWeight: 700, lineHeight: 1, color: overspent ? "#d2453f" : "#5fc27a" }}>
+            {sway.net >= 0 ? "+" : ""}{sway.net}
+          </div>
+          <div style={{ fontFamily: C.font, fontSize: 8.5, letterSpacing: 1.2, textTransform: "uppercase", color: C.textFaint }}>
+            net / round
+          </div>
+        </div>
+      </div>
+      {atCap && (
+        <div style={{ fontFamily: C.font, fontSize: 9.5, letterSpacing: 0.5, color: "#c9b24e", marginTop: 6 }}>
+          At the ceiling — income above this is being wasted. Sway is a flow, not a war chest.
+        </div>
+      )}
+      {sway.courting.length > 0 && (
+        <div className="pc-prose" style={{ fontSize: 11.5, lineHeight: 1.5, marginTop: 7, color: "rgba(207,214,220,0.85)" }}>
+          <Term id="r-courtship">Courting</Term>{" "}<b style={{ color: C.holoHi }}>{sway.courting.map((c) => c.name).join(", ")}</b>
+          {" "}— {sway.committed} Sway a round, every round it runs.
+        </div>
+      )}
+      <button
+        className="hud-int"
+        onClick={() => setOpen((v) => !v)}
+        style={{
+          marginTop: 7, width: "100%", textAlign: "left", background: "none", border: "none",
+          padding: 0, cursor: "pointer", color: C.holoHi,
+          fontFamily: C.font, fontSize: 9, fontWeight: 700,
+          letterSpacing: 1.6, textTransform: "uppercase",
+        }}
+      >{open ? "▾" : "▸"} Where it comes from</button>
+      {open && (
+        <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 2 }}>
+          {row("Floor", p.floor, "every faction, every round — so nobody is locked out of politics")}
+          {row("Territory", p.territory,
+            `${p.hexes} hex${p.hexes === 1 ? "" : "es"} dominated${p.hexes > p.hexCap ? `, counted to ${p.hexCap}` : ""}`)}
+          {row("Agreements", p.agreements,
+            `${p.agreementCount} pact${p.agreementCount === 1 ? "" : "s"}, trade route${p.agreementCount === 1 ? "" : "s"} and vassal${p.agreementCount === 1 ? "" : "s"} — diplomacy funds diplomacy`)}
+          {p.chips > 0 && row("Buildings", p.chips, null)}
+          <div style={{ height: 1, background: "rgba(86,211,198,0.18)", margin: "4px 0" }} />
+          {row("Income", sway.income, null)}
+          {row(<Term id="r-courtship">Courtships</Term>, -sway.committed, `${sway.costs.courtUpkeep} each, per round`)}
+          <div style={{
+            fontFamily: C.font, fontSize: 9.5, letterSpacing: 0.4, lineHeight: 1.5,
+            color: "rgba(143,246,234,0.55)", marginTop: 6,
+          }}>
+            Scrap buys what a faction has. Sway buys what a faction thinks.
+            Nothing converts between them — not at any rate, in either direction.
+          </div>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+// §12.1 — the Standing receipt. Standing is the ONE number the win condition
+// reads, and it was the only reputation measure with no receipt at all: a
+// player could watch a faction cool on them with no way to tell which of their
+// own acts did it.
+//
+// Causes only, ordered, unsigned. The magnitudes are deliberately withheld
+// (§12.2): rendering signed deltas the way "How you got here" does for Menace
+// and Honor would hand the player a derivable running total for the value the
+// Spy Ring is supposed to sell. Which WAY it moved is free — a player must be
+// able to tell a grievance from a courtesy without buying espionage.
+// §6.3 — a gift, priced in political capacity. The old pane was the deal
+// builder set to "scrap, one way", which is what a gift USED to be: scrap
+// moving and Standing following. Scrap still moves goods — that is a deal with
+// nothing asked in return — but it no longer moves opinions, so this pane asks
+// the only question left: how much warmth, at the published rate.
+function GiftPane({ f, dip, onBack, onSubmit }) {
+  const sway = dip.sway || { pool: 0, costs: { perStanding: 8 } };
+  // THIS faction's rate, not the published one. Reaching somebody who despises
+  // you costs more per point (§6.3 reparations), and the engine quotes the
+  // real number on the verb so the pane never promises a price the verb will
+  // refuse. Falls back to the flat rate for every ordinary case.
+  const listed = (f.verbs || []).find((v) => v.verb === "gift");
+  const base = sway.costs.perStanding;
+  const rate = listed?.rate || base;
+  const affordable = Math.max(0, Math.floor(sway.pool / rate));
+  const [want, setWant] = useState(() => Math.min(2, Math.max(1, affordable)));
+  const cost = want * rate;
+  const canSend = affordable >= 1 && cost <= sway.pool;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
+      <PaneHeader title="Send word" f={f} onBack={onBack} term="r-gift-diplomacy" />
+      <div className="pc-scroll" style={{
+        flex: 1, overflowY: "auto", padding: "12px 16px",
+        display: "flex", flexDirection: "column", gap: 10,
+      }}>
+        <div className="pc-prose" style={{ fontSize: 12, lineHeight: 1.5, color: C.textDim }}>
+          Envoys, favours, a hearing at the right table. Costs{" "}
+          <b style={{ color: C.holoHi }}>{rate} Sway</b> per point of their regard —
+          political capacity, not scrap. Lean on them too often and each gift
+          buys less than the last.
+          {rate > base && (
+            <>
+              {" "}The usual rate is <b>{base}</b>. You are paying more because of
+              how badly they think of you — this is not a courtesy, it is
+              reparations, and there is no cheaper way back.
+            </>
+          )}
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <button className="hud-int" onClick={() => setWant((v) => Math.max(1, v - 1))}
+            style={{ ...paneBtn, opacity: want > 1 ? 1 : 0.4 }}>−</button>
+          <div style={{ minWidth: 88, flex: "0 1 auto", textAlign: "center" }}>
+            <div style={{ fontFamily: C.font, fontSize: 22, fontWeight: 700, color: C.holoHi, lineHeight: 1 }}>
+              +{want}
+            </div>
+            <div style={{ fontFamily: C.font, fontSize: 9, letterSpacing: 1.2, textTransform: "uppercase", color: C.textFaint }}>
+              regard
+            </div>
+          </div>
+          <button className="hud-int" onClick={() => setWant((v) => Math.min(Math.max(1, affordable), v + 1))}
+            style={{ ...paneBtn, opacity: want < affordable ? 1 : 0.4 }}>+</button>
+          <div style={{ flex: 1, minWidth: 0, textAlign: "right" }}>
+            <div style={{ fontFamily: C.font, fontSize: 13, fontWeight: 700, color: cost > sway.pool ? "#d2453f" : C.holoHi }}>
+              {cost} Sway
+            </div>
+            <div style={{ fontFamily: C.font, fontSize: 9, letterSpacing: 0.8, color: C.textFaint }}>
+              of {sway.pool} held
+            </div>
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button className="hud-int" onClick={onBack} style={{ ...paneBtn, flex: 1 }}>Back</button>
+          <button className="hud-int" disabled={!canSend}
+            onClick={canSend ? () => onSubmit(want) : undefined}
+            style={{
+              ...paneBtn, flex: 2,
+              color: "#08100f",
+              background: `linear-gradient(180deg, ${C.holoHi}, ${C.holo})`,
+              opacity: canSend ? 1 : 0.4,
+              cursor: canSend ? "pointer" : "not-allowed",
+            }}>Send</button>
+        </div>
+        {!canSend && (
+          <div style={{ fontFamily: C.font, fontSize: 9.5, letterSpacing: 0.5, color: "#d2913c" }}>
+            Not enough Sway. It comes from the floor every faction gets, the ground
+            you dominate, and the agreements you already hold — not from your purse.
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+const paneBtn = {
+  fontFamily: C.font, fontSize: 11, fontWeight: 700, letterSpacing: 1.2,
+  textTransform: "uppercase", padding: "7px 14px", borderRadius: 5,
+  border: `1px solid ${C.holo}88`, background: "rgba(6,14,15,0.85)",
+  color: C.holoHi, cursor: "pointer",
+};
+
+function StandingReceipt({ rows, name }) {
+  const [open, setOpen] = useState(false);
+  if (!rows || !rows.length) return null;
+  const hasNumbers = rows.some((r) => r.delta != null);
+  return (
+    <div style={{ marginTop: 8 }}>
+      <button
+        className="hud-int"
+        onClick={() => setOpen((v) => !v)}
+        style={{
+          width: "100%", textAlign: "left", background: "none", border: "none",
+          padding: 0, cursor: "pointer", color: C.holoHi,
+          fontFamily: C.font, fontSize: 9, fontWeight: 700,
+          letterSpacing: 1.6, textTransform: "uppercase",
+        }}
+      >{open ? "▾" : "▸"} Why they stand there · {rows.length}</button>
+      {open && (
+        <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 3 }}>
+          {rows.map((r, i) => (
+            <div key={i} className="pc-prose" style={{ fontSize: 11.5, lineHeight: 1.45 }}>
+              <span style={{
+                fontFamily: C.font, fontWeight: 700, fontSize: 9, letterSpacing: 0.8,
+                marginRight: 6, color: r.direction === "warmed" ? "#5fc27a" : "#d2913c",
+              }}>{r.direction === "warmed" ? "WARMED" : "COOLED"}</span>
+              <span style={{ color: "rgba(207,214,220,0.85)" }}>
+                {r.text} · round {r.round}
+              </span>
+              {r.delta != null && (
+                <span style={{ color: "#8fd8ce", marginLeft: 6, fontFamily: C.font, fontSize: 10 }}>
+                  {r.delta > 0 ? "+" : ""}{r.delta} → {r.value}
+                </span>
+              )}
+            </div>
+          ))}
+          {!hasNumbers && (
+            <div style={{
+              fontFamily: C.font, fontSize: 8.5, letterSpacing: 0.8, textTransform: "uppercase",
+              color: "rgba(210,145,60,0.8)", marginTop: 4,
+            }}>By how much: Espionage required · Intelligence B1 Spy Ring</div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// A demand with a deadline. Complying costs you the thing; defying costs you
+// nothing yet, and hands them the right to take it.
+function UltimatumCard({ u, dip, onAction }) {
+  const f = dip.factions.find((x) => x.id === u.from);
+  return (
+    <Card accent="#d2453f">
+      <div className="pc-prose" style={{ fontSize: 12, lineHeight: 1.5, marginBottom: 7 }}>
+        <b style={{ color: f?.color || "#d2453f" }}>{u.fromName}</b> demands{" "}
+        <b style={{ color: C.holoHi }}>{u.demandText}</b>
+        {u.defied ? " — and you have refused." : "."}
+      </div>
+      {!u.defied && (
+        <div style={{ display: "flex", gap: 8 }}>
+          <button
+            className="hud-int"
+            disabled={!u.canComply}
+            onClick={() => onAction("answer-ultimatum", { ultimatumId: u.id, comply: true })}
+            style={{
+              flex: 1, fontFamily: C.font, fontSize: 10, fontWeight: 700,
+              letterSpacing: 1, textTransform: "uppercase", color: "#f4efe2",
+              padding: "6px 8px", borderRadius: 4, border: "1px solid rgba(86,211,198,0.35)",
+              background: "rgba(86,211,198,0.06)",
+              cursor: u.canComply ? "pointer" : "not-allowed", opacity: u.canComply ? 1 : 0.45,
+            }}
+          >{u.canComply ? "Give in" : (u.kind === "tribute" ? "Can't afford" : "Units still there")}</button>
+          <button
+            className="hud-int"
+            onClick={() => onAction("answer-ultimatum", { ultimatumId: u.id, comply: false })}
+            title={u.ifDefy}
+            style={{
+              flex: 1, fontFamily: C.font, fontSize: 10, fontWeight: 700,
+              letterSpacing: 1, textTransform: "uppercase", color: "#fff",
+              padding: "6px 8px", borderRadius: 4, border: "1px solid #6e1f12",
+              background: "linear-gradient(180deg, #d8553f, #a5331f)", cursor: "pointer",
+            }}
+          >Let it stand</button>
+        </div>
+      )}
+      <div style={{ fontFamily: C.font, fontSize: 9, letterSpacing: 0.5, color: "rgba(255,180,174,0.75)", marginTop: 6 }}>
+        {u.defied
+          ? "They may now take it by force, righteously."
+          : `${u.roundsLeft} round${u.roundsLeft === 1 ? "" : "s"} left. ${u.ifDefy}`}
+      </div>
+    </Card>
+  );
+}
+
+// One offer awaiting an answer. Deliberately plain: two term lists and two
+// buttons. The interesting part is that it EXISTS — before this, a proposal
+// resolved the instant it was made and there was no state in which anything
+// was pending.
+// §12.3 — THE INTRIGUE BRANCH.
+//
+// Three ops, and the card's job is to make the difference between them
+// legible before a press, because the difference is the design: Expose is
+// TRUE and cannot rebound; Forge and Fabricate are lies and can be seen
+// through. A lie whose chance of being caught the player cannot read is a coin
+// flip, not a decision — so the percentage is on the button.
+// The six derived wants, in the words the courtship conditions already use.
+const WANT_TEXT = {
+  reclaim: "a homeland of theirs somebody else holds",
+  redress: "amends for something done to them",
+  warHelp: "help in a war they are losing",
+  routes: "a trade route",
+  quiet: "your columns off their ground",
+  isolate: "somebody's lead cut down",
+};
+
+// Which ear heard it. Named on the row, because "you can expose this" is a
+// button and "your Spy Ring heard about it" is a reason to have built one.
+const VIA = {
+  "spy-ring": "your Spy Ring heard",
+  "listening-post": "a listening post caught it",
+  scouts: "your scouts pieced it together",
+  omniscient: "word got around",
+};
+
+function IntrigueCard({ intrigue, factions, onAction }) {
+  const [mode, setMode] = useState(null); // null | "expose" | "forge" | "fabricate"
+  const [forgeAgainst, setForgeAgainst] = useState(null);
+  if (!intrigue) return null;
+  const { cost, affordable, caughtPercent, targets } = intrigue;
+  const dim = { fontFamily: C.font, fontSize: 8.5, letterSpacing: 0.4, color: "rgba(143,246,234,0.5)" };
+  const colFor = (id) => factions.find((f) => f.id === id)?.color || C.holoHi;
+  const pill = (label, active, onClick, disabled, title) => (
+    <button
+      className="hud-int"
+      disabled={disabled}
+      onClick={onClick}
+      title={title}
+      style={{
+        flex: 1, fontFamily: C.font, fontSize: 9.5, fontWeight: 700, letterSpacing: 0.9,
+        textTransform: "uppercase", color: active ? "#08100f" : "#f4efe2",
+        padding: "5px 6px", borderRadius: 3,
+        border: `1px solid ${active ? "#a878c8" : "rgba(168,120,200,0.35)"}`,
+        background: active ? "linear-gradient(180deg,#c9a0e0,#9b6fbe)" : "rgba(168,120,200,0.07)",
+        cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.4 : 1,
+      }}
+    >{label}</button>
+  );
+  const row = (t, label, enabled, why, onClick) => (
+    <button
+      key={t.id + label}
+      className="hud-int"
+      disabled={!enabled}
+      onClick={onClick}
+      title={why || undefined}
+      style={{
+        display: "block", width: "100%", textAlign: "left",
+        fontSize: 12, color: "#f4efe2", padding: "5px 8px", borderRadius: 3,
+        marginBottom: 3, border: "1px solid rgba(168,120,200,0.25)",
+        background: "rgba(168,120,200,0.05)",
+        cursor: enabled ? "pointer" : "not-allowed", opacity: enabled ? 1 : 0.4,
+      }}
+    >
+      <b style={{ color: colFor(t.id) }}>{t.name}</b>
+      {why ? <span style={{ opacity: 0.7 }}> — {why}</span> : null}
+    </button>
+  );
+  return (
+    <Card accent="#a878c8">
+      <SectionLabel color="#c9a0e0" term="r-intrigue">Quiet work</SectionLabel>
+      <div className="pc-prose" style={{ fontSize: 12, lineHeight: 1.5, marginBottom: 7 }}>
+        <Term id="r-sway">Sway</Term> buys what the board <i>believes</i>. Each of
+        these costs <b style={{ color: affordable ? C.holoHi : "#ffb4ae" }}>{cost} Sway</b>
+        {" "}— <Term id="r-expose">expose</Term> the true, <Term id="r-forge">forge</Term>{" "}
+        against a third party, <Term id="r-fabricate">fabricate</Term> about yourself.
+      </div>
+      {/* §12.3 — WHAT YOUR EARS ARE. Expose publishes a strike nobody saw, so
+          the first question is how you would know about it, and the answer is
+          the Intelligence branch. Said once at the top rather than left to be
+          inferred from a row of greyed-out names. */}
+      <div className="pc-prose" style={{
+        fontSize: 11.5, lineHeight: 1.45, marginBottom: 7, padding: "5px 8px",
+        borderRadius: 3, border: `1px solid ${intrigue.apparatus ? "rgba(168,120,200,0.3)" : "rgba(210,69,63,0.35)"}`,
+        background: intrigue.apparatus ? "rgba(168,120,200,0.06)" : "rgba(210,69,63,0.06)",
+        color: intrigue.apparatus ? "#f4efe2" : "#ffb4ae",
+      }}>
+        <Term id="r-spy-ring">{intrigue.apparatusText}</Term>
+      </div>
+      <div style={{ display: "flex", gap: 5, marginBottom: 7 }}>
+        {pill("Expose", mode === "expose", () => setMode(mode === "expose" ? null : "expose"),
+          !affordable, "Publish a strike they got away with. True, so it cannot rebound on you.")}
+        {pill("Forge", mode === "forge", () => setMode(mode === "forge" ? null : "forge"),
+          !affordable, "Plant evidence they wronged somebody else. A lie.")}
+        {pill("Fabricate", mode === "fabricate", () => setMode(mode === "fabricate" ? null : "fabricate"),
+          !affordable, "Invent a wrong done to you, and a war worth fighting over it. A lie.")}
+      </div>
+      {mode === "expose" && (
+        <div>
+          <div style={{ ...dim, marginBottom: 5 }}>THE TRUTH COSTS YOU NOTHING BUT THE SWAY.</div>
+          {targets.map((t) => row(t, "expose", t.canExpose,
+            t.canExpose
+              ? `struck ${t.exposeAgainst} unseen — ${VIA[t.exposeVia] || "you heard"}`
+              : intrigue.apparatus ? "nothing you have heard of"
+                : "you have no way of knowing",
+            () => { setMode(null); onAction("expose", { faction: t.id }); }))}
+        </div>
+      )}
+      {(mode === "forge" || mode === "fabricate") && (
+        <div>
+          <div style={{ ...dim, marginBottom: 5, color: "#ffb4ae" }}>
+            {`SEEN THROUGH ${caughtPercent}% OF THE TIME — ${intrigue.caughtHonorLoss} HONOR, `}
+            {`${intrigue.caughtMenace} MENACE, AND EVERYONE IT TOUCHED HOLDS IT AGAINST YOU. `}
+            {`IF IT LANDS IT LASTS ${intrigue.lastsRounds} ROUNDS.`}
+          </div>
+          {mode === "fabricate" && targets.map((t) => row(t, "fab", t.canFabricate, t.fabricateWhy,
+            () => { setMode(null); onAction("fabricate", { faction: t.id }); }))}
+          {mode === "forge" && !forgeAgainst && (
+            <>
+              <div style={{ ...dim, marginBottom: 4 }}>WHO IS THE FORGERY ABOUT?</div>
+              {targets.map((t) => row(t, "who", true, null, () => setForgeAgainst(t.id)))}
+            </>
+          )}
+          {mode === "forge" && forgeAgainst && (
+            <>
+              <div style={{ ...dim, marginBottom: 4 }}>
+                {`AND WHO IS TOLD THAT ${(targets.find((x) => x.id === forgeAgainst)?.name || "").toUpperCase()} WRONGED THEM?`}
+              </div>
+              {targets.filter((t) => t.id !== forgeAgainst).map((t) => row(t, "told", true, null,
+                () => { setMode(null); setForgeAgainst(null); onAction("forge", { faction: forgeAgainst, against: t.id }); }))}
+            </>
+          )}
+        </div>
+      )}
+      {!affordable && (
+        <div style={{ ...dim, marginTop: 5 }}>NOT ENOUGH SWAY — QUIET WORK IS PAID FOR OUT OF SURPLUS.</div>
+      )}
+    </Card>
+  );
+}
+
+// §13 — WHAT YOU STAND FOR.
+//
+// Every other political act in this drawer is a transaction: pay Sway, trade
+// terms, take ground and lose Standing. A POSITION is the only thing here you
+// can simply say, at nobody's request, and be held to — which makes it the
+// only one that builds a reputation instead of spending one.
+//
+// So the card leads with the cost of breaking one, not with the button. The
+// whole value of the feature is that the number is real before you press it.
+function PositionsCard({ positions, onAction }) {
+  const [picking, setPicking] = useState(false);
+  if (!positions) return null;
+  const { held, options, room, max } = positions;
+  const open = (options || []).filter((o) => o.available);
+  const dim = { fontFamily: C.font, fontSize: 8.5, letterSpacing: 0.4, color: "rgba(143,246,234,0.5)" };
+  return (
+    <Card accent="#c9b24e">
+      <SectionLabel color="#c9b24e" term="r-position">What you stand for</SectionLabel>
+      {held.length === 0 && !picking && (
+        <div className="pc-prose" style={{ fontSize: 12, lineHeight: 1.5, opacity: 0.75 }}>
+          You have said nothing to the board that anyone can hold you to.
+        </div>
+      )}
+      {held.map((p) => (
+        <div key={p.id} style={{
+          display: "flex", alignItems: "baseline", gap: 8,
+          padding: "5px 0", borderBottom: "1px solid rgba(201,178,78,0.15)",
+        }}>
+          <div className="pc-prose" style={{ flex: 1, fontSize: 12, lineHeight: 1.45 }}>
+            You <b style={{ color: "#e6cf7a" }}>{p.text}</b>.
+            <span style={{ ...dim, marginLeft: 6 }}>
+              {p.heldRounds === 0 ? "SAID THIS ROUND" : `HELD ${p.heldRounds} ROUND${p.heldRounds === 1 ? "" : "S"}`}
+            </span>
+          </div>
+          <button
+            className="hud-int"
+            disabled={!p.canWithdraw}
+            onClick={() => onAction("withdraw-position", { positionId: p.id })}
+            title={p.canWithdraw
+              ? `Stand down honestly: −${positions.withdrawHonorLoss} Honor, against −${positions.breakHonorLoss} for being caught breaking it.`
+              : `Not yet — ${p.withdrawIn} more round${p.withdrawIn === 1 ? "" : "s"}. A position you can drop the round before you break it is not one.`}
+            style={{
+              fontFamily: C.font, fontSize: 8.5, fontWeight: 700, letterSpacing: 0.8,
+              textTransform: "uppercase", color: "#f4efe2", padding: "3px 7px",
+              borderRadius: 3, border: "1px solid rgba(201,178,78,0.35)",
+              background: "rgba(201,178,78,0.07)",
+              cursor: p.canWithdraw ? "pointer" : "not-allowed", opacity: p.canWithdraw ? 1 : 0.4,
+            }}
+          >Stand down</button>
+        </div>
+      ))}
+      {(positions.cited || []).length > 0 && (
+        <div className="pc-prose" style={{ fontSize: 11.5, lineHeight: 1.45, marginTop: 6, color: "#ffb4ae" }}>
+          They are still naming you for it: {positions.cited.map((c) => `"${c.text}"`).join(", ")}.
+        </div>
+      )}
+      {!picking && room > 0 && open.length > 0 && (
+        <button
+          className="hud-int"
+          onClick={() => setPicking(true)}
+          style={{
+            width: "100%", marginTop: 8, fontFamily: C.font, fontSize: 10, fontWeight: 700,
+            letterSpacing: 1, textTransform: "uppercase", color: "#f4efe2",
+            padding: "6px 8px", borderRadius: 4, border: "1px solid rgba(201,178,78,0.4)",
+            background: "rgba(201,178,78,0.08)", cursor: "pointer",
+          }}
+        >Take a position ({room} of {max} left)</button>
+      )}
+      {picking && (
+        <div style={{ marginTop: 8 }}>
+          <div style={{ ...dim, marginBottom: 6, color: "#ffb4ae" }}>
+            {`BREAKING ONE COSTS ${positions.breakHonorLoss} HONOR AND ${positions.breakMenace} MENACE, AND THE BOARD WILL NAME IT.`}
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            {open.map((o) => (
+              <button
+                key={`${o.kind}|${o.target || "any"}`}
+                className="hud-int"
+                onClick={() => { setPicking(false); onAction("declare-position", { kind: o.kind, target: o.target }); }}
+                style={{
+                  textAlign: "left", fontFamily: C.body || "inherit", fontSize: 12,
+                  color: "#f4efe2", padding: "5px 8px", borderRadius: 3,
+                  border: "1px solid rgba(201,178,78,0.28)",
+                  background: "rgba(201,178,78,0.05)", cursor: "pointer",
+                }}
+              >You {o.text}.</button>
+            ))}
+          </div>
+          <button
+            className="hud-int"
+            onClick={() => setPicking(false)}
+            style={{
+              width: "100%", marginTop: 6, fontFamily: C.font, fontSize: 9, fontWeight: 700,
+              letterSpacing: 1, textTransform: "uppercase", color: "#f4efe2",
+              padding: "5px 8px", borderRadius: 3, border: "1px solid rgba(86,211,198,0.28)",
+              background: "rgba(86,211,198,0.05)", cursor: "pointer",
+            }}
+          >Say nothing</button>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function OfferCard({ offer: o, dip, onAction }) {
+  const f = dip.factions.find((x) => x.id === o.from);
+  const accent = o.isCounter ? "#c9b24e" : (f?.color || C.holoHi);
+  // §13 — the haggle, signed from YOUR seat: positive is scrap you pay,
+  // negative is scrap you want paid. Seeded from the terms as tabled, so the
+  // stepper starts where the offer stands and every press is a visible move
+  // off it rather than a number invented from nothing.
+  const [scrap, setScrap] = useState(o.netScrap ?? 0);
+  const [haggling, setHaggling] = useState(false);
+  // A counter is an ASK, and past `freeAsks` a refusal starts costing
+  // Standing. Say so before the press, not after.
+  const asked = (dip.asks || {})[o.from] || 0;
+  const willPester = asked >= (dip.freeAsks ?? 2);
+  const purse = dip.scrap ?? 0;
+  const overPurse = scrap > purse;
+  const unmoved = scrap === (o.netScrap ?? 0);
+  const Terms = ({ label, items, empty }) => (
+    <div style={{ flex: 1, minWidth: 0 }}>
+      <SectionLabel>{label}</SectionLabel>
+      <div className="pc-prose" style={{ fontSize: 12, lineHeight: 1.5 }}>
+        {items.length ? items.join(" · ") : <span style={{ opacity: 0.55 }}>{empty}</span>}
+      </div>
+    </div>
+  );
+  const btn = (label, onClick, opts = {}) => (
+    <button
+      className="hud-int"
+      disabled={opts.disabled}
+      onClick={onClick}
+      title={opts.title}
+      style={{
+        flex: opts.flex ?? 1, fontFamily: C.font, fontSize: 10, fontWeight: 700,
+        letterSpacing: 1, textTransform: "uppercase",
+        color: opts.primary ? "#08100f" : "#f4efe2",
+        padding: "6px 8px", borderRadius: 4,
+        border: `1px solid ${opts.primary ? "#5fc27a" : "rgba(86,211,198,0.35)"}`,
+        background: opts.primary
+          ? "linear-gradient(180deg, #7bd496, #4faf6e)"
+          : "rgba(86,211,198,0.06)",
+        cursor: opts.disabled ? "not-allowed" : "pointer",
+        opacity: opts.disabled ? 0.45 : 1,
+      }}
+    >{label}</button>
+  );
+  return (
+    <Card accent={accent}>
+      {/* Phrased around the faction name rather than after it: half the
+          names are plural ("Free Plainers"), half singular ("Clan Tempest"),
+          and no verb agrees with both. */}
+      <div className="pc-prose" style={{ fontSize: 12, lineHeight: 1.5, marginBottom: 8 }}>
+        {o.isCounter ? "Counter-terms from " : "An offer from "}
+        <b style={{ color: f?.color || C.holoHi }}>{o.fromName}</b>.
+        {o.note && <span style={{ opacity: 0.75 }}> {o.note}</span>}
+      </div>
+      <div style={{ display: "flex", gap: 10, marginBottom: 8 }}>
+        <Terms label="You get" items={o.youGet} empty="nothing" />
+        <Terms label="You give" items={o.youGive} empty="nothing" />
+      </div>
+      {!haggling && (
+        <div style={{ display: "flex", gap: 8 }}>
+          {btn(o.affordable ? "Accept" : "Can't afford",
+            () => onAction("answer-offer", { offerId: o.id, accept: true }),
+            { primary: true, disabled: !o.affordable })}
+          {o.canCounter !== false && btn("Counter", () => { setScrap(o.netScrap ?? 0); setHaggling(true); },
+            { title: "Move the scrap and put it back to them. A counter is an ask." })}
+          {btn("Decline", () => onAction("answer-offer", { offerId: o.id, accept: false }))}
+        </div>
+      )}
+      {haggling && (
+        <div>
+          {/* Only the scrap moves. Rewriting the other terms would make it a
+              different deal, which is what Propose Deal is for — and the AI's
+              own counters hold to the same line. */}
+          <SectionLabel>Your counter</SectionLabel>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
+            {btn("−5", () => setScrap((v) => v - 5), { flex: 0 })}
+            {btn("−1", () => setScrap((v) => v - 1), { flex: 0 })}
+            <div className="pc-prose" style={{ flex: 1, textAlign: "center", fontSize: 12, lineHeight: 1.4 }}>
+              {scrap > 0
+                ? <>you pay <b style={{ color: overPurse ? "#ffb4ae" : C.holoHi }}>{scrap}</b> scrap</>
+                : scrap < 0
+                  ? <>they pay <b style={{ color: C.holoHi }}>{-scrap}</b> scrap</>
+                  : <span style={{ opacity: 0.6 }}>no scrap either way</span>}
+            </div>
+            {btn("+1", () => setScrap((v) => v + 1), { flex: 0 })}
+            {btn("+5", () => setScrap((v) => v + 5), { flex: 0 })}
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            {btn(overPurse ? `You hold ${purse}` : "Put it to them",
+              () => { setHaggling(false); onAction("counter-offer", { offerId: o.id, scrap }); },
+              { primary: true, disabled: overPurse || unmoved,
+                title: unmoved ? "Move the terms first — that is what they already offered." : undefined })}
+            {btn("Back", () => setHaggling(false))}
+          </div>
+          <div style={{ fontFamily: C.font, fontSize: 8.5, letterSpacing: 0.4, color: "rgba(143,246,234,0.5)", marginTop: 6 }}>
+            {willPester
+              ? "THEY HAVE HEARD ENOUGH OF YOU THIS ROUND — A REFUSAL WILL COST STANDING."
+              : "A COUNTER TAKES THE OFFER OFF THE TABLE. THEY ANSWER IT AT ONCE."}
+          </div>
+        </div>
+      )}
+      <div style={{ fontFamily: C.font, fontSize: 8.5, letterSpacing: 0.4, color: "rgba(143,246,234,0.5)", marginTop: 6 }}>
+        {o.roundsLeft > 0
+          ? `Lapses in ${o.roundsLeft} round${o.roundsLeft === 1 ? "" : "s"} — letting it lapse costs nothing.`
+          : "Lapses at the end of this round."}
+      </div>
+    </Card>
+  );
+}
+
 function LandingView({ dip, onSelectFaction, onAction, onClose }) {
-  const rec = dip.recognition;
+  const dom = dip.dominion;
   const inbox = dip.pendingCalls || [];
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
@@ -402,40 +1109,92 @@ function LandingView({ dip, onSelectFaction, onAction, onClose }) {
         flex: 1, overflowY: "auto", padding: "14px 16px",
         display: "flex", flexDirection: "column", gap: 12,
       }}>
+        {/* §13.4 — the win condition is the most-read thing on this screen,
+            so it is the first card. It used to sit third, under two blocks of
+            reputation numbers that decide nothing on their own. */}
+        <PathToDominionCard dom={dom} />
+
         {/* Reputation block — your aggregate scores. */}
         <Card>
-          <SectionLabel>Your Standing in the Ashlands</SectionLabel>
+          <SectionLabel term="r-standing">Your Standing on the Continent</SectionLabel>
           <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-            <RepStat label="Menace" value={dip.menace.toFixed(1)} color="#d2913c" sub="aggression weight" />
-            <RepStat label="Honor" value={dip.honor.toFixed(1)} color="#5fc27a" sub="kept your word" />
-            <RepStat label="Threat" value={dip.threat.toFixed(1)} color={dip.threat > 6 ? "#d2453f" : C.holoHi} sub="coalition risk" />
+            <RepStat term="r-menace" label="Menace" value={dip.menace.toFixed(1)} color="#d2913c" sub="aggression weight" />
+            <RepStat term="r-honor" label="Honor" value={dip.honor.toFixed(1)} color="#5fc27a" sub="kept your word" />
+            <RepStat term="r-threat" label="Threat" value={dip.threat.toFixed(1)} color={dip.threat > 6 ? "#d2453f" : C.holoHi} sub="coalition risk" />
             <RepStat
-              label="Recognition"
-              value={`${rec.score}/${rec.threshold}`}
-              color={rec.met ? "#5fc27a" : "#c9b24e"}
-              sub={rec.met ? "Victory!" : `${rec.contributors?.length || 0} backing`}
+              term="r-dominion"
+              label="Dominion"
+              value={`${dom.score}/${dom.threshold}`}
+              color={dom.met ? "#5fc27a" : "#c9b24e"}
+              sub={dom.roundsLeft != null
+                ? `${dom.roundsLeft} to victory`
+                : `${dom.outstanding?.length || 0} still to deal with`}
             />
           </div>
         </Card>
 
-        {/* Path to Recognition — the per-faction backing checklist. Coarse
-            status is common knowledge; exact numbers ride with the Spy Ring. */}
-        <RecognitionCard rec={rec} />
+        <SwayCard sway={dip.sway} />
 
+        <PositionsCard positions={dip.positions} onAction={onAction} />
+
+        <IntrigueCard intrigue={dip.intrigue} factions={dip.factions} onAction={onAction} />
+
+        <Receipts receipts={dip.receipts} />
 
         {dip.coalitionAgainstYou && (
           <Card accent="#d2453f">
-            <SectionLabel color="#ffb4ae">Coalition against you</SectionLabel>
+            <SectionLabel color="#ffb4ae" term="r-coalition">Coalition against you</SectionLabel>
             <div className="pc-prose" style={{ fontSize: 12, lineHeight: 1.5 }}>
               {dip.coalitionAgainstYou.join(", ")} have aligned against your rise. Their walls are higher; your reach is shorter.
             </div>
           </Card>
         )}
 
+        {/* §6.10 — offers on the table. Either a faction opened a
+            conversation with you, or one came back with terms of its own
+            after refusing yours. Sits above Calls to Arms because an offer
+            expires quietly and a call does not. */}
+        {(dip.offers || []).length > 0 && (
+          <>
+            <SectionLabel color={C.holoHi} term="r-offer">On the Table</SectionLabel>
+            {dip.offers.map((o) => (
+              <OfferCard key={o.id} offer={o} dip={dip} onAction={onAction} />
+            ))}
+          </>
+        )}
+
+        {/* §6.11 — threats standing over you, and your own clock running. */}
+        {(dip.ultimatums || []).length > 0 && (
+          <>
+            <SectionLabel color="#d2453f" term="r-ultimatum">Or Else</SectionLabel>
+            {dip.ultimatums.map((u) => (
+              <UltimatumCard key={u.id} u={u} dip={dip} onAction={onAction} />
+            ))}
+          </>
+        )}
+        {(dip.ultimatumsIssued || []).length > 0 && (
+          <>
+            <SectionLabel color="#c9b24e" term="r-ultimatum">Your Word</SectionLabel>
+            {dip.ultimatumsIssued.map((u) => (
+              <Card key={u.id} accent="#c9b24e">
+                <div className="pc-prose" style={{ fontSize: 12, lineHeight: 1.5 }}>
+                  You have demanded <b style={{ color: C.holoHi }}>{u.demandText}</b> of{" "}
+                  <b>{u.toName}</b>.
+                </div>
+                <div style={{ fontFamily: C.font, fontSize: 9, letterSpacing: 0.5, color: u.defied ? "#ffb4ae" : "rgba(143,246,234,0.6)", marginTop: 5 }}>
+                  {u.defied
+                    ? `THEY REFUSED. ${u.roundsLeft} round${u.roundsLeft === 1 ? "" : "s"} to make good on it, or the board watches you back down.`
+                    : `${u.roundsLeft} round${u.roundsLeft === 1 ? "" : "s"} to answer.`}
+                </div>
+              </Card>
+            ))}
+          </>
+        )}
+
         {/* §1.8 — pact-call inbox: allies calling you into their wars. */}
         {inbox.length > 0 && (
           <>
-            <SectionLabel color="#c9b24e">Calls to Arms</SectionLabel>
+            <SectionLabel color="#c9b24e" term="r-pact-call">Calls to Arms</SectionLabel>
             {inbox.map((c) => (
               <Card key={c.id} accent="#c9b24e">
                 <div className="pc-prose" style={{ fontSize: 12, lineHeight: 1.5, marginBottom: 8 }}>
@@ -474,7 +1233,7 @@ function LandingView({ dip, onSelectFaction, onAction, onClose }) {
           </>
         )}
 
-        <SectionLabel>The Other Powers</SectionLabel>
+        <SectionLabel term="r-dominion">The Other Powers</SectionLabel>
 
         {/* Faction list */}
         {dip.factions.map((f) => (
@@ -491,22 +1250,40 @@ const BACKING_COLOR = {
   backs: "#5fc27a", warming: "#c9b24e", cold: "rgba(143,246,234,0.45)",
   blocked: "#d2913c", coalition: "#d2453f",
 };
+// "BACKS YOU" was the language of a Recognition score somebody could lend you
+// weight toward. The question now is simply whether this faction is dealt
+// with — allied, sworn, or gone.
 const BACKING_LABEL = {
-  backs: "BACKS YOU", warming: "WARMING", cold: "COLD",
+  backs: "DEALT WITH", warming: "WARMING", cold: "OUTSTANDING",
   blocked: "DISTRUSTS", coalition: "COALITION",
 };
-function RecognitionCard({ rec }) {
-  const backing = rec.backing || [];
+function PathToDominionCard({ dom }) {
+  const backing = dom.backing || [];
   if (!backing.length) return null;
   const hasSpy = backing.some((b) => b.detail);
   return (
     <Card>
-      <SectionLabel>Path to Recognition</SectionLabel>
+      <SectionLabel term="r-dominion">Path to Dominion</SectionLabel>
       <div className="pc-prose" style={{ fontSize: 11, lineHeight: 1.5, color: "rgba(143,246,234,0.6)", marginBottom: 8 }}>
-        Reach <b style={{ color: C.holoHi }}>{rec.threshold}</b> backing to win outright.
-        A vassal counts double an ally. The first time each power backs you,
-        you bank <b style={{ color: "#e8c95a" }}>+{rec.summitVp} VP</b>.
+        You win when every faction still standing is your{" "}
+        <Term id="r-alliance">ally</Term>, your <Term id="r-vassalage">vassal</Term>,
+        or gone — by conquest, by diplomacy, or any mix of the two. Then hold it
+        for <b style={{ color: C.holoHi }}>{dom.holdRounds}</b> rounds.
+        {" "}<b style={{ color: dom.met ? "#5fc27a" : C.holoHi }}>{dom.score}</b> of{" "}
+        <b style={{ color: C.holoHi }}>{dom.threshold}</b> dealt with.
       </div>
+      {dom.roundsLeft != null && (
+        <div style={{
+          fontFamily: C.font, fontSize: 11, letterSpacing: 1, marginBottom: 8,
+          padding: "6px 8px", borderRadius: 5,
+          color: "#08100f", fontWeight: 700,
+          background: `linear-gradient(180deg, ${C.holoHi}, ${C.holo})`,
+        }}>
+          {dom.roundsLeft > 0
+            ? `Hold it — ${dom.roundsLeft} round${dom.roundsLeft === 1 ? "" : "s"} to victory`
+            : "The board is yours"}
+        </div>
+      )}
       <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
         {backing.map((b) => (
           <div key={b.id} style={{
@@ -518,13 +1295,7 @@ function RecognitionCard({ rec }) {
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <span style={{ fontFamily: C.font, fontSize: 11.5, fontWeight: 700, flex: 1, color: "#f4efe2" }}>
                 {b.name}
-                {rec.summits?.includes(b.id) && (
-                  <span title="Summit VP banked" style={{ color: "#e8c95a", marginLeft: 6 }}>★</span>
-                )}
               </span>
-              {b.weight > 0 && (
-                <span style={{ fontFamily: C.font, fontSize: 10.5, fontWeight: 700, color: "#5fc27a" }}>+{b.weight}</span>
-              )}
               <span style={{
                 fontFamily: C.font, fontSize: 8.5, fontWeight: 700, letterSpacing: 1,
                 color: BACKING_COLOR[b.status],
@@ -553,13 +1324,13 @@ function RecognitionCard({ rec }) {
   );
 }
 
-function RepStat({ label, value, sub, color }) {
+function RepStat({ label, value, sub, color, term }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", minWidth: 70 }}>
       <span style={{
         fontFamily: C.font, fontSize: 9, letterSpacing: 1.6,
         textTransform: "uppercase", color: "rgba(143,246,234,0.55)",
-      }}>{label}</span>
+      }}>{term ? <Term id={term}>{label}</Term> : label}</span>
       <span style={{
         fontFamily: C.font, fontSize: 18, fontWeight: 700,
         color: color || "#f4efe2",
@@ -575,8 +1346,13 @@ function RepStat({ label, value, sub, color }) {
 }
 
 function FactionRow({ f, onClick }) {
-  const tierColor = TIER_COLOR[f.standingTier] || "#f4efe2";
-  const rel = f.lordOfYou ? "YOUR LORD"
+  // A destroyed faction keeps its row — what passed between you is still
+  // worth reading — but every live reading on it is stale. Its last Standing
+  // rendered as "NEUTRAL · tolerates you with caution", which invited the
+  // player to court a faction that no longer has a unit or a town.
+  const tierColor = f.eliminated ? C.textFaint : (TIER_COLOR[f.standingTier] || "#f4efe2");
+  const rel = f.eliminated ? "DESTROYED"
+    : f.lordOfYou ? "YOUR LORD"
     : f.vassalOfYou ? "YOUR VASSAL"
     : f.pacted ? "PACTED"
     : f.atWar ? "AT WAR"
@@ -639,20 +1415,65 @@ function FactionRow({ f, onClick }) {
         fontFamily: C.font, fontSize: 10, letterSpacing: 1.2,
         textTransform: "uppercase",
       }}>
-        <span style={{ color: tierColor, fontWeight: 700 }}>{TIER_LABEL[f.standingTier] || f.standingTier}</span>
+        <span style={{ color: tierColor, fontWeight: 700 }}>
+          {f.eliminated ? "GONE" : (TIER_LABEL[f.standingTier] || f.standingTier)}
+        </span>
         {rel && (
           <span style={{
-            color: f.atWar || f.inCoalition ? "#d2453f" : "#5fc27a",
+            color: f.eliminated ? C.textFaint
+              : f.atWar || f.inCoalition ? "#d2453f" : "#5fc27a",
             fontWeight: 800, letterSpacing: 1.4,
           }}>{rel}</span>
         )}
       </div>
+      {/* §13.4 — POSTURE AND CONDITION, next to the tier word. This one line
+          is the legibility fix the whole brief turns on: "Courting — wants you
+          clear of Omara" tells a player what the tier word never could, and it
+          is the difference between an AI whose behaviour you can reconstruct
+          and one that reads as arbitrary. The posture and the condition are
+          public; how close you are to the threshold behind them is not. */}
+      {!f.eliminated && f.posture && f.posture.kind !== "Watching" && f.posture.kind !== "Indifferent" && (
+        <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginTop: 5, flexWrap: "wrap" }}>
+          <span style={{
+            fontFamily: C.font, fontSize: 9.5, fontWeight: 800, letterSpacing: 1.4,
+            textTransform: "uppercase", color: POSTURE_COLOR[f.posture.kind] || C.holoHi,
+          }}><Term id="r-posture">{f.posture.kind}</Term></span>
+          {f.posture.condition && (
+            <span className="pc-prose" style={{
+              fontSize: 11.5, lineHeight: 1.4, color: "rgba(207,214,220,0.9)", fontStyle: "italic",
+            }}>“<Term id="r-condition">{f.posture.condition}</Term>”</span>
+          )}
+          {!f.posture.stated && (
+            <span title="They have not said this out loud yet — and a faction does not act on a posture it has not stated."
+              style={{ fontFamily: C.font, fontSize: 8.5, letterSpacing: 1, color: C.textFaint }}>
+              UNSPOKEN
+            </span>
+          )}
+        </div>
+      )}
+      {!f.eliminated && f.posture?.youAreCourting && (
+        <div style={{
+          fontFamily: C.font, fontSize: 9, letterSpacing: 1.1, textTransform: "uppercase",
+          color: "#5fc27a", marginTop: 3,
+        }}><Term id="r-courtship">You are courting them</Term> · round {f.posture.yourCourtRounds}</div>
+      )}
       <div className="pc-prose" style={{
         fontSize: 11.5, color: "rgba(207,214,220,0.86)", marginTop: 5, lineHeight: 1.4,
-      }}>{f.sentenceShort}</div>
+      }}>{f.eliminated ? "Driven from the board. Nothing left to deal with."
+          : f.sentenceShort}</div>
     </button>
   );
 }
+
+// Posture reads as a stance, so it takes the temperature of one: a courtship
+// is warm, a warning is not, and a commitment is simply a fact.
+const POSTURE_COLOR = {
+  Courting: "#5fc27a",
+  Warning: "#d2913c",
+  Committed: "#8fd8ce",
+  Watching: "#a89d87",
+  Indifferent: "#6b6355",
+};
 
 // =======================================================================
 // Faction Detail view — §3.3
@@ -783,7 +1604,7 @@ function LeaderTransmission({ f, tierColor }) {
 
 // Small holo pill — used as a tag row below the leader transmission to
 // surface relationship state at a glance (Pacted, At War, Vassal, etc).
-function StatusPill({ color, children }) {
+function StatusPill({ color, children, term }) {
   return (
     <span style={{
       display: "inline-flex", alignItems: "center", gap: 4,
@@ -794,30 +1615,30 @@ function StatusPill({ color, children }) {
       fontFamily: C.font, fontSize: 8.5, fontWeight: 700,
       letterSpacing: 1.4, textTransform: "uppercase",
       color, whiteSpace: "nowrap",
-    }}>{children}</span>
+    }}>{term ? <Term id={term}>{children}</Term> : children}</span>
   );
 }
 
 function StatusRow({ f, tierColor }) {
   const pills = [];
-  pills.push({ color: tierColor, label: TIER_LABEL[f.standingTier] || f.standingTier });
+  pills.push({ color: tierColor, label: TIER_LABEL[f.standingTier] || f.standingTier, term: "r-standing" });
   if (f.vp != null) pills.push({ color: "#e8c95a", label: `★ ${f.vp} VP` });
   if (f.temperament) pills.push({ color: C.holo, label: f.temperament });
-  if (f.atWar)        pills.push({ color: "#d2453f", label: "◤ At War" });
-  if (f.pacted)       pills.push({ color: "#5fc27a", label: "◆ Pacted" });
-  if (f.vassalOfYou)  pills.push({ color: C.gold,    label: "◇ Your Vassal" });
-  if (f.lordOfYou)    pills.push({ color: C.gold,    label: "◆ Sworn To" });
-  if (f.inCoalition)  pills.push({ color: "#d2453f", label: "⚠ Coalition" });
+  if (f.atWar)        pills.push({ color: "#d2453f", label: "◤ At War",     term: "r-war" });
+  if (f.pacted)       pills.push({ color: "#5fc27a", label: "◆ Pacted",     term: "r-pact" });
+  if (f.vassalOfYou)  pills.push({ color: C.gold,    label: "◇ Your Vassal", term: "r-vassalage" });
+  if (f.lordOfYou)    pills.push({ color: C.gold,    label: "◆ Sworn To",   term: "r-vassalage" });
+  if (f.inCoalition)  pills.push({ color: "#d2453f", label: "⚠ Coalition",  term: "r-coalition" });
   return (
     <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
-      {pills.map((p, i) => <StatusPill key={i} color={p.color}>{p.label}</StatusPill>)}
+      {pills.map((p, i) => <StatusPill key={i} color={p.color} term={p.term}>{p.label}</StatusPill>)}
     </div>
   );
 }
 
 // A thin gradient rule with an inline numeric marker — used to separate
 // sections in the scrolling detail body without piling Cards on Cards.
-function SectionRule({ index, label, color = C.holo }) {
+function SectionRule({ index, label, color = C.holo, term }) {
   return (
     <div style={{
       display: "flex", alignItems: "center", gap: 8,
@@ -832,7 +1653,7 @@ function SectionRule({ index, label, color = C.holo }) {
         fontFamily: C.font, fontSize: 9, fontWeight: 700,
         letterSpacing: 2.4, textTransform: "uppercase", color,
         opacity: 0.9,
-      }}>▸ {label}</span>
+      }}>▸ {term ? <Term id={term}>{label}</Term> : label}</span>
       <span style={{
         flex: 1, height: 1,
         background: `linear-gradient(90deg, ${color}99, ${color}10 80%, transparent)`,
@@ -934,6 +1755,7 @@ function IntelBrief({ f, tierColor }) {
             </>
           )}
         </div>
+        <StandingReceipt rows={f.standingReceipt} name={f.name} />
       </div>
     </div>
   );
@@ -943,6 +1765,8 @@ function IntelBrief({ f, tierColor }) {
 // wall of buttons.
 const VERB_CATEGORY = {
   // Diplomacy — overtures, custom deals, mediation.
+  "court":                 "diplomacy",
+  "end-courtship":         "diplomacy",
   "gift":                  "diplomacy",
   "propose-deal":          "diplomacy",
   "propose-pact":          "diplomacy",
@@ -1097,6 +1921,11 @@ function ActionGroup({ label, accent, defaultOpen, count, children }) {
 
 function FactionDetailView({ f, dip, onBack, onClose, onVerb, onOpenPane, onConfirmAndAct }) {
   const tierColor = TIER_COLOR[f.standingTier] || "#f4efe2";
+  // Anything THIS faction has put to you, shown here as well as in the
+  // landing inbox. A counter-offer is generated by proposing from this very
+  // screen, so telling the player to go and look somewhere else for the
+  // reply would be a strange way to hold a conversation.
+  const theirOffers = (dip.offers || []).filter((o) => o.from === f.id);
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
       <DetailHeader f={f} tierColor={tierColor} onBack={onBack} onClose={onClose} />
@@ -1105,20 +1934,29 @@ function FactionDetailView({ f, dip, onBack, onClose, onVerb, onOpenPane, onConf
         flex: 1, overflowY: "auto", padding: "12px 14px 14px",
         display: "flex", flexDirection: "column", gap: 11,
       }}>
+        {theirOffers.length > 0 && (
+          <>
+            <SectionRule index={0} label={theirOffers[0].isCounter ? "Their Terms" : "On the Table"} color={C.holoHi} term="r-offer" />
+            {theirOffers.map((o) => (
+              <OfferCard key={o.id} offer={o} dip={dip} onAction={onVerb} />
+            ))}
+          </>
+        )}
         {/* Recorded transmission — leader portrait in a viewscreen with
             broadcast HUD strips. Top of the detail view; scrolls away. */}
         <LeaderTransmission f={f} tierColor={tierColor} />
         <StatusRow f={f} tierColor={tierColor} />
 
-        <SectionRule index={1} label="Intel Brief" color={tierColor} />
+        <SectionRule index={1} label="Intel Brief" color={tierColor} term="r-spy-ring" />
         <IntelBrief f={f} tierColor={tierColor} />
 
-        <SectionRule index={2} label="Relationship" color={C.holo} />
+        <SectionRule index={2} label="Relationship" color={C.holo} term="r-standing" />
         <Card>
           <ObligationsList f={f} dip={dip} />
         </Card>
+        <GrievanceLedger f={f} />
 
-        <SectionRule index={3} label="What They Want" color={C.holo} />
+        <SectionRule index={3} label="What They Want" color={C.holo} term="r-interests" />
         <Card>
           <div className="pc-prose" style={{ fontSize: 12, lineHeight: 1.5 }}>
             <div style={{ marginBottom: 4 }}>
@@ -1129,6 +1967,48 @@ function FactionDetailView({ f, dip, onBack, onClose, onVerb, onOpenPane, onConf
             {f.wants}
           </div>
         </Card>
+
+        {/* §17.5 B1 — what a Spy Ring learns about the POLITICAL layer. It
+            used to reveal a tech wheel and two derived numbers, both of which
+            predate the diplomacy rework; a holder could not see what a rival
+            WANTED, what they had publicly sworn, or what they could afford.
+            Under Dominion, knowing what a faction wants is knowing how to ally
+            it, so this is the reveal that pays for the node. */}
+        {dip.spyRing && f.theirIntel && (
+          <>
+            <SectionRule index={4} label="What they are after" color="#c9a0e0" term="r-interests" />
+            <Card accent="#a878c8">
+              {f.theirIntel.interests.length ? (
+                <div className="pc-prose" style={{ fontSize: 12, lineHeight: 1.6 }}>
+                  {f.theirIntel.interests.slice(0, 4).map((w, i) => (
+                    <div key={i}>
+                      <b style={{ color: "#c9a0e0" }}>{WANT_TEXT[w.kind] || w.kind}</b>
+                      {w.subjectName ? <> — {w.subjectName}</> : null}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="pc-prose" style={{ fontSize: 12, opacity: 0.7 }}>
+                  Your people can find nothing they particularly want.
+                </div>
+              )}
+              {f.theirIntel.positions.length > 0 && (
+                <div className="pc-prose" style={{ fontSize: 12, lineHeight: 1.5, marginTop: 7 }}>
+                  They have sworn, in public: {f.theirIntel.positions.map((p) => p.text).join("; ")}.
+                </div>
+              )}
+              <div style={{
+                fontFamily: C.font, fontSize: 8.5, letterSpacing: 0.5, marginTop: 7,
+                color: "rgba(143,246,234,0.55)", textTransform: "uppercase",
+              }}>
+                {`SWAY ${f.theirIntel.sway.pool} · INCOME ${f.theirIntel.sway.income} · `}
+                {f.theirIntel.sway.courting
+                  ? `COURTING ${f.theirIntel.sway.courting}`
+                  : "COURTING NOBODY"}
+              </div>
+            </Card>
+          </>
+        )}
 
         <SectionRule index={4} label="Tech Wheel" color={C.holo} />
         {dip.spyRing ? (
@@ -1148,7 +2028,7 @@ function FactionDetailView({ f, dip, onBack, onClose, onVerb, onOpenPane, onConf
           </Card>
         )}
 
-        <SectionRule index={5} label="Actions" color={C.holoHi} />
+        <SectionRule index={5} label="Actions" color={C.holoHi} term="r-actions" />
         <ActionGroups
           f={f}
           onVerb={onVerb}
@@ -1157,6 +2037,47 @@ function FactionDetailView({ f, dip, onBack, onClose, onVerb, onOpenPane, onConf
         />
       </div>
     </div>
+  );
+}
+
+// What is actually between you — the books, both ways. The engine has always
+// kept this (it is what makes a war "justified") and never shown a line of
+// it, so a player could be denounced, invaded and coalitioned against with
+// no way to read why.
+function GrievanceLedger({ f }) {
+  const l = f.ledger;
+  if (!l || (!l.theyHold.length && !l.youHold.length)) return null;
+  const Side = ({ label, entries, weight, color }) => {
+    if (!entries.length) return null;
+    return (
+      <div style={{ marginTop: 6 }}>
+        <SectionLabel color={color}>{label} · weight {weight}</SectionLabel>
+        {entries.map((e, i) => (
+          <div key={i} className="pc-prose" style={{ fontSize: 11.5, lineHeight: 1.5, color: "rgba(207,214,220,0.85)" }}>
+            <span style={{ color, fontWeight: 700 }}>▪</span> {e.text}
+          </div>
+        ))}
+      </div>
+    );
+  };
+  return (
+    <Card accent="#d2913c">
+      <SectionLabel color="#e8b467" term="r-grievance">The books</SectionLabel>
+      <Side label="They hold against you" entries={l.theyHold} weight={l.theirWeight} color="#d2453f" />
+      <Side label="You hold against them" entries={l.youHold} weight={l.yourWeight} color="#c9b24e" />
+      {(l.theyHold.some((e) => e.kind === "occupation") || l.youHold.some((e) => e.kind === "occupation")) && (
+        <div className="pc-prose" style={{ fontSize: 11, lineHeight: 1.5, color: "#e8b467", marginTop: 6 }}>
+          Ground held is not a thing that happened — no settlement clears it.
+          It ends when the place changes hands.
+        </div>
+      )}
+      <div className="pc-prose" style={{ fontSize: 11, lineHeight: 1.5, color: "rgba(207,214,220,0.55)", marginTop: 7 }}>
+        A live grievance makes a war righteous for the side that holds it, and
+        gives them grounds to denounce — which is how something nobody
+        witnessed still reaches the board. Offer a settlement in a deal to
+        clear the slate: both ways at once, for a price that tracks the weight.
+      </div>
+    </Card>
   );
 }
 
@@ -1222,19 +2143,19 @@ function DetailHeader({ f, tierColor, onBack, onClose }) {
 
 function ObligationsList({ f, dip }) {
   const items = [];
-  if (f.lordOfYou) items.push("You are sworn to them as their vassal.");
-  if (f.vassalOfYou) items.push("They are your vassal — tribute flows to your bank each Upkeep.");
-  if (f.pacted) items.push("You have a mutual-defence pact.");
-  if (f.atWar) items.push("You are at war.");
-  if (f.inCoalition) items.push("They have joined a coalition against you.");
+  if (f.lordOfYou) items.push(<>You are sworn to them as their <Term id="r-vassalage">vassal</Term>.</>);
+  if (f.vassalOfYou) items.push(<>They are your <Term id="r-vassalage">vassal</Term> — <Term id="r-tribute">tribute</Term> flows to your bank each Upkeep.</>);
+  if (f.pacted) items.push(<>You have a mutual-defence <Term id="r-pact">pact</Term>.</>);
+  if (f.atWar) items.push(<>You are <Term id="r-war">at war</Term>.</>);
+  if (f.inCoalition) items.push(<>They have joined a <Term id="r-coalition">coalition</Term> against you.</>);
   if (f.tradingPact) {
     items.push(f.tradingPact.suspended
-      ? `Trading pact — suspended (round ${f.tradingPact.suspendedRounds} of grace).`
-      : "Trading pact — open route between capitals.");
+      ? <><Term id="r-trading-pact">Trading pact</Term> — suspended (round {f.tradingPact.suspendedRounds} of grace).</>
+      : <><Term id="r-trading-pact">Trading pact</Term> — a clear route from your ground to theirs.</>);
   }
-  if (f.openBordersFromYou && f.openBordersFromThem) items.push("Open borders both ways.");
-  else if (f.openBordersFromYou) items.push("You allow their units through your territory.");
-  else if (f.openBordersFromThem) items.push("They allow your units through their territory.");
+  if (f.openBordersFromYou && f.openBordersFromThem) items.push(<><Term id="r-open-borders">Open borders</Term> both ways.</>);
+  else if (f.openBordersFromYou) items.push(<>You allow their units <Term id="r-open-borders">through your territory</Term>.</>);
+  else if (f.openBordersFromThem) items.push(<>They allow your units <Term id="r-open-borders">through their territory</Term>.</>);
   if (items.length === 0) items.push("No formal agreements with this faction.");
 
   return (
@@ -1299,25 +2220,86 @@ function TechReadout({ nodes }) {
 // Action panes — §3.4
 // =======================================================================
 
+// The term, in rounds, that a stream or a standing promise runs for.
+// Mirrors CONFIG.diplomacy.flow — kept here rather than imported so the pane
+// stays a pure view; the engine clamps anything out of range regardless.
+const TERM_DEFAULT = 5;
+const TERM_MAX = 20;
+
 function DealPane({ f, dip, kind = "custom", onBack, onSubmit }) {
   const [scrapGive, setScrapGive] = useState(0);
   const [scrapGet, setScrapGet] = useState(0);
+  const [flowGive, setFlowGive] = useState(0);
+  const [flowGet, setFlowGet] = useState(0);
   const [pactOffer, setPactOffer] = useState(false);
   const [openBorders, setOpenBorders] = useState(false);
+  const [nonAggression, setNonAggression] = useState(false);
+  // …and the same three the other way round. A treaty table where you can
+  // only ever OFFER is a donation form; asking for their borders is half of
+  // what anyone actually wants out of one.
+  const [wantPact, setWantPact] = useState(false);
+  const [wantBorders, setWantBorders] = useState(false);
+  const [settle, setSettle] = useState(false);
+  // ECONOMY §9 — hire. Who you are paying them to fight, and who you are
+  // offering to fight for. Stored as a faction id or null, not a set: a deal
+  // that opens three wars at once is not a hire, it is a suicide note.
+  const [hireAgainst, setHireAgainst] = useState(null);
+  const [fightFor, setFightFor] = useState(null);
+  // §3.2 — cities on the table, by hexId. The map is what the war is about,
+  // and until now the only thing this pane could move was scrap.
+  const [cedeGive, setCedeGive] = useState(() => new Set());
+  const [cedeGet, setCedeGet] = useState(() => new Set());
+  const yoursToGive = dip.youCouldCede || [];
+  const theirsToAsk = f.theyCouldCede || [];
+  // Only worth offering when there is something a settlement can clear. An
+  // occupation is not in the past, so scrap does not touch it.
+  const owed = f.ledger?.settleable || 0;
+  const [term, setTerm] = useState(TERM_DEFAULT);
   const isPeace = kind === "peace";
   const isTribute = kind === "tribute";
   const isGift = kind === "gift";
+  // A term only means anything when something on the table actually runs for
+  // one; a lump sum and an alliance are both settled the moment it's struck.
+  const termMatters = flowGive > 0 || flowGet > 0 || nonAggression;
 
+  // Everything here speaks the engine's item schema
+  // ({resource} / {flow} / {promise:{kind}}). It used to emit its own
+  // shorthand — {pact:true}, {openBorders:true} — which valueOfItem does not
+  // read, so those terms were worth nothing to the other side and created
+  // nothing when the deal was struck. An offer of "an alliance for free" was
+  // accepted and produced no alliance.
   const deal = useMemo(() => {
     const give = [];
     const get = [];
     if (scrapGive > 0) give.push({ resource: { resource: "scrap", amount: scrapGive } });
     if (scrapGet > 0) get.push({ resource: { resource: "scrap", amount: scrapGet } });
-    if (pactOffer && !isTribute) give.push({ pact: true });
-    if (openBorders) give.push({ openBorders: true });
-    if (isPeace) give.push({ peace: true });
+    if (flowGive > 0) give.push({ flow: { resource: "scrap", amountPerTurn: flowGive, rounds: term } });
+    if (flowGet > 0) get.push({ flow: { resource: "scrap", amountPerTurn: flowGet, rounds: term } });
+    if (pactOffer && !isTribute) give.push({ promise: { kind: "pact" } });
+    if (openBorders) give.push({ promise: { kind: "openBorders" } });
+    if (nonAggression) {
+      // Non-aggression is mutual by nature — a one-sided one is just a
+      // promise not to hit somebody who may still hit you.
+      give.push({ promise: { kind: "nonAggression", rounds: term } });
+      get.push({ promise: { kind: "nonAggression", rounds: term } });
+    }
+    if (wantPact && !isTribute) get.push({ promise: { kind: "pact" } });
+    if (wantBorders) get.push({ promise: { kind: "openBorders" } });
+    // Asked for, not given: the party holding the grievances is the one being
+    // asked to give something up, and they price it accordingly.
+    if (settle) get.push({ settlement: true });
+    // ECONOMY §9 — "fight X with me", and its mirror. The engine has enacted
+    // this promise since §6.10 by declaring the war on acceptance; the
+    // composer simply could not say it.
+    if (hireAgainst) get.push({ promise: { kind: "joinWar", target: hireAgainst } });
+    if (fightFor) give.push({ promise: { kind: "joinWar", target: fightFor } });
+    for (const hex of cedeGive) give.push({ location: { hexId: hex } });
+    for (const hex of cedeGet) get.push({ location: { hexId: hex } });
+    if (isPeace) give.push({ promise: { kind: "peace" } });
     return { proposer: dip.youId, recipient: f.id, give, get };
-  }, [scrapGive, scrapGet, pactOffer, openBorders, dip.youId, f.id, isPeace, isTribute]);
+  }, [scrapGive, scrapGet, flowGive, flowGet, pactOffer, openBorders, nonAggression,
+      wantPact, wantBorders, settle, cedeGive, cedeGet, term, dip.youId, f.id, isPeace, isTribute,
+      hireAgainst, fightFor]);
 
   const title = isGift ? "Send a gift" : isPeace ? "Sue for peace" : isTribute ? "Demand tribute" : "Custom deal";
   const subtitle = isGift
@@ -1326,7 +2308,7 @@ function DealPane({ f, dip, kind = "custom", onBack, onSubmit }) {
     ? "The peace promise is fixed; everything else is yours to shape."
     : isTribute
     ? "Make them an offer they can refuse. Then live with the cost."
-    : "Build a give/get. They accept where the offer outweighs the ask.";
+    : "Build a give/get. If the ask outweighs the offer they will say so — and name the price they would take.";
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
@@ -1346,11 +2328,26 @@ function DealPane({ f, dip, kind = "custom", onBack, onSubmit }) {
             <Card style={{ flex: 1 }}>
               <SectionLabel>You give</SectionLabel>
               <NumberRow label="Scrap" value={scrapGive} onChange={setScrapGive} max={50} disabled={isTribute} />
+              {!isGift && (
+                <NumberRow label="Scrap / turn" value={flowGive} onChange={setFlowGive} max={12} />
+              )}
               {!isPeace && !isGift && (
                 <Toggle label="Offer pact" value={pactOffer} onChange={setPactOffer} />
               )}
               {!isGift && (
-                <Toggle label="Open borders" value={openBorders} onChange={setOpenBorders} />
+                <Toggle label="Open my borders" value={openBorders} onChange={setOpenBorders} />
+              )}
+              {!isGift && (
+                <Toggle label="Non-aggression" value={nonAggression} onChange={setNonAggression} />
+              )}
+              {!isGift && yoursToGive.length > 0 && (
+                <CityPicker
+                  label="Cede a city"
+                  cities={yoursToGive}
+                  chosen={cedeGive}
+                  onChange={setCedeGive}
+                  claimantOf={f.id}
+                />
               )}
               {isPeace && (
                 <div style={{
@@ -1366,9 +2363,103 @@ function DealPane({ f, dip, kind = "custom", onBack, onSubmit }) {
             <Card style={{ flex: 1 }}>
               <SectionLabel>You get</SectionLabel>
               <NumberRow label="Scrap" value={scrapGet} onChange={setScrapGet} max={50} />
+              <NumberRow label="Scrap / turn" value={flowGet} onChange={setFlowGet} max={12} />
+              {!isPeace && !isTribute && (
+                <Toggle label="Their alliance" value={wantPact} onChange={setWantPact} />
+              )}
+              <Toggle label="Their borders" value={wantBorders} onChange={setWantBorders} />
+              {owed > 0 && (
+                <Toggle label={`Call it settled (weight ${owed})`} value={settle} onChange={setSettle} />
+              )}
+              {theirsToAsk.length > 0 && (
+                <CityPicker
+                  label="Ask for a city"
+                  cities={theirsToAsk}
+                  chosen={cedeGet}
+                  onChange={setCedeGet}
+                  claimantOf={dip.youId}
+                />
+              )}
             </Card>
           )}
         </div>
+
+        {/* Term — only shown once something on the table actually runs for
+            one. A stream priced without a term is how the old builder let a
+            player buy four scrap a turn forever for twelve scrap. */}
+        {/* ECONOMY §9 — HIRE. The engine has enacted "fight X with me" since
+            §6.10 and this pane could not say it, so paying somebody to join
+            your war was engine-only. Both directions, because a war you are
+            OFFERED a hand in is worth as much as one you buy help for. */}
+        {!isGift && !isTribute && ((f.couldHireAgainst || []).length > 0 || (f.couldFightFor || []).length > 0) && (
+          <Card>
+            <SectionLabel term="r-pact-call">Swords</SectionLabel>
+            {(f.couldHireAgainst || []).length > 0 && (
+              <>
+                <div className="pc-prose" style={{ fontSize: 11.5, lineHeight: 1.5, marginBottom: 5 }}>
+                  Ask them into one of your wars. They will want paying for it —
+                  and they will not turn on their own allies at any price.
+                </div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginBottom: 8 }}>
+                  {(f.couldHireAgainst || []).map((t) => (
+                    <button
+                      key={t.id}
+                      className="hud-int"
+                      onClick={() => setHireAgainst(hireAgainst === t.id ? null : t.id)}
+                      style={{
+                        fontFamily: C.font, fontSize: 9.5, fontWeight: 700, letterSpacing: 0.8,
+                        textTransform: "uppercase", padding: "4px 8px", borderRadius: 3,
+                        color: hireAgainst === t.id ? "#08100f" : "#f4efe2",
+                        border: `1px solid ${hireAgainst === t.id ? "#d2453f" : "rgba(210,69,63,0.35)"}`,
+                        background: hireAgainst === t.id
+                          ? "linear-gradient(180deg,#e8756f,#c03b36)" : "rgba(210,69,63,0.07)",
+                        cursor: "pointer",
+                      }}
+                    >{`vs ${t.name}`}</button>
+                  ))}
+                </div>
+              </>
+            )}
+            {(f.couldFightFor || []).length > 0 && (
+              <>
+                <div className="pc-prose" style={{ fontSize: 11.5, lineHeight: 1.5, marginBottom: 5 }}>
+                  Or offer your own. Accepting opens the war the moment the deal
+                  is struck — this is a war you are choosing, not one you are promising.
+                </div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
+                  {(f.couldFightFor || []).map((t) => (
+                    <button
+                      key={t.id}
+                      className="hud-int"
+                      onClick={() => setFightFor(fightFor === t.id ? null : t.id)}
+                      style={{
+                        fontFamily: C.font, fontSize: 9.5, fontWeight: 700, letterSpacing: 0.8,
+                        textTransform: "uppercase", padding: "4px 8px", borderRadius: 3,
+                        color: fightFor === t.id ? "#08100f" : "#f4efe2",
+                        border: `1px solid ${fightFor === t.id ? "#c9b24e" : "rgba(201,178,78,0.35)"}`,
+                        background: fightFor === t.id
+                          ? "linear-gradient(180deg,#e6cf7a,#b99f3c)" : "rgba(201,178,78,0.07)",
+                        cursor: "pointer",
+                      }}
+                    >{`join vs ${t.name}`}</button>
+                  ))}
+                </div>
+              </>
+            )}
+          </Card>
+        )}
+
+        {termMatters && (
+          <Card>
+            <SectionLabel>Term</SectionLabel>
+            <NumberRow label="Rounds" value={term} onChange={(v) => setTerm(Math.max(1, v))} max={TERM_MAX} />
+            <div className="pc-prose" style={{ fontSize: 11, lineHeight: 1.5, color: "rgba(207,214,220,0.6)", marginTop: 4 }}>
+              Streams and standing promises run for this long, then lapse —
+              honourably, on both sides. They price it accordingly: a longer
+              term is worth more, but not proportionally more.
+            </div>
+          </Card>
+        )}
 
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
           <button onClick={onBack} className="hud-int" style={btnGhostStyle()}>Back</button>
@@ -1378,6 +2469,54 @@ function DealPane({ f, dip, kind = "custom", onBack, onSubmit }) {
             className="hud-int"
             style={{ ...btnHoloStyle(), opacity: isGift && scrapGive <= 0 ? 0.5 : 1 }}
           >{isGift ? "Send gift" : isTribute ? "Demand" : isPeace ? "Sue for peace" : "Propose"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Naming a demand and a deadline. Two kinds, because these are the two the
+// engine can check without ambiguity: scrap paid, and units gone.
+function UltimatumPane({ f, dip, onBack, onSubmit }) {
+  const [kind, setKind] = useState("tribute");
+  const [amount, setAmount] = useState(8);
+  const intruders = f.unitsInYourTerritory ?? null;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
+      <PaneHeader title="Issue an ultimatum" f={f} onBack={onBack} />
+      <div className="pc-scroll" style={{
+        flex: 1, overflowY: "auto", padding: "12px 16px",
+        display: "flex", flexDirection: "column", gap: 12,
+      }}>
+        <div style={{ fontFamily: C.font, fontSize: 11, letterSpacing: 1, lineHeight: 1.5, color: "rgba(207,214,220,0.7)" }}>
+          Say it out loud, with a date on it. If they defy you, your war on
+          them is righteous — and if you then do nothing, everyone saw.
+        </div>
+        <Card>
+          <SectionLabel>The demand</SectionLabel>
+          <Toggle label="Pay us" value={kind === "tribute"} onChange={() => setKind("tribute")} />
+          {kind === "tribute" && (
+            <NumberRow label="Scrap" value={amount} onChange={setAmount} max={30} />
+          )}
+          <Toggle
+            label="Get your units out of our territory"
+            value={kind === "withdraw"}
+            onChange={() => setKind("withdraw")}
+          />
+          {kind === "withdraw" && intruders === 0 && (
+            <div className="pc-prose" style={{ fontSize: 11, color: "#ffb4ae", marginTop: 5 }}>
+              They have nothing inside your borders to withdraw.
+            </div>
+          )}
+        </Card>
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+          <button onClick={onBack} className="hud-int" style={btnGhostStyle()}>Back</button>
+          <button
+            className="hud-int"
+            disabled={kind === "tribute" && amount < 1}
+            onClick={() => onSubmit(kind === "tribute" ? { kind, amount } : { kind })}
+            style={btnHoloStyle()}
+          >Deliver it</button>
         </div>
       </div>
     </div>
@@ -1520,7 +2659,7 @@ function PactCallPane({ f, dip, onBack, onSubmit }) {
   );
 }
 
-function PaneHeader({ title, f, onBack }) {
+function PaneHeader({ title, f, onBack, term }) {
   return (
     <div style={{
       padding: "12px 16px",
@@ -1546,7 +2685,7 @@ function PaneHeader({ title, f, onBack }) {
           fontFamily: C.font, fontSize: 14, fontWeight: 700,
           letterSpacing: 1.2, textTransform: "uppercase", color: C.holoHi,
           textShadow: `0 0 8px ${C.holo}66`,
-        }}>{title}</div>
+        }}>{term ? <Term id={term}>{title}</Term> : title}</div>
         {f && (
           <div style={{
             fontFamily: C.font, fontSize: 9.5, letterSpacing: 1.4,
@@ -1596,6 +2735,65 @@ function smallBtnStyle() {
     padding: 0,
   };
 }
+// §3.2 — the cities each side can put on the table. Multi-select, because
+// "both Omara and Kansit and we have peace" is a sentence somebody will want
+// to say, and each row carries the two facts that decide the price: what the
+// place is worth, and whose homeland it is. `claimantOf` is the party on the
+// OTHER side of this column — a city they call theirs is the one they will
+// pay far over the odds for, and the row says so rather than leaving the
+// player to discover it from a refusal.
+function CityPicker({ label, cities, chosen, onChange, claimantOf }) {
+  const toggle = (hex) => {
+    const next = new Set(chosen);
+    if (next.has(hex)) next.delete(hex); else next.add(hex);
+    onChange(next);
+  };
+  return (
+    <div style={{ marginTop: 10 }}>
+      <div style={{
+        fontFamily: C.font, fontSize: 9.5, letterSpacing: 1.4,
+        textTransform: "uppercase", color: "rgba(207,214,220,0.5)", marginBottom: 4,
+      }}>{label}</div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+        {cities.map((c) => {
+          const on = chosen.has(c.hexId);
+          const theirHomeland = c.affiliation && c.affiliation === claimantOf;
+          return (
+            <button
+              key={c.hexId}
+              onClick={() => toggle(c.hexId)}
+              className="hud-int"
+              style={{
+                display: "flex", alignItems: "baseline", gap: 6, width: "100%",
+                textAlign: "left", cursor: "pointer",
+                padding: "4px 6px", borderRadius: 3,
+                border: `1px solid ${on ? C.holo : "rgba(207,214,220,0.18)"}`,
+                background: on ? "rgba(86,211,198,0.14)" : "rgba(255,255,255,0.02)",
+                boxShadow: on ? `0 0 6px ${C.holo}55` : undefined,
+              }}
+            >
+              <span style={{
+                fontFamily: C.font, fontSize: 11.5, letterSpacing: 0.6,
+                color: on ? "#f4efe2" : "#cfd6dc", flex: 1,
+              }}>{c.name}</span>
+              {theirHomeland && (
+                <span
+                  title="Their homeland — they will pay well past its output to have it back"
+                  style={{ fontFamily: C.font, fontSize: 9, letterSpacing: 1, color: C.holoHi }}
+                >CLAIMED</span>
+              )}
+              <span style={{
+                fontFamily: C.font, fontSize: 10, letterSpacing: 0.6,
+                color: "rgba(207,214,220,0.55)",
+              }}>{c.vp} VP · {c.output}/turn</span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function Toggle({ label, value, onChange }) {
   return (
     <label style={{
@@ -1675,21 +2873,25 @@ export default function DiplomacyDrawer({
     setPane(null);
   }
 
-  // §5.3 — when the faction-detail view is showing a faction with an
-  // active trading pact, paint the capital-to-capital dotted route line
-  // on the map (green if clear, amber if suspended). Endpoints come from
-  // FACTIONS.{capital} — the viewer's own capital is read from data.js.
+  // §5.3 — when the faction-detail view is showing a faction with an active
+  // trading pact, paint the dotted route line on the map (green if clear,
+  // amber if suspended). The endpoints are the two cities the ENGINE found the
+  // route between, not the two capitals: a pact is no longer a statement about
+  // anybody's seat, and drawing capital-to-capital would trace a line the
+  // trade is not travelling. Falls back to the capitals when the route is
+  // severed, so a suspended pact still shows what it was.
   const tradeFor = selectedFaction?.tradingPact || null;
-  const myCapital = UI_FACTIONS[dip.youId]?.capital || null;
-  const theirCapital = selectedFaction?.capital || null;
-  const showRoute = tradeFor && myCapital && theirCapital && view === "detail";
+  const route = selectedFaction?.tradeRoute || null;
+  const fromLoc = route?.fromLocId || dip.youCapital || null;
+  const toLoc = route?.toLocId || selectedFaction?.capital || null;
+  const showRoute = tradeFor && fromLoc && toLoc && view === "detail";
 
   return (
     <>
       {showRoute && (
         <TradingPactRouteLayer
-          fromLocId={myCapital}
-          toLocId={theirCapital}
+          fromLocId={fromLoc}
+          toLocId={toLoc}
           status={tradeFor.suspended ? "suspended" : "clear"}
         />
       )}
@@ -1816,14 +3018,12 @@ export default function DiplomacyDrawer({
                 />
               )}
               {pane === "gift" && (
-                <DealPane
-                  kind="gift"
+                <GiftPane
                   f={selectedFaction}
                   dip={dip}
                   onBack={() => setPane(null)}
-                  onSubmit={(deal) => runFromPane("gift", {
-                    faction: selectedFaction.id,
-                    amount: deal.give.find((g) => g.resource)?.resource.amount || 0,
+                  onSubmit={(standing) => runFromPane("gift", {
+                    faction: selectedFaction.id, standing,
                   })}
                 />
               )}
@@ -1835,7 +3035,10 @@ export default function DiplomacyDrawer({
                   onBack={() => setPane(null)}
                   onSubmit={(deal) => runFromPane("demand-tribute", {
                     faction: selectedFaction.id,
-                    give: [], get: deal.get,
+                    // `terms` is what the verb reads. It used to be sent as
+                    // `get`, which the verb ignored, so every demand made
+                    // from here asked for nothing and "succeeded".
+                    terms: deal.get,
                   })}
                 />
               )}
@@ -1848,6 +3051,16 @@ export default function DiplomacyDrawer({
                   onSubmit={(deal) => runFromPane("sue-for-peace", {
                     faction: selectedFaction.id,
                     give: deal.give, get: deal.get,
+                  })}
+                />
+              )}
+              {pane === "ultimatum" && (
+                <UltimatumPane
+                  f={selectedFaction}
+                  dip={dip}
+                  onBack={() => setPane(null)}
+                  onSubmit={(demand) => runFromPane("issue-ultimatum", {
+                    faction: selectedFaction.id, demand,
                   })}
                 />
               )}

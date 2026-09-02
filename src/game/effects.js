@@ -2,7 +2,7 @@
 // effect `type`. Handlers mutate the GameState and emit events.
 import { CONFIG } from "./config.js";
 import { emit } from "./events.js";
-import { resolveTargets } from "./targeting.js";
+import { resolveTargets, resolveHex } from "./targeting.js";
 import { recomputeStats, recomputeResearch } from "./stats.js";
 import { CHIPS } from "./content.js";
 import { unitHasStatType } from "./economy.js";
@@ -10,6 +10,7 @@ import { destroyUnit } from "./contest.js";
 import { bfsDistances } from "./board.js";
 import { revealRegion, plantFalseGhost, ensureVisibility } from "./visibility.js";
 import * as diplo from "./diplomacy.js";
+import { evalCond, evalStrength } from "./dsl.js";
 
 // Headless default for interactive effects — pick the first option.
 export function autoInteract(request) {
@@ -17,6 +18,18 @@ export function autoInteract(request) {
 }
 
 const POOL_KEY = { Resource: "resource", VP: "vp" };
+
+// The force a player brings to a narrative CONTEST: the unit the encounter
+// is happening to if there is one (field encounters pass ctx.sourceUnit),
+// otherwise the strongest unit they have. Falls back to 0 rather than
+// throwing — a player with no units loses, which is the right answer.
+function contestingStrength(state, pid, ctx) {
+  const source = state.units[ctx.sourceUnit];
+  if (source && source.owner === pid) return source.strength ?? 0;
+  const owned = Object.values(state.units).filter((u) => u.owner === pid && !u.seconded);
+  if (!owned.length) return 0;
+  return owned.reduce((best, u) => Math.max(best, u.strength ?? 0), 0);
+}
 
 function findEntity(state, id) {
   return (
@@ -57,14 +70,24 @@ const EFFECTS = {
         });
         continue;
       }
+      // VP granted by an encounter or quest is BANKED, not held (victory.js):
+      // it is not tied to a place, so it survives losing one. Both `bankedVp`
+      // and the `vp` total move by the same amount, which keeps the
+      // vp === bankedVp + settlementVp invariant true without importing
+      // victory.js — events.js already imports THIS module, so that would be a
+      // cycle. The next recomputeVp lands on the identical number.
+      if (e.resource === "VP") {
+        p.bankedVp = Math.max(0, (p.bankedVp || 0) + e.amount);
+      }
       const key = POOL_KEY[e.resource] || "resource";
       p[key] = Math.max(0, p[key] + e.amount);
       emit(state, e.amount >= 0 ? "resource_gained" : "resource_spent", {
         player: pid, resource: e.resource, amount: e.amount,
       });
-      if (e.resource === "VP" && p.vp >= CONFIG.vpThreshold && !state.winnerId) {
-        state.winnerId = pid;
-      }
+      // VP no longer wins anything — it is the end-of-game standing. This was
+      // the third copy of the old threshold check, and like the one in
+      // contest.js it honoured neither the setup toggle nor the major/minor
+      // rule the copy in victory.js applied.
     }
   },
 
@@ -295,8 +318,59 @@ const EFFECTS = {
     // location / obstacle spawns arrive with the encounter content.
   },
 
+  // Look ahead at what is coming without changing it. The only effect that
+  // grants information rather than altering state — content uses it as a
+  // foresight reward ("have her read the road"). The peeked ids are parked
+  // on the player for the UI to render; `reorder` lets a caller rewrite the
+  // order it saw, which is the difference between scrying and merely
+  // looking.
   PEEK(state, e, ctx) {
-    // Information-only — surfaced to the UI in a later layer.
+    // `scope` says WHERE the foresight looks, and follows the fiction of
+    // where the reading happens: a reader at a roadside sees what is coming
+    // on the road; a seer sitting with your seat sees what is coming to the
+    // settlement. Neither is the default — content states which it means.
+    //
+    //   scope: "field"      the field-encounter deck (what the road holds)
+    //   scope: "settlement" the world encounters currently closest to firing
+    //   deck/zone           an explicit zone, for anything else
+    //
+    // The settlement side is not a deck — world encounters are scored and
+    // fired by triggers.js rather than drawn — so foresight there means
+    // "which of these is nearest to happening", which is the same question
+    // a deck peek answers for the road.
+    // "both" is a real authored case — a reading that names a road, a
+    // settlement and a party in the same breath. It costs one extra call,
+    // so there is no reason to make content pick a side it did not mean.
+    if (e.scope === "settlement" || e.scope === "both") {
+      peekSettlement(state, e, ctx);
+      if (e.scope === "settlement") return;
+    }
+    const zone = getZone(state, e.deck || e.zone
+      || (e.scope === "field" || e.scope === "both" ? "encounterDeck" : null));
+    if (!zone) return;
+    const count = Math.max(0, Math.min(e.count ?? 1, zone.length));
+    const cards = zone.slice(0, count);
+    for (const pid of resolveTargets(state, e.target ?? "active", ctx)) {
+      const p = state.players[pid];
+      if (!p) continue;
+      const prior = e.scope === "both" && p.peeked?.round === state.round
+        ? p.peeked.settlement ?? null : null;
+      p.peeked = {
+        deck: e.deck || e.zone || "encounterDeck", cards: [...cards],
+        round: state.round, ...(prior ? { settlement: prior } : {}),
+      };
+      emit(state, "deck_peeked", {
+        player: pid, deck: e.deck || e.zone, count, cards: [...cards],
+        reorder: !!e.reorder,
+      });
+    }
+    if (e.reorder && ctx.interact && count > 1) {
+      const order = ctx.interact({ kind: "reorderPeek", options: [...cards] });
+      if (Array.isArray(order) && order.length === count
+          && order.every((c) => cards.includes(c))) {
+        zone.splice(0, count, ...order);
+      }
+    }
   },
 
   FORCE_CHOICE(state, e, ctx) {
@@ -332,6 +406,23 @@ const EFFECTS = {
       emit(state, "track_changed", {
         player: pid, track: e.track, value: p.tracks[e.track], delta: e.amount,
       });
+      // §4 — THE SEAM. `trust` is a reputation the diplomacy layer could not
+      // see: 23 authored beats write it, they sum to -16, and no rule read it.
+      // Rather than rewrite those beats (the content files are generated from
+      // a corpus outside this repository and the edit would not survive the
+      // next build), the merge lives at the one place authored trust enters
+      // the game. The track keeps its own value for content that reads it.
+      const H = CONFIG.diplomacy.honor;
+      if (e.track === "trust" && H.trustToHonor && e.amount) {
+        const delta = (e.amount || 0) * H.trustToHonor;
+        const floor = H.questHonorFloor;
+        // A quest choice costs you the board's regard; it never closes the
+        // diplomacy face outright. Deeds still can — the player can see those
+        // numbers while they choose. Text is read without them.
+        const room = floor == null ? delta
+          : (delta < 0 ? Math.min(0, Math.max(delta, floor - (p.honor ?? H.start))) : delta);
+        if (room) diplo.adjustHonor(state, pid, room, "quest-trust");
+      }
     }
   },
 
@@ -347,6 +438,37 @@ const EFFECTS = {
     diplo.adjustStanding(state, fid, pid, e.amount || 0, "encounter");
   },
 
+  // "A reader tells you where to go." Marks sites on the map as known to the
+  // target, so they are drawn.
+  //
+  // The default rule (quests.js `siteIsKnown`) already reveals the trail a
+  // scene points you down, and hides a quest's opener because nobody has
+  // mentioned it yet. This is the authored override for the case the default
+  // cannot infer: an encounter that IS the reason you now know — a map found
+  // in a wreck, a name paid for, a reader who reads the road. Content reaches
+  // for it when the fiction hands the player a location.
+  //
+  // `hex` names one site. Without it, every site the target does not yet know
+  // about is revealed, which is what "she draws you the whole route" means —
+  // use it sparingly, and prefer naming the hex.
+  REVEAL_SITE(state, e, ctx) {
+    const markers = state.world?.encounterMarkers;
+    if (!markers) return;
+    const hexes = e.hex ? [e.hex] : Object.keys(markers);
+    for (const pid of resolveTargets(state, e.target, ctx)) {
+      if (!pid) continue;
+      for (const hex of hexes) {
+        for (const m of markers[hex] || []) {
+          m.knownTo = m.knownTo || [];
+          if (!m.knownTo.includes(pid)) {
+            m.knownTo.push(pid);
+            emit(state, "site_revealed", { hex, player: pid, encounterId: m.encounterId });
+          }
+        }
+      }
+    }
+  },
+
   SET_PLAYER_FLAG(state, e, ctx) {
     // Player-scoped flag store, parallel to §12.5 SET_FLAG which stays
     // entity-scoped (unit / location / chip).
@@ -354,10 +476,18 @@ const EFFECTS = {
       const p = state.players[pid];
       if (!p) continue;
       p.flags = p.flags || {};
+      // `durationRounds` (or a numeric `duration`) gives the flag a real
+      // lifetime, swept by turn.js. Without one it is permanent — which is
+      // the right default for a ledger entry ("you hanged the prisoner")
+      // and the wrong one for a temporary arrangement, so content that
+      // means "for a while" must say how long.
+      const rounds = e.durationRounds
+        ?? (typeof e.duration === "number" ? e.duration : null);
       p.flags[e.flag] = {
         value: e.value !== undefined ? e.value : true,
-        duration: e.duration || "permanent",
+        duration: rounds != null ? rounds : (e.duration || "permanent"),
         setAt: state.round,
+        expiresAtRound: rounds != null ? state.round + rounds : null,
       };
     }
   },
@@ -368,7 +498,16 @@ const EFFECTS = {
     // original queuer rather than whoever happens to be active when
     // the packet resolves N rounds later. Other tokens
     // (`controller`, `claimant`, …) keep their resolution-time semantics.
-    const active = state.turnOrder[state.activeIndex];
+    // Snapshot to the player this packet BELONGS to, not to whoever holds
+    // the turn at the moment it is queued.
+    //
+    // A queued encounter is answered whenever the player gets to it, and the
+    // round-end pipeline resolves with seat 0 nominally active — so
+    // `active` at queue time is very often a bystander. The packet then
+    // landed its flags, rewards and costs on that bystander N rounds later,
+    // and the beat waiting on the flag never opened for the player who
+    // actually made the choice. `ctx.asPlayer` is who the card was for.
+    const active = ctx.asPlayer ?? state.turnOrder[state.activeIndex];
     const effects = (e.effects || []).map((eff) => snapshotActiveToken(eff, active));
     state.deferred = state.deferred || [];
     state.deferred.push({
@@ -377,6 +516,23 @@ const EFFECTS = {
       source: ctx.source || null,
       originalActive: active,
       queuedAt: state.round,
+      // --- visible deadline (optional) ---------------------------------
+      // A deadline IS a deferred packet; it just says so out loud. Keeping
+      // them one mechanism means the countdown on screen and the thing that
+      // actually fires can never drift apart, which a parallel timer system
+      // would guarantee they eventually did.
+      //
+      //   label            player-facing text for the HUD
+      //   visible          show a countdown for `originalActive`
+      //   satisfiedIfFlag  the condition the player is racing to meet
+      //   onMissed         what happens if they don't
+      //
+      // Omit all four and the packet behaves exactly as every existing one
+      // does: fires its `effects` on the due round, unconditionally.
+      label: e.label || null,
+      visible: !!e.visible,
+      satisfiedIfFlag: e.satisfiedIfFlag || null,
+      onMissed: (e.onMissed || []).map((eff) => snapshotActiveToken(eff, active)),
     });
   },
 
@@ -437,7 +593,7 @@ const EFFECTS = {
   FORM_PACT(state, e, ctx) {
     const a = resolveTargets(state, e.actor || "active", ctx)[0];
     diplo.formPact(state, a, e.faction, e.cause);
-    diplo.checkRecognitionVictory(state);
+    diplo.checkDominion(state);
   },
   BREAK_PACT(state, e, ctx) {
     const a = resolveTargets(state, e.actor || "active", ctx)[0];
@@ -460,7 +616,7 @@ const EFFECTS = {
   VASSALIZE(state, e, ctx) {
     const lord = resolveTargets(state, e.actor || "active", ctx)[0];
     diplo.vassalize(state, lord, e.faction, e.cause);
-    diplo.checkRecognitionVictory(state);
+    diplo.checkDominion(state);
   },
   RELEASE_VASSAL(state, e, ctx) {
     diplo.releaseVassal(state, e.faction, e.cause);
@@ -469,7 +625,7 @@ const EFFECTS = {
   RESOLVE_DEAL(state, e, ctx) {
     if (e.accept === false || !e.deal) return;
     diplo.applyDeal(state, e.deal, e.cause || "deal");
-    diplo.checkRecognitionVictory(state);
+    diplo.checkDominion(state);
   },
   // Deliver a proposal to a human recipient as a §15.5 private encounter,
   // or (AI recipient) evaluate immediately via the valuation engine.
@@ -483,8 +639,192 @@ const EFFECTS = {
     }
     if (diplo.wouldAccept(state, deal.recipient, deal)) {
       diplo.applyDeal(state, deal, "ai-accept");
-      diplo.checkRecognitionVictory(state);
+      diplo.checkDominion(state);
     }
+  },
+
+  // --- authored resolution primitives ----------------------------------
+  //
+  // ROLL and CONTEST are how encounter content asks "did it work?". Both
+  // branch into named outcome lists rather than mutating directly, so an
+  // author writes the consequence next to the odds.
+
+  // A d100 against an authored `chance` (1..chance succeeds). Content prices
+  // its own risk — 15% for the careful method, 50% for the reckless one —
+  // and those numbers ARE the design, so nothing here rounds or rescales.
+  //
+  // `chanceIfFlag` re-prices the roll when a flag is set, which is how a
+  // setup two beats earlier pays off ("you armed the agent, so 33 becomes
+  // 66"). Accepts one entry or a list; later matches win, so content can
+  // layer several conditions and read them top-to-bottom.
+  //
+  // Uses state.rng (the seeded generator the contest dice draw from), never
+  // Math.random, so replays and the harness stay deterministic.
+  ROLL(state, e, ctx) {
+    const sides = e.sides ?? 100;
+    let chance = e.chance ?? 0;
+    let reason = null;
+    const rules = e.chanceIfFlag == null ? []
+      : (Array.isArray(e.chanceIfFlag) ? e.chanceIfFlag : [e.chanceIfFlag]);
+    for (const rule of rules) {
+      const pid = resolveTargets(state, rule.target ?? rule.player ?? e.target ?? "active", ctx)[0];
+      if (state.players[pid]?.flags?.[rule.flag]?.value) {
+        chance = rule.chance ?? chance;
+        reason = rule.flag;
+      }
+    }
+    const roll = state.rng.roll(sides);
+    const success = roll <= chance;
+    emit(state, "roll_resolved", {
+      player: resolveTargets(state, e.target ?? "active", ctx)[0],
+      roll, sides, chance, success, modifiedBy: reason,
+    });
+    applyEffects(state, (success ? e.onSuccess : e.onFail) || [], ctx);
+  },
+
+  // A narrative strength check: the player's force against an authored
+  // `opponentStrength`, each side adding the standard contest die. This is
+  // deliberately NOT contest.js runContest — that is a board operation that
+  // needs a unit already standing on the target's hex, zeroes its movement,
+  // opens a reaction window and can trigger salvage and war. An encounter
+  // asking "do you take the wall?" wants the arithmetic, not the board
+  // side effects, and world encounters and quest beats carry no unit at all.
+  //
+  // `allyStrength` is the reinforcement an author has promised in prose —
+  // "you go back with the Goldgrass at your shoulder" — and it adds to the
+  // player's side. Without it that beat would fight identically to the solo
+  // attempt it is supposed to contrast with.
+  //
+  // Both branches are authored, so a win may carry penalties: beating
+  // farmers with hand tools costs alignment and standing, and the content
+  // says so.
+  CONTEST(state, e, ctx) {
+    const pid = resolveTargets(state, e.target ?? "active", ctx)[0];
+    const own = contestingStrength(state, pid, ctx);
+    const ally = e.allyStrength ?? 0;
+    const sides = CONFIG.contestDieSides;
+    // Both dice are rolled into named locals rather than inlined into the
+    // sums: the UI replays this contest die-by-die the way a board contest
+    // is replayed, and a payload that carries only the totals leaves it
+    // reconstructing each face by subtraction.
+    const myDie = state.rng.roll(sides);
+    const theirDie = state.rng.roll(sides);
+    const mine = own + ally + myDie;
+    const theirs = (e.opponentStrength ?? 0) + theirDie;
+    const won = mine >= theirs; // ties to the player, as the attacker here
+    emit(state, "narrative_contest_resolved", {
+      player: pid, own, ally, opponent: e.opponentStrength ?? 0,
+      die: myDie, opponentDie: theirDie, sides,
+      total: mine, against: theirs, won,
+    });
+    applyEffects(state, (won ? e.onWin : e.onLose) || [], ctx);
+  },
+
+  // --- one-off authored effects ----------------------------------------
+
+  // Free passage through a faction's territory for a limited time. Written
+  // as flag-scoped (`whileFlag`), so the grant lives exactly as long as the
+  // flag does and the flag's own duration decides when it lapses.
+  GRANT_SAFE_PASSAGE(state, e, ctx) {
+    const factions = e.factions || (e.faction ? [e.faction] : []);
+    for (const pid of resolveTargets(state, e.target ?? "active", ctx)) {
+      const p = state.players[pid];
+      if (!p) continue;
+      p.safePassage = p.safePassage || {};
+      for (const fid of factions) {
+        p.safePassage[fid] = {
+          whileFlag: e.whileFlag || null,
+          until: e.durationRounds != null ? state.round + e.durationRounds : null,
+          grantedAt: state.round,
+        };
+      }
+      emit(state, "safe_passage_granted", {
+        player: pid, factions, whileFlag: e.whileFlag || null,
+        until: e.durationRounds != null ? state.round + e.durationRounds : null,
+      });
+    }
+  },
+
+  // Somebody borrows one of your units. It leaves play for `rounds`, then
+  // comes back — by default weaker for the experience. A loan under duress,
+  // not a transfer: the unit is yours throughout and returns to where it
+  // stood. Implemented as a secondment record swept by turn.js, so the unit
+  // is genuinely unavailable rather than merely flagged.
+  TAKE_UNIT(state, e, ctx) {
+    const pid = resolveTargets(state, e.target ?? "active", ctx)[0];
+    const unit = state.units[e.unit] || state.units[ctx.sourceUnit]
+      || Object.values(state.units).filter((u) => u.owner === pid)
+           .sort((a, b) => (b.strength ?? 0) - (a.strength ?? 0))[0];
+    if (!unit) return; // nothing to lend — the arrangement fizzles
+    // Lift the whole record out of play — a borrowed unit should not be
+    // movable, contestable or countable while it is away. Stashing the
+    // record (rather than setting a flag every consumer would have to
+    // learn) means one touch point here and one on the way back.
+    state.secondedUnits = state.secondedUnits || [];
+    state.secondedUnits.push({
+      record: unit, owner: unit.owner, node: unit.node,
+      returnRound: state.round + (e.rounds ?? 1),
+      strengthDelta: e.returnStrengthDelta ?? 0,
+      returnFlag: e.returnFlag || null,
+    });
+    delete state.units[unit.uid];
+    recomputeStats(state);
+    emit(state, "unit_seconded", {
+      unit: unit.uid, player: unit.owner, rounds: e.rounds ?? 1,
+      returnRound: state.round + (e.rounds ?? 1),
+    });
+  },
+
+  // Absolute movement override — the unit's Movement BECOMES `value`, it is
+  // not adjusted by it. "Take the long way" means you arrive slowly whatever
+  // your logistics; a delta would make a fast army barely notice the detour.
+  SET_MOVEMENT(state, e, ctx) {
+    for (const pid of resolveTargets(state, e.target ?? "active", ctx)) {
+      if (!state.players[pid]) continue;
+      state.movementOverrides = state.movementOverrides || [];
+      state.movementOverrides.push({
+        player: pid, value: e.value ?? 1,
+        appliesOnRound: e.when === "next_turn" ? state.round + 1 : state.round,
+        consumed: false,
+      });
+      emit(state, "movement_overridden", {
+        player: pid, value: e.value ?? 1, when: e.when || "this_turn",
+      });
+    }
+  },
+
+  // Ongoing sight of one place. The fiction's word is "again" — this ford
+  // does not go dark to you a second time — so the hex is added to a
+  // permanent watch list that survives the normal visibility recompute,
+  // rather than being a one-shot reveal.
+  PERSISTENT_VISION(state, e, ctx) {
+    const hex = resolveHex(state, e.hex ?? "encounter-hex", ctx);
+    if (!hex || !state.board.hexes[hex]) return;
+    for (const fid of resolveTargets(state, e.target ?? "active", ctx)) {
+      if (!state.players[fid]) continue;
+      const vis = ensureVisibility(state, fid);
+      vis.permanent = vis.permanent || new Set();
+      vis.permanent.add(hex);
+      revealRegion(state, fid, [hex]);
+    }
+  },
+
+  // A place nobody owns and everybody uses. Deliberately NOT a transfer of
+  // control: ownership stays unresolved and the hex pays a recurring yield
+  // to the player for as long as the arrangement stands. "Nothing is
+  // settled. Everything works."
+  ESTABLISH_DUAL_HOLDING(state, e, ctx) {
+    const hex = resolveHex(state, e.hex ?? "encounter-hex", ctx);
+    if (!hex) return;
+    const pid = resolveTargets(state, e.target ?? "active", ctx)[0];
+    state.dualHoldings = state.dualHoldings || {};
+    state.dualHoldings[hex] = {
+      hex, owners: e.owners || [pid], beneficiary: pid,
+      playerYield: e.playerYield ?? 0, since: state.round,
+    };
+    emit(state, "dual_holding_established", {
+      hex, owners: e.owners || [pid], player: pid, playerYield: e.playerYield ?? 0,
+    });
   },
 
   // --- replacement mode — only meaningful inside a reaction window ---
@@ -509,6 +849,43 @@ const EFFECTS = {
     if (ctx.pending) ctx.pending.cancelled = true;
   },
 };
+
+// Foresight over world encounters: the ones whose trigger conditions are
+// currently satisfied, ranked the way triggers.js would rank them at the
+// next round end (strength x rarity weight). Read-only — it scores without
+// firing anything and without touching cooldowns.
+// Read the live registry lazily: encounters.js imports this module, so a
+// top-level import back would close the cycle.
+let _worldReg = null;
+function worldEncountersRegistry() {
+  return _worldReg ? _worldReg() : {};
+}
+export function __bindWorldRegistry(fn) { _worldReg = fn; }
+
+function peekSettlement(state, e, ctx) {
+  const count = Math.max(1, e.count ?? 1);
+  const ranked = [];
+  for (const [id, def] of Object.entries(worldEncountersRegistry())) {
+    const cooldownUntil = state.triggerCooldowns?.[id] || 0;
+    if (cooldownUntil > state.round) continue;
+    if (def.triggerCondition != null && !evalCond(state, def.triggerCondition, ctx)) continue;
+    const strength = def.triggerStrength == null
+      ? 1 : evalStrength(state, def.triggerStrength, ctx);
+    if (strength <= 0) continue;
+    const weight = def.triggerWeight == null ? 1 : Number(def.triggerWeight) || 1;
+    ranked.push({ id, score: strength * weight });
+  }
+  ranked.sort((a, b) => b.score - a.score);
+  const cards = ranked.slice(0, count).map((r) => r.id);
+  for (const pid of resolveTargets(state, e.target ?? "active", ctx)) {
+    const p = state.players[pid];
+    if (!p) continue;
+    p.peeked = { deck: "settlement", cards: [...cards], settlement: [...cards], round: state.round };
+    emit(state, "deck_peeked", {
+      player: pid, deck: "settlement", count: cards.length, cards: [...cards], reorder: false,
+    });
+  }
+}
 
 // Walk an effect tree and replace any `active` / `active_player` token
 // in player-bearing fields with a concrete pid. Used by QUEUE_DEFERRED

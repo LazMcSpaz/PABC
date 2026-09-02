@@ -2,21 +2,55 @@
 // the board, players, locations, units, and the tiered Market.
 import { CONFIG } from "./config.js";
 import { FACTIONS, MINOR_FACTIONS, LOCATIONS, CAPITAL, ABILITIES, REACTIVES, factionDef } from "./content.js";
-import { FIELD_ENCOUNTERS } from "./content/index.js";
+
 import { makeRng } from "./rng.js";
 import { createIdGen } from "./ids.js";
-import { buildHexGrid, generateLayout, assignTerrainFeatures, assignRoads, bfsDistances } from "./board.js";
+import { buildHexGrid, generateLayout, assignTerrainFeatures, assignRoads, assignRails, bfsDistances } from "./board.js";
 import { recomputeInfluence } from "./influence.js";
 import { recomputeVisibility } from "./visibility.js";
-import { ensureDiplomacy, seedStanding } from "./diplomacy.js";
+import { ensureDiplomacy, seedStanding, seedSway } from "./diplomacy.js";
+import { recomputeVp } from "./victory.js";
+// The LIVE field registry, not the generated import: the deck has to be built
+// from the same list delivery reads, or a repo-authored (or runtime-injected)
+// card sits in the registry and is never dealt.
+import { fieldEncounters } from "./encounters.js";
+
+// The name a faction's `seq`-th unit musters under. Walks the faction's
+// authored roster (content.js `unitNames`) in order; past the end it wraps
+// and suffixes a numeral, so a long game reads "Grain Guard II" rather than
+// fielding two formations with the same name. Deterministic in `seq` — no
+// RNG draw — so a seeded game names its units identically every replay.
+const NUMERALS = ["", " II", " III", " IV", " V", " VI", " VII", " VIII"];
+
+// Claim the next roster slot for `owner` and advance the counter. Counts
+// musters rather than living units, so a replacement never inherits a dead
+// formation's name. Takes anything carrying `unitsMustered`, which is how
+// setup can use it while state is still being assembled.
+export function nextMusterIndex(carrier, owner) {
+  carrier.unitsMustered = carrier.unitsMustered || {};
+  const n = carrier.unitsMustered[owner] || 0;
+  carrier.unitsMustered[owner] = n + 1;
+  return n;
+}
+export function unitNameFor(owner, seq) {
+  const roster = factionDef(owner)?.unitNames;
+  if (!roster || !roster.length) return `${factionDef(owner)?.name || owner} unit`;
+  const i = seq % roster.length;
+  const lap = Math.floor(seq / roster.length);
+  return roster[i] + (NUMERALS[lap] ?? ` ${lap + 1}`);
+}
 
 // A fresh unit with the full v0.2 field set (§16.3 / plan). `moveRemaining`
 // seeds to base Movement; the owner's Upkeep refreshes it from effective.
-export function makeUnit(uid, owner, node, factionName) {
+//
+// `seq` is how many units this faction has already mustered this game — the
+// index into its name roster. It counts musters, not living units, so a
+// replacement never inherits a dead formation's name.
+export function makeUnit(uid, owner, node, factionName, seq = 0) {
   return {
     uid,
     owner,
-    name: `${factionName} unit`, // flavor names arrive with content
+    name: unitNameFor(owner, seq),
     node,
     baseStrength: CONFIG.unit.baseStrength,
     baseMovement: CONFIG.unit.baseMovement,
@@ -39,6 +73,28 @@ export function createGame({
   factionIds,
   humanFactionId = null,
   minors = [], // §18.4.1 — a VARIABLE subset of minor faction ids to seed
+  // "small" | "medium" | "large" | "huge" (CONFIG.mapSizes). Omitted means
+  // the legacy testMap board, so headless callers and the harness keep the
+  // exact layouts they had before board size became selectable.
+  mapSize = null,
+  // How many Locations to seat, overriding the map size's default. The two are
+  // deliberately independent: a small board crowded with settlements and a big
+  // empty one are both legitimate games, and tying density to size made "small"
+  // mean "few cities" whether or not that was what anyone wanted.
+  locationBudget = null,
+  // Optional rule switches from the setup screen. Every one defaults to the
+  // behaviour the engine has always had, so headless callers and the harness
+  // are untouched by their existence.
+  //
+  //   victory   which win conditions are live. Turning one off removes a way
+  //             to end the game, never a way to score — VP is still tracked.
+  //   fogOfWar  false leaves state.visibility EMPTY, which the whole
+  //             visibility layer already reads as "everything is visible"
+  //             (isHexVisible / canSee both fall through when a faction has
+  //             no fog record). No second code path to keep in step.
+  //   encounters  field = the share of spare hexes that become encounter
+  //             sites; world = how many world triggers fire each round.
+  rules = null,
 } = {}) {
   const rng = makeRng(seed);
   const uid = createIdGen();
@@ -48,8 +104,13 @@ export function createGame({
   const seededMinors = (minors || []).filter((m) => MINOR_FACTIONS[m]);
   const playing = [...majors, ...seededMinors];
 
-  const grid = buildHexGrid(CONFIG.testMap);
-  const layout = generateLayout(rng, grid, FACTIONS, LOCATIONS);
+  const size = (mapSize && CONFIG.mapSizes[mapSize]) || null;
+  const grid = buildHexGrid(size ? size.rows : CONFIG.testMap);
+  const layout = generateLayout(rng, grid, FACTIONS, LOCATIONS,
+    {
+      locationBudget: locationBudget ?? (size ? size.locations : CONFIG.testMapLocations),
+      encounterShare: rules?.encounters?.field,
+    });
 
   // chip-instance registry — every chip in play has a uid
   const chips = {};
@@ -71,9 +132,32 @@ export function createGame({
   // existing seed-dependent test — is byte-for-byte unchanged.
   assignTerrainFeatures(makeRng((seed ^ 0x9e3779b9) >>> 0), hexes);
   // §16.2 — lay road corridors between the faction capitals (deterministic
-  // MST over the start hexes). Roads negate terrain movement cost along the
-  // lane (a fast, contestable highway); cover/visibility are unaffected.
-  assignRoads(grid.adjacency, hexes, Object.values(layout.factionStart));
+  // MST over the start hexes). Roads EASE terrain movement cost along the lane
+  // — half the toll, not none (a fast, contestable highway that still has to
+  // climb the mountain); cover/visibility are unaffected.
+  // Roads tie settlements together, not just capitals — see assignRoads. The
+  // value lookup drives how many links each one gets, so a city is a hub and a
+  // town is a stop on the way.
+  const settlementHexes = Object.keys(layout.placement);
+  assignRoads(grid.adjacency, hexes, settlementHexes,
+    (hexId) => LOCATIONS[layout.placement[hexId]]?.strategicValue || "medium");
+  // Rail: pre-collapse trunk line between the major settlements. Generated,
+  // never built (docs/rail-road-blockade-design.md §2.4).
+  //
+  // Stations are every seated Location in `CONFIG.rail.hubTiers`, not just the
+  // four capitals: a trunk line stops at the big places, and stopping only at
+  // capitals gave every board — 30 hexes or 127, ten cities or nineteen — the
+  // same three links, with no faction holding both ends of one at setup.
+  //
+  // Sign-named settlements (`noRailTerminus`) are never stations: they grew up
+  // around ROAD signage and a railway had no reason to stop at a lay-by. A line
+  // may still run THROUGH their hex to reach somewhere that does matter.
+  const railHubs = settlementHexes.filter((hexId) => {
+    const def = LOCATIONS[layout.placement[hexId]];
+    return def && !def.noRailTerminus
+      && CONFIG.rail.hubTiers.includes(def.strategicValue);
+  });
+  const rails = assignRails(grid.adjacency, hexes, railHubs);
 
   // --- players ---
   const players = {};
@@ -89,7 +173,11 @@ export function createGame({
       menace: 0,
       honor: CONFIG.diplomacy.honor.start,
       resource: 0,
+      // `vp` is DERIVED (victory.js): bankedVp + whatever this faction holds
+      // right now. `bankedVp` is the half that only ever goes up — recognition
+      // summits, encounter grants, the alliance trickle.
       vp: 0,
+      bankedVp: 0,
       tech: CONFIG.tech.start,
       actions: { remaining: CONFIG.baseActions, max: CONFIG.baseActions },
       // §17 Tech Wheel. `research` = permanent + Lab-derived (recomputed);
@@ -99,7 +187,10 @@ export function createGame({
       permanentResearch: 0,
       techLevel: 1,
       techWheel: [],
-      unitCap: 1,
+      // No `unitCap` here. It sat at 1 and was silently overridden everywhere
+      // that matters: the real cap is CONFIG.baseUnitCap (3) + unitCapBonus,
+      // which `validateRecruit` enforces and `engineAdapter` reports. A stale
+      // field disagreeing with the live rule is worse than no field.
       hand: [],
       // Layer 5 (encounter & quest system) per spec §15.11
       tracks: { trust: 0, reputation: 0, alignment: 0 },
@@ -129,19 +220,16 @@ export function createGame({
       production += CONFIG.capital.productionBonus;
     }
 
-    // Every High / Very High location gets one random ability (§6.3),
-    // and that ability costs the location one of its chip slots.
-    let abilityId = null;
-    if (def.strategicValue === "high" || def.strategicValue === "veryHigh") {
-      const pool = Object.values(ABILITIES).filter(
-        (a) => a.eligibleTier === def.strategicValue || a.eligibleTier === "either",
-      );
-      if (pool.length) abilityId = rng.pick(pool).id;
-    }
-    const chipSlots = Math.max(
-      0,
-      CONFIG.chipSlotsByValue[def.strategicValue] - (abilityId ? 1 : 0),
-    );
+    // Location abilities are WITHDRAWN pending a redesign (2026-08-16). Every
+    // High / Very High Location used to roll one at random from ABILITIES, and
+    // it cost the Location a chip slot. The content did not earn its keep, so
+    // nothing is assigned; the machinery in effects/actions/contest is intact
+    // and a future pass only has to start handing ids out again.
+    //
+    // Side effect worth knowing: every High / Very High Location now keeps the
+    // full CONFIG.chipSlotsByValue count instead of paying one for its ability.
+    const abilityId = null;
+    const chipSlots = CONFIG.chipSlotsByValue[def.strategicValue];
 
     locations[hexId] = {
       hexId,
@@ -153,6 +241,17 @@ export function createGame({
       // full Loyalty; neutral Locations have no Loyalty until captured.
       loyalty: controller ? CONFIG.loyalty.ceiling : null,
       chipSlots,
+      // Room the holder has paid to add (economy.slotExpansion). On the
+      // Location rather than on the player, because it is permanent and rides
+      // with the place through a capture.
+      boughtSlots: 0,
+      // Economy §6.5 — WHO STARTED HERE. `occupationsBy` compares a Location's
+      // authored `affiliation` against its current controller, which cannot
+      // tell "I conquered this from them" from "the setup dealt it to me" —
+      // and the setup does deal it: the Croppers open holding `omara`, whose
+      // affiliation is `goldgrass`. Without this stamp the occupation charge
+      // would bill a faction from round one for a city it never took.
+      startingController: controller || null,
       chips: locChips,
       garrison,
       production,
@@ -165,22 +264,41 @@ export function createGame({
       buildSlider: CONFIG.economy.defaultSlider,
       buildProgress: 0,
       activeBuild: null,
+      // Rail doc §3.4 — who gets this city's build output when it is building a
+      // chip AND funding a blockade. "blockade" (the default) answers the map;
+      // "chips" says the building matters more and makes the blockade wait.
+      buildPriority: "blockade",
+      // Rail doc §2.2 — hexId of a directly rail-linked settlement this one
+      // pools its idle build output into, or null. Opt-in, never inferred.
+      poolTarget: null,
     };
   }
 
-  // §18.4.1 — give each seeded minor a SEAT: it takes a free neutral
-  // Location nearest its associated major (so it sits as a regional power
-  // near its kin/rival/foil). Landless minors (no free seat) stay political-
-  // only actors. Done before units so the seat can host the minor's unit.
+  // §18.4.1 — give each seeded minor a SEAT. A minor that declares a
+  // `homeLocation` takes that Location: the Dambarans hold Dambar and there is
+  // no reading of the fiction where they open anywhere else, so the seat is
+  // content rather than a proximity accident. Everyone else takes the free
+  // neutral Location nearest its associated major, so it still sits as a
+  // regional power beside its kin/rival/foil — and a home-declaring minor
+  // falls back to that same rule when its home Location did not make the board
+  // (small budgets drop the home bands) or is already held.
+  //
+  // Home-declaring minors are seated FIRST so a proximity pick can never take
+  // the city out from under the faction the city is named for.
   const minorSeat = {}; // minor fid -> hexId
-  for (const fid of seededMinors) {
-    const major = MINOR_FACTIONS[fid].associatedMajor;
-    const majorStart = layout.factionStart[major];
+  const seatOrder = [...seededMinors].sort(
+    (a, b) => (MINOR_FACTIONS[b].homeLocation ? 1 : 0) - (MINOR_FACTIONS[a].homeLocation ? 1 : 0),
+  );
+  for (const fid of seatOrder) {
+    const def = MINOR_FACTIONS[fid];
+    const majorStart = layout.factionStart[def.associatedMajor];
     const free = Object.values(locations).filter((l) => !l.controller && !Object.values(minorSeat).includes(l.hexId));
     if (!free.length) continue;
-    const dist = majorStart ? bfsDistances(grid.adjacency, majorStart) : {};
-    free.sort((a, b) => (dist[a.hexId] ?? 99) - (dist[b.hexId] ?? 99));
-    const seat = free[0];
+    let seat = def.homeLocation ? free.find((l) => l.locationId === def.homeLocation) : null;
+    if (!seat) {
+      const dist = majorStart ? bfsDistances(grid.adjacency, majorStart) : {};
+      seat = [...free].sort((a, b) => (dist[a.hexId] ?? 99) - (dist[b.hexId] ?? 99))[0];
+    }
     seat.controller = fid;
     seat.loyaltyOwner = fid;
     seat.sections = [fid, fid, fid];
@@ -190,6 +308,10 @@ export function createGame({
 
   // --- units: CONFIG.startingUnits per faction (§16.3), on/near start ---
   const units = {};
+  // How many units each faction has mustered all game — the index into its
+  // name roster. Kept on state (below) so recruits and reinforcements keep
+  // counting from where setup left off.
+  const musterBook = { unitsMustered: {} };
   for (const fid of majors) {
     const start = layout.factionStart[fid];
     for (let i = 0; i < (CONFIG.startingUnits || 1); i++) {
@@ -204,14 +326,14 @@ export function createGame({
         node = adj || start;
       }
       const u = uid("unit");
-      units[u] = makeUnit(u, fid, node, FACTIONS[fid].name);
+      units[u] = makeUnit(u, fid, node, FACTIONS[fid].name, nextMusterIndex(musterBook, fid));
     }
   }
   // §18.4.1 — one defending unit on each seated minor's seat.
   for (const fid of seededMinors) {
     if (!minorSeat[fid]) continue;
     const u = uid("unit");
-    units[u] = makeUnit(u, fid, minorSeat[fid], factionDef(fid).name);
+    units[u] = makeUnit(u, fid, minorSeat[fid], factionDef(fid).name, nextMusterIndex(musterBook, fid));
   }
 
   // §20.2 — the Market is retired. Chips are no longer drawn from a shared
@@ -223,7 +345,7 @@ export function createGame({
   // state, unlike chips).
   const encounterDeck = (() => {
     const seeds = [];
-    for (const def of Object.values(FIELD_ENCOUNTERS)) {
+    for (const def of Object.values(fieldEncounters())) {
       const copies = def.copies || 1;
       for (let i = 0; i < copies; i++) seeds.push(def.id);
     }
@@ -258,6 +380,24 @@ export function createGame({
 
   const state = {
     seed,
+    // Rule switches, normalised once here so every reader gets a complete
+    // object and no site has to cope with a partial or missing `rules`.
+    rules: {
+      // One condition now — every surviving faction eliminated, allied or
+      // vassal — so one switch. `conquest` / `recognition` / `elimination`
+      // were three toggles over what turned out to be three faces of the same
+      // thing, and only one of the three code paths honoured its own switch.
+      // Any of the old names still turns it off, so a saved setup or an older
+      // caller keeps working.
+      victory: {
+        dominion: rules?.victory?.dominion !== false
+          && rules?.victory?.conquest !== false
+          && rules?.victory?.recognition !== false
+          && rules?.victory?.elimination !== false,
+      },
+      fogOfWar: rules?.fogOfWar !== false,
+      worldEncountersPerRound: rules?.encounters?.world ?? CONFIG.encounters.worldPerRound,
+    },
     rng, // live seeded generator — contest dice draw from it
     nextId: uid, // shared instance id generator — used by runtime Recruit
     humanFactionId,
@@ -266,9 +406,12 @@ export function createGame({
     turnOrder: [...playing],
     activeIndex: 0,
     players,
-    board: { hexes, adjacency: grid.adjacency },
+    // `rails` is the link registry: the 1-MP hop is a property of the LINK,
+    // not of the hexes it runs over, so hex.rail alone cannot express it.
+    board: { hexes, adjacency: grid.adjacency, rails },
     locations,
     units,
+    unitsMustered: musterBook.unitsMustered,
     chips,
     encounterDeck,
     reactiveDeck,
@@ -277,6 +420,9 @@ export function createGame({
     modifiers: [],
     pendingActionGrants: [],
     surcharges: [],
+    // Encounters waiting on a human decision (encounters.js). Empty for
+    // headless and AI-only games, which resolve inline.
+    pendingEncounters: [],
     winnerId: null,
     reinforcements: [], // v0.2 §16.5 — pending field-reinforcement packets
     pendingSalvage: [], // interactive salvage queue (UI resolves via resolveSalvage)
@@ -300,6 +446,9 @@ export function createGame({
       zoc: {},
       // §17.7 Listening Posts — hexId -> { owner, hex, strength, paid, revealedTo }.
       listeningPosts: {},
+      // Blockades (rail doc §3) — hexId -> { owner, hex, done, progress, cost,
+      // builder, chips }. Under construction while `done` is false.
+      blockades: {},
     },
     factionStanding: Object.fromEntries(
       playing.map((fid) => [fid, Object.fromEntries(playing.map((pid) => [pid, 0]))]),
@@ -315,12 +464,33 @@ export function createGame({
   // §19 — seed each faction's fog from its starting sources (units + its
   // Capital + ZoC). Quietly: no spot/explore events at game creation.
   state.visibility = {};
-  for (const fid of playing) recomputeVisibility(state, fid, { emitEvents: false });
+  // Fog OFF means never building the per-faction records at all. Leaving them
+  // empty is what the readers already treat as full sight, so "no fog" needs
+  // no special case anywhere downstream.
+  if (state.rules.fogOfWar) {
+    for (const fid of playing) recomputeVisibility(state, fid, { emitEvents: false });
+  }
   // §18.4–§18.5 — init the diplomacy layer + global reputations, then seed
   // faction↔faction Standing from temperament compatibility + relationship
   // + a PER-SEED jitter (alliance variety). The jitter uses an ISOLATED rng
   // so the main contest stream is untouched; human rows start neutral.
   ensureDiplomacy(state);
   seedStanding(state, makeRng((seed ^ 0x517cc1b7) >>> 0));
+  // Economy §6 — and the opening political capacity, computed with the same
+  // income rule the round tick uses. Without this the game begins with every
+  // faction on zero and EVERY political verb disabled for its whole first
+  // turn, because income is only paid at round end: the first Sway anyone
+  // holds would arrive on round 2. A dead first turn across a whole layer
+  // reads as broken rather than as a rule, and it is not one — the game starts
+  // at the beginning of round 1, so a faction opens it holding a round's worth
+  // of capacity, exactly as it opens holding its starting scrap.
+  //
+  // After `recomputeInfluence` above, because the territorial term reads the
+  // ZoC map.
+  seedSway(state);
+  // VP is held, not banked (victory.js) — so every faction opens with whatever
+  // its starting homeland is worth, rather than at zero. Quietly: nobody has
+  // "gained" anything yet.
+  recomputeVp(state, { emitEvents: false });
   return state;
 }

@@ -46,6 +46,20 @@ effects) — not in the engine.
 
 ## 3. Resources, Stats and Tech
 
+> **Out of date 2026-08-23 — two rows and two bullets below are dead.** VP is a
+> **held score that wins nothing** (`src/game/victory.js`): a faction draws a
+> Location's VP for as long as it holds the place, the win condition is
+> Dominion (§18.10's banner), and nothing anywhere reads a VP threshold.
+> `Actions` are **per-entity**, not a per-turn pool: `CONFIG.baseActions` is
+> **0**, plus 1 per unit and `locationActionCapacity` per Location
+> (`turn.js` `refreshActionBudgets`). The old global pool survives only as a
+> wildcard any entity may spend. §4.1 one paragraph below already carries a
+> banner; this section needed the same one and did not have it.
+>
+> The narrative-tracks paragraph is also stale in a way worth knowing about:
+> `p.tracks` is written 44 times by authored content and **read by nothing** in
+> gameplay. See `diplomacy-brief-2026-08-23.md` §11.
+
 Mechanically distinct categories. The engine treats them differently; do
 not conflate them.
 
@@ -219,6 +233,11 @@ from each other.
 
 #### 6.3.2 Foothold and decay
 
+> **Out of date — superseded by §18.2 (Loyalty).** Foothold does not exist;
+> nor does the Town Hall that raised its cap. The Loyalty ceiling is **fixed
+> at 8** and nothing raises it (`config.js`: `ceiling: 8 — fixed; nothing
+> raises it`). Kept for history.
+
 The meter's centre holds a signed **foothold score `F`** — the
 controller's grip on the Location.
 
@@ -324,6 +343,12 @@ Reaction windows (§10) can interrupt at defined points regardless of whose
 turn it is.
 
 ## 8. Actions
+
+> **Out of date 2026-08-23.** **Acquire is gone** — the Market is retired and
+> chips are **built** locally (§20, and §4.1's banner). **Recruit costs 6**,
+> not 10 (`CONFIG.unitRecruitCost`), less 2 at a Motor Pool. Actions are
+> per-entity (see §3's banner), so "costs `Actions` from the budget" means the
+> acting entity's own action, or a wildcard. The rest of the table is current.
 
 During the Main phase, each action costs `Actions` from the budget
 (default 1 unless stated otherwise). The action set:
@@ -666,6 +691,23 @@ matrix, `state.triggerCooldowns`, `state.deferred`, and
 ## 14. Configuration & Open Questions
 
 ### 14.1 Locked constants (v0.1)
+
+> **Out of date 2026-08-23 — this table is a list of wrong numbers and had no
+> marker at all, which makes it the most dangerous page in the document.**
+> Every row below marked ✗ is superseded. **`src/game/config.js` is the
+> numbers**, and it carries the playtest rationale beside each one.
+>
+> | row | status |
+> |---|---|
+> | VP threshold (win) 12 | ✗ VP wins nothing; the condition is Dominion |
+> | Base Actions / turn 2 | ✗ `baseActions: 0`, per-entity (§3 banner) |
+> | Foothold cap | ✗ replaced by Loyalty, ceiling fixed at 8 |
+> | Movement 1 | ✗ `baseMovement: 2` |
+> | Recruit cost 10 | ✗ `unitRecruitCost: 6` |
+> | Unit cap 1 + Training Grounds | ✗ `baseUnitCap: 3` + `unitCapBonus` |
+> | Market row sizes | ✗ the Market is retired |
+> | Base chip slots by value | ✗ `{low:1, medium:2, high:3, veryHigh:4}` |
+> | Strength 4, bay slots 2, contest dice, garrison by value | ✓ still current |
 
 | Constant | Value |
 |---|---|
@@ -1497,6 +1539,14 @@ record for the political layer. Where it conflicts with earlier text,
 the tables get filled and tuned in a later pass; this section fixes the
 *model*, not the constants.
 
+> **Currency note (2026-08-23).** Those tables have since been filled: the
+> political layer is built and `CONFIG.diplomacy` in `src/game/config.js`
+> holds 146 tuned constants, several carrying playtest rationale in the
+> comments beside them. Treat `CONFIG.diplomacy` — not this section's TBDs —
+> as the source of truth for any number. Parts of §18 have also been
+> superseded; see `diplomacy-brief-input-2026-08-23.md` §3 for the list, and
+> the banners on §18.10 and §18.12 below.
+
 ### 18.0 Terminology (ratified)
 
 These names are now canonical across the spec, the engine, and the UI:
@@ -1615,6 +1665,15 @@ influence(faction, hex) =
   *presence* or *pressure* depending on that faction's Standing toward
   you (§18.5). It is **not** wired to contest math or passive yield in
   this pass (those were considered and deliberately deferred).
+
+> **Half out of date 2026-08-23.** Contest math is still untouched and should
+> stay that way — a border combat bonus makes the leader's border stronger with
+> no counterplay. But **passive yield is wired**: `tickLoyalty`
+> (`turn.js`) reads `pressureSource` every Upkeep, so a rival out-projecting
+> you on your own city's hex bleeds its Loyalty and costs them Standing and
+> Menace. That is the influence-pressure mechanic, and it is the best thing in
+> the layer. Full list of what consumes the field:
+> `economy-influence-brief-2026-08-23.md` §4.
 
 ### 18.4 Faction model
 
@@ -1898,7 +1957,17 @@ inputs:
 player's threat crosses a **threshold**, eligible factions (not allied or
 vassal to that player, and able to cooperate) **join the coalition**: their
 Standing toward the player drops and they are pushed to war the player and
-to ally **each other**. The coalition **dissolves** when threat falls
+to ally **each other**.
+
+> **Changed in the engine (2026-08-23 note).** Members no longer ally each
+> other — after the 2026-08-13 playtest, force-pacting the bloc was found to
+> mint free summit VP and leave a permanent alliance web behind, so members
+> now make peace and warm slightly ("common cause") with **no pacts minted**.
+> Live weights are `wM 1, wP 2, threshold 16`. Note also that joining is not
+> a decision: every eligible AI faction is enrolled with an unasked
+> `declareWar`, which overwrites its Standing toward the target regardless of
+> prior relationship. Only the human is spared. See
+> `diplomacy-brief-input-2026-08-23.md` §1.4. The coalition **dissolves** when threat falls
 (territory lost, peace made, Menace decayed). Consequences by playstyle:
 - **Conquest player:** a rising-difficulty brake — the more you win, the
   more the world unites against you. Pacing + anti-runaway in one.
@@ -1950,6 +2019,18 @@ sub-state above Allied.
 
 ### 18.10 The diplomacy victory — Recognition (reputation-gated, not peace-gated)
 
+> **SUPERSEDED 2026-08-21 — do not design against this section.** The
+> Recognition track and the parallel "Conquest (VP 12)" threshold described
+> below were both removed. See `victory-redesign-2026-08-21.md`, which
+> replaced them with a single condition: *every surviving faction is your
+> ally, your vassal, or gone, held for three consecutive rounds.* Across 20
+> AI-only games the VP threshold ended all twenty and Recognition never fired
+> once. The engine's `recognitionScore` / `recognitionMet` /
+> `CONFIG.diplomacy.recognition` survive as vestigial names and decide
+> nothing — `checkRecognitionVictory()` is a one-line alias for
+> `checkDominion()`. §18.8's closing paragraph inherits this error where it
+> speaks of "sprinting toward Recognition".
+
 - **Recognition track.** Each faction contributes **Recognition weight** by
   its formal relation to you: **Allied = 1, Vassal = 2** *(weights TBD)*.
   You win when total Recognition crosses a **threshold** *(TBD; e.g. a
@@ -1988,6 +2069,14 @@ sub-state above Allied.
   and all numeric constants are authoring tasks for the content pass.
 
 ### 18.12 Engine mapping (for implementers — design only, not yet built)
+
+> **Out of date 2026-08-23 — this heading is wrong; the layer IS built.**
+> Standing with baselines and grudges, Menace, Honor, just war, coalitions,
+> vassalage, trading pacts, war exhaustion, ultimatums and offers-with-expiry
+> all ship today. The mapping below is kept as the design record. For what
+> the engine actually does, read `src/game/diplomacy.js` and run
+> `node scripts/audit-diplomacy.mjs`, which exercises eight named behaviours
+> against a live engine.
 
 High-level; consistent with §15–§17 patterns. Detailed schemas and the full
 effect/event lists are finalized when this leaves the design phase.
@@ -2386,6 +2475,24 @@ Two **independent** gates, **both** required, plus a free slot:
   visible even early), **greyed** if **either** Tech Level **or** Loyalty is
   short, with the reason.
 
+### 20.6a Stacking — ten units to a hex
+
+A hex holds at most **ten units**, counting every owner
+(`CONFIG.hexUnitCap`). Enforced on every path a unit can arrive by: a full
+hex leaves the movement field, so it is neither offered by the UI nor pathed
+to by the AI; Move and Recruit refuse it by name; and a beaten unit cannot
+retreat into one.
+
+A full hex may still be **crossed**. The cap is about what may stand on a
+tile, not about the road over it, so it prunes destinations rather than
+making the hex impassable.
+
+The number is a display limit made into a rule. Past ten, a tile has no room
+left to draw units at a size anyone can tell apart
+(`docs/unit-model-pipeline.md` §10.1), and a rule the board cannot show is a
+rule players cannot plan around. `boardSlots.js` reads `CONFIG.hexUnitCap`
+directly so the two can never drift.
+
 ### 20.7 Rush-building
 
 - A player may spend **banked scrap** to add to (or complete) a city's
@@ -2437,6 +2544,17 @@ board and rush Recognition), and a warmonger can't neglect either — the army
 needs scrap *and* its gear needs construction.
 
 ### 20.11 Engine mapping (design only, not yet built)
+
+> **Out of date 2026-08-23 — this heading is wrong; every item below is
+> built.** Location `output` / `buildSlider` / `buildProgress` /
+> `activeBuild`, the chip schema's `buildCost` / `upgradesTo` / `loyaltyReq` /
+> `upkeep`, the Upkeep order, all four effects and all six events ship today.
+> The Market and Acquire are removed. The mapping is kept as the design
+> record; for what the engine actually does read `src/game/economy.js` and
+> `CONFIG.economy`, and run `node scripts/audit-economy.mjs`.
+>
+> §18.12 got this identical banner on 2026-08-23 and this section did not,
+> which made it the single most misleading heading left in the repo.
 
 - **Location state:** add `output` (derived), `buildSlider` (`f`),
   `buildProgress`, and `activeBuild { kind: build|upgrade, chipId,

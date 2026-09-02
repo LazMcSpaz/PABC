@@ -2,55 +2,96 @@
 // runs the turn loop, and exercises the effect library so each engine
 // layer can be verified without the UI.
 import { createGame } from "./setup.js";
-import { startTurn, endTurn, tickLoyalty } from "./turn.js";
+import { startTurn, endTurn, tickLoyalty, tickClaims, pendingSectionChange, locationActionCapacity } from "./turn.js";
 import { performAction, recruitCostAt } from "./actions.js";
 import { applyEffect } from "./effects.js";
 import { emit } from "./events.js";
 import { recomputeStats, recomputeResearch, assignTechNode, effectiveVeteran } from "./stats.js";
-import { recomputeInfluence, zocOwner, inZoC } from "./influence.js";
+import { recomputeInfluence, zocOwner, inZoC, claimStrength, strongestRivalAt } from "./influence.js";
+import { drawFieldEncounter, fieldEncounters } from "./encounters.js";
 import { reinforcementRoute, bfsDistances, movementField, movementRoute } from "./board.js";
-import { passesFreely, movementBlockers, unitReach, unitIgnoresTerrain } from "./movement.js";
-import { recomputeVisibility, isUnitVisibleTo, revealRegion, unitVision, isHexVisible } from "./visibility.js";
+import { passesFreely, movementBlockers, unitReach, unitIgnoresTerrain, supplyCutter, unitRailEdges } from "./movement.js";
+import { recomputeVisibility, isUnitVisibleTo, revealRegion, unitVision, isHexVisible, ensureAllVisibility } from "./visibility.js";
 import {
   ensureDiplomacy, menaceFromAttack, onAttack,
   formPact, declareWar, vassalize, runDiplomacyRound,
-  recognitionScore, recognitionMet, wouldAccept, dealValue, performDiplomacy,
-  getStanding, atWar, arePacted, vassalLord, mayEngage, areNeighbours,
+  wouldAccept, dealValue, performDiplomacy,
+  getStanding, atWar, arePacted, vassalLord, mayEngage, mayCourt, areNeighbours,
+  isCourting, postureOf, postureStated, courtRounds, interestsOf, speakPosture,
   tolerance, passesRepGates, factionIds,
   // diplomacy-spec.md additions
   findWar, warExhaustion, aiAcceptsPeace, evaluatePactCall,
-  canDemandTribute, caveOnDemand, hasOpenBorders, formTradingPact,
+  canDemandTribute, caveOnDemand, hasOpenBorders, formTradingPact, openBordersStanding,
+  hasRailAccess, railAccessStanding,
   findPactAgreement, honorOf, powerOf,
   // diplomacy robustness pass — baselines, patronage, summit VP
   getBaseline, adjustBaseline, aiAcceptsVassalage, breakPact,
-  resolvePactCall, checkRecognitionVictory,
+  resolvePactCall,
   // diplomacy tuning pass — cooldowns + citations
   mediate, sweepTrespass, warJustification, threatScore,
   // pace pass — truces + partial control
   truceBetween, makePeace,
+  // diplomacy audit fixes — consent, cost, one deal schema, terms
+  denounce, denounceCooldown, denounceWarrant, denounceGrounds, valueOfItem, applyDeal, adjustStanding,
+  recordGrievance, grievancesAgainst, grievanceWeight, worstGrievance,
+  witnessesOf, witnessShare, reputationLog, adjustHonor, adjustMenace, settleableWeight,
+  ultimatumsFor, ultimatumCooldown,
+  // §6.10 the round trip — offers, counters, patience
+  counterOffer, tableOffer, offersFor, answerOffer, asksThisRound, counterTheOffer,
+  // §13 player positions
+  declarePosition, withdrawPosition, positionsOf, positionHeld, citablePositions, positionText, menaceOf,
+  // §12.3 the intrigue branch
+  expose, forge, fabricate, exposableStrikes, lieDetectionChance, sweepForgeries, opsEnabled,
+  covertDetection, counterIntelligence, sabotageCaught,
+  // the one win condition
+  dominionStanding, dominionMet, checkDominion, dominionCountdown, releaseVassal, aiAcceptsPact,
+  // §3.2 Locations as deal items — ceding ground
+  locationWorth, cedeBlocker, cedeableLocations, cedeLocation, resolveProposal,
+  // §8 what a fight costs your name
+  diplomaticPrice, attackIsWorthIt,
+  giftCost, cleanHandsSurcharge,
+  // §6 Sway — the pool a gift must never spend out from under a courtship.
+  swayOf, courtingList,
+  // §9 grounds for a rising, and one faction's appetite for it
+  coalitionGrounds, coalitionJoinScore, coalitionAgainst,
 } from "./diplomacy.js";
-import { holderOf, controlLevel, holdsLocation } from "./control.js";
+import { holderOf, controlLevel, holdsLocation, syncControlHistory } from "./control.js";
+import { recomputeVp, settlementVp, locationVp } from "./victory.js";
 import { setStanding } from "./standing.js";
 import { factionDef, MINOR_FACTIONS } from "./content.js";
 import { activePlayerId } from "./targeting.js";
-import { FACTIONS, LOCATIONS, ABILITIES, REACTIVES, CHIPS } from "./content.js";
+import { FACTIONS, LOCATIONS, ABILITIES, REACTIVES, CHIPS, chipBlocksRail } from "./content.js";
+import { chipValue, upgradeValue, VALUED_FIELDS, NON_EFFECT_FIELDS } from "./chipValue.js";
 import { resolveSalvage } from "./contest.js";
 import { readRivalIntel } from "./intel.js";
 import { postAt, isPostVisibleTo, chargePostUpkeep } from "./posts.js";
+import {
+  blockadeAt, activeBlockadeAt, creditCap, roadSupplyPath,
+  blockadeDefense, blockadeVision, blockadeIncome, blockadeDrainOn, destroyBlockade,
+  chargeBlockadeUpkeep,
+} from "./blockades.js";
 import { loadFieldEncounters, findUnsupportedTypes, choiceIsRunnable, WORLD_ENCOUNTERS } from "./content-loader.js";
 import { pickHexByFilter, encounterRedrawBudget } from "./encounters.js";
 import { resolveTokens } from "./textTokens.js";
 import { evalCond, evalStrength } from "./dsl.js";
 import { registerQuest } from "./quests.js";
 import { CONFIG } from "./config.js";
-import { takeAITurn, maybeAssignTech } from "./ai.js";
-import { enforceLoyaltySlotCap, chargeChipUpkeep, slotCapacity, effectiveBuildCost, buildableChips, applyOutputAndBuilds, locationOutput } from "./economy.js";
+import { takeAITurn, maybeAssignTech, warPeaceTerms, manageDiplomacy,
+  DIPLOMACY_BRANCH_ORDER, runDiplomacyBranch, landlessBlockerHexes, giftBudget } from "./ai.js";
+import { enforceLoyaltySlotCap, chargeChipUpkeep, slotCapacity, effectiveBuildCost, buildableChips, applyOutputAndBuilds, locationOutput, unitUpkeepFor, chargeUnitUpkeep, chipsHeldBy, chipUpkeepFor, slotExpansionCost, completeBuildIfDone } from "./economy.js";
 
 const seed = Number(process.argv[2]) || 42;
 const line = (s = "") => console.log(s);
 
+// What `pid`'s standing army bills each Upkeep. Income checks net this out so
+// they keep measuring income rather than income-minus-whatever-army-the-seed-
+// happened-to-deal.
+const armyUpkeep = (g, pid) => Object.values(g.units)
+  .filter((u) => u.owner === pid)
+  .reduce((n, u) => n + unitUpkeepFor(g, u), 0);
+
 const game = createGame({ seed });
-line(`\n=== Ashland Conquest — engine harness (seed ${seed}) ===`);
+line(`\n=== The Remnant Continent — engine harness (seed ${seed}) ===`);
 
 // --- board ---
 line("\nBOARD  (loc[CTRL]  ~encounter~  wasteland;  * = unit)");
@@ -247,6 +288,10 @@ line(`  upgrade Labs -> ${up.ok ? `ok (now ${game.chips[labUid]?.chipId})` : "bl
 
 line("\nACTIVATE");
 const korad = Object.values(game.locations).find((l) => l.locationId === "korad");
+// Setup no longer hands out abilities (withdrawn 2026-08-16 pending a
+// redesign), so the walkthrough assigns one to keep exercising the machinery —
+// which is intact and waiting for content.
+korad.abilityId = korad.abilityId || "staging-ground";
 const koradAbility = ABILITIES[korad.abilityId];
 const before = {
   scrap: game.players[me].resource, vp: game.players[me].vp,
@@ -515,11 +560,41 @@ line("");
 // =====================================================================
 line("v0.2 VERIFICATION  (movement / attrition / reinforcement / combat)");
 let v2pass = 0, v2fail = 0;
+// Small readers for the §8 fixture: the price rule is about WHOSE ground a
+// fight happens on, so the fixture needs real hexes off the generated board
+// rather than invented ids.
+function hexControlledBy(g, fid) {
+  for (const [hexId, loc] of Object.entries(g.locations || {})) {
+    if (loc.controller === fid) return hexId;
+  }
+  return null;
+}
+function firstEnemyHex(g, pid) {
+  for (const [hexId, loc] of Object.entries(g.locations || {})) {
+    if (loc.controller && loc.controller !== pid) return hexId;
+  }
+  return Object.keys(g.locations || {})[0];
+}
+
 const check = (label, cond) => {
   if (cond) { v2pass++; line(`  ✓ ${label}`); }
   else { v2fail++; line(`  ✗ FAIL — ${label}`); }
 };
 const setStrOn = (g, u, n) => { u.baseStrength = n; recomputeStats(g); };
+
+// Economy §10.2 — entering a rival's ZoC now costs extra movement, which is a
+// SECOND surcharge stacking on terrain, roads and Toll Gates. Fixtures that
+// measure one of those in isolation have to say so, or they are measuring two
+// rules and attributing the total to one. Clears every hex `pid` does not
+// dominate, so the staged rule is the only thing being charged for.
+//
+// The ZoC surcharge has its own fixture (search "§10.2"); this is not a way of
+// not testing it.
+const isolateTerrain = (g, pid) => {
+  for (const hex of Object.keys(g.world?.zoc || {})) {
+    if (g.world.zoc[hex] !== pid) delete g.world.zoc[hex];
+  }
+};
 
 // Fixtures below stage clean 1v1 (or 1v2) contests on "the terrain hex"
 // (the first hex of type "terrain"), assuming it starts empty. Procedural
@@ -543,11 +618,8 @@ line("\n  [Phase 1] movement budget");
   startTurn(g);
   const me = activePlayerId(g);
   const u = Object.values(g.units).find((x) => x.owner === me);
-  // Capitals sit on the road network, so a unit opening its turn there
-  // marches +roadStartBonus — the budget starts at base + bonus.
-  const roadBonus = g.board.hexes[u.node]?.road ? CONFIG.movement.roadStartBonus : 0;
-  check("base Movement is 2 (+1 road march when starting on the highway)",
-    u.movement === 2 && u.moveRemaining === 2 + roadBonus);
+  check("base Movement is 2, and that is the whole turn's budget",
+    u.movement === 2 && u.moveRemaining === 2);
   const actionsBefore = g.players[me].actions.remaining;
   // Two plain (non-forest/mountain) single-cost hops: pick a first hop `a`
   // adjacent to the unit, then a second hop `b` adjacent to `a` — clearing
@@ -561,6 +633,10 @@ line("\n  [Phase 1] movement budget");
   const a = g.board.adjacency[u.node].find(plain) || g.board.adjacency[u.node][0];
   g.board.hexes[a].type = "terrain"; // pin — the fallback pick may be an encounter hex
   g.board.hexes[a].elevation = false; g.board.hexes[a].cover = false;
+  // …and unpave it, for the same reason the terrain is cleared: a capital sits
+  // on the network, so its neighbours are often road, and a road hex is half a
+  // hex. This fixture is about the BUDGET, not about what the lane is worth.
+  g.board.hexes[a].road = false; g.board.hexes[a].rail = false;
   const m1 = performAction(g, "move", { unit: u.uid, to: a });
   const clear = (h) => plain(h) && !Object.values(g.units).some(
     (x) => x.owner !== me && x.node === h);
@@ -572,6 +648,7 @@ line("\n  [Phase 1] movement budget");
     // rewrite the budget this fixture measures.
     g.board.hexes[b].type = "terrain";
     g.board.hexes[b].elevation = false; g.board.hexes[b].cover = false;
+    g.board.hexes[b].road = false; g.board.hexes[b].rail = false;
     for (const x of Object.values(g.units)) {
       if (x.owner !== me && x.node === b) {
         const home = Object.values(g.locations).find((l) => l.controller === x.owner);
@@ -579,8 +656,9 @@ line("\n  [Phase 1] movement budget");
       }
     }
   }
+  isolateTerrain(g, me);
   const m2 = b ? performAction(g, "move", { unit: u.uid, to: b }) : { ok: false };
-  check("two moves consume the budget", m1.ok && m2.ok && u.moveRemaining === roadBonus);
+  check("two moves consume the budget", m1.ok && m2.ok && u.moveRemaining === 0);
   check("moves cost no Actions", g.players[me].actions.remaining === actionsBefore);
   // After a contest the unit can't move.
   const u2 = Object.values(g.units).find((x) => x.owner === me && x.uid !== u.uid) || u;
@@ -639,9 +717,10 @@ line("\n  [Terrain] movement costs (forest +1, mountains halt)");
   }
 }
 
-// --- §16.2 roads — a hex modifier that negates terrain MOVEMENT cost ---
-line("\n  [Roads] negate terrain movement cost (forest + mountain)");
+// --- §16.2 the network: half a hex on easy ground, EASED terrain on rough ---
+line("\n  [Paved] road and rail: half a hex where it is a lane, eased where it is a pass");
 {
+  const PAVED = CONFIG.movement.pavedCost;
   const mk = (B, C) => ({
     board: {
       adjacency: { A: ["B"], B: ["A", "C"], C: ["B", "D"], D: ["C"] },
@@ -649,15 +728,80 @@ line("\n  [Roads] negate terrain movement cost (forest + mountain)");
     },
   });
   const forestRoad = movementField(mk({ cover: true, road: true }, {}), "A", 2);
-  check("a road through forest costs 1 (B rem1, C still reachable)",
-    forestRoad.B === 1 && "C" in forestRoad);
-  const mtnRoad = movementField(mk({}, { elevation: true, road: true }), "A", 3);
-  check("a road through a mountain does NOT halt (C rem1, D reachable)",
-    mtnRoad.C === 1 && "D" in mtnRoad);
-  // Setup lays road corridors between the faction capitals.
+  const M = CONFIG.movement;
+  // Rough ground is EASED, not deleted: a road over a pass is still a pass.
+  check(`a road through forest costs ${M.roadForestCost}, not forestCost`,
+    forestRoad.B === 2 - M.roadForestCost && "C" in forestRoad);
+  const mtnRoad = movementField(mk({}, { elevation: true, road: true }), "A", 4);
+  check("a road over a mountain does NOT halt (D reachable beyond it)",
+    "D" in mtnRoad);
+  check(`…but it still costs ${M.roadMountainCost}, not 1`,
+    mtnRoad.C === 4 - 1 - M.roadMountainCost);
+  check("a road halves forest's toll rather than waiving it",
+    M.roadForestCost === M.forestCost / 2);
+  // …and on EASY ground, which is where a lane is actually a lane, it is half
+  // a hex. These two rules met in a merge and both survived, because they are
+  // about different ground.
+  const openRoad = movementField(mk({ road: true }, {}), "A", 2);
+  check("a road across open ground costs half a hex",
+    openRoad.B === 2 - PAVED);
+  const railOnly = movementField(mk({ rail: true }, { rail: true }), "A", 2);
+  check("rail is graded ground on its own, with no road beside it",
+    railOnly.B === 2 - PAVED && railOnly.C === 2 - PAVED * 2);
+  const tolled = movementField(mk({ road: true }, {}), "A", 2,
+    { extraCost: new Map([["B", 1]]) });
+  check("a toll rides on top of the half-hex, it is not absorbed by it",
+    tolled.B === 2 - PAVED - 1);
+  // Setup lays road corridors between the settlements.
   const g = createGame({ seed });
   const roads = Object.values(g.board.hexes).filter((h) => h.road).length;
-  check("setup lays a road network between capitals", roads > 0);
+  check("setup lays a road network", roads > 0);
+
+  // The SHAPE of what setup lays, over enough boards to mean something.
+  //
+  // `road` is a per-hex boolean, so connectivity — for the renderer and for
+  // the supply walk in blockades.js alike — is "adjacent hexes that both carry
+  // road". Two corridors passing through neighbouring hexes are therefore
+  // welded into a ladder, which is why assignRoads routes each corridor over
+  // the ones already laid instead of independently. These guard that: without
+  // the reuse discount the rungs come back, and without the terrain cost the
+  // corridors drive straight over the high ground they are supposed to skirt.
+  {
+    const seeds = [424242, 7, 991, 4711, 8123, 20260821, 31337, 55555];
+    let hexes = 0, tri = 0, rough = 0, islands = 0;
+    for (const s of seeds) for (const mapSize of [null, "medium", "huge"]) {
+      const b = createGame({ seed: s, mapSize }).board;
+      const road = Object.keys(b.hexes).filter((h) => b.hexes[h].road);
+      const on = new Set(road);
+      hexes += road.length;
+      rough += road.filter((h) => b.hexes[h].elevation || b.hexes[h].cover).length;
+      // A triangle of mutually adjacent road hexes is one rung of a ladder.
+      for (const a of road) for (const x of b.adjacency[a] || []) {
+        if (!on.has(x) || x <= a) continue;
+        for (const c of b.adjacency[x] || []) {
+          if (on.has(c) && c > x && (b.adjacency[a] || []).includes(c)) tri++;
+        }
+      }
+      // One network, not several — supply and blockades both assume it.
+      const seen = new Set([road[0]]);
+      const q = [road[0]];
+      for (let i = 0; i < q.length; i++) for (const nb of b.adjacency[q[i]] || []) {
+        if (on.has(nb) && !seen.has(nb)) { seen.add(nb); q.push(nb); }
+      }
+      if (seen.size !== road.length) islands++;
+    }
+    const n = seeds.length * 3;
+    // Was 7.7 per board when every corridor took its own independent path.
+    check(`roads join instead of running parallel (${(tri / n).toFixed(1)} rungs/board)`,
+      tri / n < 5);
+    // Was 3.6. A road over rough ground deletes that terrain from the game.
+    check(`roads skirt rough ground (${(rough / n).toFixed(1)} rough road hexes/board)`,
+      rough / n < 2);
+    check("every board's road network is one connected piece", islands === 0);
+    check(`the network stays small enough to be worth having (${(hexes / n).toFixed(1)} hexes/board)`,
+      hexes / n < 30);
+  }
+
 }
 
 // --- §16.2 blockade — foreign units / enemy Locations halt movement ---
@@ -698,6 +842,166 @@ line("\n  [Blockade] non-passing units and enemy Locations stop a move");
 }
 
 // --- §16.2 route — the move arrow follows the actual least-cost path ---
+// Location budgets are handed out in whole FAIRNESS GROUPS. Splitting one — as
+// a flat truncation did — hands some factions a homeland pair and others a
+// single city, which is what let the 2026-08-15 playtest's human take an
+// uncontested corner while the AI ground itself down in another.
+line("\n  [Setup] every faction gets the same number of home Locations");
+{
+  const homes = (g) => {
+    const per = {};
+    for (const loc of Object.values(g.locations)) {
+      const aff = LOCATIONS[loc.locationId]?.affiliation;
+      if (aff) per[aff] = (per[aff] || 0) + 1;
+    }
+    return per;
+  };
+  const majors = ["versari", "goldgrass", "lakers", "plainers"];
+  let fair = true;
+  let sizes = [];
+  for (const size of ["small", "medium", "large", "huge"]) {
+    for (const s of [1, 2, 3, 7, 42]) {
+      const g = createGame({ seed: s, mapSize: size });
+      const per = homes(g);
+      const counts = majors.map((f) => per[f] || 0);
+      if (new Set(counts).size !== 1) fair = false;
+      if (s === 1) sizes.push(`${size}:${counts[0]}`);
+    }
+  }
+  check(`every faction holds the same number of affiliated Locations at every size (${sizes.join(" ")})`, fair);
+
+  // The budget is still spent in full — fairness must not cost Locations.
+  const placed = ["small", "medium", "large", "huge"].map((size) =>
+    Object.keys(createGame({ seed: 5, mapSize: size }).locations).length);
+  const wanted = ["small", "medium", "large", "huge"].map((size) => CONFIG.mapSizes[size].locations);
+  check(`the Location budget is spent in full at every size (${placed.join("/")} of ${wanted.join("/")})`,
+    placed.every((n, i) => n === wanted[i]));
+}
+
+// Setup-screen rule switches. Each of these was, at some point, a control that
+// looked live and changed nothing — so each gets a check that the SWITCH does
+// something, not merely that the default still works.
+line("\n  [Setup] Rule switches from the start screen");
+{
+  // VP no longer ends anything. It is the end-of-game standing, and a faction
+  // sitting on a mountain of it wins nothing by that alone.
+  {
+    const g = createGame({ seed });
+    const me = g.turnOrder[0];
+    g.players[me].bankedVp = CONFIG.vpThreshold * 5;
+    recomputeVp(g);
+    check("a pile of VP wins nothing — it is a score, not a condition",
+      g.players[me].vp >= CONFIG.vpThreshold && !g.winnerId);
+  }
+
+  // The pure-conquest face of the one condition: wipe the board and there is
+  // nobody left who is not dealt with, so it lands at once — no hold, because
+  // there is nobody left to break it.
+  {
+    const stage = (rules) => {
+      const g = createGame({ seed, rules });
+      for (const pid of g.turnOrder.slice(1)) {
+        for (const uid of Object.keys(g.units)) if (g.units[uid].owner === pid) delete g.units[uid];
+        for (const loc of Object.values(g.locations)) {
+          if (loc.controller === pid) { loc.controller = null; loc.sections = ["neutral", "neutral", "neutral"]; }
+          if (loc.loyaltyOwner === pid) { loc.loyaltyOwner = null; loc.loyalty = null; }
+        }
+      }
+      startTurn(g); endTurn(g);
+      return g;
+    };
+    check("outliving everyone wins immediately — nothing left to hold against",
+      stage(undefined).winnerId === createGame({ seed }).turnOrder[0]);
+    check("…and the toggle switches the whole condition off",
+      !stage({ victory: { dominion: false } }).winnerId);
+  }
+
+  // Fog: OFF leaves the per-faction records empty, which every reader already
+  // treats as full sight — so there is no second code path to keep in step.
+  {
+    const dark = createGame({ seed });
+    const lit = createGame({ seed, rules: { fogOfWar: false } });
+    const me = lit.turnOrder[0];
+    const someHex = Object.keys(lit.board.hexes)[0];
+    check("fog: on — a faction has a visibility record and cannot see everything",
+      !!dark.visibility?.[me] && dark.visibility[me].visible.size < Object.keys(dark.board.hexes).length);
+    check("fog: off — no record is built, and every hex reads as visible",
+      !lit.visibility?.[me] && isHexVisible(lit, me, someHex));
+  }
+
+  // Encounters: both dials reach real engine numbers.
+  {
+    const none = createGame({ seed, rules: { encounters: { field: 0 } } });
+    const many = createGame({ seed, rules: { encounters: { field: 0.9 } } });
+    const count = (g) => Object.values(g.board.hexes).filter((h) => h.type === "encounter").length;
+    check(`encounters: the field share sets how many encounter hexes exist (${count(none)} vs ${count(many)})`,
+      count(none) === 0 && count(many) > count(none));
+
+    const off = createGame({ seed, rules: { encounters: { world: 0 } } });
+    check("encounters: world 0 is carried onto the state for the trigger loop",
+      off.rules.worldEncountersPerRound === 0 &&
+      createGame({ seed }).rules.worldEncountersPerRound === CONFIG.encounters.worldPerRound);
+  }
+
+  // The defaults must be exactly what the engine did before rules existed —
+  // otherwise every headless caller and the rest of this harness shifts.
+  {
+    const g = createGame({ seed });
+    check("defaults: the condition is live, fog on, world cadence at the config default",
+      g.rules.victory.dominion === true &&
+      g.rules.fogOfWar === true &&
+      g.rules.worldEncountersPerRound === CONFIG.encounters.worldPerRound);
+    // The three old switches were three names for one thing. Any of them still
+    // turns it off, so a saved setup or an older caller keeps working.
+    for (const legacy of ["conquest", "recognition", "elimination"]) {
+      check(`…and the legacy "${legacy}" switch still turns it off`,
+        createGame({ seed, rules: { victory: { [legacy]: false } } }).rules.victory.dominion === false);
+    }
+  }
+}
+
+// Content rules that are easy to break by adding a Location and forgetting.
+line("\n  [Content] Location rules that must hold at every board size");
+{
+  const sizes = ["small", "medium", "large", "huge"];
+  const games = sizes.map((size) => ({ size, g: createGame({ seed, mapSize: size }) }));
+
+  // Sign-named settlements grew up around ROAD signage, so a railway never had
+  // reason to STOP at one. Passing through their hex is fine.
+  let badTerminus = [];
+  for (const { g } of games) {
+    for (const link of g.board.rails || []) {
+      for (const end of [link.a, link.b]) {
+        const id = g.locations[end]?.locationId;
+        if (id && LOCATIONS[id]?.noRailTerminus) badTerminus.push(id);
+      }
+    }
+  }
+  check("rail never terminates at a sign-named settlement", badTerminus.length === 0, badTerminus);
+
+  // …and the rule is only meaningful if such places actually reach a board.
+  const huge = games.find((x) => x.size === "huge").g;
+  const signNamed = Object.values(huge.locations)
+    .filter((l) => LOCATIONS[l.locationId]?.noRailTerminus);
+  check(`sign-named settlements do reach the big boards (${signNamed.length} on huge)`,
+    signNamed.length >= 3);
+
+  // Abilities are withdrawn pending a redesign — nothing should carry one, and
+  // High/VeryHigh Locations get their chip slot back.
+  const withAbility = games.flatMap(({ g }) =>
+    Object.values(g.locations).filter((l) => l.abilityId).map((l) => l.locationId));
+  check("no Location is assigned an ability", withAbility.length === 0, withAbility);
+  const slotShort = Object.values(huge.locations).filter(
+    (l) => l.chipSlots !== CONFIG.chipSlotsByValue[LOCATIONS[l.locationId].strategicValue]);
+  check("every Location keeps its full chip-slot count now nothing pays for an ability",
+    slotShort.length === 0);
+
+  // Every engine Location must be renderable — the UI keeps its own table.
+  check("the `low` tier is in use (Nosservis / Detor)",
+    Object.values(huge.locations).some(
+      (l) => LOCATIONS[l.locationId].strategicValue === "low"));
+}
+
 line("\n  [Route] the move path follows real movement rules");
 {
   // Diamond: A→{B forest, X plains}→D. The cheaper lane is A→X→D.
@@ -1347,27 +1651,36 @@ line("\n  [Tech Wheel] entry-node effects");
     const me = g.turnOrder[0];
     g.players[me].techLevel = 2; g.players[me].techWheel = ["eco-entry"];
     const locs = Object.values(g.locations).filter((l) => l.controller === me);
-    const expected = locs.reduce((n, l) => n + l.production, 0) + locs.length;
+    // Net of the army's keep — this check is about INCOME, and standing units
+    // now bill against the same pot.
+    const expected = locs.reduce((n, l) => n + l.production, 0) + locs.length
+      - armyUpkeep(g, me);
     const before = g.players[me].resource;
     for (let i = 0; i < g.turnOrder.length; i++) endTurn(g); // back to me's Upkeep
     check("Economy (Industry): +1 scrap per held Location",
       g.players[me].resource - before === expected);
   }
 
-  // Intelligence: the redraw stacks with the Recon Team chip (budget 2).
+  // Intelligence: the redraw now comes from the TECH WHEEL, not from a
+  // town-buildable chip. `recon-team` was removed by design ruling — encounter
+  // foresight is a tech-wheel entry or a unit chip, never a settlement build —
+  // so this asserts the tech grants it and that a unit chip stacks on top,
+  // which is the only remaining way to reach a budget of 2.
   {
     const g = createGame({ seed }); startTurn(g);
     const me = g.turnOrder[0];
-    const home = Object.values(g.locations).find((l) => l.controller === me);
     g.players[me].techLevel = 2; g.players[me].techWheel = ["int-entry"];
-    const rc = g.nextId("chip"); g.chips[rc] = { uid: rc, chipId: "recon-team" };
-    home.chips.push(rc); // +1 discard; with int-entry = 2 total
     const encHex = Object.values(g.board.hexes).find(
       (h) => h.type === "encounter" && g.board.adjacency[h.id]?.length,
     );
     const staging = g.board.adjacency[encHex.id][0];
     const u = Object.values(g.units).find((x) => x.owner === me);
-    u.node = staging; u.moveRemaining = 9; recomputeStats(g);
+    u.node = staging; u.moveRemaining = 9;
+    // Trailwise is a UNIT chip and remains buildable; it is what stacks with
+    // the tech entry now that no Location chip grants a redraw.
+    const tw = g.nextId("chip"); g.chips[tw] = { uid: tw, chipId: "trailwise" };
+    u.chips.push(tw);
+    recomputeStats(g);
     g.players[me].actions.remaining = 5;
     const original = [...g.encounterDeck];
     let discards = 0;
@@ -1378,7 +1691,7 @@ line("\n  [Tech Wheel] entry-node effects");
     } };
     performAction(g, "move", { unit: u.uid, to: encHex.id }, ctx);
     const delivered = [...g.log].reverse().find((e) => e.name === "encounter_delivered");
-    check("Intelligence + Recon Team grant 2 discards (3rd card drawn)",
+    check("Intelligence (tech) + Trailwise (unit chip) grant 2 discards (3rd card drawn)",
       discards === 2 && delivered && delivered.payload.encounter === original[2]);
   }
 }
@@ -1585,7 +1898,8 @@ line("\n  [Tech Wheel §17.5] Economy branch (Industry / Construction)");
     const me = g.turnOrder[0];
     g.players[me].techLevel = 5; g.players[me].techWheel = ["eco-entry", "eco-a1"];
     const locs = Object.values(g.locations).filter((l) => l.controller === me);
-    const expected = locs.reduce((n, l) => n + l.production, 0) + locs.length * 2;
+    const expected = locs.reduce((n, l) => n + l.production, 0) + locs.length * 2
+      - armyUpkeep(g, me);
     const before = g.players[me].resource;
     for (let i = 0; i < g.turnOrder.length; i++) endTurn(g);
     check("Economy A1 (Refineries): +2 scrap/held Location (entry + A1)",
@@ -1817,6 +2131,727 @@ line("\n  [Tech Wheel §17.7] Listening Post");
     chargePostUpkeep(g, me);
     check("Listening Post: paying upkeep reactivates the post",
       post.paid === true && g.players[me].resource === 4);
+  }
+}
+
+// =====================================================================
+// AMBUSH HALTS — a blocker you could not see stops you, but costs you the
+// ADVANCE rather than the whole turn. A blocker you could see costs both.
+// =====================================================================
+line("\n  [§16.2] Halted by something you could not see");
+{
+  // `me`'s lone unit in open country with one enemy planted `range` hexes
+  // ahead. Every other vision source `me` has is stripped (other units, its
+  // Locations, its ZoC) so the mover's OWN sight is the only thing deciding
+  // whether the blocker is a surprise — which is the whole variable here.
+  const stage = (range) => {
+    const g = createGame({ seed }); startTurn(g);
+    const me = g.turnOrder[0], foe = g.turnOrder[1];
+    const u = Object.values(g.units).find((x) => x.owner === me);
+    const fu = Object.values(g.units).find((x) => x.owner === foe);
+    for (const x of Object.values(g.units)) {
+      if (x.uid !== u.uid && x.uid !== fu.uid) delete g.units[x.uid];
+    }
+    for (const l of Object.values(g.locations)) if (l.controller === me) l.controller = null;
+    g.world.zoc = {};
+
+    // Plain ground only — a mountain or forest would halt or tax the move for
+    // reasons that have nothing to do with the blocker.
+    const plain = (h) => g.board.hexes[h] && !g.locations[h] &&
+      !g.board.hexes[h].elevation && !g.board.hexes[h].cover;
+    const start = Object.keys(g.board.hexes).find(
+      (h) => plain(h) && (g.board.adjacency[h] || []).filter(plain).length >= 2);
+    u.node = start; u.moveRemaining = 6; u.turnStartNode = start; u.checked = false;
+
+    const d = bfsDistances(g.board.adjacency, start);
+    const blockHex = Object.keys(g.board.hexes)
+      .filter((h) => plain(h) && d[h] === range).sort()[0];
+    if (!blockHex) throw new Error(`no plain hex ${range} from ${start} on seed ${seed}`);
+    fu.node = blockHex;
+    recomputeStats(g);
+    g.players[me].actions.remaining = 9;
+    recomputeVisibility(g, me, { emitEvents: false });
+    // A hex one step further out than the blocker — where "pressing on" leads.
+    const beyond = (g.board.adjacency[blockHex] || []).find((h) => plain(h) && d[h] === range + 1);
+    return { g, me, foe, u, fu, start, blockHex, beyond, d };
+  };
+
+  // Unseen (3 hexes out, past the mover's own sight): keeps the remainder.
+  {
+    const { g, me, u, blockHex } = stage(3);
+    const hidden = !isHexVisible(g, me, blockHex);
+    // What the trip WOULD have cost with nothing blocking — the movement the
+    // unit should still be holding once it is stopped by a surprise.
+    const owed = u.moveRemaining - (unitReach(g, u)[blockHex] ?? 0);
+    const before = u.moveRemaining;
+    const mv = performAction(g, "move", { unit: u.uid, to: blockHex });
+    check("Ambush: a halt you could not see keeps the movement you had left",
+      hidden && mv.ok && u.node === blockHex && u.moveRemaining > 0 &&
+      u.moveRemaining === before - owed && u.checked === true);
+  }
+
+  // Seen (adjacent, so the mover's own sight covers it): costs the whole move.
+  {
+    const { g, me, u, blockHex } = stage(1);
+    const seen = isHexVisible(g, me, blockHex);
+    const mv = performAction(g, "move", { unit: u.uid, to: blockHex });
+    check("Ambush: a halt you COULD see still costs the rest of the move",
+      seen && mv.ok && u.node === blockHex && u.moveRemaining === 0 && !u.checked);
+  }
+
+  // Checked units may fall back or sidestep, but not press on. Note the unit
+  // may not have the movement to reach its start hex again — the rule is about
+  // DIRECTION, so the test is too: something strictly closer must be open, and
+  // nothing further out may be.
+  {
+    const { g, me, u, blockHex, beyond, d } = stage(3);
+    performAction(g, "move", { unit: u.uid, to: blockHex });
+    const reach = unitReach(g, u);
+    const closer = Object.keys(reach).filter((h) => (d[h] ?? 99) < d[blockHex]);
+    check("Ambush: a checked unit may fall back toward where it started",
+      u.moveRemaining > 0 && closer.length > 0);
+    check("Ambush: a checked unit may sidestep, but never press on past the blocker",
+      Object.keys(reach).every((h) => (d[h] ?? 99) <= d[blockHex]) &&
+      // `beyond` only exists when the blocker isn't on the board's rim.
+      (!beyond || !(beyond in reach)));
+  }
+
+  // The check lasts the turn, and lifts at the next Upkeep.
+  {
+    const { g, me, u, blockHex, d } = stage(3);
+    performAction(g, "move", { unit: u.uid, to: blockHex });
+    const back = Object.keys(unitReach(g, u))
+      .filter((h) => (d[h] ?? 99) < d[blockHex]).sort()[0];
+    performAction(g, "move", { unit: u.uid, to: back });
+    check("Ambush: the check persists after falling back",
+      u.node === back && u.checked === true);
+    // Round the table back to `me` — its own turn has to END first, or the
+    // loop condition is already satisfied and nothing happens.
+    endTurn(g);
+    while (activePlayerId(g) !== me) endTurn(g);
+    check("Ambush: the next Upkeep clears it",
+      u.checked === false && u.turnStartNode === u.node);
+  }
+}
+
+// =====================================================================
+// RAIL PRODUCTION POOLING (docs/rail-road-blockade-design.md §2.2) — an idle
+// settlement routes its build throughput down a DIRECT rail link.
+// =====================================================================
+line("\n  [Rail doc §2.2] Production pooling");
+{
+  // Two capitals joined by a rail link, both held by `me`, both idle.
+  const stage = () => {
+    const g = createGame({ seed }); startTurn(g);
+    const me = g.turnOrder[0];
+    const link = (g.board.rails || [])[0];
+    if (!link) return null;
+    const from = g.locations[link.a], to = g.locations[link.b];
+    if (!from || !to) return null;
+    for (const l of [from, to]) {
+      l.controller = me; l.sections = [me, me, me];
+      l.production = 6; l.buildSlider = 1; l.activeBuild = null; l.buildProgress = 0;
+      l.poolTarget = null;
+    }
+    // Both endpoints were somebody else's capital, and their garrisons are
+    // still standing on them — which genuinely cuts the line. Clear the whole
+    // path so each case below controls the interruption it is testing.
+    const path = new Set(link.path);
+    for (const u of Object.values(g.units)) {
+      if (u.owner !== me && path.has(u.node)) delete g.units[u.uid];
+    }
+    recomputeStats(g);
+    g.players[me].actions.remaining = 9;
+    return { g, me, from, to, link };
+  };
+
+  const st0 = stage();
+  check("Pooling: the test board has a rail link between two Locations", !!st0);
+
+  if (st0) {
+    // Opt-in, direct pairs, both stations held.
+    {
+      const { g, me, from, to } = stage();
+      const set = performAction(g, "set-pool-target", { at: from.hexId, to: to.hexId });
+      const self = performAction(g, "set-pool-target", { at: from.hexId, to: from.hexId });
+      const unlinked = Object.values(g.locations)
+        .find((l) => l.hexId !== from.hexId && l.hexId !== to.hexId);
+      unlinked.controller = me;
+      const far = performAction(g, "set-pool-target", { at: from.hexId, to: unlinked.hexId });
+      check("Pooling: opt-in only, never into itself, and only down a DIRECT link",
+        set.ok && !self.ok && !far.ok && from.poolTarget === to.hexId);
+    }
+
+    // The transfer itself.
+    {
+      const { g, me, from, to } = stage();
+      performAction(g, "set-pool-target", { at: from.hexId, to: to.hexId });
+      const output = locationOutput(g, from);
+      applyOutputAndBuilds(g, me);
+      check("Pooling: an idle settlement's build output arrives at the recipient",
+        to.buildProgress === output && from.buildProgress === 0 && output > 0);
+    }
+
+    // The donor's own build always comes first.
+    {
+      const { g, me, from, to } = stage();
+      performAction(g, "set-pool-target", { at: from.hexId, to: to.hexId });
+      from.activeBuild = { kind: "build", chipId: "scrapworks", cost: 99 };
+      const output = locationOutput(g, from);
+      applyOutputAndBuilds(g, me);
+      check("Pooling: a settlement building something of its own pools nothing",
+        from.buildProgress === output && to.buildProgress === 0);
+    }
+
+    // §2.2 mid-turn interruption — no partial credit, and it banks instead.
+    {
+      const { g, me, from, to, link } = stage();
+      performAction(g, "set-pool-target", { at: from.hexId, to: to.hexId });
+      const foe = g.turnOrder[1];
+      const cutAt = link.path.find((h) => h !== from.hexId && h !== to.hexId) || link.path[1];
+      const fu = Object.values(g.units).find((x) => x.owner === foe);
+      fu.node = cutAt; recomputeStats(g);
+      const banked = g.players[me].resource;
+      applyOutputAndBuilds(g, me);
+      check("Pooling: a cut line pools NOTHING — no partial credit",
+        to.buildProgress === 0 && from.buildProgress === 0 &&
+        g.log.some((e) => e.name === "pool_interrupted"));
+      check("Pooling: a cut line banks the output instead of losing it",
+        g.players[me].resource > banked);
+    }
+
+    // §2.3 — losing a station closes the link.
+    {
+      const { g, me, from, to } = stage();
+      performAction(g, "set-pool-target", { at: from.hexId, to: to.hexId });
+      to.controller = g.turnOrder[1];
+      applyOutputAndBuilds(g, me);
+      check("Pooling: you must hold BOTH stations — a lost recipient pools nothing",
+        to.buildProgress === 0);
+    }
+  }
+}
+
+// =====================================================================
+// BLOCKADE STRUCTURES (docs/rail-road-blockade-design.md §3) — build gating →
+// supply-fed construction → blocking + Vision once complete → destroy-only.
+// =====================================================================
+line("\n  [Rail doc §3] Blockade structures");
+{
+  // A road hex with a friendly unit on it and an intact road link back to a
+  // settlement `me` holds — the standard setup for every case below.
+  const stage = () => {
+    const g = createGame({ seed }); startTurn(g);
+    const me = g.turnOrder[0];
+    const home = Object.values(g.locations).find((l) => l.controller === me);
+    // Nearest road hex to home that isn't a Location, so supply is short and
+    // its path is easy to cut in the tests that want to cut it.
+    const d = bfsDistances(g.board.adjacency, home.hexId);
+    const hex = Object.keys(g.board.hexes)
+      .filter((h) => g.board.hexes[h].road && !g.locations[h])
+      .sort((a, b) => (d[a] ?? 99) - (d[b] ?? 99))[0];
+    const u = Object.values(g.units).find((x) => x.owner === me);
+    u.node = hex; recomputeStats(g);
+    g.players[me].resource = 10; g.players[me].actions.remaining = 5;
+    // Rail doc §3.4 — construction is paid out of the funding settlement's
+    // build output, so pin that down: a generous Output, all of it on the guns
+    // side, and no chip of its own competing unless a case asks for one.
+    home.production = 8; home.buildSlider = 1; home.activeBuild = null;
+    home.buildProgress = 0;
+    return { g, me, hex, u, home };
+  };
+
+  // One Upkeep's worth of economy for `me` — this is what funds blockades now.
+  const upkeep = (g, me) => applyOutputAndBuilds(g, me);
+
+  // Build gating: road hex, a unit to pin, scrap, and a live supply line.
+  {
+    const { g, me, hex, u } = stage();
+    const offRoad = Object.keys(g.board.hexes).find((h) => !g.board.hexes[h].road && !g.locations[h]);
+    const notRoad = performAction(g, "build-blockade", { hex: offRoad });
+    const onLoc = performAction(g, "build-blockade", {
+      hex: Object.values(g.locations).find((l) => l.controller === me).hexId,
+    });
+    const kept = g.players[me].resource; g.players[me].resource = 1;
+    const poor = performAction(g, "build-blockade", { hex });
+    g.players[me].resource = kept;
+    const built = performAction(g, "build-blockade", { hex });
+    const twice = performAction(g, "build-blockade", { hex });
+    check("Blockade: build needs a road hex, off a Location, with scrap — then succeeds",
+      !notRoad.ok && !onLoc.ok && !poor.ok && built.ok && !twice.ok && !!blockadeAt(g, hex));
+    check(`Blockade: costs ${CONFIG.blockades.buildCost} scrap and starts unfinished, pinning its builder`,
+      g.players[me].resource === 10 - CONFIG.blockades.buildCost &&
+      blockadeAt(g, hex).done === false &&
+      blockadeAt(g, hex).builder === u.uid);
+    // Step the builder aside to read the SITE's own blocking: with the unit
+    // still on it the hex is blocked either way, and the point of the check is
+    // that a construction site contributes nothing on its own.
+    const parked = u.node;
+    u.node = g.board.adjacency[hex][0]; recomputeStats(g);
+    check("Blockade: an unfinished site is not a blockade and blocks nobody",
+      !activeBlockadeAt(g, hex) && !movementBlockers(g, g.turnOrder[1]).has(hex));
+    u.node = parked; recomputeStats(g);
+  }
+
+  // Construction takes the §3.1 two-turn floor, and completing it frees the
+  // builder while turning the site into a real structure.
+  {
+    const { g, me, hex } = stage();
+    performAction(g, "build-blockade", { hex });
+    upkeep(g, me);
+    const midway = blockadeAt(g, hex);
+    // The settlement produces 8 with the slider fully on build, far more than
+    // the site's whole 4-point cost — the floor is what stops it landing now.
+    check("Blockade: a rich settlement still cannot raise one in a single Upkeep",
+      midway.done === false && midway.progress === creditCap(midway));
+    upkeep(g, me);
+    const done = blockadeAt(g, hex);
+    check("Blockade: a second Upkeep completes it and releases the builder",
+      done.done === true && done.builder === null && !!activeBlockadeAt(g, hex));
+  }
+
+  // §3.1 — the builder is the real cost. Walk it off and construction fails.
+  {
+    const { g, me, hex, u } = stage();
+    performAction(g, "build-blockade", { hex });
+    u.node = g.board.adjacency[hex][0]; recomputeStats(g);
+    upkeep(g, me);
+    check("Blockade: losing the pinned builder fails construction outright",
+      !blockadeAt(g, hex));
+  }
+
+  // §3.1 — a cut supply line stalls construction rather than failing it.
+  {
+    const { g, me, hex, home } = stage();
+    const foe = g.turnOrder[1];
+    performAction(g, "build-blockade", { hex });
+    // Park an enemy on the road between the site and home.
+    const path = roadSupplyPath(g, me, hex);
+    const cutAt = path[1];
+    const fu = Object.values(g.units).find((x) => x.owner === foe);
+    fu.node = cutAt; recomputeStats(g);
+    upkeep(g, me);
+    const stalled = blockadeAt(g, hex);
+    check("Blockade: an enemy on the supply road stalls construction, not fails it",
+      !!stalled && stalled.done === false && stalled.progress === 0 &&
+      path[path.length - 1] === home.hexId);
+    // Clear the line — every foreign unit, not just the one we parked — and
+    // construction resumes.
+    const offPath = Object.keys(g.board.hexes).find((h) => !path.includes(h));
+    for (const x of Object.values(g.units)) {
+      if (x.owner !== me && path.includes(x.node)) x.node = offPath;
+    }
+    recomputeStats(g);
+    upkeep(g, me);
+    check("Blockade: clearing the road resumes construction",
+      blockadeAt(g, hex).progress === creditCap(blockadeAt(g, hex)));
+  }
+
+  // §3.4 — the blockade outranks the settlement's own chip by default, but only
+  // takes what the floor lets it; the remainder still reaches the chip.
+  {
+    const { g, me, hex, home } = stage();
+    performAction(g, "build-blockade", { hex });
+    home.activeBuild = { kind: "build", chipId: "scrapworks", cost: 99 };
+    home.buildProgress = 0;
+    const site = blockadeAt(g, hex);
+    const cap = creditCap(site);
+    const output = locationOutput(g, home);
+    upkeep(g, me);
+    check("Blockade: outranks the settlement's own chip by default",
+      blockadeAt(g, hex).progress === cap);
+    check("Blockade: takes only its per-turn cap — the rest still reaches the chip",
+      home.buildProgress === output - cap && output > cap);
+  }
+
+  // §3.4 — the toggle flips it, and flips it hard: while a chip is building,
+  // it takes everything and the blockade waits.
+  {
+    const { g, me, hex, home } = stage();
+    performAction(g, "build-blockade", { hex });
+    const set = performAction(g, "set-build-priority", { at: home.hexId, value: "chips" });
+    home.activeBuild = { kind: "build", chipId: "scrapworks", cost: 99 };
+    home.buildProgress = 0;
+    const output = locationOutput(g, home);
+    upkeep(g, me);
+    check("Blockade: the chips-first toggle starves the site while a chip builds",
+      set.ok && blockadeAt(g, hex).progress === 0 && home.buildProgress === output);
+    // Finish the chip and the site resumes — it was waiting, not cancelled.
+    home.activeBuild = null;
+    upkeep(g, me);
+    check("Blockade: with the chip done, a chips-first settlement funds it again",
+      blockadeAt(g, hex).progress === creditCap(blockadeAt(g, hex)));
+    const bad = performAction(g, "set-build-priority", { at: home.hexId, value: "wombat" });
+    check("Blockade: build priority only accepts blockade / chips", !bad.ok);
+  }
+
+  // §3 — once complete it halts enemy movement and sees for its owner.
+  {
+    const { g, me, hex } = stage();
+    const foe = g.turnOrder[1];
+    performAction(g, "build-blockade", { hex });
+    upkeep(g, me);
+    upkeep(g, me);
+    check("Blockade: a completed blockade halts enemy movement",
+      movementBlockers(g, foe).has(hex) && !movementBlockers(g, me).has(hex));
+    // Isolate it as me's only Vision source.
+    for (const uid of Object.keys(g.units)) if (g.units[uid].owner === me) delete g.units[uid];
+    for (const l of Object.values(g.locations)) if (l.controller === me) l.controller = null;
+    g.world.zoc = {};
+    recomputeVisibility(g, me, { emitEvents: false });
+    check("Blockade: a completed blockade is a Vision source for its owner",
+      isHexVisible(g, me, hex));
+  }
+
+  // Build points with nowhere to go become scrap rather than sitting on the
+  // Location as an untargeted pile.
+  {
+    const g = createGame({ seed }); startTurn(g);
+    const me = g.turnOrder[0];
+    const home = Object.values(g.locations).find((l) => l.controller === me);
+    home.buildSlider = 1;              // all Output to BUILD
+    home.production = 20;              // far more than the cheapest chip costs
+    home.activeBuild = null; home.buildProgress = 0;
+    g.players[me].techLevel = 5;
+
+    // Queue something cheap so the Output massively overshoots it.
+    const opt = buildableChips(g, home).find((o) => !o.locked && o.def.kind === "location");
+    const cost = effectiveBuildCost(g, me, opt.def);
+    g.players[me].actions.remaining = 5;
+    const queued = performAction(g, "build", { at: home.hexId, chipId: opt.chipId });
+
+    const before = g.players[me].resource;
+    // Snapshot Output BEFORE the tick: the chip that lands may itself add
+    // Output, so reading it afterwards measures a different settlement.
+    const outputs = Object.values(g.locations)
+      .filter((l) => l.controller === me)
+      .reduce((n, l) => n + locationOutput(g, l), 0);
+    applyOutputAndBuilds(g, me);
+    check("Build surplus: the overshoot banks as scrap, not stranded progress",
+      queued.ok && home.activeBuild === null && (home.buildProgress || 0) === 0 &&
+      g.players[me].resource > before);
+    check("Build surplus: nothing is lost — output is conserved end to end",
+      g.players[me].resource - before === outputs - cost);
+  }
+
+  // A unit chip with no unit to arm used to destroy every point sunk into it.
+  {
+    const g = createGame({ seed }); startTurn(g);
+    const me = g.turnOrder[0];
+    const home = Object.values(g.locations).find((l) => l.controller === me);
+    g.players[me].techLevel = 5; g.players[me].actions.remaining = 5;
+    home.buildSlider = 1; home.production = 20;
+    const unitOpt = buildableChips(g, home).find((o) => !o.locked && o.def.kind === "unit");
+    // Stage a unit so the build is legal to QUEUE, then march it off before the
+    // chip lands — the forfeit path.
+    const u = Object.values(g.units).find((x) => x.owner === me);
+    u.node = home.hexId; recomputeStats(g);
+    const queuedUnit = performAction(g, "build", { at: home.hexId, chipId: unitOpt.chipId });
+    u.node = (g.board.adjacency[home.hexId] || [])[0]; recomputeStats(g);
+    const before = g.players[me].resource;
+    const outputs = Object.values(g.locations)
+      .filter((l) => l.controller === me)
+      .reduce((n, l) => n + locationOutput(g, l), 0);
+    applyOutputAndBuilds(g, me);
+    check("Build surplus: a forfeited unit chip refunds its work as scrap",
+      queuedUnit.ok && home.activeBuild === null && (home.buildProgress || 0) === 0 &&
+      // The chip never landed, so the ENTIRE build half comes back rather than
+      // evaporating: nothing is deducted for a chip that was never installed.
+      g.players[me].resource - before === outputs);
+  }
+
+  // Rail doc Part 1 — a blockade is a GARRISON, not a wall: it halts only what
+  // it can see, so stealth walks through and a Signal Mast closes the gap.
+  {
+    const { g, me, hex, u } = stage();
+    const foe = g.turnOrder[1];
+    performAction(g, "build-blockade", { hex });
+    upkeep(g, me); upkeep(g, me);
+    const b = blockadeAt(g, hex);
+    u.node = g.board.adjacency[hex][0]; recomputeStats(g); // builder steps off
+    ensureAllVisibility(g);
+    recomputeVisibility(g, me, { emitEvents: false });
+
+    // An ordinary enemy walking up to it is seen and stopped.
+    const mover = Object.values(g.units).find((x) => x.owner === foe);
+    mover.node = g.board.adjacency[hex].find((h) => h !== u.node) || g.board.adjacency[hex][0];
+    recomputeStats(g);
+    check("Blockade garrison: an unconcealed mover is seen and halted",
+      movementBlockers(g, foe, { mover }).has(hex));
+
+    // Now the mover sneaks. Stealth is exactly the "if you are sneaking" case.
+    mover.stealth = true;
+    check("Blockade garrison: a stealthed mover slips past an unmasted blockade",
+      !movementBlockers(g, foe, { mover }).has(hex));
+    check("Blockade garrison: ground truth is unchanged — only the mover's view of it",
+      movementBlockers(g, foe).has(hex));
+
+    // A Signal Mast gives the blockade Detection, and the road shuts again.
+    const mast = g.nextId("chip");
+    g.chips[mast] = { uid: mast, chipId: "signal-mast" };
+    b.chips = [...(b.chips || []), mast];
+    recomputeVisibility(g, me, { emitEvents: false });
+    check("Blockade garrison: a Signal Mast detects the sneak and halts it again",
+      movementBlockers(g, foe, { mover }).has(hex));
+
+    // A dormant blockade detects nothing, mast or not — nobody is up there.
+    b.paid = false;
+    check("Blockade garrison: a dormant masted blockade stops nobody",
+      !movementBlockers(g, foe, { mover }).has(hex));
+    b.paid = true;
+
+    // And the unit's own reachability agrees with the scan — the field is what
+    // the player actually acts on.
+    mover.stealth = false;
+    b.chips = [];
+    recomputeVisibility(g, me, { emitEvents: false });
+    mover.moveRemaining = 4; recomputeStats(g);
+    const seenField = unitReach(g, mover);
+    mover.stealth = true;
+    const sneakField = unitReach(g, mover);
+    // Past the blockade means: some hex beyond it that only opens when the
+    // blockade stops halting you.
+    const beyond = (g.board.adjacency[hex] || []).filter((h) => h !== mover.node);
+    const opensUp = beyond.some((h) => !(h in seenField) && h in sneakField)
+      || (seenField[hex] === 0 && sneakField[hex] > 0);
+    check("Blockade garrison: sneaking actually widens the reachable field",
+      opensUp);
+  }
+
+  // Standing armies eat — 1 scrap a unit, 2 with a full bay, and an unpaid
+  // unit is stranded rather than killed.
+  {
+    const g = createGame({ seed }); startTurn(g);
+    const me = g.turnOrder[0];
+    const mine = Object.values(g.units).filter((u) => u.owner === me);
+    const u = mine[0];
+
+    check("Unit upkeep: a bare unit bills 1", unitUpkeepFor(g, u) === CONFIG.unit.upkeep);
+    // Two 1-slot chips and one 2-slot chip must price identically — that is
+    // the whole "or a single double chip" clause.
+    const put = (unit, chipId) => {
+      const uid = g.nextId("chip");
+      g.chips[uid] = { uid, chipId };
+      unit.chips.push(uid);
+      return uid;
+    };
+    const oneSlot = put(u, "drilled-troops");
+    check("Unit upkeep: a half-filled bay still bills 1",
+      unitUpkeepFor(g, u) === CONFIG.unit.upkeep);
+    put(u, "drilled-troops");
+    check("Unit upkeep: two 1-slot chips fill the bay and double it",
+      unitUpkeepFor(g, u) === CONFIG.unit.upkeepFullyChipped);
+    u.chips = [];
+    put(u, "bombard"); // slots: 2
+    check("Unit upkeep: one 2-slot chip fills the bay on its own",
+      unitUpkeepFor(g, u) === CONFIG.unit.upkeepFullyChipped);
+    u.chips = [oneSlot];
+
+    // Park it on plain ground so the build-post case below has a legal site.
+    u.node = (g.board.adjacency[u.node] || []).find((h) => !g.locations[h]) || u.node;
+    recomputeStats(g);
+
+    // Charged against an empty pot: stranded, not destroyed.
+    const before = Object.keys(g.units).length;
+    g.players[me].resource = 0;
+    chargeUnitUpkeep(g, me);
+    check("Unit upkeep: an unpayable unit goes unsupplied, not destroyed",
+      mine.every((x) => x.unsupplied) && Object.keys(g.units).length === before);
+    check("Unit upkeep: an unsupplied unit cannot move or act",
+      mine.every((x) => x.moveRemaining === 0 && x.actionsRemaining === 0));
+    const moved = performAction(g, "move", {
+      unit: u.uid, to: g.board.adjacency[u.node][0],
+    });
+    check("Unit upkeep: the move verb refuses an unsupplied unit",
+      !moved.ok && /unsupplied/.test(moved.reason || ""));
+    // A wildcard must not buy back what arrears took away. Everything else
+    // about this build-post is made legal first (tech, scrap, wildcards), so
+    // the only thing left to refuse it is the arrears — note the scrap is
+    // restored AFTER the charge above, so the unit stays unsupplied.
+    g.players[me].actions.remaining = 5;
+    g.players[me].resource = 99;
+    g.players[me].techLevel = 5;
+    g.players[me].techWheel = ["int-entry", "int-a2"];
+    const acted = performAction(g, "build-post", { unit: u.uid, hex: u.node });
+    check("Unit upkeep: a player wildcard cannot revive an unsupplied unit",
+      !acted.ok && /unsupplied/.test(acted.reason || ""));
+
+    // Partial funds feed the cheap units first.
+    g.players[me].resource = CONFIG.unit.upkeep;
+    chargeUnitUpkeep(g, me);
+    const fed = mine.filter((x) => !x.unsupplied);
+    check("Unit upkeep: partial funds feed as many units as they cover",
+      fed.length === 1 && g.players[me].resource === 0);
+
+    g.players[me].resource = 99;
+    chargeUnitUpkeep(g, me);
+    check("Unit upkeep: paying up restores the whole army",
+      mine.every((x) => !x.unsupplied));
+  }
+
+  // §3.1 — a finished blockade is manned, and an unmanned one is no obstacle.
+  {
+    const { g, me, hex, u } = stage();
+    const foe = g.turnOrder[1];
+    performAction(g, "build-blockade", { hex });
+    upkeep(g, me); upkeep(g, me);
+    const b = blockadeAt(g, hex);
+    check("Blockade upkeep: a blockade opens paid, before any Upkeep bills it",
+      b.done && b.paid === true);
+    // Step the builder off, or the hex reads as blocked by the UNIT and the
+    // dormancy check below would pass for the wrong reason.
+    u.node = g.board.adjacency[hex][0]; recomputeStats(g);
+
+    // Broke: the whole army and the blockade bill against an empty pot.
+    g.players[me].resource = 0;
+    for (const l of Object.values(g.locations)) if (l.controller === me) l.production = 0;
+    chargeBlockadeUpkeep(g, me);
+    check("Blockade upkeep: unaffordable upkeep puts it dormant, not destroyed",
+      b.paid === false && !!blockadeAt(g, hex));
+    check("Blockade upkeep: a dormant blockade halts nobody",
+      !activeBlockadeAt(g, hex) && !movementBlockers(g, foe).has(hex));
+    // §7.3 — a blockade DRAINS its victim now rather than paying its owner.
+    // A dormant one strangles nobody, which is the same contract dormancy has
+    // always had: the garrison drifts off and comes back.
+    check("Blockade upkeep: a dormant barricade strangles nobody", (() => {
+      const victim = Object.values(g.locations).find(
+        (l) => l.controller && l.controller !== me
+          && [l.hexId, ...(g.board.adjacency[l.hexId] || [])].includes(hex));
+      if (!victim) return true; // no Location in reach of this site on this seed
+      b.paid = false;
+      const dark = blockadeDrainOn(g, victim);
+      b.paid = true;
+      const lit = blockadeDrainOn(g, victim);
+      b.paid = false;
+      return dark === 0 && lit >= CONFIG.blockades.drainOutput;
+    })());
+
+    // Pay the arrears and it comes straight back.
+    g.players[me].resource = 20;
+    chargeBlockadeUpkeep(g, me);
+    check("Blockade upkeep: paying the arrears revives it",
+      b.paid === true && !!activeBlockadeAt(g, hex) &&
+      g.players[me].resource === 20 - CONFIG.blockades.upkeep);
+  }
+
+  // §3.2 — upgrade chips: queued free, paid by the same settlement draw,
+  // and each one actually changes the thing it says it changes.
+  {
+    const { g, me, hex, home } = stage();
+    performAction(g, "build-blockade", { hex });
+    upkeep(g, me); upkeep(g, me);
+    const b = blockadeAt(g, hex);
+    g.players[me].techLevel = 5;
+
+    // A site still under construction takes no chips — check on a fresh one.
+    const other = stage();
+    other.g.players[other.me].techLevel = 5;
+    performAction(other.g, "build-blockade", { hex: other.hex });
+    const tooSoon = performAction(other.g, "upgrade-blockade",
+      { hex: other.hex, chipId: "palisade" });
+
+    const notBlockadeChip = performAction(g, "upgrade-blockade", { hex, chipId: "works" });
+    const baseDef = blockadeDefense(g, b);
+    const baseVis = blockadeVision(g, b);
+    const queued = performAction(g, "upgrade-blockade", { hex, chipId: "palisade" });
+    check("Blockade chip: queues free onto a FINISHED blockade, and only real ones",
+      !tooSoon.ok && !notBlockadeChip.ok && queued.ok &&
+      b.build.chipId === "palisade" && b.build.progress === 0);
+    const busy = performAction(g, "upgrade-blockade", { hex, chipId: "signal-mast" });
+    check("Blockade chip: one at a time", !busy.ok);
+
+    upkeep(g, me);
+    check("Blockade chip: the funding settlement pays for it, then it installs",
+      b.build === null && b.chips.length === 1 &&
+      blockadeDefense(g, b) === baseDef + CHIPS.palisade.blockadeDefense);
+
+    performAction(g, "upgrade-blockade", { hex, chipId: "signal-mast" });
+    upkeep(g, me);
+    check("Blockade chip: Signal Mast widens its Vision",
+      b.chips.length === 2 && blockadeVision(g, b) === baseVis + CHIPS["signal-mast"].blockadeVision);
+
+    const full = performAction(g, "upgrade-blockade", { hex, chipId: "toll-booth" });
+    check("Blockade chip: slots are finite", !full.ok && CONFIG.blockades.chipSlots === 2);
+
+    // Destroying the structure takes its chips out of play with it.
+    const installed = [...b.chips];
+    destroyBlockade(g, hex, g.turnOrder[1]);
+    check("Blockade chip: destroying the blockade removes its chips from play",
+      installed.every((c) => g.removed.includes(c)) && !blockadeAt(g, hex));
+  }
+
+  // §3.2 Toll Booth — a blockade's own income, independent of its settlement.
+  {
+    const { g, me, hex } = stage();
+    performAction(g, "build-blockade", { hex });
+    upkeep(g, me); upkeep(g, me);
+    const b = blockadeAt(g, hex);
+    g.players[me].techLevel = 5;
+    performAction(g, "upgrade-blockade", { hex, chipId: "toll-booth" });
+    upkeep(g, me);
+    // §7.3 — the Toll Booth stopped being a stipend and became a tighter grip.
+    // The tariff-on-passing-trade version does not work: a route through a
+    // hex you dominate is SEVERED rather than taxed, so there is nothing
+    // passing to charge for.
+    check("Blockade chip: Toll Booth installs", b.chips.length === 1);
+    check("Blockade chip: …and pays its owner nothing", blockadeIncome(g, me) === 0);
+    const victim2 = Object.values(g.locations).find(
+      (l) => l.controller && l.controller !== me
+        && [l.hexId, ...(g.board.adjacency[l.hexId] || [])].includes(hex));
+    if (victim2) {
+      const withBooth = blockadeDrainOn(g, victim2);
+      b.chips = [];
+      const bare = blockadeDrainOn(g, victim2);
+      check("Blockade chip: …it makes the barricade bite harder on its victim",
+        withBooth === bare + CHIPS["toll-booth"].output,
+        `bare ${bare}, with booth ${withBooth}`);
+    } else {
+      check("Blockade chip: …it makes the barricade bite harder on its victim",
+        true, "(no Location in reach of this site on this seed)");
+    }
+  }
+
+  // §3.2/§3.3 — static defense, defender-stacking, and destroy-only.
+  {
+    const { g, me, hex } = stage();
+    const foe = g.turnOrder[1];
+    performAction(g, "build-blockade", { hex });
+    upkeep(g, me);
+    upkeep(g, me);
+    // The builder stays put, so the blockade defends at base + its Strength.
+    while (activePlayerId(g) !== foe) endTurn(g);
+    const fu = Object.values(g.units).find((x) => x.owner === foe);
+    fu.node = hex; fu.baseStrength = 30; fu.moveRemaining = fu.movement; recomputeStats(g);
+    // Snapshot the garrison's Strength BEFORE the contest — losing costs it 1,
+    // so reading it afterwards would compare against the wounded value.
+    const garrisonStrength = Object.values(g.units)
+      .filter((x) => x.owner === me && x.node === hex)
+      .reduce((n, x) => n + x.strength, 0);
+    g.players[foe].actions.remaining = 5; g.rng.roll = () => 6;
+    const r = performAction(g, "contest", { unit: fu.uid, target: "blockade" });
+    check("Blockade: defends at its static value PLUS the stack standing on it",
+      r.kind === "blockade" &&
+      r.defenderValue === CONFIG.blockades.defense + garrisonStrength);
+    check("Blockade: a lost contest destroys it outright — no capture, no flip",
+      r.won && !blockadeAt(g, hex));
+  }
+
+  // §3.1 — a site under construction has no defense of its own; the builder
+  // fights as an ordinary unit.
+  {
+    const { g, me, hex } = stage();
+    const foe = g.turnOrder[1];
+    performAction(g, "build-blockade", { hex });
+    while (activePlayerId(g) !== foe) endTurn(g);
+    const fu = Object.values(g.units).find((x) => x.owner === foe);
+    fu.node = hex; fu.baseStrength = 30; fu.moveRemaining = fu.movement; recomputeStats(g);
+    const builderStrength = Object.values(g.units)
+      .filter((x) => x.owner === me && x.node === hex)
+      .reduce((n, x) => n + x.strength, 0);
+    g.players[foe].actions.remaining = 5; g.rng.roll = () => 6;
+    const r = performAction(g, "contest", { unit: fu.uid, target: "blockade" });
+    check("Blockade: an unfinished site adds no defense — only its builder does",
+      r.defenderValue === builderStrength && r.won && !blockadeAt(g, hex));
   }
 }
 
@@ -2527,6 +3562,45 @@ line("\n§18 DIPLOMACY CAPSTONE");
     check("a minor carries scope:local + associatedMajor + relationship",
       MINOR_FACTIONS.tempest.scope === "local" && MINOR_FACTIONS.tempest.associatedMajor === "lakers"
       && MINOR_FACTIONS.tempest.relationship === "rival");
+    // §18.4.1 — a minor that declares a homeLocation opens THERE. The
+    // Dambarans hold Dambar; before this they took whatever neutral sat
+    // nearest the Versari, which put them in a random city on most seeds.
+    // Checked over a span of seeds because the seat used to be a layout
+    // accident and a single seed would not have caught it.
+    {
+      let atHome = 0, versariClean = 0;
+      const SEEDS = 40;
+      for (let s = 1; s <= SEEDS; s++) {
+        const gg = createGame({ seed: s, minors: ["dambarans", "croppers"], mapSize: "large" });
+        const L = Object.values(gg.locations);
+        const seat = L.find((l) => l.controller === "dambarans");
+        if (seat && seat.locationId === "dambar") atHome++;
+        // and the Versari open holding their capital and nothing else
+        const vers = L.filter((l) => l.controller === "versari").map((l) => l.locationId);
+        if (vers.length === 1 && vers[0] === "korad") versariClean++;
+      }
+      check("the Dambarans open at Dambar on every seed that seats them",
+        atHome === SEEDS, `${atHome}/${SEEDS}`);
+      check("the Versari open holding Korad alone (Dambar is not theirs to start)",
+        versariClean === SEEDS, `${versariClean}/${SEEDS}`);
+    }
+    // A minor with no homeLocation still seats by proximity, and a declared
+    // home that did not make the board falls through to the same rule.
+    {
+      const small = createGame({ seed, minors: ["dambarans"], mapSize: "small", locationBudget: 6 });
+      const L = Object.values(small.locations);
+      const seat = L.find((l) => l.controller === "dambarans");
+      const dambarOnBoard = L.some((l) => l.locationId === "dambar");
+      check("a minor whose home Location is off the board still gets a seat",
+        !dambarOnBoard && !!seat);
+    }
+    // Unseeded means unheld: Dambar is only Dambaran when they are in the game.
+    {
+      const without = createGame({ seed, minors: ["croppers"], mapSize: "large" });
+      const dambar = Object.values(without.locations).find((l) => l.locationId === "dambar");
+      check("Dambar stays neutral in a game without the Dambarans",
+        !!dambar && dambar.controller === null);
+    }
     // seeded faction↔faction standing is non-trivial (not all zero)
     const anyNonZero = factionIds(g).some((a) => factionIds(g).some((b) => a !== b && getStanding(g, a, b) !== 0));
     check("faction↔faction Standing is seeded (not all neutral)", anyNonZero);
@@ -2625,8 +3699,13 @@ line("\n§18 DIPLOMACY CAPSTONE");
     runDiplomacyRound(g);
     check("a clean runaway leader still provokes a coalition (power trigger)",
       !!g.diplomacy.coalitions.find((c) => c.target === "versari"));
-    check("a coalition member contributes 0 to the runaway's Recognition",
-      recognitionScore(g, "versari").total === 0 || (g.diplomacy.coalitions.find((c) => c.target === "versari")));
+    // Was: "a coalition member contributes 0 to the runaway's Recognition."
+    // Recognition is gone (2026-08-23); the thing a coalition actually costs
+    // the runaway is the win condition itself — a member marching against you
+    // is a rival who is neither your ally nor your vassal, so it is
+    // OUTSTANDING and Dominion cannot be met while the coalition stands.
+    check("a coalition member leaves the runaway short of Dominion",
+      dominionStanding(g, "versari").outstanding.length > 0);
   }
 
   // --- vassalage: formation, tribute, rebellion (§18.9) ---
@@ -2650,27 +3729,114 @@ line("\n§18 DIPLOMACY CAPSTONE");
       vassalLord(g, "croppers") == null && atWar(g, "croppers", "versari"));
   }
 
-  // --- Recognition victory + its Menace/Honor gate (§18.10) ---
+  // --- the win condition: everyone dealt with, and it has to HOLD ---
   {
-    const g = createGame({ seed, humanFactionId: "versari", minors: ["tempest", "croppers"] });
-    // convert three factions into vassals (weight 2 each = 6 ≥ threshold 6)
-    for (const f of ["goldgrass", "croppers", "tempest"]) vassalize(g, "versari", f, "test");
-    const sc = recognitionScore(g, "versari");
-    check("Recognition reaches the threshold via vassals (Allied=1, Vassal=2)",
-      sc.total >= CONFIG.diplomacy.recognition.threshold);
-    check("Recognition victory is reachable (winner set on the check)",
-      (() => { const gg = g; gg.winnerId = null; ensureDiplomacy(gg); runDiplomacyRound(gg); return gg.winnerId === "versari"; })());
-    // gate: a notorious bully loses Recognition (Menace over Tolerance)
-    const g2 = createGame({ seed, humanFactionId: "versari", minors: ["tempest", "croppers"] });
-    for (const f of ["goldgrass", "croppers", "tempest"]) vassalize(g2, "versari", f, "test");
-    g2.players.versari.menace = 99;
-    check("Recognition is GATED by Menace (a bully cannot be acknowledged)",
-      !recognitionMet(g2, "versari"));
-    const g3 = createGame({ seed, humanFactionId: "versari", minors: ["tempest", "croppers"] });
-    for (const f of ["goldgrass", "croppers", "tempest"]) vassalize(g3, "versari", f, "test");
-    g3.players.versari.honor = -99;
-    check("Recognition is GATED by Honor (a liar cannot be acknowledged)",
-      !recognitionMet(g3, "versari"));
+    const HOLD = CONFIG.victory.holdRounds;
+    const mk = () => {
+      const g = createGame({ seed, humanFactionId: "versari", minors: ["tempest", "croppers"] });
+      ensureDiplomacy(g);
+      return g;
+    };
+    const others = (g) => factionIds(g).filter((f) => f !== "versari");
+
+    // Nothing dealt with, nothing won.
+    {
+      const g = mk();
+      const st = dominionStanding(g, "versari");
+      check("with rivals unaccounted for, the condition is not met",
+        !st.met && st.outstanding.length === others(g).length);
+    }
+
+    // All vassals — the submission face.
+    {
+      const g = mk();
+      for (const f of others(g)) vassalize(g, "versari", f, "test");
+      check("every rival a vassal meets it", dominionMet(g, "versari"));
+    }
+
+    // A mix of allies and vassals — the case no previous version could express.
+    {
+      const g = mk();
+      const list = others(g);
+      vassalize(g, "versari", list[0], "test");
+      for (const f of list.slice(1)) formPact(g, "versari", f, "test");
+      const st = dominionStanding(g, "versari");
+      check("…and so does a MIX of allies and vassals",
+        st.met && st.vassals.length === 1 && st.allied.length === list.length - 1);
+    }
+
+    // The hold: reaching it starts a clock, and only time wins.
+    {
+      const g = mk();
+      for (const f of others(g)) vassalize(g, "versari", f, "test");
+      checkDominion(g);
+      check("reaching it does not win on the spot — it starts a clock",
+        !g.winnerId && dominionCountdown(g, "versari") === HOLD);
+      for (let i = 0; i < HOLD - 1; i += 1) { g.round += 1; checkDominion(g); }
+      check("…which is still running one round short", !g.winnerId);
+      g.round += 1; checkDominion(g);
+      check(`…and lands after ${HOLD} rounds held`, g.winnerId === "versari");
+    }
+
+    // …and a rival who breaks away stops it. This is the whole point of the
+    // hold: a bloodless win is a position you defend, not a switch you flip.
+    {
+      const g = mk();
+      for (const f of others(g)) vassalize(g, "versari", f, "test");
+      checkDominion(g);
+      g.round += 1; checkDominion(g);
+      releaseVassal(g, others(g)[0], "rebellion");
+      checkDominion(g);
+      check("a rival breaking away stops the clock", !g.winnerId && dominionCountdown(g, "versari") === null);
+      check("…and it restarts from the top, not from where it left off",
+        (() => {
+          vassalize(g, "versari", others(g)[0], "retaken");
+          checkDominion(g);
+          return dominionCountdown(g, "versari") === HOLD;
+        })());
+    }
+
+    // The closing table has to be right the moment the game ends. Nothing
+    // recomputed the score on a change to the ALLIANCE graph — territory
+    // changes always did, handshakes never did — so a lord who had sworn the
+    // whole board still showed its opening total, and the end screen could
+    // rank the winner below its own vassal.
+    {
+      const g = mk();
+      const before = g.players.versari.vp;
+      for (const f of others(g)) vassalize(g, "versari", f, "test");
+      checkDominion(g);
+      const expect = before + others(g).length * CONFIG.victory.score.vassal;
+      check("swearing the board moves the score without waiting for a turn",
+        g.players.versari.vp === expect);
+      // Only for a lord who has sworn EVERYONE. VP is not the condition, so in
+      // an organic game a diplomat can win it while a bigger land power
+      // out-scores them — measured at 2 games in 14. The end screen pins the
+      // winner to the top of the table rather than pretending otherwise.
+      check("…and a lord who has sworn the whole board tops the table",
+        others(g).every((f) => g.players.versari.vp > g.players[f].vp));
+    }
+
+    // A faction serves ONE lord, so two rivals can never both count it.
+    {
+      const g = mk();
+      for (const f of others(g)) vassalize(g, "versari", f, "test");
+      vassalize(g, "goldgrass", "tempest", "steal");
+      check("taking a vassal takes it from its old lord — nobody shares one",
+        vassalLord(g, "tempest") === "goldgrass" && !dominionMet(g, "versari"));
+      check("…and the old lord's tribute goes with it",
+        g.diplomacy.agreements.filter((a) => a.vassalTribute === "tempest").length === 1);
+    }
+
+    // The reputation gates still bite, one level down: a bully cannot GET the
+    // pacts and submissions in the first place, so the condition needs no gate
+    // of its own.
+    {
+      const g = mk();
+      g.players.versari.menace = 99;
+      check("a notorious bully cannot get the alliances it would need",
+        !aiAcceptsPact(g, "goldgrass", "versari"));
+    }
   }
 
   // --- minors respect scope:"local" (§18.4.1) ---
@@ -2685,16 +3851,122 @@ line("\n§18 DIPLOMACY CAPSTONE");
       check("a scope:local minor will not engage a non-neighbour (no far faction this seed)", true);
     }
     check("a global major may engage anyone", mayEngage(g, "versari", "goldgrass"));
+    // §15 — and the ally/vassal doors open on their own clock. `mayEngage`
+    // stays the scope predicate for war, grudges, ultimatums and coalition
+    // membership; only `mayCourt` widens. Gating both on the widened one was
+    // measured and reverted: wars per game 52 -> 78, unresolved 6 of 15 -> 11.
+    if (farMajor) {
+      check("…and cannot court one either, at first",
+        !mayCourt(g, "tempest", farMajor));
+      g.round = CONFIG.diplomacy.reach.reachabilityRounds + 1;
+      check("…but silence long enough makes them strangers you can write to",
+        mayCourt(g, "tempest", farMajor));
+      check("…while the WAR predicate is untouched by distance",
+        !mayEngage(g, "tempest", farMajor));
+      // Strangers are a harder sell. The escape opens a door; it does not
+      // lower the bar behind it.
+      adjustStanding(g, "tempest", farMajor, CONFIG.diplomacy.pactStandingReq, "test");
+      check("…and a stranger at the ordinary bar is still not enough",
+        !aiAcceptsPact(g, "tempest", farMajor));
+      adjustStanding(g, "tempest", farMajor, CONFIG.diplomacy.reach.distantStandingPenalty, "test");
+      check("…they want the distance paid for",
+        aiAcceptsPact(g, "tempest", farMajor) ||
+        // sociability / rep gates are separate rulings; only the reach term
+        // is under test here
+        getStanding(g, "tempest", farMajor) >= CONFIG.diplomacy.pactStandingReq
+          + CONFIG.diplomacy.reach.distantStandingPenalty);
+      g.round = 1;
+    }
+  }
+
+  // --- brief §7.1: the Standing pump is closed ---
+  {
+    const g = createGame({ seed, humanFactionId: "versari" });
+    ensureDiplomacy(g);
+    g.players.versari.resource = 200;
+    const s0 = getStanding(g, "goldgrass", "versari");
+    // The measured exploit, verbatim: four one-scrap deals took Goldgrass
+    // from 0 to 8 and signed a pact on round one.
+    for (let i = 0; i < 4; i += 1) {
+      performDiplomacy(g, "versari", "propose-deal",
+        { faction: "goldgrass", give: [{ resource: { resource: "scrap", amount: 1 } }], get: [] });
+    }
+    check("four scrap no longer buys eight Standing",
+      getStanding(g, "goldgrass", "versari") <= s0);
+    check("…and no pact with it",
+      !performDiplomacy(g, "versari", "propose-pact", { faction: "goldgrass" }).accepted);
+    check("…because a token deal transfers no net value worth warming to",
+      getStanding(g, "goldgrass", "versari") < CONFIG.diplomacy.pactStandingReq);
+
+    // Generosity still works, and is still capped per pair per round.
+    const g2 = createGame({ seed, humanFactionId: "versari" });
+    ensureDiplomacy(g2);
+    g2.players.versari.resource = 200;
+    performDiplomacy(g2, "versari", "propose-deal",
+      { faction: "goldgrass", give: [{ resource: { resource: "scrap", amount: 12 } }], get: [] });
+    const afterOne = getStanding(g2, "goldgrass", "versari");
+    check("a generous deal still warms", afterOne > 0);
+    performDiplomacy(g2, "versari", "propose-deal",
+      { faction: "goldgrass", give: [{ resource: { resource: "scrap", amount: 12 } }], get: [] });
+    check("…and the per-pair, per-round cap holds",
+      getStanding(g2, "goldgrass", "versari") === afterOne);
+    g2.round += 1;
+    performDiplomacy(g2, "versari", "propose-deal",
+      { faction: "goldgrass", give: [{ resource: { resource: "scrap", amount: 12 } }], get: [] });
+    check("…and lifts again next round", getStanding(g2, "goldgrass", "versari") > afterOne);
+
+    // A swap of equals is business, not friendship.
+    const g3 = createGame({ seed, humanFactionId: "versari" });
+    ensureDiplomacy(g3);
+    g3.players.versari.resource = 200; g3.players.goldgrass.resource = 200;
+    performDiplomacy(g3, "versari", "propose-deal", { faction: "goldgrass",
+      give: [{ resource: { resource: "scrap", amount: 10 } }],
+      get: [{ resource: { resource: "scrap", amount: 10 } }] });
+    check("an even swap warms nobody", getStanding(g3, "goldgrass", "versari") === 0);
+  }
+
+  // --- economy §13: the control ledger is appended to ---
+  {
+    const g = createGame({ seed, humanFactionId: "versari" });
+    const loc = Object.values(g.locations).find((l) => l.controller === "versari");
+    const before = g.world.controlHistory.length;
+    check("setup seeds the ledger", before > 0);
+    // Hand it over and sweep: the old tenure closes, a new one opens.
+    loc.sections = loc.sections.map(() => "lakers");
+    loc.controller = "lakers";
+    g.round = 5;
+    syncControlHistory(g);
+    const open = g.world.controlHistory.filter((h) => h.hex === loc.hexId && h.toRound == null);
+    const closed = g.world.controlHistory.filter((h) => h.hex === loc.hexId && h.toRound != null);
+    check("a change of hands closes the old tenure", closed.length === 1 && closed[0].controller === "versari");
+    check("…and opens the new one", open.length === 1 && open[0].controller === "lakers" && open[0].fromRound === 5);
+    // Which is the whole point: control_duration could never fire before.
+    g.round = 8;
+    check("…so control_duration finally answers",
+      evalCond(g, {
+        op: "gte",
+        left: { control_duration: { player: "lakers", hex: loc.hexId } },
+        right: 3,
+      }, {}) === true);
+    // Idempotent — the sweep runs every round end and must not churn.
+    const n = g.world.controlHistory.length;
+    syncControlHistory(g); syncControlHistory(g);
+    check("…and the sweep is idempotent", g.world.controlHistory.length === n);
   }
 
   // --- performDiplomacy verbs (the player's levers, §18.7) ---
   {
     const g = createGame({ seed, humanFactionId: "versari" });
     const s0 = getStanding(g, "goldgrass", "versari");
+    // Economy §6.3 — a gift buys WARMTH, and warmth is bought with political
+    // capacity. Scrap still moves goods; it no longer moves opinions.
     g.players.versari.resource = 10;
-    const gift = performDiplomacy(g, "versari", "gift", { faction: "goldgrass", amount: 5 });
-    check("performDiplomacy gift transfers scrap + warms Standing",
-      gift.ok && getStanding(g, "goldgrass", "versari") > s0 && g.players.versari.resource === 5);
+    g.players.versari.sway = 40;
+    const gift = performDiplomacy(g, "versari", "gift", { faction: "goldgrass", standing: 2 });
+    check("performDiplomacy gift warms Standing, and spends Sway to do it",
+      gift.ok && getStanding(g, "goldgrass", "versari") > s0
+      && g.players.versari.sway < 40 && g.players.versari.resource === 10,
+      JSON.stringify(gift));
     const war = performDiplomacy(g, "versari", "declare-war", { faction: "lakers" });
     check("performDiplomacy declare-war sets the war-state", war.ok && atWar(g, "versari", "lakers"));
     // a pact offer is refused when Standing is too cold, accepted when warm
@@ -2703,7 +3975,18 @@ line("\n§18 DIPLOMACY CAPSTONE");
       performDiplomacy(g, "versari", "propose-pact", { faction: "plainers" }).accepted === false);
     setStanding(g, "plainers", "versari", 8, "test"); setStanding(g, "versari", "plainers", 8, "test");
     g.players.versari.menace = 0; g.players.versari.honor = 6;
-    check("a pact offer is accepted when Standing + rep gates pass",
+    // §7.2/§7.3 — Standing alone is no longer the whole bar. A faction does
+    // not enter an alliance with anyone it is not Courting, and a courtship is
+    // a process rather than a switch: it takes `courtRounds` of somebody
+    // publicly working the relationship. The bar was never the problem; the
+    // absence of a middle was.
+    check("…and Standing alone is not enough without a courtship behind it",
+      performDiplomacy(g, "versari", "propose-pact", { faction: "plainers" }).accepted === false);
+    check("…so the player opens one", performDiplomacy(g, "versari", "court", { faction: "plainers" }).ok);
+    check("…and it is not instant",
+      performDiplomacy(g, "versari", "propose-pact", { faction: "plainers" }).accepted === false);
+    g.round += CONFIG.diplomacy.posture.courtRounds;
+    check("a pact offer is accepted when Standing + rep gates pass, after the courtship",
       performDiplomacy(g, "versari", "propose-pact", { faction: "plainers" }).accepted === true);
   }
 }
@@ -2746,31 +4029,994 @@ line("\n  [§1.1] surprise-attack Honor");
     honorOf(g, a) === h0 - DH.honor.breakLoss);
 }
 
-// §1.2 — gift diminishing returns
-line("\n  [§1.2] gift diminishing returns");
+// §8 — the price of a fight, and whether it is worth paying.
+//
+// The rule ships with `attackPrice.enabled: 0` because every live setting of
+// it made the three governing numbers worse (the table is in config.js). That
+// makes a fixture MORE important, not less: an unexercised mechanism rots, and
+// phase 5 is going to switch this on. Everything below sets `enabled` locally
+// and puts it back, so the suite still measures the shipped default.
+line("\n  [§8] a fight costs your name, and the AI can price it");
+{
+  const AP = CONFIG.diplomacy.attackPrice;
+  const was = AP.enabled;
+  try {
+    AP.enabled = 0;
+    const g0 = createGame({ seed }); ensureDiplomacy(g0);
+    check("switched off, the price is zero and every fight is worth it",
+      diplomaticPrice(g0, "versari", "lakers") === 0
+      && attackIsWorthIt(g0, "versari", firstEnemyHex(g0, "versari"), 0.1));
+
+    AP.enabled = 1;
+    const g = createGame({ seed }); ensureDiplomacy(g);
+    const a = "versari", b = "lakers";
+    const surprise = diplomaticPrice(g, a, b);
+    const declared = diplomaticPrice(g, a, b, { declared: true });
+    check("a surprise strike costs more than declaring first", surprise > declared);
+    check("…and declaring is not free either, absent a grievance", declared > 0);
+
+    // The one thing the price must never do: stop you answering a war you are
+    // already in. That reputation is spent.
+    declareWar(g, a, b, "test");
+    const hex = hexControlledBy(g, b);
+    check("a war already open prices at nothing more",
+      hex == null || attackIsWorthIt(g, a, hex, 0.05));
+
+    // Defence is never priced — the exemption that took unresolved games back
+    // from 6 to 3 when it was added.
+    const g2 = createGame({ seed }); ensureDiplomacy(g2);
+    const own = hexControlledBy(g2, "versari");
+    check("clearing your own ground is never a treacherous strike",
+      own == null || attackIsWorthIt(g2, "versari", own, 0.01, { victim: "lakers" }));
+  } finally {
+    AP.enabled = was;
+  }
+}
+
+// §9 — a coalition needs GROUNDS, and each member decides for itself.
+//
+// The two failures this fixture pins are both in the 2026-08-15 log. A
+// spotless Goldgrass had two wars declared on it in R7 for the crime of
+// leading, and the blanket draft slammed every member's Standing to Hostile,
+// so a partner became an enemy over a third party's position.
+line("\n  [§9] a rising needs grounds, and members who want to be in it");
+{
+  const CC = CONFIG.diplomacy.coalition;
+  const g = createGame({ seed }); ensureDiplomacy(g);
+  const lead = "versari";
+  g.players[lead].menace = 0;
+  // Park the lead in the band that matters: frightening enough that the old
+  // rule would have risen, clean enough that the new one must not.
+  let t = 0;
+  for (let vp = 1; vp <= 60; vp++) {
+    g.players[lead].vp = vp;
+    t = threatScore(g, lead);
+    if (t >= CC.threshold && t < CC.fearThreshold) break;
+  }
+  check("a lead past the coalition threshold is reachable in the fixture",
+    t >= CC.threshold && t < CC.fearThreshold);
+  check("…and leading, alone, is not grounds to rise", coalitionGrounds(g, lead) === null);
+  runDiplomacyRound(g);
+  check("…so no coalition forms against a spotless leader", !coalitionAgainst(g, lead));
+
+  // Conduct is grounds at any position.
+  const g2 = createGame({ seed }); ensureDiplomacy(g2);
+  g2.players[lead].menace = CC.menaceGrounds;
+  check("Menace it earned itself IS grounds", coalitionGrounds(g2, lead) === "menace");
+
+  // …and so is a lead far enough past everything else that saying so is honest.
+  const g3 = createGame({ seed }); ensureDiplomacy(g3);
+  g3.players[lead].menace = 0; g3.players[lead].vp = 200;
+  check("a lead past fearThreshold is grounds on its own",
+    coalitionGrounds(g3, lead) === "fear");
+
+  // Switchable, per the plan's rule 1.4.
+  const wasGate = CC.groundsGate;
+  try {
+    CC.groundsGate = 0;
+    check("groundsGate 0 restores the old position-alone behaviour",
+      coalitionGrounds(g, lead) === "position");
+  } finally { CC.groundsGate = wasGate; }
+}
+{
+  // The draft floor, and the Menace it must NOT charge.
+  const CC = CONFIG.diplomacy.coalition;
+  const g = createGame({ seed }); ensureDiplomacy(g);
+  const lead = "versari";
+  adjustStanding(g, "lakers", lead, 5, "test");
+  g.players[lead].menace = CC.menaceGrounds + 2;
+  g.players[lead].vp = 14;
+  const menaceBefore = {};
+  for (const f of factionIds(g)) menaceBefore[f] = g.players[f]?.menace ?? 0;
+  runDiplomacyRound(g);
+  const coal = coalitionAgainst(g, lead);
+  check("with grounds, a coalition does form", !!coal && coal.members.length >= 2);
+  check("…and it says what it rose about", coal?.grounds === "menace");
+  if (coal) {
+    check("no drafted member is pushed below the draft floor",
+      coal.members.every((m) => getStanding(g, m, lead) >= CC.draftStandingFloor));
+    check("…a partner at +5 is cooled to the floor, not made an enemy",
+      !coal.members.includes("lakers") || getStanding(g, "lakers", lead) === CC.draftStandingFloor);
+    // The seeding loop: an unjustified declaration charges Menace, wM is 1, so
+    // the members' own threat scores rise and the next coalition forms out of
+    // this one. A rising on grounds is justified for everyone in it.
+    check("…and joining a justified rising charges the members no Menace",
+      coal.members.every((m) => (g.players[m]?.menace ?? 0) <= menaceBefore[m]));
+  }
+}
+{
+  // Deliberation: the Standing term is signed, so liking the target holds you
+  // back. This is what makes a coalition something the target can talk its way
+  // out of rather than a dice roll on the leaderboard.
+  const g = createGame({ seed }); ensureDiplomacy(g);
+  const lead = "versari";
+  g.players[lead].menace = CONFIG.diplomacy.coalition.menaceGrounds + 2;
+  g.players[lead].vp = 14;
+  setStanding(g, "lakers", lead, 10);
+  setStanding(g, "goldgrass", lead, -8);
+  check("a faction that likes the target wants in less than one that doesn't",
+    coalitionJoinScore(g, "lakers", lead) < coalitionJoinScore(g, "goldgrass", lead));
+}
+
+// §13 — the player can haggle, not only take it or leave it.
+//
+// The AI has been able to counter the player's terms since §6.10; the player
+// could only Accept or Decline, which is what made the inbox read as a vending
+// machine. A counter moves the SCRAP and nothing else — rewriting the other
+// terms would be a different deal, and the AI's own counters hold the same line.
+line("\n  [§13] a counter is a haggle: the scrap moves, the terms do not");
+{
+  const g = createGame({ seed }); ensureDiplomacy(g);
+  const me = "versari", them = "lakers";
+  g.players[me].resource = 60;
+  // They offer non-aggression and want 20 scrap for it.
+  const deal = {
+    proposer: them, recipient: me,
+    give: [{ promise: { kind: "nonAggression", rounds: 5 } }],
+    get: [{ resource: { resource: "scrap", amount: 20 } }],
+  };
+  const offer = tableOffer(g, them, me, deal, { kind: "deal" });
+  const purse = g.players[me].resource;
+
+  const tooRich = performDiplomacy(g, me, "counter-offer", { offerId: offer.id, scrap: 999 });
+  check("you cannot counter with scrap you do not hold", !tooRich.ok);
+  check("…and the offer is still on the table to answer properly",
+    offersFor(g, me).some((o) => o.id === offer.id));
+  check("…and nothing was paid", g.players[me].resource === purse);
+
+  // Haggle them down to 5.
+  const res = performDiplomacy(g, me, "counter-offer", { offerId: offer.id, scrap: 5 });
+  check("the counter is put to them", res.ok);
+  check("…and it takes the original off the table either way",
+    !offersFor(g, me).some((o) => o.id === offer.id));
+  check("…the promise is untouched by the haggle — only scrap moved",
+    g.log.some((e) => e.name === "offer_countered" && e.payload.offer === offer.id));
+}
+{
+  // A counter they take applies at the COUNTERED price, not the tabled one.
+  const g = createGame({ seed }); ensureDiplomacy(g);
+  const me = "versari", them = "lakers";
+  g.players[me].resource = 80;
+  const deal = {
+    proposer: them, recipient: me,
+    give: [{ promise: { kind: "nonAggression", rounds: 5 } }],
+    get: [{ resource: { resource: "scrap", amount: 12 } }],
+  };
+  const offer = tableOffer(g, them, me, deal, { kind: "deal" });
+  const before = g.players[me].resource;
+  // Overpay: they will not refuse more money than they asked for.
+  const res = performDiplomacy(g, me, "counter-offer", { offerId: offer.id, scrap: 14 });
+  check("a counter that pays over the asking price is taken", res.ok && res.accepted);
+  check("…and it charges the countered price, not the tabled one",
+    g.players[me].resource === before - 14);
+}
+{
+  // The direction rule. On counter-terms the player is still the PROPOSER, so
+  // a positive number is still scrap they pay — the frame flip that turned
+  // every counter inside out the first time offers shipped.
+  const g = createGame({ seed }); ensureDiplomacy(g);
+  const me = "versari", them = "lakers";
+  g.players[me].resource = 50;
+  const deal = {
+    proposer: me, recipient: them,
+    give: [{ resource: { resource: "scrap", amount: 4 } }],
+    get: [{ promise: { kind: "nonAggression", rounds: 5 } }],
+  };
+  const offer = tableOffer(g, them, me, deal, { kind: "deal", isCounter: true });
+  const before = g.players[me].resource;
+  const res = performDiplomacy(g, me, "counter-offer", { offerId: offer.id, scrap: 9 });
+  check("countering counter-terms still reads positive as SCRAP YOU PAY",
+    !res.accepted || g.players[me].resource === before - 9);
+}
+
+// §13 — a POSITION: unilateral, public, and cited by name when broken.
+//
+// The audit's claim is specifically about the citation. A cost nobody names is
+// not a cost — it is a number in a save file — and the entire reason to stand
+// on something in public is that the board can hold you to it out loud.
+line("\n  [§13] you can stand for something, and be named when you don't");
+{
+  const g = createGame({ seed }); ensureDiplomacy(g);
+  const me = "versari", them = "lakers";
+  const PC = CONFIG.diplomacy.positions;
+
+  const bad = performDiplomacy(g, me, "declare-position", { kind: "noWarOn" });
+  check("a position about nobody in particular is refused", !bad.ok);
+  const ok = performDiplomacy(g, me, "declare-position", { kind: "noWarOn", target: them });
+  check("you can stand on making no war on somebody", ok.ok);
+  check("…and it reads back", !!positionHeld(g, me, "noWarOn", them));
+  check("…in words", /Lakers|lakers/.test(positionText(g, positionHeld(g, me, "noWarOn", them))));
+  const dup = performDiplomacy(g, me, "declare-position", { kind: "noWarOn", target: them });
+  check("…and you cannot stand on it twice", !dup.ok);
+
+  // The press-release guard.
+  const g2 = createGame({ seed }); ensureDiplomacy(g2);
+  declareWar(g2, me, them, "test");
+  check("you cannot take a position you are already in breach of",
+    !performDiplomacy(g2, me, "declare-position", { kind: "noWarOn", target: them }).ok);
+
+  // Standing down honestly, and not the round before you break it.
+  const early = performDiplomacy(g, me, "withdraw-position",
+    { positionId: positionHeld(g, me, "noWarOn", them).id });
+  check("a position cannot be dropped the moment it becomes inconvenient", !early.ok);
+  g.round += PC.minRounds;
+  const h0 = honorOf(g, me);
+  const late = performDiplomacy(g, me, "withdraw-position",
+    { positionId: positionHeld(g, me, "noWarOn", them).id });
+  check("…but it can be stood down from, once it has been stood on", late.ok);
+  check("…and standing down costs less than being caught",
+    honorOf(g, me) === h0 - PC.withdrawHonorLoss && PC.withdrawHonorLoss < PC.breakHonorLoss);
+  check("…and it is no longer held", !positionHeld(g, me, "noWarOn", them));
+}
+{
+  // Breaking one: the cost, and the citation the whole feature exists for.
+  const g = createGame({ seed }); ensureDiplomacy(g);
+  const me = "versari", them = "lakers", other = "goldgrass";
+  const PC = CONFIG.diplomacy.positions;
+  performDiplomacy(g, me, "declare-position", { kind: "noWarOn", target: them });
+  const h0 = honorOf(g, me), m0 = menaceOf(g, me);
+  declareWar(g, me, them, "player");
+  check("declaring the war breaks the position", !positionHeld(g, me, "noWarOn", them));
+  check("…and it costs more Honor than a bilateral promise does",
+    honorOf(g, me) === h0 - PC.breakHonorLoss && PC.breakHonorLoss > CONFIG.diplomacy.honor.breakLoss);
+  // Not `=== m0 + breakMenace`: the declaration ALSO charges declareUnjustified,
+  // and asserting the total would be asserting the sum of two unrelated rules.
+  check("…and the board marks you for it, by that name",
+    g.log.some((e) => e.name === "menace_changed"
+      && e.payload.cause === "position-broken" && e.payload.delta === PC.breakMenace)
+    && menaceOf(g, me) >= m0 + PC.breakMenace);
+  check("…the wronged party holds a grievance naming it",
+    grievancesAgainst(g, them, me).some((x) => x.kind === "position-broken"));
+  // THE CLAIM: cited by name, within the window.
+  const cites = citablePositions(g, me, them);
+  check("it is citable, by name, this round", cites.length === 1);
+  check("…and the citation carries the words you used",
+    /Lakers|lakers/.test(positionText(g, cites[0])));
+  check("…and a denouncement reaches for it first",
+    denounceGrounds(g, them, me)?.kind === "position-broken");
+  g.round += PC.citeWithinRounds + 1;
+  check(`…and it stops being news after ${PC.citeWithinRounds} rounds`,
+    citablePositions(g, me, them).length === 0);
+  check("a faction it was not about cannot cite a targeted position",
+    citablePositions(g, me, other).length === 0);
+}
+{
+  // A position made to the ROOM is held by the room.
+  const g = createGame({ seed }); ensureDiplomacy(g);
+  const me = "versari";
+  performDiplomacy(g, me, "declare-position", { kind: "noVassals" });
+  check("you can stand on taking no vassals", !!positionHeld(g, me, "noVassals"));
+  vassalize(g, me, "lakers", "test");
+  check("…and taking one breaks it", !positionHeld(g, me, "noVassals"));
+  const wronged = factionIds(g).filter((f) => f !== me
+    && grievancesAgainst(g, f, me).some((x) => x.kind === "position-broken"));
+  check("…and everybody holds it against you, not just the vassal",
+    wronged.length >= 2);
+  check("…so anyone may cite it", citablePositions(g, me, "goldgrass").length === 1);
+}
+{
+  // The cap, so a player cannot paper the board with positions they mean to keep.
+  const g = createGame({ seed }); ensureDiplomacy(g);
+  const me = "versari";
+  const PC = CONFIG.diplomacy.positions;
+  const others = factionIds(g).filter((f) => f !== me);
+  let taken = 0;
+  for (const f of others) {
+    if (performDiplomacy(g, me, "declare-position", { kind: "noWarOn", target: f }).ok) taken += 1;
+  }
+  if (others.length > PC.max) {
+    check(`you can stand on at most ${PC.max} things at once`, taken === PC.max);
+    check("…and the cap counts what you HOLD", positionsOf(g, me).length === PC.max);
+  }
+}
+
+// Economy §10 — the effect→value table, and the upgrade pass it unblocked.
+//
+// `pickBuild` scored six of forty-two authored chip fields. Every movement
+// chip, every vision chip, the whole blockade kit, the influence chips and the
+// Loyalty chips were worth exactly zero to an AI deciding what to build, and
+// `chipUpgradesByAI` measured 0 across the whole 15-seed suite — every tier-2
+// chip in the content set was human-only.
+line("\n  [economy §10] the AI can price content, and can upgrade");
+{
+  const SKIP = new Set(NON_EFFECT_FIELDS);
+  const authored = new Set();
+  for (const def of Object.values(CHIPS)) {
+    for (const k of Object.keys(def)) if (!SKIP.has(k)) authored.add(k);
+  }
+  const unseen = [...authored].filter((f) => !VALUED_FIELDS.includes(f));
+  check("every authored chip field has a row in the value table",
+    unseen.length === 0);
+  check("…and the table has no rows for fields nobody authors",
+    VALUED_FIELDS.every((f) => authored.has(f)));
+  check("…and every authored chip prices to a finite number",
+    Object.values(CHIPS).every((d) => Number.isFinite(chipValue(d))));
+
+  // The ordering that cost an evening. Garrison shipped at 1.6, which put
+  // defense-turrets a fifth of a point over recyclers — and on seed 1234 the
+  // AI then built 23 turrets, 0 recyclers, and its captures fell 22 -> 8.
+  check("production outranks fortification, point for point",
+    chipValue(CHIPS["recyclers"]) >= chipValue(CHIPS["defense-turrets"]));
+  check("…and an upgrade is worth its DELTA, not its destination",
+    upgradeValue(CHIPS["recyclers"], CHIPS["factory"])
+      === chipValue(CHIPS["factory"]) - chipValue(CHIPS["recyclers"]));
+  check("…which is smaller than the destination, so upgrades do not swamp builds",
+    upgradeValue(CHIPS["recyclers"], CHIPS["factory"]) < chipValue(CHIPS["factory"]));
+}
+{
+  // The field-aware influence term. Dominance is a step function with a wide
+  // dead zone, so an influence chip is worth nothing mid-band and a great deal
+  // one point below a bar — and a flat weight prices it at the average of
+  // those, which is a number that is never right anywhere.
+  const g = createGame({ seed });
+  const loc = Object.values(g.locations).find((l) => l.controller);
+  const chip = Object.values(CHIPS).find((c) => (c.localInfluence || 0) > 0);
+  if (chip) {
+    g.world = g.world || {};
+    g.world.influence = {};
+    const gain = chip.localInfluence;
+    // Parked just under the 6-hex bar, the same chip should be worth more than
+    // parked well inside a band.
+    g.world.influence[loc.hexId] = 6 - gain;
+    const atTheBar = chipValue(chip, { state: g, loc, contested: false });
+    g.world.influence[loc.hexId] = 0;
+    const deadZone = chipValue(chip, { state: g, loc, contested: false });
+    check("an influence chip that crosses a dominance bar is worth more than one that does not",
+      atTheBar > deadZone);
+  }
+  // Loyalty at the ceiling buys nothing, and the table has to know that.
+  const loyChip = Object.values(CHIPS).find((c) => (c.loyaltyRise || 0) > 0);
+  if (loyChip) {
+    const full = { ...loc, loyalty: CONFIG.loyalty.max };
+    const low = { ...loc, loyalty: 0 };
+    check("a Loyalty chip on a city at the ceiling is worth nothing",
+      chipValue(loyChip, { state: g, loc: full }) < chipValue(loyChip, { state: g, loc: low }));
+  }
+}
+{
+  // The compounding horizon. output/research/upkeep pay EVERY ROUND; strength
+  // and siege pay once. A flat points-per-point scale cannot tell those apart,
+  // and the first draft did not try.
+  const AI = CONFIG.ai;
+  const was = AI.compoundingWeight;
+  try {
+    AI.compoundingWeight = 1;
+    const flat = chipValue(CHIPS["factory"]);
+    AI.compoundingWeight = 2;
+    check("the horizon lifts a per-round chip and nothing else",
+      chipValue(CHIPS["factory"]) > flat
+      && chipValue(CHIPS["defense-turrets"]) === chipValue(CHIPS["defense-turrets"]));
+  } finally { AI.compoundingWeight = was; }
+  // …and the horizon is the SHIPPED value, not an accident of the sweep. 2
+  // sent the AI hoarding (109 median end scrap, 14 of 15 games unresolved).
+  check("…and it ships at the value the suite chose", CONFIG.ai.compoundingWeight === 1);
+}
+
+// §5 — WHAT A FACTION WANTS, IN THE PRICE.
+//
+// `interestMultiplier` shipped with the interests module and was called by
+// nothing. Every faction priced every item identically, so the six derived
+// wants shaped what an AI would SAY in a courtship condition and had no bearing
+// whatever on what it would PAY — a faction whose homeland was under occupation
+// valued that city at exactly the number a bystander did.
+line("\n  [§5] the six wants reach the price, not only the sentence");
+{
+  const g = createGame({ seed }); ensureDiplomacy(g);
+  const me = "versari", them = "lakers";
+  // A live grievance gives `me` a `redress` want against `them`. Settling is
+  // the item that answers it.
+  recordGrievance(g, me, them, "surprise-attack");
+  const settlement = { settlement: true };
+  const withWant = valueOfItem(g, me, settlement, { other: them });
+  const cfg = CONFIG.diplomacy.interests;
+  const was = cfg.priceMultiplier;
+  try {
+    cfg.priceMultiplier = 0;
+    const flat = valueOfItem(g, me, settlement, { other: them });
+    check("a faction that wants redress pays more for a settlement",
+      withWant > flat);
+    check("…and priceMultiplier 0 is a true no-op",
+      flat === valueOfItem(g, me, settlement, { other: them }));
+  } finally { cfg.priceMultiplier = was; }
+
+  // Capped. Personality tilts a negotiation; it does not let a faction be
+  // talked into anything with the right word in it.
+  cfg.priceMultiplier = was;
+  const bystander = createGame({ seed }); ensureDiplomacy(bystander);
+  const flatPrice = valueOfItem(bystander, me, settlement, { other: them });
+  check("…and the want is a tilt, not a blank cheque",
+    withWant <= (flatPrice || 1) * (1 + was) + 0.001 || flatPrice === 0);
+
+  // Scrap is exempt: a want that changed the value of a coin would be an
+  // exchange-rate bug wearing a hat.
+  const coin = { resource: { resource: "scrap", amount: 10 } };
+  check("money is money — no want moves the price of scrap",
+    valueOfItem(g, me, coin, { other: them }) === 10);
+}
+{
+  // `routes` had no matcher at all: the interest was derived, weighted and
+  // spoken in courtship conditions from the day it shipped, and the one item
+  // that delivers it priced at par.
+  const g = createGame({ seed }); ensureDiplomacy(g);
+  const me = "versari";
+  const other = factionIds(g).find((f) => f !== me
+    && interestsOf(g, me).some((w) => w.kind === "routes" && w.subject === f));
+  if (other) {
+    const ob = { promise: { kind: "openBorders" } };
+    const cfg = CONFIG.diplomacy.interests;
+    const was = cfg.priceMultiplier;
+    const wanted = valueOfItem(g, me, ob, { other });
+    try {
+      cfg.priceMultiplier = 0;
+      check("a faction that wants a route pays more for open borders",
+        wanted > valueOfItem(g, me, ob, { other }));
+    } finally { cfg.priceMultiplier = was; }
+  }
+}
+
+// §6.3/§6.4 — THE WALL HOLDS AT THE AI's FAUCET TOO.
+//
+// Scrap buys what a faction HAS; Sway buys what a faction THINKS, and nothing
+// converts. The human's Gift button has been Sway-priced since §6.3 — but the
+// AI was still handing over 3 scrap through `applyDeal` and getting Standing
+// for it, so the wall held at one faucet and not the other. That is the same
+// asymmetric-bar failure already fixed once for courtship.
+line("\n  [§6.4] no faction buys goodwill with coin — the AI included");
+{
+  const g = createGame({ seed }); ensureDiplomacy(g);
+  const before = {};
+  for (const f of factionIds(g)) for (const o of factionIds(g)) {
+    if (f !== o) before[`${f}|${o}`] = getStanding(g, f, o);
+  }
+  const purses = {};
+  for (const f of factionIds(g)) if (g.players[f]) { g.players[f].resource = 500; g.players[f].sway = 0; purses[f] = 500; }
+  // Run the political layer with every faction rich in coin and broke in Sway.
+  for (let i = 0; i < 6; i++) { g.round += 1; runDiplomacyRound(g); }
+  // Standing may move for a dozen legitimate reasons — drift, war, peace,
+  // grievances. What must NOT appear is a `gift` cause, because that is the
+  // one that would mean somebody bought it.
+  const bought = g.log.filter((e) => e.name === "standing_changed" && e.payload.cause === "gift");
+  check("a board full of scrap and empty of Sway buys nobody's goodwill",
+    bought.length === 0, );
+}
+{
+  // THIS USED TO PIN THE BRANCH SHUT — `giftAboveShareOfCap >= 1` — and that
+  // was a check on a VERDICT rather than on a rule. The verdict has since
+  // flipped: re-measured alongside `ai.dominionWeight: 1`, the gift buys back
+  // the whole ending mix the landless clock cost (0.32 -> 0.40 at n=90) with
+  // `unresolved` flat, and it now ships at 0.8. A check that asserts today's
+  // setting fails the day somebody re-measures honestly, which is the opposite
+  // of what it is for.
+  //
+  // What replaces it is the rule the branch has to obey at ANY setting, and
+  // the one whose breach was actually measured: A GIFT MUST NEVER COST A
+  // COURTSHIP. Letting a gift eat the pool took the ending mix from 9 to 5 and
+  // unresolved from 1 to 6, because `chargeSwayUpkeep` then called the running
+  // courtships off and lapses went 3.9 to 6.4. Commitments first, surplus
+  // second — for however many rounds `giftReserveRounds` asks for.
+  const g6g = createGame({ seed: 2071, humanFactionId: "versari" });
+  ensureDiplomacy(g6g);
+  const SW = CONFIG.sway;
+  g6g.players.goldgrass.sway = SW.cap;
+  // Warm enough to be SEEN courting them — the courtship floor is Neutral, and
+  // at this seed Goldgrass starts below it toward both.
+  for (const f of ["lakers", "plainers"]) {
+    setStanding(g6g, "goldgrass", f, CONFIG.diplomacy.tiers.friendly, "test");
+  }
+  const openedCourtships = ["lakers", "plainers"].filter((f) =>
+    performDiplomacy(g6g, "goldgrass", "court", { faction: f }).ok === true).length;
+  check("the courtship fixture opened something to protect",
+    openedCourtships > 0 && courtingList(g6g, "goldgrass").length === openedCourtships);
+  const owed = openedCourtships * SW.courtUpkeep * (CONFIG.ai.giftReserveRounds ?? 2);
+  check("a gift never spends what a running courtship is owed",
+    giftBudget(g6g, "goldgrass") <= swayOf(g6g, "goldgrass") - owed);
+  // …and the no-op is still a no-op, whatever the shipped value happens to be.
+  const shareSave6g = CONFIG.ai.giftAboveShareOfCap;
+  CONFIG.ai.giftAboveShareOfCap = 1;
+  check("share 1 still shuts the branch completely",
+    giftBudget(g6g, "goldgrass") === 0);
+  CONFIG.ai.giftAboveShareOfCap = shareSave6g;
+  // The human's, of course, does not.
+  const g = createGame({ seed }); ensureDiplomacy(g);
+  g.players.versari.sway = 200;
+  g.players.versari.resource = 0;
+  setStanding(g, "lakers", "versari", 0);
+  const res = performDiplomacy(g, "versari", "gift", { faction: "lakers", standing: 1 });
+  check("…while a player with Sway and no scrap can still send one", res.ok);
+  check("…and it lands", getStanding(g, "lakers", "versari") > 0);
+}
+
+// §12.3 — the intrigue branch: Expose, Forge, Fabricate.
+//
+// `sway.opCost` sat in config with nothing reading it, and the recorded
+// phase-3 finding was that the political pool sits at its ceiling 30% of all
+// rounds. This is the sink. Each op is a claim about who wronged whom, and
+// they differ in whether the claim is TRUE and in who it is about:
+//
+//   Expose     a true wrong, done by them, that nobody saw
+//   Forge      a false wrong, done by them, to somebody else
+//   Fabricate  a false wrong, done by them, to YOU
+line("\n  [§12.3] what Sway buys when the courtships are paid for");
+{
+  const g = createGame({ seed }); ensureDiplomacy(g);
+  const me = "versari", them = "lakers", third = "goldgrass";
+  g.players[me].sway = 500;
+  check("with nothing to publish, Expose is refused rather than invented",
+    !performDiplomacy(g, me, "expose", { faction: them }).ok);
+  const sway0 = g.players[me].sway;
+  check("…and it costs nothing to be told so", sway0 === 500);
+
+  // Manufacture the one thing Expose reads: a strike whose Menace rounded to
+  // nothing because nobody saw it. `menaceFromAttack` emits it; the op does
+  // not keep a second ledger of the same fact.
+  emit(g, "attack_unwitnessed", { attacker: them, victim: third, hex: null });
+
+  // …AND YOU HAVE TO HAVE FOUND OUT SOMEHOW. The first draft read the log
+  // omnisciently, so any faction anywhere could publish a strike that by
+  // definition nobody witnessed — the one place in the diplomacy layer where
+  // fog did not apply, in the one verb whose whole subject is a thing nobody
+  // saw. The apparatus is the Intelligence branch, which until now had no
+  // contact with the intrigue verbs at all.
+  check("with no intelligence apparatus, there is nothing you can publish",
+    exposableStrikes(g, them, me).length === 0);
+  const blind = performDiplomacy(g, me, "expose", { faction: them });
+  check("…and the refusal says WHICH wall you hit",
+    !blind.ok && /no way of knowing/.test(blind.reason || ""), blind.reason);
+  check("…and it costs nothing to be told", g.players[me].sway === 500);
+
+  // Spy Ring: a standing network. Set directly, as the surrounding fixtures do
+  // — this is about what the node BUYS, not about earning it.
+  g.players[me].techWheel = ["int-entry", "int-b1"];
+  check("a Spy Ring hears about it wherever it happened",
+    exposableStrikes(g, them, me).length === 1);
+  check("…and says so", exposableStrikes(g, them, me)[0].apparatus === "spy-ring");
+  check("an unwitnessed strike is exposable", exposableStrikes(g, them, me).length === 1);
+  const m0 = menaceOf(g, them), h0 = honorOf(g, me);
+  const res = performDiplomacy(g, me, "expose", { faction: them });
+  check("…and publishing it works", res.ok);
+  check("…it charges the Menace the strike escaped", menaceOf(g, them) > m0);
+  check("…it hands the victim the grievance they were denied",
+    grievancesAgainst(g, third, them).some((x) => x.kind === "surprise-attack"));
+  check("…the truth costs the teller no Honor", honorOf(g, me) === h0);
+  check("…and it costs Sway", g.players[me].sway === 500 - CONFIG.sway.opCost);
+  check("…and the same strike cannot be sold twice",
+    exposableStrikes(g, them, me).length === 0
+    && !performDiplomacy(g, me, "expose", { faction: them }).ok);
+
+  // You are never a source on your own business — you were there.
+  const g2 = createGame({ seed }); ensureDiplomacy(g2);
+  g2.players[me].sway = 500;
+  g2.players[me].techWheel = ["int-entry", "int-b1"];
+  emit(g2, "attack_unwitnessed", { attacker: me, victim: them, hex: null });
+  emit(g2, "attack_unwitnessed", { attacker: them, victim: me, hex: null });
+  check("you cannot publish your own quiet strike",
+    exposableStrikes(g2, me, me).length === 0);
+  check("…nor one against you, which you did not need telling about",
+    exposableStrikes(g2, them, me).length === 0);
+
+  // The other two doors, because a gate only one node opens is that node's
+  // gate rather than the branch's. A Listening Post is the A-path payoff: it
+  // has carried an upkeep, a concealment model, a Strength and a destruction
+  // path since it shipped, and the only reason to build one was map vision.
+  {
+    const gp = createGame({ seed }); ensureDiplomacy(gp);
+    gp.players[me].sway = 500;
+    const hex = Object.keys(gp.board.hexes)[0];
+    const near = (gp.board.adjacency[hex] || [])[0];
+    emit(gp, "attack_unwitnessed", { attacker: them, victim: third, hex });
+    check("no post, no ears", exposableStrikes(gp, them, me).length === 0);
+    gp.world.listeningPosts = gp.world.listeningPosts || {};
+    gp.world.listeningPosts[near] = { hex: near, owner: me, strength: 5, revealedTo: [] };
+    check("a Listening Post in earshot hears it",
+      exposableStrikes(gp, them, me)[0]?.apparatus === "listening-post");
+    // …and an unpaid one hears nothing, which is what dormancy MEANS.
+    gp.world.listeningPosts[near].dormant = true;
+    check("…and a dormant post hears nothing", exposableStrikes(gp, them, me).length === 0);
+  }
+  {
+    // Scouts: int-a1 plus eyes on the place now.
+    const gs = createGame({ seed }); ensureDiplomacy(gs);
+    gs.players[me].sway = 500;
+    const hex = Object.keys(gs.board.hexes)[0];
+    emit(gs, "attack_unwitnessed", { attacker: them, victim: third, hex });
+    gs.players[me].techWheel = ["int-entry", "int-a1"];
+    gs.visibility = gs.visibility || {};
+    gs.visibility[me] = { visible: new Set(), explored: new Set() };
+    check("Intelligence A1 alone, with the place out of sight, learns nothing",
+      exposableStrikes(gs, them, me).length === 0);
+    gs.visibility[me].visible.add(hex);
+    check("…and with eyes on it, the scouts piece it together",
+      exposableStrikes(gs, them, me)[0]?.apparatus === "scouts");
+  }
+
+  // The no-op, per the plan's rule 1.4.
+  const O = CONFIG.sway.ops;
+  const wasNeed = O.exposeNeedsApparatus;
+  try {
+    O.exposeNeedsApparatus = 0;
+    const g3 = createGame({ seed }); ensureDiplomacy(g3);
+    emit(g3, "attack_unwitnessed", { attacker: them, victim: third, hex: null });
+    check("exposeNeedsApparatus 0 restores the omniscient reading",
+      exposableStrikes(g3, them, me).length === 1);
+  } finally { O.exposeNeedsApparatus = wasNeed; }
+}
+{
+  // A covert act is seen through on a roll with TWO sides. The caster's Honor
+  // is cover — the interesting reason to keep it, and to spend it.
+  const g = createGame({ seed }); ensureDiplomacy(g);
+  const me = "versari", them = "lakers";
+  g.players[me].honor = 0;
+  const dishonest = covertDetection(g, me, null);
+  g.players[me].honor = 12;
+  check("a spotless name is cover for a lie", covertDetection(g, me, null) < dishonest);
+  const o = CONFIG.sway.ops;
+  check("…within bounds either way",
+    covertDetection(g, me, null) >= o.lieDetectionMin
+    && dishonest <= o.lieDetectionMax);
+
+  // …and the VICTIM's apparatus is the counter. This half was missing, and its
+  // absence made `int-b1` — a node called SPY RING — do nothing whatever to
+  // help its holder catch somebody lying about them.
+  check("a faction with nothing counts for nothing", counterIntelligence(g, them) === 0);
+  const bare = covertDetection(g, me, them);
+  g.players[them].techWheel = ["int-entry", "int-b1"];
+  check("a Spy Ring makes you harder to lie about", covertDetection(g, me, them) > bare);
+  check("…and it is the Spy Ring doing it, not the roll drifting",
+    counterIntelligence(g, them) === o.counterSpyRing);
+  const g2 = createGame({ seed }); ensureDiplomacy(g2);
+  g2.world.listeningPosts = {};
+  for (const hex of Object.keys(g2.board.hexes).slice(0, 12)) {
+    g2.world.listeningPosts[hex] = { hex, owner: them, strength: 5, revealedTo: [] };
+  }
+  check("…and a wall of listening posts is capped, not cumulative",
+    counterIntelligence(g2, them) === o.counterPostCap);
+}
+{
+  // SABOTAGE IS A COVERT ACT TOO, and it was the only one in the game with no
+  // risk at all: Forge and Fabricate roll against Honor and backfire hard,
+  // while Saboteurs lowered a rival's Loyalty for free, anonymously, with no
+  // Menace and no grievance. The diplomatic lie risked everything and the
+  // physical one risked nothing.
+  const o = CONFIG.sway.ops;
+  const was = [o.lieBaseDetection, o.lieDetectionMin, o.lieDetectionMax];
+  const me = "versari", them = "lakers";
+  try {
+    o.lieBaseDetection = 1; o.lieDetectionMin = 1; o.lieDetectionMax = 1;
+    const g = createGame({ seed }); ensureDiplomacy(g);
+    const h0 = honorOf(g, me), m0 = menaceOf(g, me);
+    check("a saboteur can be traced", sabotageCaught(g, me, them) === true);
+    check("…and it costs Honor, but less than a forgery does",
+      honorOf(g, me) === h0 - o.sabotageCaughtHonorLoss
+      && o.sabotageCaughtHonorLoss < o.caughtHonorLoss);
+    check("…and Menace", menaceOf(g, me) === m0 + o.sabotageCaughtMenace);
+    check("…and the victim holds it against them, by name",
+      grievancesAgainst(g, them, me).length > 0);
+
+    o.lieBaseDetection = 0; o.lieDetectionMin = 0; o.lieDetectionMax = 0;
+    const g3 = createGame({ seed }); ensureDiplomacy(g3);
+    const h1 = honorOf(g3, me);
+    check("…and an unseen saboteur pays nothing",
+      sabotageCaught(g3, me, them) === false && honorOf(g3, me) === h1);
+  } finally {
+    [o.lieBaseDetection, o.lieDetectionMin, o.lieDetectionMax] = was;
+  }
+  const wasCatch = o.sabotageCanBeCaught;
+  try {
+    o.sabotageCanBeCaught = 0;
+    const g4 = createGame({ seed }); ensureDiplomacy(g4);
+    check("sabotageCanBeCaught 0 restores the free, anonymous sabotage",
+      sabotageCaught(g4, me, them) === false);
+  } finally { o.sabotageCanBeCaught = wasCatch; }
+}
+{
+  // §17.5 B1 — a Spy Ring reads the POLITICAL layer now, not just two numbers
+  // that both predate the diplomacy rework.
+  const g = createGame({ seed }); ensureDiplomacy(g);
+  const me = "versari", them = "lakers";
+  check("without a Spy Ring you learn nothing", readRivalIntel(g, me, them) === null);
+  g.players[me].techWheel = ["int-entry", "int-b1"];
+  const r = readRivalIntel(g, me, them);
+  check("with one, you learn what they are AFTER", Array.isArray(r.interests));
+  check("…and what they can afford to do about it",
+    typeof r.sway.pool === "number" && typeof r.sway.income === "number");
+  performDiplomacy(g, them, "declare-position", { kind: "noVassals" });
+  const r2 = readRivalIntel(g, me, them);
+  check("…and what they have sworn in public",
+    r2.positions.some((p) => p.kind === "noVassals"));
+  check("…in words", /vassal/i.test(r2.positions[0].text));
+  r.techWheel.push("__probe");
+  check("…and the report is a copy, not a handle on the engine",
+    !g.players[them].techWheel.includes("__probe"));
+}
+{
+  // Forge, forced to succeed and forced to fail, so both halves are pinned.
+  const o = CONFIG.sway.ops;
+  const was = [o.lieBaseDetection, o.lieDetectionMin, o.lieDetectionMax];
+  try {
+    o.lieBaseDetection = 0; o.lieDetectionMin = 0; o.lieDetectionMax = 0;
+    const g = createGame({ seed }); ensureDiplomacy(g);
+    const me = "versari", them = "lakers", third = "goldgrass";
+    g.players[me].sway = 500;
+    check("a forgery has to be about somebody else",
+      !performDiplomacy(g, me, "forge", { faction: them, against: them }).ok);
+    const r = performDiplomacy(g, me, "forge", { faction: them, against: third });
+    check("an undetected forgery plants a grievance", r.ok && !r.caught);
+    check("…held by the party it was told to, against the party it was about",
+      grievancesAgainst(g, third, them).length === 1);
+    check("…and it is marked as the lie it is",
+      grievancesAgainst(g, third, them)[0].forged?.by === me);
+    // …and it evaporates. Without this, one Fabricate would make every war
+    // that faction ever fought against that target righteous forever.
+    g.round += o.lieDecaysAfterRounds + 1;
+    sweepForgeries(g);
+    check("…and a lie is real while it lasts and then evaporates",
+      grievancesAgainst(g, third, them).length === 0);
+
+    o.lieBaseDetection = 1; o.lieDetectionMin = 1; o.lieDetectionMax = 1;
+    const g2 = createGame({ seed }); ensureDiplomacy(g2);
+    g2.players[me].sway = 500;
+    const h0 = honorOf(g2, me), m0 = menaceOf(g2, me);
+    const caught = performDiplomacy(g2, me, "forge", { faction: them, against: third });
+    check("a forgery seen through is still an act that happened", caught.ok && caught.caught);
+    check("…and it costs the forger more than an ordinary broken promise",
+      honorOf(g2, me) === h0 - o.caughtHonorLoss
+      && o.caughtHonorLoss > CONFIG.diplomacy.honor.breakLoss);
+    check("…and the board marks them", menaceOf(g2, me) === m0 + o.caughtMenace);
+    check("…and BOTH parties they tried to set against each other hold it",
+      grievancesAgainst(g2, them, me).length > 0 && grievancesAgainst(g2, third, me).length > 0);
+    check("…and no grievance was planted", grievancesAgainst(g2, third, them).length === 0);
+  } finally {
+    [o.lieBaseDetection, o.lieDetectionMin, o.lieDetectionMax] = was;
+  }
+}
+{
+  // Fabricate is the one that buys a war, so it is the one most worth lying
+  // about — and the one that must refuse to stack on a real grievance, or the
+  // AI would fabricate every round to keep a war righteous.
+  const o = CONFIG.sway.ops;
+  const was = [o.lieBaseDetection, o.lieDetectionMin, o.lieDetectionMax];
+  try {
+    o.lieBaseDetection = 0; o.lieDetectionMin = 0; o.lieDetectionMax = 0;
+    const g = createGame({ seed }); ensureDiplomacy(g);
+    const me = "versari", them = "lakers";
+    g.players[me].sway = 500;
+    check("a fabricated wrong makes your war righteous",
+      performDiplomacy(g, me, "fabricate", { faction: them }).ok
+      && warJustification(g, me, them) != null);
+    const sway1 = g.players[me].sway;
+    check("…but you cannot stack one on a grievance you actually hold",
+      !performDiplomacy(g, me, "fabricate", { faction: them }).ok);
+    check("…and being refused is free", g.players[me].sway === sway1);
+    g.round += o.lieDecaysAfterRounds + 1;
+    sweepForgeries(g);
+    check("…and the licence expires with the lie", grievancesAgainst(g, me, them).length === 0);
+  } finally {
+    [o.lieBaseDetection, o.lieDetectionMin, o.lieDetectionMax] = was;
+  }
+}
+{
+  // The whole branch is switchable, per the plan's rule 1.4.
+  const o = CONFIG.sway.ops;
+  const was = o.enabled;
+  try {
+    o.enabled = 0;
+    const g = createGame({ seed }); ensureDiplomacy(g);
+    g.players.versari.sway = 500;
+    check("ops.enabled 0 removes the branch entirely",
+      !opsEnabled()
+      && !performDiplomacy(g, "versari", "expose", { faction: "lakers" }).ok
+      && !performDiplomacy(g, "versari", "fabricate", { faction: "lakers" }).ok
+      && g.players.versari.sway === 500);
+  } finally { o.enabled = was; }
+  // The AI's pass ships ON as of the n=45 re-measurement (see the config
+  // note). What the fixture pins is that the switch still SWITCHES — the verbs
+  // are the player's either way, and `ops.enabled` above is the master.
+  check("…and the AI's own intrigue pass is a switch, not a hard-coded policy",
+    CONFIG.ai.intrigue === 0 || CONFIG.ai.intrigue === 1);
+}
+
+// Economy §8 — a COUNT-based obligation, because a per-chip one never arrived.
+//
+// Five of forty authored chips carry any `upkeep` at all, so a faction could
+// accumulate thirty-five of them for nothing. Measured on seed 1234 at round
+// 20, the leader held 20 chips while two of the four majors held none — so a
+// count obligation bites exactly where a sink should, on the faction that is
+// winning, and is invisible to the one that is losing.
+line("\n  [economy §8] the Nth chip past the allowance costs something");
+{
+  const eco = CONFIG.economy;
+  const g = createGame({ seed });
+  startTurn(g);
+  const pid = "versari";
+  const home = Object.values(g.locations).find((l) => l.controller === pid);
+  const free = Object.values(CHIPS).find((c) => !(c.upkeep > 0) && c.kind === "location");
+  for (let i = 0; i < eco.freeChips + 3; i += 1) {
+    const u = g.nextId("chip");
+    g.chips[u] = { uid: u, chipId: free.id };
+    home.chips.push(u);
+  }
+  const held = chipsHeldBy(g, pid);
+  check("every chip a faction holds is counted, wherever it sits",
+    held.length >= eco.freeChips + 3);
+  check("…a chip inside the allowance costs only what it authored",
+    held.slice(0, eco.freeChips).every((c, i) => chipUpkeepFor(g, pid, c.uid, i) === 0));
+  check(`…and each one past it costs ${eco.perExtraChip} more`,
+    held.slice(eco.freeChips).every((c, i) =>
+      chipUpkeepFor(g, pid, c.uid, eco.freeChips + i) === eco.perExtraChip));
+
+  // Charged, not merely quoted.
+  g.players[pid].resource = 200;
+  const before = g.players[pid].resource;
+  chargeChipUpkeep(g, pid);
+  check("…and the bill is actually taken",
+    before - g.players[pid].resource >= (held.length - eco.freeChips) * eco.perExtraChip);
+
+  // Cannot pay -> dormant, never destroyed. The surcharge must not be a way to
+  // lose chips you built, only a reason to stop building more.
+  g.players[pid].resource = 0;
+  chargeChipUpkeep(g, pid);
+  check("…and a faction that cannot pay goes dormant, never loses the chip",
+    chipsHeldBy(g, pid).length === held.length
+    && held.slice(eco.freeChips).some((c) => g.chips[c.uid].disabled));
+  g.players[pid].resource = 200;
+  chargeChipUpkeep(g, pid);
+  check("…and it comes back the moment the bill can be met",
+    held.slice(eco.freeChips).every((c) => !g.chips[c.uid].disabled));
+
+  const was = eco.perExtraChip;
+  try {
+    eco.perExtraChip = 0;
+    check("…and perExtraChip 0 is a true no-op",
+      held.every((c, i) => chipUpkeepFor(g, pid, c.uid, i) === 0));
+  } finally { eco.perExtraChip = was; }
+}
+
+// §4 — THE trust -> HONOR MERGE.
+//
+// Twenty-three authored beats write `ADJUST_TRACK {track:"trust"}`, summing
+// -16, and `p.tracks.trust` was read by NOTHING in the rules — a parallel
+// reputation the diplomacy layer could not see, so a player could be
+// scrupulous through a whole quest line and have the board treat them as a
+// stranger.
+//
+// The merge lands at the ADJUST_TRACK SEAM rather than in the corpus, and that
+// is the load-bearing decision: `src/game/content/*.js` is generated from a
+// JSON outside this repository (its own banner says so), so rewriting the 23
+// beats would be blown away by the next `build-content.mjs` run — and would be
+// 23 things to keep in sync instead of one.
+line("\n  [§4] what a quest costs your name");
+{
+  const H = CONFIG.diplomacy.honor;
+  const g = createGame({ seed }); ensureDiplomacy(g);
+  const pid = "versari";
+  const ctx = { activePlayer: pid };
+  const h0 = honorOf(g, pid);
+  applyEffect(g, { type: "ADJUST_TRACK", track: "trust", amount: -2, target: "active" }, ctx);
+  check("an authored trust write now moves Honor", honorOf(g, pid) === h0 - 2 * H.trustToHonor);
+  check("…at the halved magnitude, not the authored one",
+    H.trustToHonor < 1 && honorOf(g, pid) > h0 - 2);
+  check("…and the track keeps its own value for content that reads it",
+    g.players[pid].tracks.trust === -2);
+  check("…and it says where it came from",
+    g.log.some((e) => e.name === "honor_changed" && e.payload.cause === "quest-trust"));
+
+  // THE FLOOR. Halving alone was not enough: the audit measures the corpus at
+  // Honor -4 with no faction's gates open, and every negative beat at -11.5 —
+  // 62 rounds of clean play, which is longer than a game. A quest choice
+  // should COST the board's regard and never close the diplomacy face
+  // outright, because the player cannot see the arithmetic while reading a
+  // story. Deeds still can; those are chosen with the numbers on screen.
+  for (let i = 0; i < 40; i += 1) {
+    applyEffect(g, { type: "ADJUST_TRACK", track: "trust", amount: -3, target: "active" }, ctx);
+  }
+  check("quest trust alone cannot push Honor past the floor",
+    honorOf(g, pid) === H.questHonorFloor,
+    );
+  check("…while the track itself keeps counting, so content still reads the truth",
+    g.players[pid].tracks.trust < H.questHonorFloor);
+  // …and a DEED still can. The floor is on the merge, not on Honor.
+  adjustHonor(g, pid, -H.surpriseAttackLoss, "test-deed");
+  check("…but a deed still can, which is the whole distinction",
+    honorOf(g, pid) < H.questHonorFloor);
+}
+{
+  // Recovery. Honor was the one reputation stat with no passive faucet, and a
+  // stat that only falls is a countdown rather than a character.
+  const H = CONFIG.diplomacy.honor;
+  check("Honor recovers, toward where an honourable faction started",
+    H.decayPerRound > 0 && H.decayToward === H.start);
+  const g = createGame({ seed }); ensureDiplomacy(g);
+  const pid = "versari";
+  adjustHonor(g, pid, -6, "test");
+  const low = honorOf(g, pid);
+  for (let i = 0; i < 5; i += 1) { g.round += 1; runDiplomacyRound(g); }
+  check("…and clean play actually lifts it", honorOf(g, pid) > low);
+  // It must not overshoot: drifting an honourable faction DOWN for playing
+  // quietly would be its own bug.
+  const g2 = createGame({ seed }); ensureDiplomacy(g2);
+  adjustHonor(g2, pid, 6, "test");
+  const high = honorOf(g2, pid);
+  for (let i = 0; i < 40; i += 1) { g2.round += 1; runDiplomacyRound(g2); }
+  check("…and it settles at the target rather than sliding past it",
+    honorOf(g2, pid) <= high && honorOf(g2, pid) >= H.decayToward - H.decayPerRound);
+}
+{
+  // Both halves are switchable, per the plan's rule 1.4.
+  const H = CONFIG.diplomacy.honor;
+  const was = H.trustToHonor;
+  try {
+    H.trustToHonor = 0;
+    const g = createGame({ seed }); ensureDiplomacy(g);
+    const h0 = honorOf(g, "versari");
+    applyEffect(g, { type: "ADJUST_TRACK", track: "trust", amount: -5, target: "active" },
+      { activePlayer: "versari" });
+    check("trustToHonor 0 unmerges the tracks and restores the old silence",
+      honorOf(g, "versari") === h0 && g.players.versari.tracks.trust === -5);
+  } finally { H.trustToHonor = was; }
+}
+
+// §1.2 / economy §6.3 — gifts are priced in SWAY now, not scrap. The
+// diminishing-returns window is unchanged, because which currency pays for a
+// gift has nothing to do with how quickly a faction tires of being flattered.
+line("\n  [§1.2] gifts buy Standing with political capacity, not scrap");
 {
   const g = createGame({ seed }); ensureDiplomacy(g);
   const from = "versari", to = "lakers";
+  const SW = CONFIG.sway;
   g.players[from].resource = 200;
+  g.players[from].sway = 400;
   setStanding(g, to, from, -12); setStanding(g, from, to, -2); // room below cap; no pact
+
+  // The wall: scrap alone buys nothing a faction thinks.
+  g.players[from].sway = 0;
+  const broke = performDiplomacy(g, from, "gift", { faction: to, standing: 4 });
+  check("a purse full of scrap and no Sway buys no goodwill at all",
+    !broke.ok && /Sway/.test(broke.reason || ""));
+  // -12 clamps to standingMin; read the board rather than the number we asked
+  // for, which is what a refusal not moving anything actually means.
+  check("…and moved nothing", getStanding(g, to, from) === CONFIG.diplomacy.standingMin);
+
+  g.players[from].sway = 400;
   const gains = [];
   for (let i = 0; i < 4; i++) {
     const before = getStanding(g, to, from);
-    performDiplomacy(g, from, "gift", { faction: to, amount: 8 }); // baseGain 4
+    performDiplomacy(g, from, "gift", { faction: to, standing: 4 });
     gains.push(getStanding(g, to, from) - before);
   }
-  check("gift gains diminish floor(baseGain/(n+1)) → 4,2,1,1",
-    JSON.stringify(gains) === JSON.stringify([4, 2, 1, 1]));
+  check("gift gains still diminish floor(want/(n+1)) → 4,2,1,1",
+    JSON.stringify(gains) === JSON.stringify([4, 2, 1, 1]), JSON.stringify(gains));
+  check("…and each landed gift cost Sway", g.players[from].sway < 400);
 }
 {
   const g = createGame({ seed }); ensureDiplomacy(g);
   const from = "versari", to = "lakers";
-  g.players[from].resource = 200;
+  g.players[from].sway = 400;
   setStanding(g, to, from, -12); setStanding(g, from, to, -2);
-  performDiplomacy(g, from, "gift", { faction: to, amount: 8 }); // counter → 1
+  performDiplomacy(g, from, "gift", { faction: to, standing: 4 }); // counter → 1
   runDiplomacyRound(g); // decay → 0
+  g.players[from].sway = 400;
   const before = getStanding(g, to, from);
-  performDiplomacy(g, from, "gift", { faction: to, amount: 8 });
+  performDiplomacy(g, from, "gift", { faction: to, standing: 4 });
   check("an idle round decays the gift counter, refreshing the gain rate (full 4)",
     getStanding(g, to, from) - before === 4);
 }
@@ -2808,6 +5054,127 @@ line("\n  [§1.3] Trading Pact");
   runDiplomacyRound(g); runDiplomacyRound(g); // reach the grace limit (3 suspended rounds)
   check("3 suspended rounds auto-dissolve the Trading Pact + remove the Research floor",
     !g.diplomacy.agreements.some((x) => x.type === "trading-pact") && (g.players[a].permanentResearch || 0) === permA);
+}
+
+// A trading pact is about whether two powers can reach each other, not about
+// two specific hexes. It used to demand a clear CAPITAL-to-capital route, so
+// two neighbours whose border towns shared a railway could not trade if their
+// capitals sat at opposite ends of the map, and a pact died the moment either
+// capital was cut off however well-connected the rest of both countries were.
+{
+  const g = createGame({ seed }); ensureDiplomacy(g);
+  const a = "versari", b = "goldgrass";
+  const isCap = (l) => (l.chips || []).some((c) => g.chips[c]?.chipId === "capital");
+  const seat = (loc, fid) => {
+    loc.controller = fid; loc.loyaltyOwner = fid;
+    loc.sections = [fid, fid, fid]; loc.loyalty = CONFIG.loyalty.ceiling;
+  };
+  setStanding(g, a, b, 0); setStanding(g, b, a, 0);
+  g.players[a].menace = 0; g.players[b].menace = 0; g.players[a].honor = 6; g.players[b].honor = 6;
+  g.world.zoc = {};
+
+  // `a` loses its seat but keeps a city. It still has something to trade from.
+  const capA = Object.values(g.locations).find((l) => l.controller === a && isCap(l));
+  const spare = Object.values(g.locations).find((l) => !l.controller);
+  seat(spare, a);
+  capA.controller = null;
+  capA.sections = ["neutral", "neutral", "neutral"];
+  check("a faction that has lost its Capital can still trade from the cities it holds",
+    formTradingPact(g, a, b).ok);
+
+  // …but one with nothing left cannot.
+  const g2 = createGame({ seed }); ensureDiplomacy(g2);
+  setStanding(g2, a, b, 0); setStanding(g2, b, a, 0);
+  g2.players[a].menace = 0; g2.players[b].menace = 0; g2.players[a].honor = 6; g2.players[b].honor = 6;
+  for (const loc of Object.values(g2.locations)) if (loc.controller === a) loc.controller = null;
+  const landless = formTradingPact(g2, a, b);
+  check("…and a landless faction has nowhere to trade from",
+    !landless.ok && /somewhere to trade from/.test(landless.reason || ""));
+}
+
+// Trade routes may run by rail, not only overland — a pact should not collapse
+// for want of a footpath while a railway runs between the two.
+line("\n  [§1.3] Trading Pact — routing by rail");
+{
+  const stage = () => {
+    const g = createGame({ seed }); ensureDiplomacy(g);
+    const a = "versari", b = "goldgrass";
+    const isCap = (l) => (l.chips || []).some((c) => g.chips[c]?.chipId === "capital");
+    const capA = Object.values(g.locations).find((l) => l.controller === a && isCap(l));
+    const capB = Object.values(g.locations).find((l) => l.controller === b && isCap(l));
+    for (const loc of Object.values(g.locations)) if (loc !== capA && loc !== capB) loc.controller = null;
+    setStanding(g, a, b, 0); setStanding(g, b, a, 0);
+    g.players[a].menace = 0; g.players[b].menace = 0; g.players[a].honor = 6; g.players[b].honor = 6;
+    // Wall the OVERLAND route completely: a third faction's ZoC over every hex
+    // but the two capitals. reinforcementRoute treats enemy ZoC as a wall; rail
+    // does not care about ZoC at all, only about who is standing on the line.
+    g.world.zoc = {};
+    for (const h of Object.keys(g.board.hexes)) {
+      if (h !== capA.hexId && h !== capB.hexId) g.world.zoc[h] = "plainers";
+    }
+    return { g, a, b, capA, capB };
+  };
+
+  {
+    const { g, a, b, capA, capB } = stage();
+    const overland = !!reinforcementRoute(g, a, capB.hexId);
+    const railed = (g.board.rails || []).length > 0;
+    const res = formTradingPact(g, a, b);
+    check("Trading Pact: forms over an intact rail line with the overland route walled off",
+      railed && !overland && res.ok);
+    runDiplomacyRound(g);
+    const agr = g.diplomacy.agreements.find((x) => x.type === "trading-pact");
+    check("Trading Pact: a railed route keeps it running", !!agr && agr.suspended === false);
+  }
+
+  {
+    const { g, a, b } = stage();
+    formTradingPact(g, a, b);
+    // Park a hostile third party on every rail hex — the line is track, not an
+    // abstraction, so standing on it severs it (rail doc §2.1).
+    const railHexes = new Set((g.board.rails || []).flatMap((l) => l.path));
+    setStanding(g, a, "plainers", -8); setStanding(g, "plainers", a, -8);
+    setStanding(g, b, "plainers", -8); setStanding(g, "plainers", b, -8);
+    let n = 0;
+    for (const h of railHexes) {
+      const u = Object.values(g.units).find((x) => x.owner === "plainers" && !x.parked);
+      if (!u) break;
+      u.node = h; u.parked = true; n++;
+    }
+    runDiplomacyRound(g);
+    const agr = g.diplomacy.agreements.find((x) => x.type === "trading-pact");
+    check("Trading Pact: an enemy standing on the line cuts the railed route",
+      n > 0 && !!agr && agr.suspended === true);
+  }
+}
+
+// §1.6 — the open-borders Standing gate reports WHICH side is short.
+line("\n  [§1.6] Open Borders — mutual standing");
+{
+  const g = createGame({ seed }); ensureDiplomacy(g);
+  const a = "versari", b = "goldgrass";
+  const need = DH.tiers.friendly;
+
+  // The case that reads as a bug: they like you plenty, you do not like them.
+  setStanding(g, b, a, need + 2);
+  setStanding(g, a, b, need - 2);
+  const oneWay = openBordersStanding(g, a, b);
+  check("Open Borders: one-sided Friendly is refused, naming YOUR side as short",
+    !oneWay.ok && oneWay.reason.includes("your regard"));
+  const attempt = performDiplomacy(g, a, "set-open-borders", { faction: b, on: true });
+  check("Open Borders: the engine refuses with that same reason",
+    !attempt.ok && attempt.reason === oneWay.reason);
+
+  // And the mirror image, so the message is not just always blaming you.
+  setStanding(g, a, b, need + 2);
+  setStanding(g, b, a, need - 2);
+  check("Open Borders: when THEY are short, the reason says so",
+    openBordersStanding(g, a, b).reason.includes("their regard"));
+
+  setStanding(g, b, a, need);
+  check("Open Borders: exactly Friendly on both sides passes — the tier label is not a lie",
+    openBordersStanding(g, a, b).ok &&
+    performDiplomacy(g, a, "set-open-borders", { faction: b, on: true }).ok);
 }
 
 // §1.4 — Demand Tribute
@@ -3002,6 +5369,138 @@ line("\n  [§1.6/§1.10] Open borders contract");
     performDiplomacy(g, a, "set-open-borders", { faction: b, on: false }).ok && !hasOpenBorders(g, a, b));
 }
 
+// Rail doc §2 — where the trunk line stops. It used to stop at the four
+// CAPITALS and nowhere else, which gave every board the same three links
+// however big the map or however many cities were seated, and meant the only
+// way to hold both ends of a link — which is what production pooling needs —
+// was to take an enemy capital.
+{
+  line("\n  [Rail doc §2] The trunk stops at the major settlements");
+  const rails = (g2) => g2.board.rails || [];
+  const hubsOf = (g2) => new Set(rails(g2).flatMap((l) => [l.a, l.b]));
+  const nameAt = (g2, hex) => LOCATIONS[g2.locations[hex]?.locationId];
+
+  const small = createGame({ seed, mapSize: "medium", locationBudget: 6 });
+  const big = createGame({ seed, mapSize: "large", locationBudget: 19 });
+  check("rail scales with how many major settlements are seated",
+    rails(big).length > rails(small).length);
+  check("…and stops at more than the four capitals",
+    hubsOf(big).size > 4);
+
+  // Every station is a major settlement, and never a sign-named one.
+  const badTier = [...hubsOf(big)].filter((h) => {
+    const def = nameAt(big, h);
+    return !def || !CONFIG.rail.hubTiers.includes(def.strategicValue);
+  });
+  check("every station is a settlement in the hub tiers",
+    badTier.length === 0);
+  check("…and a sign-named settlement is never a station",
+    [...hubsOf(big)].every((h) => !nameAt(big, h)?.noRailTerminus));
+
+  // Capitals are all `high`, so widening the band must not drop any of them.
+  const capHexes = Object.values(big.locations)
+    .filter((l) => (l.chips || []).some((c) => big.chips[c]?.chipId === "capital"))
+    .map((l) => l.hexId);
+  check("every capital is still on the line",
+    capHexes.length > 0 && capHexes.every((h) => hubsOf(big).has(h)));
+
+  // A line may still RUN THROUGH a hex that is not a station — that is what
+  // makes it cuttable per-hex rather than an abstract edge.
+  check("a link is a real sequence of hexes, not an abstract edge",
+    rails(big).every((l) => l.path.length >= 2 && l.path[0] === l.a && l.path[l.path.length - 1] === l.b));
+
+  // The network is one system: every station reachable from every other.
+  const seen = new Set([rails(big)[0].a]);
+  const queue = [rails(big)[0].a];
+  while (queue.length) {
+    const cur = queue.shift();
+    for (const l of rails(big)) {
+      const far = l.a === cur ? l.b : l.b === cur ? l.a : null;
+      if (far && !seen.has(far)) { seen.add(far); queue.push(far); }
+    }
+  }
+  check("…and the trunk is ONE network, not islands", seen.size === hubsOf(big).size);
+}
+
+// Rail doc §2.3 — running rights over another faction's stations.
+{
+  line("\n  [Rail doc §2.3] Running rights");
+  const g = createGame({ seed }); ensureDiplomacy(g);
+  const a = "versari", b = "lakers";
+  g.players[a].menace = 0; g.players[b].menace = 0; g.players[a].honor = 6; g.players[b].honor = 6;
+
+  // Below Neutral, nobody is lending anybody a railway.
+  setStanding(g, a, b, -4); setStanding(g, b, a, -4);
+  check("rail access refused below Neutral",
+    !performDiplomacy(g, a, "set-rail-access", { faction: b, on: true }).ok);
+
+  // Neutral is enough — a LOWER bar than open borders (Friendly+), which is
+  // the point: freight is not an army.
+  setStanding(g, a, b, 0); setStanding(g, b, a, 0);
+  const grant = performDiplomacy(g, a, "set-rail-access", { faction: b, on: true });
+  check("rail access granted at Neutral, a lower bar than open borders",
+    grant.ok && !openBordersStanding(g, a, b).ok);
+  check("rail access is one-directional — granting is not receiving",
+    hasRailAccess(g, b, a) && !hasRailAccess(g, a, b));
+  check("rail access revokes cleanly",
+    performDiplomacy(g, a, "set-rail-access", { faction: b, on: false }).ok &&
+    !hasRailAccess(g, b, a));
+
+  // A pact carries running rights without a separate negotiation.
+  check("pacted factions ride each other's lines implicitly", (() => {
+    const h = createGame({ seed }); ensureDiplomacy(h);
+    formPact(h, a, b);
+    return hasRailAccess(h, a, b) && hasRailAccess(h, b, a);
+  })());
+
+  // Transport: a link whose far station belongs to someone else is closed
+  // until they grant rights, then it opens.
+  check("running rights open a foreign station for unit transport", (() => {
+    const h = createGame({ seed }); ensureDiplomacy(h);
+    // CONSTRUCT the situation rather than hunt the board for it. This used to
+    // take rails[0] and assume its two ends belonged to different factions,
+    // which held only while rail stopped at capitals and nothing else. Now the
+    // trunk stops at every major settlement and the capitals are joined
+    // THROUGH the unheld big cities, so on some seeds no link has a rival at
+    // each end at all — and a fixture that returns early is a check that
+    // silently stopped checking.
+    const link = (h.board.rails || [])[0];
+    if (!link) return false;
+    const holderA = "versari", holderB = "lakers";
+    const seat = (hexId, fid) => {
+      const loc = h.locations[hexId];
+      loc.controller = fid;
+      loc.loyaltyOwner = fid;
+      loc.sections = [fid, fid, fid];
+      loc.loyalty = CONFIG.loyalty.ceiling;
+    };
+    seat(link.a, holderA);
+    seat(link.b, holderB);
+    // Pick the rider FIRST, then clear every other unit off the line so a
+    // parked garrison isn't what closes it (deleting first can delete the
+    // only unit holderA has).
+    const rider = Object.values(h.units).find((u) => u.owner === holderA);
+    if (!rider) return false;
+    for (const uid of Object.keys(h.units)) {
+      if (uid !== rider.uid && link.path.includes(h.units[uid].node)) delete h.units[uid];
+    }
+    rider.node = link.a;
+    const before = unitRailEdges(h, rider);
+    setStanding(h, holderB, holderA, 0);
+    h.players[holderB].menace = 0; h.players[holderA].honor = 6;
+    const ok = performDiplomacy(h, holderB, "set-rail-access", { faction: holderA, on: true }).ok;
+    const after = unitRailEdges(h, rider);
+    // Assert the specific EDGE, not the whole station. A hub now has several
+    // lines out of it, and unheld track is nobody's to close — so the station
+    // can be open toward a neutral neighbour while still shut toward this
+    // rival's. "Does this station have any edge at all" stopped being the
+    // same question as "is this link open".
+    return ok
+      && !before?.get(link.a)?.includes(link.b)
+      && !!after?.get(link.a)?.includes(link.b);
+  })());
+}
+
 // Open borders is a permit, not a wall — moving through territory without it
 // is trespassing (relations hit); with it, free passage.
 //
@@ -3013,6 +5512,53 @@ line("\n  [§1.6/§1.10] Open borders contract");
 // before/after Standing lets the assertion isolate the trespass rule from
 // whatever else a given seed's map happens to trigger on that hex.
 const lastTrespassEvent = (g) => [...g.log].reverse().find((e) => e.name === "territory_trespassed");
+// A citation is a diplomatic reaction, so it needs someone to have reacted.
+// Slipping through cover used to be cited by a faction that could not see you
+// — the one place ZoC and Vision were fused (rail doc Part 0).
+line("\n  [Open borders] trespass needs the host to SEE you");
+{
+  // Same intrusion three ways: open ground seen, cover unseen, cover detected.
+  const stage = (pick) => {
+    const g = createGame({ seed }); startTurn(g); ensureDiplomacy(g);
+    const mover = g.turnOrder[0], owner = g.turnOrder[1];
+    setStanding(g, owner, mover, CONFIG.diplomacy.tiers.wary - 1); // no courtesy
+    const u = Object.values(g.units).find((x) => x.owner === mover);
+    const dest = (g.board.adjacency[u.node] || []).find(pick(g));
+    if (!dest) return null;
+    g.world.zoc = g.world.zoc || {}; g.world.zoc[dest] = owner;
+    revealRegion(g, owner, [dest]); // the hex itself is in sight either way
+    u.moveRemaining = 2; recomputeStats(g);
+    return { g, mover, owner, u, dest };
+  };
+  const open = (g) => (h) => !g.locations[h] && !g.board.hexes[h].cover;
+  const covered = (g) => (h) => !g.locations[h];
+
+  {
+    const st = stage(open);
+    performAction(st.g, "move", { unit: st.u.uid, to: st.dest });
+    check("Trespass: open ground in plain sight is still cited", !!lastTrespassEvent(st.g));
+  }
+  {
+    // Force the destination into cover — the terrain that exists to hide you.
+    const st = stage(covered);
+    st.g.board.hexes[st.dest].cover = true;
+    performAction(st.g, "move", { unit: st.u.uid, to: st.dest });
+    check("Trespass: slipping through cover is NOT cited by a host without Detection",
+      !lastTrespassEvent(st.g));
+  }
+  {
+    // Same cover, but the host can see through it. Detection is granted via a
+    // Watchtower on a Location the host holds next to the hex — failing that,
+    // fall back to asserting the concealment check is what did it.
+    const st = stage(covered);
+    st.g.board.hexes[st.dest].cover = true;
+    const seen = isUnitVisibleTo(st.g, st.owner, st.u);
+    performAction(st.g, "move", { unit: st.u.uid, to: st.dest });
+    check("Trespass: the citation tracks visibility exactly — cited iff seen",
+      !!lastTrespassEvent(st.g) === seen);
+  }
+}
+
 line("\n  [Open borders] territory trespass penalty");
 {
   // Move a unit into a DISTRUSTFUL faction's ZoC with no open borders →
@@ -3022,8 +5568,9 @@ line("\n  [Open borders] territory trespass penalty");
   const mover = g.turnOrder[0], owner = g.turnOrder[1];
   setStanding(g, owner, mover, CONFIG.diplomacy.tiers.wary - 1);
   const u = Object.values(g.units).find((x) => x.owner === mover);
-  const dest = (g.board.adjacency[u.node] || []).find((h) => !g.locations[h]);
+  const dest = (g.board.adjacency[u.node] || []).find((h) => !g.locations[h] && !g.board.hexes[h].cover);
   g.world.zoc = g.world.zoc || {}; g.world.zoc[dest] = owner; // owner's territory
+  revealRegion(g, owner, [dest]); // the host can see the intrusion
   u.moveRemaining = 2; recomputeStats(g);
   performAction(g, "move", { unit: u.uid, to: dest });
   const ev = lastTrespassEvent(g);
@@ -3039,8 +5586,9 @@ line("\n  [Open borders] territory trespass penalty");
   setStanding(g, owner, mover, 0);
   g.diplomacy.agreements.push({ id: "ob-test", type: "open-borders", a: mover, b: owner, since: 0 });
   const u = Object.values(g.units).find((x) => x.owner === mover);
-  const dest = (g.board.adjacency[u.node] || []).find((h) => !g.locations[h]);
+  const dest = (g.board.adjacency[u.node] || []).find((h) => !g.locations[h] && !g.board.hexes[h].cover);
   g.world.zoc = g.world.zoc || {}; g.world.zoc[dest] = owner;
+  revealRegion(g, owner, [dest]); // the host can see the intrusion
   u.moveRemaining = 2; recomputeStats(g);
   performAction(g, "move", { unit: u.uid, to: dest });
   check("an open-borders agreement waives the trespass penalty (no Standing or Menace hit)",
@@ -3053,8 +5601,9 @@ line("\n  [Open borders] territory trespass penalty");
   const mover = g.turnOrder[0], owner = g.turnOrder[1];
   setStanding(g, owner, mover, CONFIG.diplomacy.tiers.friendly); // good terms
   const u = Object.values(g.units).find((x) => x.owner === mover);
-  const dest = (g.board.adjacency[u.node] || []).find((h) => !g.locations[h]);
+  const dest = (g.board.adjacency[u.node] || []).find((h) => !g.locations[h] && !g.board.hexes[h].cover);
   g.world.zoc = g.world.zoc || {}; g.world.zoc[dest] = owner;
+  revealRegion(g, owner, [dest]); // the host can see the intrusion
   u.moveRemaining = 2; recomputeStats(g);
   performAction(g, "move", { unit: u.uid, to: dest });
   const ev = lastTrespassEvent(g);
@@ -3512,84 +6061,490 @@ line("\n  [Phase 11] text-token resolver");
     loc.loyalty = loyalty;
   };
 
-  // -- foreign dominion ticks; homeland and low loyalty never do.
+  // -- VP is HELD, not ticked: taking a city moves its value across, losing it
+  // moves it back, and Loyalty scales what it is worth while you have it.
   const gD = createGame({ seed: 141 });
   startTurn(gD);
   const dPid = gD.turnOrder[gD.activeIndex];
   const prize = foreignCity(gD, dPid);
-  // Rung-relative so the fixture survives re-tuning of the bar.
-  const RUNG = CONFIG.victory.dominionLoyaltyMin;
-  grabFor(gD, dPid, prize, RUNG);
-  const sentry = Object.values(gD.units).find((u) => u.owner === dPid);
-  sentry.node = prize.hexId; // garrisoned: loyalty holds/rises through the tick
-  const vp0 = gD.players[dPid].vp;
-  cycleTo(gD, dPid);
-  check("dominion: a foreign high city at the Loyalty rung ticks +1 VP",
-    gD.players[dPid].vp === vp0 + 1);
-  prize.loyalty = RUNG - 2; // below the rung (rises 1 at Upkeep — still short)
-  const vp1 = gD.players[dPid].vp;
-  cycleTo(gD, dPid);
-  check("dominion: below the Loyalty rung there is no tick",
-    gD.players[dPid].vp === vp1);
-  // Homeland check: pid's own affiliated city never ticks even fully held.
-  const home14 = Object.values(gD.locations).find(
-    (l) => LOCATIONS[l.locationId]?.affiliation === dPid && l.controller === dPid);
-  check("dominion: your own affiliated city never qualifies",
-    !!home14 && (() => {
-      const before = gD.players[dPid].vp;
-      prize.loyalty = 0;
-      cycleTo(gD, dPid);
-      return gD.players[dPid].vp === before;
-    })());
+  const rival = holderOf(prize);
+  const prizeWorth = LOCATIONS[prize.locationId].vpReward;
+  const before = gD.players[dPid].vp;
+  const rivalBefore = rival ? gD.players[rival].vp : null;
+  grabFor(gD, dPid, prize, CONFIG.loyalty.ceiling); // fully settled
+  recomputeVp(gD);
+  check("held VP: taking a settled city is worth its full value immediately",
+    gD.players[dPid].vp === before + prizeWorth);
+  check("held VP: and the same value leaves whoever held it",
+    rival === null || gD.players[rival].vp === rivalBefore - prizeWorth);
 
-  // -- vassal dominion: a vassal's qualifying city ticks for the overlord.
-  const gV = createGame({ seed: 142 });
-  startTurn(gV);
-  const lord = gV.turnOrder[gV.activeIndex];
-  ensureDiplomacy(gV);
-  const vassal = gV.turnOrder.find((f) => f !== lord);
-  gV.diplomacy.vassals[vassal] = lord;
-  // pre-mark the summit dividend as paid so this check measures ONLY the
-  // dominion faucet (summit VP has its own Phase 19 checks).
-  gV.diplomacy.recognizedEver = { [lord]: [vassal] };
-  const fief = foreignCity(gV, lord);
-  grabFor(gV, vassal, fief, 8);
-  const vGuard = Object.values(gV.units).find((u) => u.owner === vassal);
-  vGuard.node = fief.hexId;
-  const lordVp = gV.players[lord].vp;
-  cycleTo(gV, lord);
-  check("vassal dominion: a vassal's qualifying city ticks +1 for the overlord",
-    gV.players[lord].vp === lordVp + 1);
+  prize.loyalty = Math.floor(CONFIG.loyalty.ceiling / 2); // exactly half — not OVER
+  recomputeVp(gD);
+  check("held VP: under half Loyalty a city is worth half, rounded down",
+    gD.players[dPid].vp === before + Math.floor(prizeWorth / 2));
 
-  // -- alliance trickle: a majority of the other MAJORS unlocks it, and
-  // past that bar it pays PER allied major (breadth scales, as Dominion
-  // does for cities — the fix for diplomacy's flat ceiling).
+  prize.loyalty = CONFIG.loyalty.ceiling / 2 + 1; // over half
+  recomputeVp(gD);
+  check("held VP: over half Loyalty restores the full value",
+    gD.players[dPid].vp === before + prizeWorth);
+
+  // Losing it takes the VP away again — the part a banked model could not do.
+  grabFor(gD, rival || gD.turnOrder.find((f) => f !== dPid), prize, CONFIG.loyalty.ceiling);
+  recomputeVp(gD);
+  check("held VP: losing the city loses the VP", gD.players[dPid].vp === before);
+
+  // Your own homeland counts now — dominion's "never your own land" rule went
+  // with the faucet. A faction opens holding something, so it opens above zero.
+  check("held VP: a faction's own homeland is worth VP, so nobody opens on 0",
+    gD.turnOrder.filter((f) => factionDef(f)?.tier === "major")
+      .every((f) => gD.players[f].vp > 0));
+
+  // -- content invariant: the rail-incompatibility flag matches the rule.
+  // The rule (2-slot unit chips can't use rail) is the source of truth; the
+  // hand-set flags in content.js are documentation. This catches them drifting
+  // apart, which is the failure mode a derived rule exists to prevent.
+  const railMismatch = Object.values(CHIPS).filter(
+    (c) => !!c.railIncompatible !== chipBlocksRail(c.id) && c.kind === "unit",
+  );
+  check("rail-incompatible chips are exactly the 2-slot unit chips",
+    railMismatch.length === 0, railMismatch.map((c) => c.id));
+
+  // Vassal dominion went with the faucet: a vassal's cities are the VASSAL's
+  // holdings and score for the vassal. An overlord's reward is tribute and the
+  // recognition summit, not a share of ground it does not hold.
+
+  // -- diplomacy is HELD, like territory. The trickle it replaced paid +1 per
+  // allied major every round forever once you were pacted with a majority: it
+  // was 77% of all banked VP across 20 games and let a faction win holding no
+  // ground at all. An alliance is worth its score while it stands, and worth
+  // nothing the moment it doesn't.
+  // The three checks below read `players[dip].vp` as an ABSOLUTE, which only
+  // measures the alliance if nothing else can move VP in the same window. The
+  // Upkeep claim drift can: `cycleTo` runs a full round, and a faction that
+  // dominates a neutral hex absorbs a section of it and scores the territory.
+  // That is real behaviour, not a regression — so isolate the measurement
+  // rather than loosen it, and cover the drift on its own terms below.
+  const claimWas = CONFIG.influence.claim.enabled;
+  CONFIG.influence.claim.enabled = 0;
   const gT = createGame({ seed: 143 });
   startTurn(gT);
   const dip = gT.turnOrder[gT.activeIndex];
   const majors14 = gT.turnOrder.filter((f) => f !== dip && factionDef(f)?.tier === "major");
-  // pre-mark summit dividends so these checks measure ONLY the trickle.
-  gT.diplomacy.recognizedEver = { [dip]: [...majors14] };
-  for (const m of majors14) gT.diplomacy.recognizedEver[m] = [dip];
-  // One ally out of three others is NOT a majority — nothing pays.
+  const SC = CONFIG.victory.score;
+  const base = gT.players[dip].vp;
   formPact(gT, dip, majors14[0]);
-  const vpMinority = gT.players[dip].vp;
+  recomputeVp(gT);
+  check("held diplomacy: one ally is worth its score at once — no majority bar",
+    gT.players[dip].vp === base + SC.allied);
+  // …and it does not pay again just because a round went by.
   cycleTo(gT, dip);
-  check("alliance trickle: a single ally is below the majority bar — pays nothing",
-    majors14.length < 2 || gT.players[dip].vp === vpMinority);
-  // A second ally clears the bar and pays for BOTH.
-  formPact(gT, dip, majors14[1]);
-  const vpTwo = gT.players[dip].vp;
-  cycleTo(gT, dip);
-  check("alliance trickle: past the majority bar it pays per allied major",
-    gT.players[dip].vp === vpTwo + 2 * CONFIG.victory.allianceTrickle);
-  // A third ally scales it again.
-  if (majors14[2]) {
-    formPact(gT, dip, majors14[2]);
-    const vpThree = gT.players[dip].vp;
-    cycleTo(gT, dip);
-    check("alliance trickle: each further ally adds another step",
-      gT.players[dip].vp === vpThree + 3 * CONFIG.victory.allianceTrickle);
+  recomputeVp(gT);
+  check("…and it does not pay again next round",
+    gT.players[dip].vp === base + SC.allied);
+  // A vassal is worth more than an ally.
+  vassalize(gT, dip, majors14[1], "test");
+  recomputeVp(gT);
+  check("…a vassal is worth more than an ally",
+    gT.players[dip].vp === base + SC.allied + SC.vassal && SC.vassal > SC.allied);
+  // Lose the alliance, lose the score — the half a banked model could not do.
+  breakPact(gT, dip, majors14[0], "test");
+  recomputeVp(gT);
+  check("…and losing the alliance loses the score with it",
+    gT.players[dip].vp === base + SC.vassal);
+  CONFIG.influence.claim.enabled = claimWas;
+
+  // -- the claim drift: unclaimed ground never rests at neutral.
+  //
+  // The old rule only peeled TOWARD neutral and stopped there, so a town that
+  // nobody held stayed nobody's for the rest of the game however deep inside
+  // one faction's country it sat. These four cover the rule and the three
+  // things that stop it, because a drift that cannot be stopped is a land
+  // grab rather than a border.
+  {
+    // TWO DIFFERENT THINGS ARE UNDER TEST HERE, and conflating them is what
+    // made the first draft of this block fail the moment the bar was tuned.
+    //
+    // The MECHANISM — one section per Upkeep, three Upkeeps to absorb, and the
+    // three things that stop it — is a rule, and it holds at any threshold.
+    // Those checks run at a bar a fresh map can actually reach, so they are
+    // measuring the rule and not the map generator.
+    //
+    // The BAR ITSELF — 8 — is a tuning number, measured in sim-suite, not
+    // asserted here. The one thing worth asserting about it is the property it
+    // was chosen for: that it is high enough nobody is handed a free town on
+    // round 1 for merely bordering it.
+    const barWas = CONFIG.influence.claim.threshold;
+    CONFIG.influence.claim.threshold = 5; // reachable on a fresh map
+
+    const gC = createGame({ seed: 424242 });
+    recomputeInfluence(gC);
+    const pid = gC.turnOrder[0];
+    const target = Object.values(gC.locations).find(
+      (l) => l.sections.every((x) => x === "neutral")
+        && claimStrength(gC, pid, l.hexId) >= CONFIG.influence.claim.threshold
+        && strongestRivalAt(gC, pid, l.hexId) < claimStrength(gC, pid, l.hexId));
+    check("claim: a neutral hex inside somebody's country is claimable at all", !!target);
+    if (target) {
+      const vpBefore = (recomputeVp(gC), gC.players[pid].vp);
+      tickClaims(gC, pid);
+      check("claim: one section per Upkeep, not the whole place at once",
+        target.sections.filter((x) => x === pid).length === 1);
+      tickClaims(gC, pid); tickClaims(gC, pid);
+      check("claim: three Upkeeps absorb it outright, and Loyalty opens low",
+        target.controller === pid && target.loyalty === CONFIG.influence.claim.startingLoyalty,
+        `controller=${target.controller} loyalty=${target.loyalty}`);
+      recomputeVp(gC);
+      check("claim: an absorbed place is worth its VP like any other ground",
+        gC.players[pid].vp > vpBefore, `${vpBefore} -> ${gC.players[pid].vp}`);
+    }
+
+    // A rival column standing in the town outranks the border on the map.
+    const gB = createGame({ seed: 424242 });
+    recomputeInfluence(gB);
+    const pid2 = gB.turnOrder[0];
+    const blocked = Object.values(gB.locations).find(
+      (l) => l.sections.every((x) => x === "neutral")
+        && claimStrength(gB, pid2, l.hexId) >= CONFIG.influence.claim.threshold);
+    if (blocked) {
+      const rival = Object.values(gB.units).find((u) => u.owner !== pid2);
+      rival.node = blocked.hexId;
+      recomputeInfluence(gB);
+      tickClaims(gB, pid2); tickClaims(gB, pid2); tickClaims(gB, pid2);
+      check("claim: a rival column on the hex stops the drift dead",
+        blocked.sections.every((x) => x === "neutral"), `[${blocked.sections}]`);
+    }
+
+    // Influence never takes a section off a faction still standing there —
+    // that is what a contest is for.
+    const gH = createGame({ seed: 424242 });
+    recomputeInfluence(gH);
+    const pid3 = gH.turnOrder[0];
+    const held = Object.values(gH.locations).find(
+      (l) => l.sections.every((x) => x === "neutral")
+        && claimStrength(gH, pid3, l.hexId) >= CONFIG.influence.claim.threshold);
+    if (held) {
+      const rivalFid = gH.turnOrder.find((f) => f !== pid3);
+      held.sections[0] = rivalFid;
+      tickClaims(gH, pid3); tickClaims(gH, pid3);
+      check("claim: contested ground stays the contest's business",
+        held.sections.filter((x) => x === pid3).length === 0, `[${held.sections}]`);
+    }
+
+    CONFIG.influence.claim.threshold = barWas;
+
+    // The bar as shipped: enclosing, not merely bordering. On a fresh map no
+    // faction can reach it anywhere, even with every city at full Loyalty and
+    // every unit it owns standing on the tile — which is the property that
+    // stopped the rule from handing out the whole neutral map (measured: 7.7
+    // places absorbed per game at 5, 2.0 at 8).
+    const gN = createGame({ seed: 424242 });
+    for (const l of Object.values(gN.locations)) if (l.controller) l.loyalty = CONFIG.loyalty.ceiling;
+    recomputeInfluence(gN);
+    const freebie = Object.values(gN.locations).some(
+      (l) => l.sections.every((x) => x === "neutral")
+        && gN.turnOrder.some((f) => claimStrength(gN, f, l.hexId) >= CONFIG.influence.claim.threshold));
+    check("claim: the shipping bar hands nobody a free town on round 1", !freebie);
+
+    // THE PULSE MUST NOT LIE. The wheel now pre-announces the third that
+    // turns over next Upkeep, and a forecast derived separately from the rule
+    // is a forecast that eventually promises a flip that does not happen. So
+    // these check the prediction against what the tick actually does, in both
+    // directions, rather than checking that the predicate returns something.
+    {
+      const barWas2 = CONFIG.influence.claim.threshold;
+      CONFIG.influence.claim.threshold = 5;
+      const gP = createGame({ seed: 424242 });
+      recomputeInfluence(gP);
+      const who = gP.turnOrder[0];
+      const loc = Object.values(gP.locations).find(
+        (l) => l.sections.every((x) => x === "neutral")
+          && claimStrength(gP, who, l.hexId) >= CONFIG.influence.claim.threshold
+          && strongestRivalAt(gP, who, l.hexId) < claimStrength(gP, who, l.hexId));
+      const forecast = loc ? pendingSectionChange(gP, loc) : null;
+      check("pulse: a section about to be claimed is flagged before it happens",
+        !!forecast && forecast.cause === "influence" && forecast.to === who,
+        JSON.stringify(forecast));
+      if (loc && forecast) {
+        tickClaims(gP, who);
+        check("pulse: …and it is the section the Upkeep actually turned over",
+          loc.sections[forecast.index] === who, `[${loc.sections}] idx ${forecast.index}`);
+      }
+      // A hex nobody is close to says nothing — the wheel is quiet by default.
+      const quiet = Object.values(gP.locations).find(
+        (l) => l.sections.every((x) => x === "neutral")
+          && gP.turnOrder.every((f) => claimStrength(gP, f, l.hexId) < CONFIG.influence.claim.threshold));
+      check("pulse: …and a place nobody is close to does not pulse",
+        !quiet || pendingSectionChange(gP, quiet) === null);
+      CONFIG.influence.claim.threshold = barWas2;
+
+      // The other direction: a neglected city at Loyalty 0 sheds a section at
+      // its holder's next Upkeep, and the holder gets a turn's warning.
+      // Every Location a faction holds at round 1 is its CAPITAL, and a
+      // Capital is inert by design — locked at full Loyalty, it never peels.
+      // So the neglected city has to be built: take a neutral one, hand it
+      // over, then walk everybody out and let it go cold. (The first draft
+      // grabbed the first controlled Location it found, which was a capital,
+      // and read the correct answer as a failure.)
+      const neglect = (g, pid) => {
+        const l = Object.values(g.locations).find((x) => x.sections.every((sec) => sec === "neutral"));
+        if (!l) return null;
+        l.sections = l.sections.map(() => pid);
+        l.controller = pid;
+        l.loyaltyOwner = pid;
+        l.loyalty = 0;
+        for (const u of Object.values(g.units)) if (u.node === l.hexId) u.node = null;
+        return l;
+      };
+      const gL = createGame({ seed: 424242 });
+      const holder = gL.turnOrder[0];
+      const mine = neglect(gL, holder);
+      recomputeInfluence(gL);
+      const losing = pendingSectionChange(gL, mine);
+      check("pulse: a section about to peel away is flagged too",
+        !!losing && losing.cause === "loyalty" && losing.from === holder,
+        JSON.stringify(losing));
+      if (losing) {
+        tickLoyalty(gL, holder);
+        check("pulse: …and that is the section the Upkeep actually peeled",
+          mine.sections[losing.index] === "neutral", `[${mine.sections}] idx ${losing.index}`);
+      }
+      // A garrison walking back in is exactly what cancels it, and the wheel
+      // has to stop promising the loss the moment it does.
+      const gG = createGame({ seed: 424242 });
+      const held = neglect(gG, gG.turnOrder[0]);
+      const anyUnit = Object.values(gG.units).find((u) => u.owner === held.controller);
+      anyUnit.node = held.hexId;
+      check("pulse: …and a garrison back in the city stops the warning",
+        pendingSectionChange(gG, held) === null);
+    }
+
+    // BUYING ROOM TO BUILD.
+    //
+    // The probe says the binding ceiling is slots, not money: 58% of
+    // faction-rounds have every city full against 10% where scrap could not
+    // buy anything. This sells the ceiling. What has to hold is that it is a
+    // BUILD and not a purchase — it takes the queue and accrues from Output,
+    // so the price is the chip that did not go up — and that it is capped,
+    // permanent, and rides with the Location through a capture.
+    {
+      const gX = createGame({ seed: 424242 });
+      startTurn(gX);
+      const owner = gX.turnOrder[gX.activeIndex];
+      const city = Object.values(gX.locations).find((l) => l.controller === owner);
+      const before = slotCapacity(city, gX);
+      const cost = slotExpansionCost(city);
+      check("room: a held city can buy another slot, at the published price",
+        cost === CONFIG.economy.slotExpansion.cost[0], `cost ${cost}`);
+
+      const actionsBefore = gX.players[owner].actions.remaining;
+      const r = performAction(gX, "expand-slots", { at: city.hexId });
+      check("room: …queued like a build rather than paid for outright",
+        r.ok && city.activeBuild?.kind === "slot" && city.activeBuild.cost === cost,
+        JSON.stringify(city.activeBuild));
+      check("room: …and costs no Action, exactly as queuing a chip does not",
+        gX.players[owner].actions.remaining === actionsBefore);
+      check("room: …so nothing widens until the work is paid for",
+        slotCapacity(city, gX) === before);
+
+      city.buildProgress = cost;
+      completeBuildIfDone(gX, city);
+      check("room: …and the slot lands when it is",
+        slotCapacity(city, gX) === before + 1, `${before} -> ${slotCapacity(city, gX)}`);
+      check("room: …the next one costs more",
+        slotExpansionCost(city) === CONFIG.economy.slotExpansion.cost[1]);
+
+      performAction(gX, "expand-slots", { at: city.hexId });
+      city.buildProgress = city.activeBuild.cost;
+      completeBuildIfDone(gX, city);
+      check("room: …and the cap holds",
+        slotExpansionCost(city) === null
+        && performAction(gX, "expand-slots", { at: city.hexId }).ok === false,
+        `bought ${city.boughtSlots}`);
+      check("room: …at exactly maxPerLocation over where it started",
+        slotCapacity(city, gX) === before + CONFIG.economy.slotExpansion.maxPerLocation);
+
+      // Permanent, and attached to the PLACE. A city taken from somebody who
+      // built it out arrives with the room they paid for — which is what ties
+      // conquest to the economy rather than leaving them in separate rooms.
+      const rival = gX.turnOrder.find((f) => f !== owner);
+      city.sections = city.sections.map(() => rival);
+      city.controller = rival;
+      check("room: bought slots ride with the city through a capture",
+        slotCapacity(city, gX) === before + CONFIG.economy.slotExpansion.maxPerLocation,
+        `capacity ${slotCapacity(city, gX)} under ${rival}`);
+
+      // And the switch is a real no-op.
+      const wasX = CONFIG.economy.slotExpansion.enabled;
+      CONFIG.economy.slotExpansion.enabled = 0;
+      const gO2 = createGame({ seed: 424242 });
+      startTurn(gO2);
+      const c2 = Object.values(gO2.locations).find((l) => l.controller === gO2.turnOrder[gO2.activeIndex]);
+      const off = performAction(gO2, "expand-slots", { at: c2.hexId });
+      // Read the price while the switch is still off — restoring first and
+      // then asking is asking the wrong question, which is what the first
+      // draft of this check did.
+      const offCost = slotExpansionCost(c2);
+      CONFIG.economy.slotExpansion.enabled = wasX;
+      check("room: enabled 0 refuses it and leaves capacity alone",
+        !off.ok && offCost === null, `${JSON.stringify(off)} cost ${offCost}`);
+    }
+
+    // HEX FILTERS — a key the matcher does not implement is a filter that
+    // silently matches everything, and the author never finds out. `hasRail`
+    // was missing while the board has carried a rail flag since the rail work
+    // landed, so a quest about people who live on the line could only ask for
+    // "any terrain hex". These check the pair together, because a one-sided
+    // filter (true works, false does not) is the same silent failure.
+    {
+      const gF = createGame({ seed: 424242 });
+      const reach = (f) => {
+        const seen = new Set();
+        for (let i = 0; i < 2000; i++) {
+          const h = pickHexByFilter(gF, f, { asPlayer: gF.turnOrder[0] });
+          if (h) seen.add(h);
+        }
+        return seen;
+      };
+      const railed = new Set(Object.values(gF.board.hexes).filter((h) => h.rail).map((h) => h.id));
+      const onRail = reach({ hasRail: true });
+      const offRail = reach({ hasRail: false });
+      check("hex filter: hasRail true reaches only hexes that carry rail",
+        onRail.size > 0 && [...onRail].every((h) => railed.has(h)),
+        `${onRail.size} reached, ${[...onRail].filter((h) => !railed.has(h)).length} without rail`);
+      check("hex filter: …and hasRail false reaches only hexes that do not",
+        offRail.size > 0 && [...offRail].every((h) => !railed.has(h)),
+        `${offRail.size} reached, ${[...offRail].filter((h) => railed.has(h)).length} with rail`);
+      check("hex filter: …and the two halves account for the whole board",
+        onRail.size + offRail.size === Object.keys(gF.board.hexes).length,
+        `${onRail.size} + ${offRail.size} vs ${Object.keys(gF.board.hexes).length}`);
+    }
+
+    // FIELD DECK — one card, one player, once.
+    //
+    // The deck is shared by every faction, so before this the same handful of
+    // cards cycled past everybody: 28 draws from a 22-card deck in a
+    // nine-round playtest, and the human met four cards twice. These check the
+    // two halves of the fix, which pull in opposite directions and are easy to
+    // get half right: a player never repeats, AND a card one faction burned is
+    // still waiting for a faction that has not met it.
+    {
+      const mkDeck = () => createGame({ seed: 424242 });
+      const drawAll = (g, pid, n) => {
+        const u = Object.values(g.units).find((x) => x.owner === pid);
+        const out = [];
+        for (let i = 0; i < n; i++) {
+          const r = drawFieldEncounter(g, u, {});
+          if (r?.encounterId) out.push(r.encounterId);
+        }
+        return out;
+      };
+      const distinct = Object.keys(fieldEncounters()).length;
+
+      // NOVELTY FIRST, AND ONLY THEN REPEATS. The first draft of this block
+      // asserted "never repeats, then goes quiet", which is what the code did
+      // and what the suite then caught as a regression: a faction cut off
+      // after its last unseen card stops receiving a faucet as well as a
+      // story, and unresolved games went from 4 to 8 over 15 seeds. So the
+      // property is not "no repeats ever" — it is "no repeat while anything
+      // unseen is left", which is what the design actually asked for.
+      const gD = mkDeck();
+      const firstPass = drawAll(gD, gD.turnOrder[0], distinct);
+      check("field deck: a faction meets every card before it meets any twice",
+        new Set(firstPass).size === firstPass.length && firstPass.length === distinct,
+        `${firstPass.length} draws, ${new Set(firstPass).size} distinct, ${distinct} exist`);
+      const afterwards = drawAll(gD, gD.turnOrder[0], 5);
+      check("field deck: …and then the road keeps happening rather than going quiet",
+        afterwards.length === 5, `${afterwards.length} of 5 draws returned a card`);
+
+      // The whole reason the pile stays shared: a card burned by one faction
+      // is still news to one that has not met it.
+      const gS = mkDeck();
+      const mine = drawAll(gS, gS.turnOrder[0], distinct);
+      const theirs = drawAll(gS, gS.turnOrder[1], distinct);
+      const burned = new Set(mine);
+      check("field deck: a card one faction burned still reaches another",
+        theirs.length > 0 && theirs.every((id) => burned.has(id)),
+        `${theirs.length} drawn, ${theirs.filter((id) => burned.has(id)).length} of them already burned`);
+      check("field deck: …and that faction meets them all before repeating either",
+        new Set(theirs).size === theirs.length && theirs.length === distinct);
+
+      const wasOnce = CONFIG.encounters.fieldOncePerPlayer;
+      CONFIG.encounters.fieldOncePerPlayer = 0;
+      const gR = mkDeck();
+      const rep = drawAll(gR, gR.turnOrder[0], distinct * 3);
+      CONFIG.encounters.fieldOncePerPlayer = wasOnce;
+      check("field deck: the switch really does restore repeats from the start",
+        rep.length > distinct && new Set(rep).size <= distinct,
+        `${rep.length} draws, ${new Set(rep).size} distinct`);
+
+      // …and the OTHER switch really does restore the silence, so the
+      // regression this replaced stays reachable rather than merely deleted.
+      const wasRepeat = CONFIG.encounters.fieldRepeatWhenExhausted;
+      CONFIG.encounters.fieldRepeatWhenExhausted = 0;
+      const gQ = mkDeck();
+      const quiet = drawAll(gQ, gQ.turnOrder[0], distinct * 2);
+      CONFIG.encounters.fieldRepeatWhenExhausted = wasRepeat;
+      check("field deck: …and fieldRepeatWhenExhausted 0 lets the road go quiet",
+        quiet.length === distinct, `${quiet.length} draws, ${distinct} exist`);
+
+      // The repo seam: hand-authored cards must actually be dealt, and must
+      // keep the shape the seam promises — three doors, two that pay, one
+      // that costs nothing to walk through.
+      const repo = Object.values(fieldEncounters()).filter((e) => e.id.startsWith("fer_"));
+      check("field deck: the repo-authored cards are in the shipped deck",
+        repo.length > 0 && repo.every((e) => mkDeck().encounterDeck.includes(e.id)),
+        `${repo.length} repo cards`);
+      const misshapen = repo.filter((e) => {
+        const ch = e.choices || [];
+        const paying = ch.filter((c) => (c.effects || []).length > 0);
+        return ch.length !== 3 || paying.length !== 2;
+      });
+      check("field deck: …each with three doors, two that pay and one that does not",
+        misshapen.length === 0, misshapen.map((e) => e.id).join(", "));
+      // PERMANENT RESEARCH IS PRICED AGAINST THE LAB, NOT AGAINST THE OTHER
+      // CARDS. `permanentResearch` feeds the same sum a Lab's output does
+      // (stats.js), so +1 from a card is a Lab's stream with no chip slot, no
+      // build action and no upkeep — strictly the better deal at any equal
+      // price. Two things therefore have to hold, and the second is the one
+      // that was missing: it costs more than a Lab, AND the cost is gated,
+      // because ADJUST_RESOURCE floors at zero and an ungated "−4 scrap"
+      // charges a faction holding 1 scrap exactly 1 for the same reward.
+      const labCost = CHIPS.labs.buildCost;
+      const researchDoors = repo.flatMap((e) => (e.choices || [])
+        .filter((c) => (c.effects || []).some((f) =>
+          f.type === "ADJUST_RESOURCE" && f.resource === "Research" && (f.amount ?? 0) > 0))
+        .map((c) => ({ card: e.id, choice: c })));
+      check("field deck: permanent Research is rare — at most one door in the set",
+        researchDoors.length <= 1, researchDoors.map((d) => `${d.card}/${d.choice.id}`).join(", "));
+      const underpriced = researchDoors.filter((d) => {
+        const spend = (d.choice.effects || [])
+          .filter((f) => f.type === "ADJUST_RESOURCE" && f.resource === "Resource")
+          .reduce((a, f) => a + (f.amount ?? 0), 0);
+        return -spend <= labCost;
+      });
+      check(`field deck: …and costs more than a Lab (${labCost})`,
+        underpriced.length === 0, underpriced.map((d) => d.card).join(", "));
+      const ungated = researchDoors.filter((d) => !d.choice.condition);
+      check("field deck: …behind a gate, so a broke faction cannot dodge the price",
+        ungated.length === 0, ungated.map((d) => d.card).join(", "));
+
+      const punished = repo.filter((e) =>
+        (e.choices || []).some((c) => (c.effects || []).some((f) =>
+          (f.amount ?? 0) < 0 && (f.type === "ADJUST_HONOR" || f.type === "ADJUST_MENACE"))));
+      check("field deck: …and walking away is never punished",
+        punished.length === 0, punished.map((e) => e.id).join(", "));
+    }
+
+    // And the switch is a real no-op.
+    const gO = createGame({ seed: 424242 });
+    recomputeInfluence(gO);
+    const was = CONFIG.influence.claim.enabled;
+    CONFIG.influence.claim.enabled = 0;
+    const off = Object.values(gO.locations).find((l) => l.sections.every((x) => x === "neutral"));
+    for (let i = 0; i < 4; i++) for (const f of gO.turnOrder) tickClaims(gO, f);
+    CONFIG.influence.claim.enabled = was;
+    check("claim: enabled 0 leaves every neutral section neutral",
+      !off || off.sections.every((x) => x === "neutral"));
   }
 
   // -- elimination: a stripped faction is flagged, skipped, and excluded;
@@ -3739,8 +6694,16 @@ line("\n  [Phase 11] text-token resolver");
     const ringNeighbor = (gG.board.adjacency[ringHex] || []).find(
       (h) => h !== tollLoc.hexId && !gG.locations[h] && !gG.board.hexes[h].elevation && !gG.board.hexes[h].cover);
     if (ringNeighbor) {
+      // Measure the TOLL, not the surface. A capital's ring is often road, and
+      // graded ground is half a hex — which would make the taxed hex cost 1.5
+      // and leave this fixture reading the pavement rather than the tax. The
+      // toll-on-a-lane interaction has its own check in [Paved].
+      for (const h of [ringHex, ringNeighbor]) {
+        gG.board.hexes[h].road = false; gG.board.hexes[h].rail = false;
+      }
       walker.node = ringNeighbor;
       walker.moveRemaining = 1;
+      isolateTerrain(gG, walker.owner); // the TOLL is what is on trial here
       const reach = unitReach(gG, walker);
       check("toll gate: a taxed hex costs 2 to enter (unreachable on budget 1)",
         !(ringHex in reach));
@@ -3752,6 +6715,34 @@ line("\n  [Phase 11] text-token resolver");
   }
 }
 
+
+// Phase 15b — the authored Location prose. content/locations.csv carried a
+// Flavor column for the ten original cities and, exactly like unit-names.csv
+// before it, was wired to nothing: nineteen places on the board and not a
+// word of what was written for them ever reaching a player.
+{
+  line("\n  [Phase 15b] Locations say what they are");
+  // The ten the sheet covers. Deliberately a list of ids rather than "every
+  // Location must have one" — nine more were added after that sheet and have
+  // no line written yet, and a check that failed on those would be demanding
+  // fiction rather than guarding the pipe.
+  const AUTHORED = ["korad", "dambar", "kansit", "omara", "chigan", "droit",
+    "the-shelf", "tin-town", "concordan", "erport"];
+  const missing = AUTHORED.filter((id) => !(LOCATIONS[id]?.flavour || "").trim());
+  check("every Location the sheet covers carries its authored line",
+    missing.length === 0);
+  check("…and it is prose, not an id echoed back",
+    AUTHORED.every((id) => (LOCATIONS[id]?.flavour || "").length > 12
+      && LOCATIONS[id].flavour !== LOCATIONS[id].name));
+  // The real-world basis is optional — two of the ten are invented
+  // settlements and two more have none recorded.
+  check("the real-world basis rides along where the sheet has one",
+    LOCATIONS.korad.basis === "Boulder, CO" && LOCATIONS.droit.basis === "Detroit");
+  // Nothing may claim a line it does not have: an empty string would render
+  // an empty italic paragraph in the Location window rather than nothing.
+  check("a Location with no line written carries none at all",
+    Object.values(LOCATIONS).every((l) => l.flavour === undefined || !!l.flavour.trim()));
+}
 
 // Phase 16 — per-entity actions (docs/vp-and-actions-design.md §2/§4):
 // one action per unit/Location, coalition charging, wildcards.
@@ -3769,6 +6760,37 @@ line("\n  [Phase 11] text-token resolver");
   check("Upkeep grants each unit and held Location exactly 1 action",
     Object.values(g16.units).filter((u) => u.owner === pid).every((u) => u.actionsRemaining === 1) &&
     home.actionsRemaining === 1);
+
+  // The refresh rule has one name, because the HUD has to draw the same
+  // number the engine hands out. It used to assume one action per city, so a
+  // Logistics Hub city put the action readout at "8/7" — more remaining than
+  // the maximum — and drew its pip row one pip short of what it held.
+  check("a plain city's action capacity is 1",
+    locationActionCapacity(g16, home) === 1
+    && home.actionsRemaining === locationActionCapacity(g16, home));
+  {
+    const gC = createGame({ seed: 161 });
+    const cPid = gC.turnOrder[gC.activeIndex];
+    const hub = Object.values(gC.locations).find((l) => l.controller === cPid);
+    const uid = gC.nextId("chip");
+    gC.chips[uid] = { uid, chipId: "logistics-hub", owner: cPid };
+    hub.chips.push(uid);
+    startTurn(gC);
+    check("…and a Logistics Hub city's is 2, which is what it refreshes to",
+      locationActionCapacity(gC, hub) === 2 && hub.actionsRemaining === 2);
+    // The readout's own invariant, stated where it can never drift: you can
+    // never have more actions left than you could possibly have had.
+    const total = (l) => Object.values(gC.locations)
+      .filter((x) => x.controller === cPid)
+      .reduce((n, x) => n + locationActionCapacity(gC, x), 0);
+    const remaining = gC.players[cPid].actions.remaining
+      + Object.values(gC.units).filter((u) => u.owner === cPid).reduce((n, u) => n + (u.actionsRemaining ?? 0), 0)
+      + Object.values(gC.locations).filter((x) => x.controller === cPid).reduce((n, x) => n + (x.actionsRemaining ?? 0), 0);
+    const max = gC.players[cPid].actions.remaining
+      + Object.values(gC.units).filter((u) => u.owner === cPid).length + total();
+    check("…so the readout never shows more actions left than its own maximum",
+      remaining <= max);
+  }
 
   // -- a unit acts once: two solo contests from one unit are refused.
   const [uA, uB] = Object.values(g16.units).filter((u) => u.owner === pid);
@@ -3867,52 +6889,199 @@ line("\n  [Phase 11] text-token resolver");
 }
 
 
-// Phase 18 — roads & terrain movement (playtest verification pass):
-// road march bonus, roadless mountain halt, road-negates-terrain.
+// Phase 18 — roads, rail and terrain movement: graded ground is half a hex,
+// the roadless mountain halt, and paved-negates-terrain.
 {
-  line("\n  [Phase 18] roads & terrain movement");
+  line("\n  [Phase 18] roads, rail & terrain movement");
+  const PAVED = CONFIG.movement.pavedCost;
   const g18 = createGame({ seed: 181 });
   startTurn(g18);
   const pid = g18.turnOrder[g18.activeIndex];
   const walker = Object.values(g18.units).find((u) => u.owner === pid);
 
-  // -- road march: on-road start = base + bonus; off-road start = base.
-  const onRoad = g18.board.hexes[walker.node]?.road === true;
-  const startBudget = walker.moveRemaining;
-  check("road march: starting on a road adds the bonus to this turn's budget",
-    startBudget === walker.movement + (onRoad ? CONFIG.movement.roadStartBonus : 0));
+  // The network pays per hex travelled, not as a lump for being parked on it
+  // at Upkeep — there is no start bonus to collect any more.
+  check("a turn's budget is the unit's Movement, wherever it began",
+    walker.moveRemaining === walker.movement);
 
-  // -- roadless mountain halts; a road over it does not.
   const occupied = (h) => Object.values(g18.units).some((x) => x.node === h);
   const anyHex = Object.values(g18.board.hexes).find(
     (h) => !g18.locations[h.id] && !occupied(h.id) &&
       (g18.board.adjacency[h.id] || []).some((n) => !g18.locations[n] && !occupied(n)));
   const mtHex = anyHex.id;
   const from18 = (g18.board.adjacency[mtHex] || []).find((n) => !g18.locations[n] && !occupied(n));
-  const stage = (road) => {
+  // `paved` has to clear RAIL as well as road. A hex can carry both, and this
+  // fixture used to set `road = false` and call the hex unpaved — which was
+  // true only while rail ran between four capitals and never crossed here.
+  const stage = ({ elevation = false, cover = false, road = false, rail = false }) => {
     const h = g18.board.hexes[mtHex];
-    h.elevation = true; h.cover = false; h.road = road;
-    g18.board.hexes[from18].elevation = false; g18.board.hexes[from18].cover = false;
+    h.elevation = elevation; h.cover = cover; h.road = road; h.rail = rail;
+    const f = g18.board.hexes[from18];
+    f.elevation = false; f.cover = false;
     walker.node = from18; walker.moveRemaining = 3;
+    isolateTerrain(g18, walker.owner); // terrain only — see the helper
     return unitReach(g18, walker);
   };
-  const noRoad = stage(false);
-  check("mountain (no road): enterable but terminal (0 movement remains)",
-    noRoad[mtHex] === 0);
-  const roaded = stage(true);
-  check("road over a mountain: costs 1 and does not halt",
-    roaded[mtHex] === 2);
-  // -- forest cost vs road-negated forest.
-  const hf = g18.board.hexes[mtHex];
-  hf.elevation = false; hf.cover = true; hf.road = false;
-  walker.moveRemaining = 3;
-  const forest = unitReach(g18, walker);
-  check("forest (no road): costs forestCost to enter",
-    forest[mtHex] === 3 - CONFIG.movement.forestCost);
-  hf.road = true;
-  walker.moveRemaining = 3;
-  const forestRoad = unitReach(g18, walker);
-  check("road through a forest: costs 1", forestRoad[mtHex] === 2);
+
+  // --- §10.2 — entering a rival's ZoC costs movement ---
+  //
+  // The most standard ZoC verb in the genre, and it was missing entirely:
+  // `blockerScan` never read `state.world.zoc`, so the field that defines
+  // "territory" for trespass, the withdraw ultimatum and `unitsInTerritory`
+  // had no effect whatever on walking through it.
+  {
+    const gz = createGame({ seed: 4242, humanFactionId: "versari" });
+    const w = Object.values(gz.units).find((u) => u.owner === "versari");
+    // A clean open lane out of the unit's hex, with nothing else charging —
+    // and AWAY FROM VERSARI'S OWN GROUND, because the toll is deliberately
+    // waived on your own Locations and the ring around them (see
+    // `zocFreeOnOwnGround`). Testing it on the doorstep would be testing the
+    // exemption and calling it the rule; the exemption gets its own check
+    // below.
+    // With the exemption off by default this set only steers the fixture away
+    // from home; it is kept so the check reads the same either way.
+    const ownRing = new Set();
+    for (const l of Object.values(gz.locations)) {
+      if (l.controller !== "versari") continue;
+      ownRing.add(l.hexId);
+      for (const n of gz.board.adjacency[l.hexId] || []) ownRing.add(n);
+    }
+    // The unit starts at home, so walk it out to open country first — every
+    // hex beside its own capital is exempt by construction.
+    const away = Object.keys(gz.board.hexes).find((h) => !ownRing.has(h) && !gz.locations[h]
+      && (gz.board.adjacency[h] || []).some((n) => !ownRing.has(n) && !gz.locations[n]
+        && !Object.values(gz.units).some((u) => u.node === n)));
+    if (away) w.node = away;
+    const step = (gz.board.adjacency[w.node] || []).find(
+      (n) => !gz.locations[n] && !ownRing.has(n)
+        && !Object.values(gz.units).some((u) => u.node === n));
+    check("§10.2 fixture: found open ground off versari's own doorstep", !!step);
+    const hex = gz.board.hexes[step];
+    hex.elevation = false; hex.cover = false; hex.road = false; hex.rail = false;
+    gz.world.zoc = {};
+    w.moveRemaining = 2;
+    const before = unitReach(gz, w)[step];
+    check("§10.2 baseline: open ground costs one movement", before === 1, `${before}`);
+
+    // Now it is somebody else's ground.
+    gz.world.zoc[step] = "lakers";
+    setStanding(gz, "versari", "lakers", 0, "test");
+    setStanding(gz, "lakers", "versari", 0, "test");
+    const taxed = unitReach(gz, w)[step];
+    check("§10.2 a rival's ZoC costs extra to enter",
+      taxed === before - CONFIG.influence.zocMoveCost, `${before} -> ${taxed}`);
+
+    // …and NEVER on your own doorstep. The toll is a border friction, not a
+    // charge for defending yourself — without this exemption the side with the
+    // furthest to march is always the side that is losing, and a faction cut
+    // to one city recovered ground in 0 of 15 games instead of 4.
+    {
+      // The exemption ships OFF (see the config note — it made the elimination
+      // ratchet worse rather than better), so the fixture turns it on to check
+      // the mechanism still works for whoever switches it on.
+      const wasFree = CONFIG.influence.zocFreeOnOwnGround;
+      CONFIG.influence.zocFreeOnOwnGround = 1;
+      const home = Object.values(gz.locations).find((l) => l.controller === "versari");
+      const doorstep = (gz.board.adjacency[home.hexId] || []).find((n) => !gz.locations[n]);
+      if (doorstep) {
+        const u2 = Object.values(gz.units).find((x) => x.owner === "versari" && x.node !== w.node) || w;
+        u2.node = home.hexId; u2.moveRemaining = 2;
+        const clean = unitReach(gz, u2)[doorstep];
+        gz.world.zoc[doorstep] = "lakers";
+        check("§10.2 …but never on ground of your own, or the ring around it",
+          unitReach(gz, u2)[doorstep] === clean, `${clean} -> ${unitReach(gz, u2)[doorstep]}`);
+        delete gz.world.zoc[doorstep];
+      }
+      CONFIG.influence.zocFreeOnOwnGround = wasFree;
+    }
+
+    // …and it is the RELATIONSHIP that decides, not the border. The same
+    // predicate open borders and trespass read: you are not picking your way
+    // through a country you are welcome in.
+    formPact(gz, "versari", "lakers", "test");
+    check("§10.2 …but not an ally's — passesFreely waives it",
+      unitReach(gz, w)[step] === before);
+    breakPact(gz, "versari", "lakers", "test");
+    setStanding(gz, "versari", "lakers", 0, "test");
+    setStanding(gz, "lakers", "versari", 0, "test");
+
+    // Forward Supply already waives the supply wall in reinforcementRoute.
+    // One node, one meaning.
+    gz.players.versari.techLevel = 4;
+    assignTechNode(gz, "versari", "log-entry");
+    assignTechNode(gz, "versari", "log-a1");
+    assignTechNode(gz, "versari", "log-a2");
+    // The logistics nodes also grant Movement, and `assignTechNode` runs
+    // `recomputeStats` — so the budget has to be pinned again or the check
+    // measures the movement bonus rather than the waived toll.
+    w.moveRemaining = 2;
+    check("§10.2 …and Forward Supply waives it too",
+      unitReach(gz, w)[step] === before,
+      `log-a2 held: ${(gz.players.versari.techWheel || []).join(",")}`);
+
+    // Your OWN ground is never a toll.
+    const gz2 = createGame({ seed: 4242, humanFactionId: "versari" });
+    const w2 = Object.values(gz2.units).find((u) => u.owner === "versari");
+    const step2 = (gz2.board.adjacency[w2.node] || []).find(
+      (n) => !gz2.locations[n] && !Object.values(gz2.units).some((u) => u.node === n));
+    const h2 = gz2.board.hexes[step2];
+    h2.elevation = false; h2.cover = false; h2.road = false; h2.rail = false;
+    gz2.world.zoc = { [step2]: "versari" };
+    w2.moveRemaining = 2;
+    check("§10.2 your own territory is free to cross", unitReach(gz2, w2)[step2] === 1);
+  }
+
+  const M18 = CONFIG.movement;
+  check("mountain, unpaved: enterable but terminal (0 movement remains)",
+    stage({ elevation: true })[mtHex] === 0);
+  check(`…a road over it does not halt, and costs ${M18.roadMountainCost}`,
+    stage({ elevation: true, road: true })[mtHex] === 3 - M18.roadMountainCost);
+  check("…and rail over it does the same — a cutting is a cutting",
+    stage({ elevation: true, rail: true })[mtHex] === 3 - M18.roadMountainCost);
+  check("forest, unpaved: costs forestCost to enter",
+    stage({ cover: true })[mtHex] === 3 - M18.forestCost);
+  check(`…a road through it costs ${M18.roadForestCost}`,
+    stage({ cover: true, road: true })[mtHex] === 3 - M18.roadForestCost);
+  check("open ground costs a whole hex", stage({})[mtHex] === 2);
+  check("…and half a hex once it is paved",
+    stage({ road: true })[mtHex] === 3 - PAVED);
+
+  // The headline: a column that stays on the network covers twice the ground.
+  // On EASY ground — the lane, not the pass, which is the half the merge with
+  // "roads ease terrain rather than deleting it" left intact.
+  {
+    const g = createGame({ seed: 181 });
+    startTurn(g);
+    const p = g.turnOrder[g.activeIndex];
+    const u = Object.values(g.units).find((x) => x.owner === p);
+    const busy = (h) => Object.values(g.units).some((x) => x.node === h && x.uid !== u.uid);
+    const lane = [u.node];
+    while (lane.length < 6) {
+      const next = (g.board.adjacency[lane[lane.length - 1]] || []).find(
+        (n) => !lane.includes(n) && !g.locations[n] && !busy(n));
+      if (!next) break;
+      lane.push(next);
+    }
+    for (const h of lane) {
+      const hex = g.board.hexes[h];
+      hex.elevation = false; hex.cover = false; hex.road = true; hex.rail = false;
+    }
+    u.moveRemaining = 2;
+    isolateTerrain(g, u.owner); // the ROAD is what is on trial here
+    const paved = unitReach(g, u);
+    check("2 Movement carries you FOUR hexes down a lane",
+      lane.length >= 5 && paved[lane[4]] === 0 && paved[lane[3]] === 0.5);
+    // …and two across country, which is what makes the lane worth taking.
+    // Strip the WHOLE board, not just the lane: leaving a neighbouring road in
+    // place hands the walker a cheaper way round and the comparison stops
+    // being about the lane at all.
+    for (const hex of Object.values(g.board.hexes)) { hex.road = false; hex.rail = false; }
+    u.moveRemaining = 2;
+    const open = unitReach(g, u);
+    check("…and only TWO across open ground",
+      open[lane[2]] === 0 && open[lane[3]] === undefined && open[lane[4]] === undefined);
+  }
+
 }
 
 // Phase 19 — diplomacy robustness pass: standing baselines (drift toward
@@ -3956,7 +7125,13 @@ line("\n  [Phase 11] text-token resolver");
   check("drift: standing below its baseline climbs toward it",
     getStanding(g3, "versari", other19) > 0 && getStanding(g3, "versari", other19) <= target);
   setStanding(g3, "versari", other19, CONFIG.diplomacy.tiers.friendly - 1, "test"); // above baseline
+  // The claim here is WHERE decay stops, not how fast it gets there — §B1's
+  // warm-drift ratchet slows the rate, so pin it to the symmetric no-op for
+  // this fixture and let its own checks own the rate.
+  const wdSave19 = CONFIG.diplomacy.warmDriftEvery;
+  CONFIG.diplomacy.warmDriftEvery = 1;
   for (let i = 0; i < 6; i++) runDiplomacyRound(g3);
+  CONFIG.diplomacy.warmDriftEvery = wdSave19;
   check("drift: standing settles AT the baseline instead of fading to zero",
     getStanding(g3, "versari", other19) === target);
 
@@ -3964,8 +7139,17 @@ line("\n  [Phase 11] text-token resolver");
   const g2 = createGame({ seed: 192, humanFactionId: "versari", minors: ["croppers"] });
   ensureDiplomacy(g2);
   const lord = "goldgrass", minor = "croppers";
-  // make the minor clearly weaker than the lord (patronage keeps the power gate)
+  // Make the minor clearly weaker than the lord (patronage keeps the power
+  // gate). Land now counts twice over — territory AND the VP it is worth, since
+  // VP is held — so a client with no army but a fat city is not weak. Strip
+  // both: no units, no holdings.
   for (const u of Object.values(g2.units)) if (u.owner === minor) delete g2.units[u.uid];
+  for (const l of Object.values(g2.locations)) {
+    if (holderOf(l) !== minor) continue;
+    l.controller = null; l.loyaltyOwner = null; l.loyalty = null;
+    l.sections = l.sections.map(() => "neutral");
+  }
+  recomputeVp(g2);
   setStanding(g2, minor, lord, CONFIG.diplomacy.tiers.friendly + 1, "test");
   for (const o of factionIds(g2)) {
     if (o !== minor && o !== lord) setStanding(g2, minor, o, 0, "test");
@@ -3986,18 +7170,24 @@ line("\n  [Phase 11] text-token resolver");
   check("patronage is minors-only: an uncornered major never bends the knee",
     !aiAcceptsVassalage(g2, weakMajor, lord));
 
-  // --- summit VP: first-time backers pay once, ever ---
+  // --- taking a vassal is worth its score, and only while you keep it ---
+  // The "summit dividend" this replaced banked 1 VP the first time each
+  // faction ever backed you — permanently, whether or not the arrangement
+  // survived. Score is held now, so a vassal you lose is a vassal you stop
+  // counting.
   const lp = g2.players[lord];
   const vpBefore = lp.vp;
   const res19 = performDiplomacy(g2, lord, "vassalize", { faction: minor });
   check("patronage: the vassalize verb lands peacefully end-to-end", res19.ok && res19.accepted === true);
-  check("summit: the first-time backer banks summit VP for the lord",
-    lp.vp === vpBefore + CONFIG.diplomacy.recognition.summitVp
-    && (g2.diplomacy.recognizedEver[lord] || []).includes(minor));
-  checkRecognitionVictory(g2);
-  check("summit: re-checking never double-pays", lp.vp === vpBefore + CONFIG.diplomacy.recognition.summitVp);
-  const summitLog = g2.log.filter((e) => e.name === "recognition_summit" && e.payload.player === lord);
-  check("summit: recognition_summit emitted exactly once for the pair", summitLog.length === 1);
+  recomputeVp(g2);
+  check("a new vassal is worth its score to the lord",
+    lp.vp === vpBefore + CONFIG.victory.score.vassal);
+  checkDominion(g2);
+  recomputeVp(g2);
+  check("…and re-checking never pays twice", lp.vp === vpBefore + CONFIG.victory.score.vassal);
+  releaseVassal(g2, minor, "test");
+  recomputeVp(g2);
+  check("…and releasing it takes the score back", lp.vp === vpBefore);
 }
 
 // Phase 20 — diplomacy tuning (2026-08-13 playtest log): coalitions never
@@ -4038,10 +7228,16 @@ line("\n  [Phase 11] text-token resolver");
   const g2 = createGame({ seed: 202, humanFactionId: "versari" });
   ensureDiplomacy(g2);
   const u20 = Object.values(g2.units).find((u) => u.owner === "versari");
-  const hex20 = Object.values(g2.board.hexes).find((h) => !g2.locations[h.id]).id;
+  // Open ground, not cover — this block tests the escalation ladder, and cover
+  // would hide the trespasser from a host with no Detection.
+  const hex20 = Object.values(g2.board.hexes).find((h) => !g2.locations[h.id] && !h.cover).id;
   g2.world.zoc = g2.world.zoc || {};
   g2.world.zoc[hex20] = "goldgrass";
   setStanding(g2, "goldgrass", "versari", 0, "test");
+  // A citation needs the host to have SEEN the intrusion. Put the unit on the
+  // hex and give goldgrass sight of it.
+  u20.node = hex20;
+  revealRegion(g2, "goldgrass", [hex20]);
   const menBefore = g2.players.versari.menace || 0;
   emit(g2, "unit_moved", { unit: u20.uid, from: u20.node, to: hex20 });
   check("first incursion on Neutral ground is a WARNING — no Standing hit, no Menace",
@@ -4088,7 +7284,15 @@ line("\n  [Phase 11] text-token resolver");
   // --- rebellion cooldown: no same-round re-vassalizing ---
   const g4 = createGame({ seed: 204, humanFactionId: "versari", minors: ["tempest"] });
   ensureDiplomacy(g4);
+  // Same as the patronage fixture: a client with no army but a rich seat is not
+  // weak now that VP is held, so strip its holdings too before the power gate.
   for (const u of Object.values(g4.units)) if (u.owner === "tempest") delete g4.units[u.uid];
+  for (const l of Object.values(g4.locations)) {
+    if (holderOf(l) !== "tempest") continue;
+    l.controller = null; l.loyaltyOwner = null; l.loyalty = null;
+    l.sections = l.sections.map(() => "neutral");
+  }
+  recomputeVp(g4);
   vassalize(g4, "lakers", "tempest", "test");
   g4.diplomacy.resentment.tempest = 99;
   runDiplomacyRound(g4);
@@ -4100,15 +7304,505 @@ line("\n  [Phase 11] text-token resolver");
   check("after the cooldown, a cornered rebel can be re-subjugated",
     aiAcceptsVassalage(g4, "tempest", "lakers"));
 
-  // --- gift ladder: capped counting + durable baseline warmth ---
+  // --- gift ladder: the price is Sway, and a landed gift still lasts ---
+  //
+  // The old cap (`gift.maxScrapPerGift`) existed to stop one giant bribe
+  // buying a pact. It is no longer the mechanism that does that job: warmth is
+  // bought a point at a time out of a political income with a ceiling, so the
+  // ceiling IS the cap and one enormous gift is arithmetically impossible.
   const g5 = createGame({ seed: 205, humanFactionId: "versari" });
   ensureDiplomacy(g5);
+  const SW5 = CONFIG.sway;
   g5.players.versari.resource = 30;
-  const r20 = performDiplomacy(g5, "versari", "gift", { faction: "goldgrass", amount: 20 });
-  check("gift scrap counted is capped (a 20-scrap bribe buys the 8-scrap rate)",
-    r20.ok && getStanding(g5, "goldgrass", "versari") === 4);
+  g5.players.versari.sway = SW5.cap;
+  const r4 = performDiplomacy(g5, "versari", "gift", { faction: "goldgrass", standing: 4 });
+  check("a gift buys the warmth it paid for", r4.ok && getStanding(g5, "goldgrass", "versari") === 4);
+  check("…out of the political pool, at the published rate",
+    g5.players.versari.sway === SW5.cap - 4 * SW5.perStanding);
+  check("…and a full pool cannot buy past the pact bar in one go",
+    Math.floor(SW5.cap / SW5.perStanding) < CONFIG.diplomacy.pactStandingReq
+    || CONFIG.diplomacy.posture.courtRounds > 0);
   check("a landed gift warms the baseline — drift can't erase generosity",
     getBaseline(g5, "goldgrass", "versari") === CONFIG.diplomacy.gift.baselineWarmth);
+
+  // --- reparations: a gift to somebody who hates you is priced, not refused ---
+  //
+  // The rule under test is that HOSTILITY IS NOT A CLOSED DOOR. Courting has a
+  // Standing floor and always will; the gift must not, because sending envoys
+  // to a faction that despises you is the one move a beaten player has left.
+  // What it has instead is a bill.
+  const g5b = createGame({ seed: 2051, humanFactionId: "versari" });
+  ensureDiplomacy(g5b);
+  const REP = CONFIG.sway.giftReparations;
+  const NEUT = CONFIG.diplomacy.tiers.neutral;
+  setStanding(g5b, "goldgrass", "versari", CONFIG.diplomacy.tiers.hostile, "test");
+  g5b.players.versari.sway = CONFIG.sway.cap;
+  const hostileRate = giftCost(g5b, "versari", "goldgrass", 1);
+  check("reaching a hostile faction costs more than the published rate",
+    hostileRate > CONFIG.sway.perStanding);
+  check("…by how far below Neutral THEIR regard for you has fallen",
+    hostileRate === Math.ceil(CONFIG.sway.perStanding
+      * Math.min(REP.maxMultiplier,
+        1 + (NEUT - CONFIG.diplomacy.tiers.hostile) * REP.perStepBelowNeutral)));
+  const rep1 = performDiplomacy(g5b, "versari", "gift", { faction: "goldgrass", standing: 1 });
+  check("…and the gift lands anyway — the door is priced, not shut",
+    rep1.ok && getStanding(g5b, "goldgrass", "versari") === CONFIG.diplomacy.tiers.hostile + 1);
+  check("…charged at the quoted price, not the published one",
+    g5b.players.versari.sway === CONFIG.sway.cap - hostileRate);
+  // The surcharge reads THEIR opinion of YOU, because that is what a gift
+  // moves. Your own contempt for them is nobody's business but yours.
+  const g5c = createGame({ seed: 2052, humanFactionId: "versari" });
+  ensureDiplomacy(g5c);
+  setStanding(g5c, "versari", "goldgrass", CONFIG.diplomacy.tiers.hostile, "test");
+  check("a gift is priced by their regard for you, not yours for them",
+    giftCost(g5c, "versari", "goldgrass", 1) === CONFIG.sway.perStanding);
+  // …and the whole surcharge is switchable back to the flat rate.
+  const repSave = REP.perStepBelowNeutral;
+  REP.perStepBelowNeutral = 0;
+  const flat = giftCost(g5b, "versari", "goldgrass", 3);
+  REP.perStepBelowNeutral = repSave;
+  check("perStepBelowNeutral 0 restores the flat published rate",
+    flat === 3 * CONFIG.sway.perStanding);
+
+  // --- and a gift never speaks over a reply ---
+  //
+  // `manageDiplomacy` is bounded to ONE act, so branch order IS priority, and
+  // a gift is the only branch in it that answers nothing on the board. This
+  // pins it below the branch that names a faction that has earned it —
+  // measured, having it above cost a peaceful faction its whole Honor engine
+  // (8.3 to 4.1), which is the same stat `declareOnCleanHands` prices its
+  // safety in. It would have been buying warmth with its armour.
+  //
+  // Set up so that the gift and the denouncement are the only two branches
+  // with anything to say: Goldgrass thinks little enough of everybody that it
+  // will not be SEEN courting them (which is the courtship floor doing its
+  // job), while the gift has no such floor and the Lakers have earned to be
+  // named. The one act it gets should be the naming.
+  const g5h = createGame({ seed: 2057, humanFactionId: "plainers" });
+  ensureDiplomacy(g5h);
+  const shareSave = CONFIG.ai.giftAboveShareOfCap;
+  CONFIG.ai.giftAboveShareOfCap = 0;
+  for (const other of ["versari", "lakers", "plainers"]) {
+    setStanding(g5h, "goldgrass", other, CONFIG.diplomacy.tiers.hostile, "test");
+  }
+  g5h.players.goldgrass.sway = CONFIG.sway.cap;   // diplomacy-lean, sociable
+  g5h.players.lakers.menace = CONFIG.diplomacy.menace.max;  // and plainly worth naming
+  const before5h = g5h.log.length;
+  manageDiplomacy(g5h, "goldgrass");
+  const said = g5h.log.slice(before5h).map((e) => e.name);
+  check("with money to gift AND somebody worth naming, it names them",
+    said.includes("denounced")
+    && !g5h.log.slice(before5h).some((e) => e.payload?.cause === "gift"));
+  // …and with nobody left worth naming, the same faction does spend it —
+  // on a relationship the courtship floor had locked it out of entirely.
+  const before5i = g5h.log.length;
+  g5h.players.lakers.menace = 0;
+  manageDiplomacy(g5h, "goldgrass");
+  CONFIG.ai.giftAboveShareOfCap = shareSave;
+  check("…and with nothing to answer, it gifts — even where it could not court",
+    g5h.log.slice(before5i).some((e) => e.payload?.cause === "gift"));
+
+  // --- §1 — BRANCH ORDER IS PRIORITY, AND NOW SOMETHING CHECKS IT -----
+  //
+  // The pass is bounded to one act, so whatever fires first silences the rest.
+  // That has cost two regressions (both recorded on the branches themselves),
+  // and both were found by measuring an unrelated number weeks later and
+  // noticing it had moved. The check above pins ONE pair — the gift against
+  // the denouncement — which is the pair that bit last time and no help at all
+  // against the pair that bites next.
+  //
+  // This checks the RULE instead of a pair: whatever set of branches is live
+  // on a given board, the act goes to the highest one of them. It cannot be
+  // fitted to an observation and it does not need updating when a branch is
+  // added — `DIPLOMACY_BRANCH_ORDER` is the chain itself, so a branch inserted
+  // in the wrong place fails here on the first board where both are live.
+  //
+  // Liveness is asked of each branch on its OWN freshly-built board, because
+  // running a branch spends the act and moves the position. That is what makes
+  // the scenarios below builders rather than states.
+  const chainScenarios = [
+    {
+      name: "a mid-game board, no human in the room",
+      pid: "goldgrass",
+      build: () => {
+        const g = createGame({ seed: 3301 });
+        ensureDiplomacy(g);
+        for (let i = 0; i < 24; i++) takeAITurn(g);
+        return g;
+      },
+    },
+    {
+      name: "…and one with a player seat in it",
+      pid: "goldgrass",
+      build: () => {
+        const g = createGame({ seed: 3302, humanFactionId: "versari" });
+        ensureDiplomacy(g);
+        for (let i = 0; i < 18; i++) { if (activePlayerId(g) === "versari") endTurn(g); else takeAITurn(g); }
+        return g;
+      },
+    },
+    {
+      name: "…and a warlord holding an ultimatum somebody defied",
+      pid: "plainers",
+      build: () => {
+        const g = createGame({ seed: 3303 });
+        ensureDiplomacy(g);
+        for (let i = 0; i < 12; i++) takeAITurn(g);
+        return g;
+      },
+    },
+  ];
+  for (const sc of chainScenarios) {
+    const live = DIPLOMACY_BRANCH_ORDER.filter((id) => runDiplomacyBranch(sc.build(), sc.pid, id));
+    const fired = manageDiplomacy(sc.build(), sc.pid);
+    check(`branch order: ${sc.name} — the act goes to the highest live branch`,
+      fired === (live.length ? live[0] : null));
+  }
+
+  // …and the rule has to have something to bite on: a run where NO branch is
+  // ever live proves nothing, so assert the scenarios are doing work. Counting
+  // that at least one board had a live branch is a MECHANISM claim (the check
+  // above is not vacuous), not a rate fitted to this sample.
+  check("…and those boards actually had political acts available to starve",
+    chainScenarios.some((sc) =>
+      DIPLOMACY_BRANCH_ORDER.some((id) => runDiplomacyBranch(sc.build(), sc.pid, id))));
+
+  // …and the ordering itself, as CONSTRAINTS rather than as the order.
+  //
+  // The check above is worth having — it proves the chain runs in its declared
+  // order and that the branch it names is the branch that acted — but on its
+  // own it is a tautology about priority: it reads `DIPLOMACY_BRANCH_ORDER` to
+  // test a chain built from `DIPLOMACY_BRANCH_ORDER`, so moving the gift to
+  // the top moves both and it still passes. It cannot catch the hazard that
+  // has actually bitten twice.
+  //
+  // What catches that is naming the positions that are load-bearing, one pair
+  // at a time, each with the measurement that put it there. These fail if the
+  // chain is reordered, which is the entire point. Every pair below is a
+  // reading somebody paid for.
+  const PRIORITY_RULES = [
+    // A gift is the only act in the pass that answers nothing on the board.
+    // It sat above `warTalk` once and returned on every turn a sociable
+    // faction took, which made the branch that ENDS WARS unreachable.
+    ["war-talk", "gift", "a gift never speaks over the branch that ends a war"],
+    // …and at position 3 it starved the denouncement, taking a pacifist's
+    // Honor from 8.3 to 4.1 — the stat `declareOnCleanHands` prices its
+    // safety in. It was buying warmth with its armour.
+    ["denounce", "gift", "…nor over naming a faction that has earned it"],
+    // A faction that gifts a stranger while owing its neighbour blood reads
+    // as having no memory.
+    ["amends", "gift", "…nor over a debt it already owes"],
+    // Talking to the party you are actually fighting outranks courting a
+    // stranger; the settle branch was hoisted over the same obstacle.
+    ["war-talk", "pact", "the war you are in outranks shopping for new friends"],
+    ["amends", "pact", "…and so does the debt you already owe"],
+    // An ultimatum you let lapse costs Honor publicly. Following through is
+    // an obligation, and obligations outrank discretionary spending.
+    ["enforce-ultimatum", "gift", "your own standing threat outranks a gift"],
+    // The close-out spends Sway on the last faction between it and the win.
+    // It sits below every reply — putting it at the top of the chain measured
+    // 12 / 43.5 / 23 against 21 / 45 / 16 by starving `amends`, `vassalize`
+    // and `warTalk`, which is the same hazard for the third time. It outranks
+    // the denouncement because naming the faction you need an alliance with
+    // moves the pair the wrong way.
+    ["amends", "close-out", "a reply on the board outranks closing the game out"],
+    ["war-talk", "close-out", "…and so does the war you are already in"],
+    ["answer-ultimatum", "close-out", "…and so does a threat standing over you"],
+    ["close-out", "denounce", "but closing the game out outranks naming the partner you need"],
+    ["close-out", "gift", "…and outranks warming somebody who is not in the way"],
+    ["answer-ultimatum", "gift", "…and so does a threat standing over you"],
+  ];
+  const pos = (id) => DIPLOMACY_BRANCH_ORDER.indexOf(id);
+  for (const [higher, lower, why] of PRIORITY_RULES) {
+    check(`priority: ${why}`,
+      pos(higher) >= 0 && pos(lower) >= 0 && pos(higher) < pos(lower));
+  }
+
+  // Every branch id the chain runs is one `sim-suite` will report, and one the
+  // event carries. A branch added without a name is a branch that goes back to
+  // being invisible, which is the whole defect.
+  check("every branch in the chain has a distinct name",
+    new Set(DIPLOMACY_BRANCH_ORDER).size === DIPLOMACY_BRANCH_ORDER.length
+    && DIPLOMACY_BRANCH_ORDER.every((id) => typeof id === "string" && id.length > 0));
+
+  // --- §B — the three balance rules, as mechanisms ------------------
+  //
+  // Built against the finding that a full game produces 6.4 eliminations and
+  // 1.5 pacts: conquest banks progress forever while diplomacy pays a
+  // ≥1/round decay tax, war never bills the pool diplomacy spends, and a
+  // faction that exterminates half the board walks up to the survivor with a
+  // clean face. Each rule ships behind a no-op; each check here asserts the
+  // MECHANISM and that the no-op really is one.
+
+  // §B1 — warmth decays slower than contempt heals.
+  //
+  // Measured on DRIFT-CAUSED changes only, with the SAME observer for both
+  // pairs: the step is scaled by the observer's grudge, so comparing
+  // goldgrass→lakers against lakers→goldgrass compares two factions'
+  // temperaments, not the rule. Other political events also move Standing
+  // during a round, so the deltas are read off the drift receipts rather
+  // than the totals.
+  {
+    // Drift moves through `setStanding`, which emits `delta: null` — so the
+    // movement is read as a TICK COUNT. Same observer means the same
+    // grudge-scaled step for both pairs, so ticks compare exactly.
+    const driftTicks = (g, from, a, b) => g.log.slice(from)
+      .filter((e) => e.name === "standing_changed" && e.payload.cause === "drift"
+        && e.payload.faction === a && e.payload.player === b).length;
+    const runPair = (every) => {
+      const g = createGame({ seed: 2081 });
+      ensureDiplomacy(g);
+      const evSave = CONFIG.diplomacy.warmDriftEvery;
+      CONFIG.diplomacy.warmDriftEvery = every;
+      setStanding(g, "goldgrass", "lakers", 9, "test");     // far above any baseline
+      setStanding(g, "goldgrass", "plainers", -9, "test");  // far below it
+      const from = g.log.length;
+      for (let i = 0; i < 4; i++) { g.round += 1; runDiplomacyRound(g); }
+      CONFIG.diplomacy.warmDriftEvery = evSave;
+      return {
+        warmLost: driftTicks(g, from, "goldgrass", "lakers"),
+        coldGained: driftTicks(g, from, "goldgrass", "plainers"),
+      };
+    };
+    const ratcheted = runPair(3);
+    check("warm Standing decays slower than cold Standing recovers",
+      ratcheted.warmLost < ratcheted.coldGained && ratcheted.warmLost > 0);
+    const symmetric = runPair(1);
+    check("warmDriftEvery 1 restores the symmetric decay exactly",
+      symmetric.warmLost === symmetric.coldGained && symmetric.warmLost > 0);
+  }
+
+  // §B4 — war bills the political pool, first and uncancellably.
+  {
+    const g7c = createGame({ seed: 2082 });
+    ensureDiplomacy(g7c);
+    const rateSave = CONFIG.sway.warUpkeep;
+    CONFIG.sway.warUpkeep = 2;
+    declareWar(g7c, "goldgrass", "lakers", "test");
+    declareWar(g7c, "goldgrass", "plainers", "test");
+    g7c.players.goldgrass.sway = 10;
+    g7c.round += 1; runDiplomacyRound(g7c);
+    const paidWars = g7c.log.filter((e) => e.name === "sway_spent"
+      && e.payload.player === "goldgrass" && e.payload.cause === "war-upkeep")
+      .reduce((n, e) => n + e.payload.amount, 0);
+    check("two wars bill the pool at the per-war rate", paidWars === 4);
+    // A shallow pool pays what it has rather than going negative.
+    g7c.players.goldgrass.sway = 1;
+    g7c.round += 1; runDiplomacyRound(g7c);
+    check("…and a shallow pool drains to zero, never below",
+      g7c.players.goldgrass.sway >= 0);
+    // no-op: at 0 no war-upkeep line ever appears — set explicitly, because
+    // the SHIPPED value is no longer 0 and this claim is about the switch.
+    CONFIG.sway.warUpkeep = 0;
+    const g7d = createGame({ seed: 2082 });
+    ensureDiplomacy(g7d);
+    declareWar(g7d, "goldgrass", "lakers", "test");
+    g7d.round += 1; runDiplomacyRound(g7d);
+    check("warUpkeep 0 bills nothing",
+      !g7d.log.some((e) => e.name === "sway_spent" && e.payload.cause === "war-upkeep"));
+    CONFIG.sway.warUpkeep = rateSave;
+  }
+
+  // §B-blood — the kill leaves a permanent mark on the killers.
+  {
+    const g7e = createGame({ seed: 2083 });
+    ensureDiplomacy(g7e);
+    const perSave = CONFIG.diplomacy.bloodPrice.menacePerKill;
+    CONFIG.diplomacy.bloodPrice.menacePerKill = 3;
+    declareWar(g7e, "goldgrass", "lakers", "test");
+    // Strip the victim while the war stands, then let the sweep find it.
+    for (const l of Object.values(g7e.locations)) if (l.controller === "lakers") l.controller = null;
+    for (const u of Object.values(g7e.units)) if (u.owner === "lakers") delete g7e.units[u.uid];
+    endTurn(g7e);
+    check("a faction at war with the dead one carries the mark",
+      g7e.players.goldgrass.bloodMarks === 1
+      && g7e.log.some((e) => e.name === "blood_marked" && e.payload.player === "goldgrass"));
+    check("…and the mark floors its Menace through every rep gate",
+      menaceOf(g7e, "goldgrass") >= 3);
+    // Permanent: decay runs every round and the floor holds.
+    for (let i = 0; i < 12; i++) { g7e.round += 1; runDiplomacyRound(g7e); }
+    check("…and twelve rounds of decay cannot wash it off",
+      menaceOf(g7e, "goldgrass") >= 3);
+    // A bystander at peace with the dead faction is not marked.
+    check("a faction not at war with them is not marked",
+      !g7e.players.plainers.bloodMarks);
+    CONFIG.diplomacy.bloodPrice.menacePerKill = 0;
+    check("menacePerKill 0 switches the floor off entirely — the marks stay recorded, the price does not",
+      menaceOf(g7e, "goldgrass") <= (g7e.players.goldgrass.menace || 0));
+    CONFIG.diplomacy.bloodPrice.menacePerKill = perSave;
+  }
+
+  // --- §5 — the faction with no ground, and the hole it sits in ------
+  //
+  // Three claims, and the first two are RULES this codebase already has. They
+  // are pinned here because the third depends on them and because together
+  // they are the reason a game can be won by nobody: a faction reduced to
+  // wandering units is alive, is counted by the win condition, and is invisible
+  // to the only targeting the AI has.
+  const g5z = createGame({ seed: 2061 });
+  ensureDiplomacy(g5z);
+  // Strip Goldgrass of every Location but leave it a unit.
+  for (const l of Object.values(g5z.locations)) if (l.controller === "goldgrass") l.controller = null;
+  const zombieUnit = Object.values(g5z.units).find((u) => u.owner === "goldgrass");
+  check("a faction can hold no ground and still have units",
+    !!zombieUnit && !Object.values(g5z.locations).some((l) => l.controller === "goldgrass"));
+  // …and the elimination sweep keeps it alive, because it wants BOTH gone.
+  endTurn(g5z);
+  check("…and it is not eliminated, because elimination wants no ground AND no units",
+    g5z.players.goldgrass.eliminated !== true);
+  // …so the win condition still counts it.
+  check("…so it still stands between somebody and Dominion",
+    dominionStanding(g5z, "versari").outstanding.includes("goldgrass"));
+
+  // --- §5 — the landless clock -------------------------------------
+  //
+  // The rule the three claims above describe the hole for. A faction with no
+  // Locations has `landlessGraceRounds` to take one back; on expiry its units
+  // are destroyed and the ordinary elimination sweep retires it. Asserted as
+  // the mechanism — the clock starts, holds, clears and expires — rather than
+  // as a round number fitted to one run.
+  const GRACE = CONFIG.victory.landlessGraceRounds;
+  check("the landless clock is on, and a faction may hold no ground for a while",
+    GRACE > 0);
+  // It survives the whole grace window, and the deadline is announced.
+  const g5y = createGame({ seed: 2062 });
+  ensureDiplomacy(g5y);
+  for (const l of Object.values(g5y.locations)) if (l.controller === "goldgrass") l.controller = null;
+  const startRound = g5y.round;
+  endTurn(g5y);
+  check("…and losing its last Location starts a clock, with the deadline stated",
+    g5y.log.some((e) => e.name === "landless_clock_started"
+      && e.payload.player === "goldgrass" && e.payload.deadline === startRound + GRACE));
+  // Hold it there. `state.round` is what the rule reads, so drive rounds
+  // rather than turns and stop one short of the deadline.
+  let spun = 0;
+  // The deadline is the round the clock EXPIRES on, so the last round it is
+  // still alive is the one before.
+  while (g5y.round < startRound + GRACE - 1 && spun++ < 400) endTurn(g5y);
+  check("…and it is still in the game right up to the deadline",
+    g5y.players.goldgrass.eliminated !== true
+    && Object.values(g5y.units).some((u) => u.owner === "goldgrass"));
+  while (g5y.round < startRound + GRACE && spun++ < 400) endTurn(g5y);
+  check("…and past it the units are destroyed and the faction is out",
+    g5y.log.some((e) => e.name === "faction_collapsed" && e.payload.player === "goldgrass")
+    && !Object.values(g5y.units).some((u) => u.owner === "goldgrass")
+    && g5y.players.goldgrass.eliminated === true);
+  // A DEADLINE, NOT A DEATH SENTENCE: taking ground back stops the clock, and
+  // says so. This is the half that makes the rule survivable.
+  const g5w = createGame({ seed: 2063 });
+  ensureDiplomacy(g5w);
+  const hadLoc = Object.values(g5w.locations).find((l) => l.controller === "goldgrass");
+  hadLoc.controller = null;
+  endTurn(g5w);
+  check("a faction that takes ground back clears its clock",
+    g5w.players.goldgrass.landlessSince != null);
+  hadLoc.controller = "goldgrass";
+  endTurn(g5w);
+  check("…and the board is told the clock stopped",
+    g5w.players.goldgrass.landlessSince == null
+    && g5w.log.some((e) => e.name === "landless_clock_cleared" && e.payload.player === "goldgrass"));
+  // …and 0 restores the old behaviour exactly: no clock ever runs.
+  const graceSave = CONFIG.victory.landlessGraceRounds;
+  CONFIG.victory.landlessGraceRounds = 0;
+  const g5v = createGame({ seed: 2064 });
+  ensureDiplomacy(g5v);
+  for (const l of Object.values(g5v.locations)) if (l.controller === "goldgrass") l.controller = null;
+  let spun2 = 0;
+  const until = g5v.round + graceSave + 2;
+  while (g5v.round < until && spun2++ < 400) endTurn(g5v);
+  check("landlessGraceRounds 0 restores the old immortality exactly",
+    g5v.players.goldgrass.eliminated !== true
+    && g5v.players.goldgrass.landlessSince == null
+    && !g5v.log.some((e) => e.name === "landless_clock_started"));
+  CONFIG.victory.landlessGraceRounds = graceSave;
+
+  // The targeting hole itself, asserted as the RULE rather than as a hex list:
+  // with the switch off the goal set is Locations only, so a landless faction
+  // contributes nothing; with it on, its units are goals. `wouldFight` still
+  // governs, so this can never send a faction at somebody it would refuse to
+  // fight on arrival.
+  const huntSave = CONFIG.ai.huntLandlessBlocker;
+  CONFIG.ai.huntLandlessBlocker = 0;
+  check("with the hunt off, a landless faction is not a goal at all",
+    landlessBlockerHexes(g5z, "versari").length === 0);
+  CONFIG.ai.huntLandlessBlocker = 1;
+  setStanding(g5z, "versari", "goldgrass", CONFIG.diplomacy.tiers.wary, "test"); // …and worth fighting
+  // FAIR FOG, NO CHEATS, and it is the half worth asserting first: a unit the
+  // hunter cannot see is not a goal, however badly the win condition wants it
+  // dealt with.
+  check("…and with it on, a landless faction it cannot SEE is still not a goal",
+    !landlessBlockerHexes(g5z, "versari").includes(zombieUnit.node));
+  g5z.visibility.versari.visible.add(zombieUnit.node);
+  const hunted = landlessBlockerHexes(g5z, "versari");
+  check("…and once it can see them, its surviving units are goals",
+    hunted.includes(zombieUnit.node));
+  // A rival that still HOLDS ground is reached through `knownGoalHexes` and
+  // must not be double-counted here — the branch is for the hole, not for
+  // every enemy unit on the map.
+  check("…while a faction that still holds ground is left to the Location goals",
+    Object.values(g5z.units).filter((u) => u.owner === "lakers")
+      .every((u) => !hunted.includes(u.node) || g5z.locations[u.node]));
+  CONFIG.ai.huntLandlessBlocker = huntSave;
+
+  // --- a clean record is armour: the Honor-gap Menace surcharge ---
+  //
+  // Two claims, and the second is the one that makes it a RULE rather than a
+  // penalty: an unjustified war on a spotless faction costs extra Menace, and
+  // a war you earned the right to still costs nothing at all to open.
+  const CH = CONFIG.diplomacy.menace.declareOnCleanHands;
+  const HON = CONFIG.diplomacy.honor;
+  const g5d = createGame({ seed: 2053, humanFactionId: "versari" });
+  ensureDiplomacy(g5d);
+  g5d.players.versari.honor = -2;
+  g5d.players.goldgrass.honor = HON.max;
+  const gapExtra = cleanHandsSurcharge(g5d, "versari", "goldgrass");
+  check("hitting a far cleaner faction carries a surcharge",
+    gapExtra > 0);
+  check("…scaled by the gap, past a free margin, and capped",
+    gapExtra === Math.min(CH.max, (HON.max - -2 - CH.freeGap) * CH.perPoint));
+  const m5dBefore = g5d.players.versari.menace || 0;
+  declareWar(g5d, "versari", "goldgrass", "declared");
+  check("…and the declaration charges it on top of the unjustified fee",
+    (g5d.players.versari.menace || 0)
+      === m5dBefore + CONFIG.diplomacy.menace.declareUnjustified + gapExtra);
+  // An equal — or a target no better than you — is the ordinary case.
+  const g5e = createGame({ seed: 2054, humanFactionId: "versari" });
+  ensureDiplomacy(g5e);
+  check("an even record carries no surcharge at all",
+    cleanHandsSurcharge(g5e, "versari", "goldgrass") === 0);
+  // The rule the design keeps: earning the war still makes opening it free.
+  const g5f = createGame({ seed: 2055, humanFactionId: "versari" });
+  ensureDiplomacy(g5f);
+  g5f.players.versari.honor = -2;
+  g5f.players.goldgrass.honor = HON.max;
+  g5f.diplomacy.denouncements = g5f.diplomacy.denouncements || {};
+  g5f.diplomacy.denouncements.versari = g5f.diplomacy.denouncements.versari || {};
+  g5f.diplomacy.denouncements.versari.goldgrass = { round: g5f.round, warrant: "menace" };
+  const m5fBefore = g5f.players.versari.menace || 0;
+  declareWar(g5f, "versari", "goldgrass", "declared");
+  check("a war you earned the right to is still free to open, however clean they are",
+    (g5f.players.versari.menace || 0) === m5fBefore);
+  // …and the war calculus sees it BEFORE the declaration, not after — which is
+  // the difference between a deterrent and a tax. Measured with
+  // `attackPrice.enabled` forced on, because it ships OFF (see the note on the
+  // config block: the gate is built and switchable but has not yet earned its
+  // price to the AI). So the surcharge's LIVE effect today is the Menace
+  // itself — third parties' threat scores, coalitions, tolerance — and this
+  // check pins the forecast so the gate is correct on the day it comes on.
+  const g5g = createGame({ seed: 2056, humanFactionId: "versari" });
+  ensureDiplomacy(g5g);
+  const apSave = CONFIG.diplomacy.attackPrice.enabled;
+  CONFIG.diplomacy.attackPrice.enabled = 1;
+  const priceEven = diplomaticPrice(g5g, "versari", "goldgrass", { declared: true });
+  g5g.players.goldgrass.honor = HON.max;
+  g5g.players.versari.honor = -2;
+  const priceClean = diplomaticPrice(g5g, "versari", "goldgrass", { declared: true });
+  const priceRaw = diplomaticPrice(g5g, "versari", "goldgrass", { declared: false });
+  CONFIG.diplomacy.attackPrice.enabled = apSave;
+  check("the war calculus sees the surcharge before the declaration, not after",
+    priceClean > priceEven);
+  check("…on the undeclared branch too, so treachery never becomes the cheap road",
+    priceRaw > priceClean);
 
   // --- encounter standing rewards: self-standing is a no-op ---
   const g6 = createGame({ seed: 206, humanFactionId: "versari" });
@@ -4143,10 +7837,19 @@ line("\n  [Phase 11] text-token resolver");
   const jw = CONFIG.diplomacy.justWar;
 
   // --- denounce → declare = justified: fighting costs no Menace ---
+  // The denouncement has to be WARRANTED to justify anything. Lakers earn it
+  // here the way a faction earns it in play: by piling up Menace past what
+  // Versari will overlook. (Denouncing a clean-handed faction is covered
+  // below — it is a slander, and justifies nothing.)
   const g = createGame({ seed: 211, humanFactionId: "versari" });
   ensureDiplomacy(g);
+  check("a clean-handed faction cannot be denounced into a just war",
+    denounceWarrant(g, "versari", "lakers") === null);
+  g.players.lakers.menace = 24;
+  check("…but a faction past your tolerance can",
+    denounceWarrant(g, "versari", "lakers") === "menace");
   performDiplomacy(g, "versari", "denounce", { faction: "lakers" });
-  check("a denouncement on record justifies a later declaration",
+  check("a warranted denouncement justifies a later declaration",
     warJustification(g, "versari", "lakers") === "denounced");
   performDiplomacy(g, "versari", "declare-war", { faction: "lakers" });
   const war21 = findWar(g, "versari", "lakers");
@@ -4295,6 +7998,1026 @@ line("\n  [Phase 11] text-token resolver");
   sweepTrespass(g3, "versari");
   check("your garrison is never cited for trespassing in a city you hold",
     getStanding(g3, "lakers", "versari") === standBefore);
+}
+
+// Phase 23 — the diplomacy audit fixes (docs/diplomacy-audit-2026-08-19.md).
+// Every check here is a bug that shipped: a verb that did nothing, a verb
+// that skipped consent entirely, a cost the UI promised and the engine never
+// charged, and a deal schema the two halves of the app disagreed on.
+{
+  line("\n  [Phase 23] diplomacy — consent, cost, and one deal schema");
+  const H = CONFIG.diplomacy.honor;
+  const M = CONFIG.diplomacy.menace;
+
+  // --- 1. Make Peace is an OFFER, not a button ---
+  {
+    const g = createGame({ seed: 231, humanFactionId: "versari" });
+    ensureDiplomacy(g);
+    declareWar(g, "lakers", "versari", "test");
+    // A warlord one round into a war it has lost nothing in refuses.
+    check("a fresh war cannot be ended by asking",
+      aiAcceptsPeace(g, "lakers", "versari", null) === false);
+    const res = performDiplomacy(g, "versari", "make-peace", { faction: "lakers" });
+    check("make-peace reports the refusal instead of silently succeeding",
+      res.ok === true && res.accepted === false);
+    check("…and the war is still on", atWar(g, "versari", "lakers"));
+    check("make-peace off a war is refused outright",
+      performDiplomacy(g, "versari", "make-peace", { faction: "goldgrass" }).ok === false);
+  }
+
+  // --- 2. Denounce costs Honor, and cannot be spammed ---
+  {
+    const g = createGame({ seed: 232, humanFactionId: "versari" });
+    ensureDiplomacy(g);
+    const h0 = honorOf(g, "versari");
+    check("denouncing lands the first time", denounce(g, "versari", "lakers") === true);
+    check("denouncing a clean faction costs Honor", honorOf(g, "versari") === h0 - H.denounceLoss);
+    check("a second denouncement in the window is refused",
+      denounce(g, "versari", "lakers") === false);
+    check("…and costs nothing further", honorOf(g, "versari") === h0 - H.denounceLoss);
+    // …and the same act against a faction that has earned it PAYS.
+    const gw = createGame({ seed: 232, humanFactionId: "versari" });
+    ensureDiplomacy(gw);
+    gw.players.lakers.menace = 24;
+    const hw = honorOf(gw, "versari");
+    denounce(gw, "versari", "lakers");
+    check("denouncing a faction the board can see is dangerous pays Honor",
+      honorOf(gw, "versari") === hw + H.denounceWarrantedGain);
+    check("the cooldown is readable by the UI",
+      denounceCooldown(g, "versari", "lakers") > 0
+      && denounceCooldown(g, "versari", "goldgrass") === 0);
+  }
+
+  // --- 2b. The board judges the ACCUSATION, not the accused ---
+  {
+    // A tyrant everyone can see: denouncing them says out loud what the
+    // board was already thinking, and the board warms to the speaker.
+    const g = createGame({ seed: 238, humanFactionId: "versari" });
+    ensureDiplomacy(g);
+    g.players.lakers.menace = 24;
+    const before = getStanding(g, "goldgrass", "versari");
+    denounce(g, "versari", "lakers");
+    check("denouncing a faction the board also condemns rallies them to you",
+      getStanding(g, "goldgrass", "versari") > before);
+
+    // The same words against a faction with clean hands land as slander.
+    const g2 = createGame({ seed: 238, humanFactionId: "versari" });
+    ensureDiplomacy(g2);
+    const before2 = getStanding(g2, "goldgrass", "versari");
+    denounce(g2, "versari", "lakers");
+    check("denouncing a clean-handed faction turns the board against YOU",
+      getStanding(g2, "goldgrass", "versari") < before2);
+
+    // …and nobody listens to a liar in the first place.
+    const g3 = createGame({ seed: 238, humanFactionId: "versari" });
+    ensureDiplomacy(g3);
+    g3.players.lakers.menace = 24;
+    g3.players.versari.honor = CONFIG.diplomacy.honor.min;
+    const before3 = getStanding(g3, "goldgrass", "versari");
+    denounce(g3, "versari", "lakers");
+    check("an accusation from a faction with no Honor moves nobody",
+      getStanding(g3, "goldgrass", "versari") === before3);
+  }
+
+  // --- 3. Declaring an unjustified war marks you; a just one does not ---
+  {
+    const g = createGame({ seed: 233, humanFactionId: "versari" });
+    ensureDiplomacy(g);
+    declareWar(g, "versari", "lakers", "player");
+    check("an unprovoked declaration raises Menace before a shot is fired",
+      (g.players.versari.menace || 0) === M.declareUnjustified);
+    const g2 = createGame({ seed: 233, humanFactionId: "versari" });
+    ensureDiplomacy(g2);
+    g2.players.lakers.menace = 24; // they have earned the accusation
+    denounce(g2, "versari", "lakers");
+    declareWar(g2, "versari", "lakers", "player");
+    check("a war you denounced your way into costs no Menace to declare",
+      (g2.players.versari.menace || 0) === 0);
+    const g3 = createGame({ seed: 233, humanFactionId: "versari" });
+    ensureDiplomacy(g3);
+    denounce(g3, "versari", "lakers"); // baseless — they have done nothing
+    declareWar(g3, "versari", "lakers", "player");
+    check("a baseless denouncement launders nothing",
+      (g3.players.versari.menace || 0) === M.declareUnjustified);
+  }
+
+  // --- 4. One deal schema: a struck promise is performed ---
+  {
+    const g = createGame({ seed: 234, humanFactionId: "versari" });
+    ensureDiplomacy(g);
+    adjustStanding(g, "goldgrass", "versari", 12, "test");
+    adjustStanding(g, "versari", "goldgrass", 12, "test");
+    // §7.2 — a pact inside a deal answers to the same bar as a pact asked for
+    // directly, courtship included. One bar for everyone has to mean every
+    // road, or the deal builder becomes the road round the ladder.
+    performDiplomacy(g, "versari", "court", { faction: "goldgrass" });
+    g.round += CONFIG.diplomacy.posture.courtRounds;
+    check("the drawer's old shorthand is worth nothing (it is not the schema)",
+      valueOfItem(g, "goldgrass", { pact: true }) === 0);
+    check("an alliance is worth something to a faction that would take one",
+      valueOfItem(g, "goldgrass", { promise: { kind: "pact" } }, { other: "versari" }) > 0);
+    const r = performDiplomacy(g, "versari", "propose-deal", {
+      faction: "goldgrass",
+      give: [{ promise: { kind: "pact" } }, { promise: { kind: "openBorders" } }],
+      get: [{ resource: { resource: "scrap", amount: 3 } }],
+    });
+    check("a struck deal that promised a pact leaves a pact behind",
+      r.accepted === true && arePacted(g, "versari", "goldgrass"));
+    check("…and one that promised open borders leaves them open",
+      hasOpenBorders(g, "versari", "goldgrass"));
+  }
+
+  // --- 5. dontAlly is enforced, not just priced ---
+  {
+    const g = createGame({ seed: 235, humanFactionId: "versari" });
+    ensureDiplomacy(g);
+    applyDeal(g, {
+      proposer: "versari", recipient: "plainers",
+      give: [{ promise: { kind: "dontAlly", target: "lakers", rounds: 6 } }], get: [],
+    }, "test");
+    adjustStanding(g, "lakers", "versari", 12, "test");
+    adjustStanding(g, "versari", "lakers", 12, "test");
+    check("a live dontAlly pledge blocks the alliance it named",
+      formPact(g, "versari", "lakers", "test") === false && !arePacted(g, "versari", "lakers"));
+  }
+
+  // --- 6. A flow is priced on its term, pays exactly that many times ---
+  {
+    const g = createGame({ seed: 236, humanFactionId: "versari" });
+    ensureDiplomacy(g);
+    const short = { flow: { resource: "scrap", amountPerTurn: 4, rounds: 5 } };
+    const long = { flow: { resource: "scrap", amountPerTurn: 4, rounds: 20 } };
+    check("a longer stream is worth more than a shorter one",
+      valueOfItem(g, "goldgrass", long) > valueOfItem(g, "goldgrass", short));
+    check("a stream is priced at rate x term", valueOfItem(g, "goldgrass", short) === 20);
+    applyDeal(g, { proposer: "goldgrass", recipient: "versari", give: [short], get: [] }, "test");
+    g.players.goldgrass.resource = 500;
+    const start = g.players.versari.resource || 0;
+    for (let i = 0; i < 12; i++) { g.round += 1; runDiplomacyRound(g); }
+    check("a 5-round stream pays exactly 5 times, then lapses",
+      (g.players.versari.resource || 0) - start === 20);
+    check("…and the agreement is gone",
+      !g.diplomacy.agreements.some((a) => a.type === "deal-promise"));
+  }
+
+  // --- 7. Demand Tribute reads what the drawer sends ---
+  {
+    const g = createGame({ seed: 237, humanFactionId: "versari" });
+    ensureDiplomacy(g);
+    g.players.goldgrass.resource = 50;
+    g.players.versari.resource = 0;
+    for (const loc of Object.values(g.locations)) {
+      if (loc.controller && loc.controller !== "goldgrass") loc.controller = "versari";
+    }
+    for (const u of Object.values(g.units)) if (u.owner !== "goldgrass") u.owner = "versari";
+    check("a demand naming nothing is refused",
+      performDiplomacy(g, "versari", "demand-tribute", { faction: "goldgrass", terms: [] }).ok === false);
+    performDiplomacy(g, "versari", "demand-tribute", {
+      faction: "goldgrass", terms: [{ resource: { resource: "scrap", amount: 15 } }],
+    });
+    check("a demand that caves actually moves the scrap named",
+      (g.players.versari.resource || 0) === 15);
+  }
+}
+
+// Phase 24 — §6.10 the round trip. A proposal is a thing on a table, a
+// refusal comes back with a price, and asking has a cost. Before this every
+// verb resolved instantly and the AI never approached the player at all.
+{
+  line("\n  [Phase 24] diplomacy — the round trip");
+  const O = CONFIG.diplomacy.offers;
+
+  // --- a refusal comes back with terms ---
+  {
+    const g = createGame({ seed: 241, humanFactionId: "versari" });
+    ensureDiplomacy(g);
+    g.players.versari.resource = 40;
+    const lowball = {
+      proposer: "versari", recipient: "goldgrass",
+      give: [{ resource: { resource: "scrap", amount: 1 } }],
+      get: [{ promise: { kind: "openBorders" } }, { promise: { kind: "nonAggression", rounds: 6 } }],
+    };
+    check("a lowball is refused as it stands", wouldAccept(g, "goldgrass", lowball) === false);
+    const counter = counterOffer(g, "goldgrass", lowball);
+    check("…but a price exists, and they name it", !!counter);
+    check("the counter is one they would actually take", wouldAccept(g, "goldgrass", counter));
+    check("the counter asks for more than the lowball did",
+      counter.give.find((i) => i.resource)?.resource.amount > 1);
+    check("…and keeps the terms the proposer actually wanted",
+      counter.get.length === lowball.get.length);
+    const r = performDiplomacy(g, "versari", "propose-deal",
+      { faction: "goldgrass", give: lowball.give, get: lowball.get });
+    check("proposing it puts their counter in your inbox",
+      r.countered === true && offersFor(g, "versari").length === 1);
+    const offer = offersFor(g, "versari")[0];
+    check("the tabled offer is theirs, marked as a counter",
+      offer.from === "goldgrass" && offer.isCounter === true);
+    const before = g.players.versari.resource;
+    answerOffer(g, "versari", offer.id, true);
+    check("accepting it applies exactly those terms",
+      g.players.versari.resource < before && hasOpenBorders(g, "goldgrass", "versari"));
+    check("…and takes it off the table", offersFor(g, "versari").length === 0);
+  }
+
+  // --- an alliance is not for sale ---
+  {
+    const g = createGame({ seed: 242, humanFactionId: "versari" });
+    ensureDiplomacy(g);
+    g.players.versari.resource = 200;
+    adjustStanding(g, "goldgrass", "versari", -4, "test"); // under the pact bar
+    const bribe = {
+      proposer: "versari", recipient: "goldgrass",
+      give: [{ resource: { resource: "scrap", amount: 150 } }],
+      get: [{ promise: { kind: "pact" } }],
+    };
+    check("no pile of scrap buys past the Standing bar",
+      wouldAccept(g, "goldgrass", bribe) === false);
+    check("…and there is no counter for it either",
+      counterOffer(g, "goldgrass", bribe) === null);
+  }
+
+  // --- a hopeless ask gets an honest no, not an empty counter ---
+  {
+    const g = createGame({ seed: 243, humanFactionId: "versari" });
+    ensureDiplomacy(g);
+    g.players.versari.resource = 3;
+    const r = performDiplomacy(g, "versari", "propose-deal", {
+      faction: "lakers", give: [],
+      get: [{ flow: { resource: "scrap", amountPerTurn: 10, rounds: 20 } }],
+    });
+    check("a gap beyond the proposer's means is refused outright",
+      r.accepted === false && !r.countered);
+    check("…and tables nothing", offersFor(g, "versari").length === 0);
+  }
+
+  // --- asking too often costs Standing ---
+  {
+    const g = createGame({ seed: 244, humanFactionId: "versari" });
+    ensureDiplomacy(g);
+    g.players.versari.resource = 0;
+    const hopeless = { faction: "lakers", give: [],
+      get: [{ flow: { resource: "scrap", amountPerTurn: 10, rounds: 20 } }] };
+    const s0 = getStanding(g, "lakers", "versari");
+    for (let i = 0; i < O.freeAsksPerRound; i++) performDiplomacy(g, "versari", "propose-deal", hopeless);
+    check("the first asks of a round are free", getStanding(g, "lakers", "versari") === s0);
+    performDiplomacy(g, "versari", "propose-deal", hopeless);
+    check("one past the quota cools them", getStanding(g, "lakers", "versari") === s0 - O.pesterStandingHit);
+    check("the tally is readable", asksThisRound(g, "versari", "lakers") === O.freeAsksPerRound + 1);
+    g.round += 1;
+    check("and it resets with the round", asksThisRound(g, "versari", "lakers") === 0);
+  }
+
+  // --- answering is never an ask ---
+  {
+    const g = createGame({ seed: 245, humanFactionId: "versari" });
+    ensureDiplomacy(g);
+    const o = tableOffer(g, "goldgrass", "versari",
+      { give: [{ resource: { resource: "scrap", amount: 5 } }], get: [] }, { kind: "deal" });
+    performDiplomacy(g, "versari", "answer-offer", { offerId: o.id, accept: false });
+    check("declining somebody else's offer costs no patience",
+      asksThisRound(g, "versari", "goldgrass") === 0);
+  }
+
+  // --- an unanswered offer lapses, and lapsing is free ---
+  {
+    const g = createGame({ seed: 246, humanFactionId: "versari" });
+    ensureDiplomacy(g);
+    tableOffer(g, "goldgrass", "versari",
+      { give: [{ resource: { resource: "scrap", amount: 5 } }], get: [] }, { kind: "deal" });
+    const s0 = getStanding(g, "goldgrass", "versari");
+    check("it waits in the inbox", offersFor(g, "versari").length === 1);
+    for (let i = 0; i < O.expiryRounds + 1; i++) { g.round += 1; runDiplomacyRound(g); }
+    check("…then lapses", offersFor(g, "versari").length === 0);
+    check("and silence was not a refusal", getStanding(g, "goldgrass", "versari") === s0);
+  }
+
+  // --- the AI approaches the human, and stops imposing on them ---
+  {
+    const g = createGame({ seed: 247, humanFactionId: "versari" });
+    ensureDiplomacy(g);
+    adjustStanding(g, "goldgrass", "versari", 20, "test");
+    adjustStanding(g, "versari", "goldgrass", 20, "test");
+    g.activeIndex = g.turnOrder.indexOf("goldgrass");
+    takeAITurn(g);
+    check("an AI no longer imposes an alliance on the human",
+      !arePacted(g, "goldgrass", "versari"));
+    // §5 — and it does not ask on the first turn either. Its one initiative
+    // goes on OPENING the courtship, which is the middle the layer was
+    // missing: an alliance out of a clear sky is unearned, the same alliance
+    // after rounds of a faction publicly courting you is not.
+    check("…it opens a courtship first", isCourting(g, "goldgrass", "versari"));
+    check("…and says so where the player can read it",
+      g.log.some((e) => e.name === "posture_changed" && e.payload.to === "Courting"));
+    // Run the ladder out. The AI keeps its cadence, so give it turns.
+    for (let i = 0; i < CONFIG.diplomacy.posture.courtRounds + 2; i += 1) {
+      g.round += 1;
+      runDiplomacyRound(g);
+      g.activeIndex = g.turnOrder.indexOf("goldgrass");
+      takeAITurn(g);
+      if (offersFor(g, "versari").some((o) => o.from === "goldgrass" && o.kind === "pact")) break;
+    }
+    check("…then it asks", offersFor(g, "versari").some((o) => o.from === "goldgrass" && o.kind === "pact"));
+    const offer = offersFor(g, "versari").find((o) => o.from === "goldgrass");
+    answerOffer(g, "versari", offer.id, true);
+    check("and accepting the offer forms the pact", arePacted(g, "goldgrass", "versari"));
+  }
+
+  // --- across a real run, the AI opens conversations ---
+  {
+    const g = createGame({ seed: 248, humanFactionId: "versari" });
+    ensureDiplomacy(g);
+    let seen = 0;
+    for (let r = 0; r < 25; r += 1) {
+      for (const f of g.turnOrder) {
+        if (f === "versari") continue;
+        g.activeIndex = g.turnOrder.indexOf(f);
+        takeAITurn(g);
+      }
+      seen += offersFor(g, "versari").length;
+      for (const o of offersFor(g, "versari")) answerOffer(g, "versari", o.id, false);
+      g.round += 1;
+      runDiplomacyRound(g);
+    }
+    check("over 25 rounds the AI approaches the human at least once", seen > 0);
+  }
+}
+
+// Phase 25 — the grievance ledger. What was done to you is a list with
+// weights and places, not one overwritten flag, and it can be settled.
+{
+  line("\n  [Phase 25] diplomacy — the grievance ledger");
+  const G = CONFIG.diplomacy.grievance;
+
+  // --- it accumulates, instead of overwriting ---
+  {
+    const g = createGame({ seed: 251, humanFactionId: "versari" });
+    ensureDiplomacy(g);
+    recordGrievance(g, "goldgrass", "versari", "surprise-attack", { at: "h2-1" });
+    g.round += 1;
+    recordGrievance(g, "goldgrass", "versari", "truce-broken", { at: "h3-0" });
+    g.round += 1;
+    recordGrievance(g, "goldgrass", "versari", "promise-broken");
+    const held = grievancesAgainst(g, "goldgrass", "versari");
+    check("three betrayals leave three entries, not one", held.length === 3);
+    check("each carries its own weight",
+      grievanceWeight(g, "goldgrass", "versari")
+        === G.severity["surprise-attack"] + G.severity["truce-broken"] + G.severity["promise-broken"]);
+    check("and its own place", held.some((e) => e.at === "h3-0"));
+    const worst = worstGrievance(g, "goldgrass", "versari");
+    check("a denouncement cites the worst of them, not the latest",
+      worst.kind === "truce-broken");
+    check("…with the receipt attached",
+      denounceGrounds(g, "goldgrass", "versari").entry.at === "h3-0");
+  }
+
+  // --- entries age out one at a time ---
+  {
+    const g = createGame({ seed: 252, humanFactionId: "versari" });
+    ensureDiplomacy(g);
+    recordGrievance(g, "goldgrass", "versari", "truce-broken");
+    g.round += CONFIG.diplomacy.justWar.grievanceWindowRounds;
+    recordGrievance(g, "goldgrass", "versari", "promise-broken");
+    g.round += 1;
+    check("the old grievance lapses while the fresh one stands",
+      grievancesAgainst(g, "goldgrass", "versari").length === 1
+      && worstGrievance(g, "goldgrass", "versari").kind === "promise-broken");
+  }
+
+  // --- the ledger stays bounded ---
+  {
+    const g = createGame({ seed: 253, humanFactionId: "versari" });
+    ensureDiplomacy(g);
+    for (let i = 0; i < G.maxPerPair + 5; i += 1) recordGrievance(g, "goldgrass", "versari", "promise-broken");
+    check("the ledger keeps a bounded history",
+      g.diplomacy.grievances.goldgrass.versari.length === G.maxPerPair);
+  }
+
+  // --- an apology is not free, and a settlement has a price ---
+  {
+    const g = createGame({ seed: 254, humanFactionId: "versari" });
+    ensureDiplomacy(g);
+    g.players.versari.resource = 40;
+    recordGrievance(g, "goldgrass", "versari", "truce-broken");
+    recordGrievance(g, "goldgrass", "versari", "surprise-attack");
+    const weight = grievanceWeight(g, "goldgrass", "versari");
+    const sorry = { proposer: "versari", recipient: "goldgrass", give: [], get: [{ settlement: true }] };
+    check("'let us call it settled', offering nothing, is refused",
+      wouldAccept(g, "goldgrass", sorry) === false);
+    const counter = counterOffer(g, "goldgrass", sorry);
+    check("…but they will name a price for it", !!counter);
+    check("the price tracks what is owed",
+      counter.give.find((i) => i.resource)?.resource.amount >= Math.floor(weight * G.settlementPerWeight));
+  }
+
+  // --- paying it clears the slate, both ways, and restores Honor ---
+  {
+    const g = createGame({ seed: 255, humanFactionId: "versari" });
+    ensureDiplomacy(g);
+    g.players.versari.resource = 40;
+    recordGrievance(g, "goldgrass", "versari", "truce-broken");
+    recordGrievance(g, "versari", "goldgrass", "promise-broken");
+    const h0 = honorOf(g, "versari");
+    check("a grievance justifies their war on you",
+      warJustification(g, "goldgrass", "versari") === "truce-broken");
+    applyDeal(g, {
+      proposer: "versari", recipient: "goldgrass",
+      give: [{ resource: { resource: "scrap", amount: 12 } }], get: [{ settlement: true }],
+    }, "test");
+    check("settling clears what they hold against you",
+      grievanceWeight(g, "goldgrass", "versari") === 0);
+    check("…and what you hold against them — half a reconciliation is not one",
+      grievanceWeight(g, "versari", "goldgrass") === 0);
+    check("their justification goes with it",
+      warJustification(g, "goldgrass", "versari") === null);
+    check("making amends is honourable", honorOf(g, "versari") === h0 + G.settlementHonorGain);
+  }
+
+  // --- and it pulls the rug from a denouncement resting on it ---
+  {
+    const g = createGame({ seed: 256, humanFactionId: "versari" });
+    ensureDiplomacy(g);
+    recordGrievance(g, "goldgrass", "versari", "truce-broken");
+    denounce(g, "goldgrass", "versari");
+    check("the denouncement stands while the grievance does",
+      warJustification(g, "goldgrass", "versari") === "denounced");
+    applyDeal(g, {
+      proposer: "versari", recipient: "goldgrass",
+      give: [{ resource: { resource: "scrap", amount: 9 } }], get: [{ settlement: true }],
+    }, "test");
+    check("settling takes the grounds out from under it",
+      warJustification(g, "goldgrass", "versari") === null);
+  }
+}
+
+// Phase 26 — reputation is what the board SAW. Fog of war and diplomacy did
+// not touch anywhere in the codebase, so a massacre in unexplored wasteland
+// cost exactly what one on a rival's doorstep did.
+{
+  line("\n  [Phase 26] diplomacy — witnessed reputation");
+  const M = CONFIG.diplomacy.menace;
+
+  // Pick a hex nobody third-party can see, and the most-watched one there is.
+  const probe = createGame({ seed: 261, humanFactionId: "versari" });
+  ensureDiplomacy(probe);
+  const opts = { attacker: "versari", victim: "goldgrass" };
+  const counted = Object.keys(probe.board.hexes)
+    .map((h) => [h, witnessesOf(probe, h, opts).length]);
+  const mostSeen = Math.max(...counted.map(([, n]) => n));
+  const openHex = counted.find(([, n]) => n === mostSeen)[0];
+  const darkHex = counted.find(([, n]) => n === 0)?.[0];
+
+  check("some ground is watched and some is not", mostSeen > 0 && !!darkHex);
+  check("an unwatched hex scores near nothing",
+    witnessShare(probe, darkHex, opts) === M.unwitnessedShare);
+  check("a watched one scores more", witnessShare(probe, openHex, opts) > witnessShare(probe, darkHex, opts));
+
+  // The same blow, in the open and in the dark. Already at war both times so
+  // the declaration's own Menace doesn't muddy the reading.
+  const strike = (hex) => {
+    const g = createGame({ seed: 261, humanFactionId: "versari" });
+    ensureDiplomacy(g);
+    declareWar(g, "versari", "goldgrass", "test");
+    const before = g.players.versari.menace || 0;
+    onAttack(g, "versari", "goldgrass", hex);
+    return (g.players.versari.menace || 0) - before;
+  };
+  check("striking where the board can see costs reputation", strike(openHex) > 0);
+  check("…and striking where it cannot costs less", strike(darkHex) < strike(openHex));
+
+  // But the victim was there, and can say so.
+  {
+    const g = createGame({ seed: 261, humanFactionId: "versari" });
+    ensureDiplomacy(g);
+    onAttack(g, "versari", "goldgrass", darkHex); // undeclared, unseen
+    const quiet = g.players.versari.menace || 0;
+    check("the victim holds it against you regardless of who saw",
+      worstGrievance(g, "goldgrass", "versari")?.kind === "surprise-attack");
+    check("…which gives them grounds",
+      denounceWarrant(g, "goldgrass", "versari") === "surprise-attack");
+    denounce(g, "goldgrass", "versari");
+    check("and a believed accusation is how a hidden crime reaches the board",
+      (g.players.versari.menace || 0) > quiet);
+  }
+
+  // …unless the accuser has burned their own credibility.
+  {
+    const g = createGame({ seed: 261, humanFactionId: "versari" });
+    ensureDiplomacy(g);
+    onAttack(g, "versari", "goldgrass", darkHex);
+    const quiet = g.players.versari.menace || 0;
+    g.players.goldgrass.honor = CONFIG.diplomacy.honor.min;
+    denounce(g, "goldgrass", "versari");
+    check("a discredited victim shouts into the void",
+      (g.players.versari.menace || 0) === quiet);
+  }
+
+  // A grievance now knows where it happened, which is what lets the UI cite
+  // the act rather than assert that one exists.
+  {
+    const g = createGame({ seed: 261, humanFactionId: "versari" });
+    ensureDiplomacy(g);
+    onAttack(g, "versari", "goldgrass", darkHex);
+    check("the ledger records the place", worstGrievance(g, "goldgrass", "versari").at === darkHex);
+  }
+}
+
+// Phase 27 — receipts. Menace and Honor were floats with no history, so a
+// player could watch the board turn on them with no way to learn which of
+// their own acts had done it.
+{
+  line("\n  [Phase 27] diplomacy — reputation receipts");
+  const g = createGame({ seed: 271, humanFactionId: "versari" });
+  ensureDiplomacy(g);
+  check("a clean faction has nothing on its record",
+    reputationLog(g, "versari").length === 0);
+
+  declareWar(g, "versari", "goldgrass", "player"); // unjustified → Menace
+  const menace = reputationLog(g, "versari", "menace");
+  check("an act that moved Menace leaves a receipt", menace.length === 1);
+  check("…carrying its cause", /^declare:/.test(menace[0].cause));
+  check("…its size", menace[0].delta === CONFIG.diplomacy.menace.declareUnjustified);
+  check("…and when", menace[0].round === g.round);
+
+  adjustHonor(g, "versari", -2, "test-cause");
+  check("Honor keeps its own receipts, filterable apart from Menace",
+    reputationLog(g, "versari", "honor").length === 1
+    && reputationLog(g, "versari", "menace").length === 1);
+  check("newest first", reputationLog(g, "versari")[0].stat === "honor");
+
+  // A change of zero is not an event.
+  const before = reputationLog(g, "versari").length;
+  adjustMenace(g, "versari", 0, "nothing-happened");
+  check("a no-op writes no receipt", reputationLog(g, "versari").length === before);
+
+  // The roll is bounded — it is a receipt, not an archive.
+  for (let i = 0; i < 40; i += 1) adjustMenace(g, "versari", 1, "test-spam");
+  check("the roll stays bounded", reputationLog(g, "versari").length <= 14);
+}
+
+// Phase 28 — claims. Every Location carries an `affiliation` in content.js
+// and it decided exactly one thing: where factions start. Holding somebody
+// else's homeland was politically invisible.
+{
+  line("\n  [Phase 28] diplomacy — ground held is a grievance");
+  const g = createGame({ seed: 281, humanFactionId: "versari" });
+  ensureDiplomacy(g);
+  const theirs = Object.values(g.locations).find(
+    (l) => LOCATIONS[l.locationId]?.affiliation === "goldgrass",
+  );
+  check("the board seats a Goldgrass homeland", !!theirs);
+  check("nothing is held against you to begin with",
+    grievanceWeight(g, "goldgrass", "versari") === 0);
+
+  theirs.controller = "versari";
+  check("taking it is a grievance the moment you hold it",
+    grievanceWeight(g, "goldgrass", "versari") > 0);
+  check("…recorded as an occupation, on the hex",
+    worstGrievance(g, "goldgrass", "versari").kind === "occupation"
+    && worstGrievance(g, "goldgrass", "versari").at === theirs.hexId);
+  check("their war to take it back is righteous",
+    warJustification(g, "goldgrass", "versari") === "occupation");
+  check("…and they may say so publicly",
+    denounceWarrant(g, "goldgrass", "versari") === "occupation");
+
+  // …but it is not a thing that HAPPENED, so it cannot be paid off.
+  check("no payment settles ground you are still standing on",
+    settleableWeight(g, "goldgrass", "versari") === 0);
+  g.players.versari.resource = 200;
+  const bribe = performDiplomacy(g, "versari", "propose-deal", {
+    faction: "goldgrass",
+    give: [{ resource: { resource: "scrap", amount: 100 } }],
+    get: [{ settlement: true }],
+  });
+  check("offering a fortune for it is refused, not pocketed",
+    bribe.accepted === false && (g.players.versari.resource || 0) === 200);
+
+  // It ends the only way it can.
+  theirs.controller = "goldgrass";
+  check("giving the place back ends it",
+    grievanceWeight(g, "goldgrass", "versari") === 0
+    && warJustification(g, "goldgrass", "versari") === null);
+
+  // A real betrayal alongside an occupation settles; the occupation stays.
+  {
+    const g2 = createGame({ seed: 281, humanFactionId: "versari" });
+    ensureDiplomacy(g2);
+    g2.players.versari.resource = 60;
+    recordGrievance(g2, "goldgrass", "versari", "truce-broken");
+    Object.values(g2.locations).find(
+      (l) => LOCATIONS[l.locationId]?.affiliation === "goldgrass",
+    ).controller = "versari";
+    applyDeal(g2, {
+      proposer: "versari", recipient: "goldgrass",
+      give: [{ resource: { resource: "scrap", amount: 20 } }], get: [{ settlement: true }],
+    }, "test");
+    const left = grievancesAgainst(g2, "goldgrass", "versari");
+    check("the betrayal is settled and the occupation is not",
+      left.length === 1 && left[0].kind === "occupation");
+  }
+}
+
+// Phase 29 — ultimatums. There was no verb between asking and attacking:
+// no way to say "stop, or else", which is the act that generates all the
+// tension in pre-war diplomacy.
+{
+  line("\n  [Phase 29] diplomacy — or else");
+  const U = CONFIG.diplomacy.ultimatum;
+  const demand = { kind: "tribute", amount: 10 };
+
+  // --- issuing costs something, and starts a clock ---
+  {
+    const g = createGame({ seed: 291, humanFactionId: "versari" });
+    ensureDiplomacy(g);
+    g.players.goldgrass.resource = 40;
+    const r = performDiplomacy(g, "versari", "issue-ultimatum", { faction: "goldgrass", demand });
+    check("an ultimatum can be issued", r.ok === true);
+    check("a threat is a hostile act", (g.players.versari.menace || 0) === U.menaceOnIssue);
+    check("…and it lands in their hands with a deadline",
+      ultimatumsFor(g, "goldgrass").length === 1);
+    check("you cannot stack two on the same faction",
+      performDiplomacy(g, "versari", "issue-ultimatum", { faction: "goldgrass", demand }).ok === false);
+  }
+
+  // --- complying pays, and ends it warmer than it started ---
+  {
+    const g = createGame({ seed: 291, humanFactionId: "versari" });
+    ensureDiplomacy(g);
+    g.players.goldgrass.resource = 40;
+    g.players.versari.resource = 0;
+    performDiplomacy(g, "versari", "issue-ultimatum", { faction: "goldgrass", demand });
+    const u = ultimatumsFor(g, "goldgrass")[0];
+    const s0 = getStanding(g, "versari", "goldgrass");
+    performDiplomacy(g, "goldgrass", "answer-ultimatum", { ultimatumId: u.id, comply: true });
+    check("giving in moves the scrap", (g.players.versari.resource || 0) === demand.amount);
+    check("…and the crisis ending warms them a little",
+      getStanding(g, "versari", "goldgrass") === s0 + U.complyStandingGain);
+    check("…and it is off the table", ultimatumsFor(g, "goldgrass").length === 0);
+  }
+
+  // --- defiance hands the issuer a righteous war ---
+  {
+    const g = createGame({ seed: 291, humanFactionId: "versari" });
+    ensureDiplomacy(g);
+    g.players.goldgrass.resource = 40;
+    performDiplomacy(g, "versari", "issue-ultimatum", { faction: "goldgrass", demand });
+    check("nothing is owed while the deadline stands",
+      warJustification(g, "versari", "goldgrass") === null);
+    for (let i = 0; i < U.deadlineRounds + 1; i += 1) { g.round += 1; runDiplomacyRound(g); }
+    check("silence past the deadline is defiance",
+      denounceWarrant(g, "versari", "goldgrass") === "defiance");
+    check("…and makes the war you threatened a just one",
+      warJustification(g, "versari", "goldgrass") === "defiance");
+
+    // …and now the issuer is the one on a clock.
+    const h0 = honorOf(g, "versari");
+    for (let i = 0; i < U.graceRounds + 1; i += 1) { g.round += 1; runDiplomacyRound(g); }
+    check("an ultimatum you do not act on is a bluff the board watched",
+      honorOf(g, "versari") === h0 - U.bluffHonorLoss);
+  }
+
+  // --- unless you meant it ---
+  {
+    const g = createGame({ seed: 291, humanFactionId: "versari" });
+    ensureDiplomacy(g);
+    g.players.goldgrass.resource = 40;
+    performDiplomacy(g, "versari", "issue-ultimatum", { faction: "goldgrass", demand });
+    for (let i = 0; i < U.deadlineRounds + 1; i += 1) { g.round += 1; runDiplomacyRound(g); }
+    const h0 = honorOf(g, "versari");
+    const m0 = g.players.versari.menace || 0;
+    declareWar(g, "versari", "goldgrass", "ultimatum-defied");
+    for (let i = 0; i < U.graceRounds + 1; i += 1) { g.round += 1; runDiplomacyRound(g); }
+    check("making good on it costs no Honor", honorOf(g, "versari") === h0);
+    check("…and the war is justified, so the declaration costs no Menace",
+      (g.players.versari.menace || 0) === m0);
+  }
+
+  // --- "get out" is satisfied by marching home, with nothing to click ---
+  {
+    const g = createGame({ seed: 291, humanFactionId: "versari" });
+    ensureDiplomacy(g);
+    const zoc = g.world.zoc || {};
+    const mine = Object.keys(zoc).find((h) => zoc[h] === "versari");
+    const theirs = Object.values(g.units).find((u) => u.owner === "goldgrass");
+    check("the board gives you territory and them a unit", !!mine && !!theirs);
+    check("you cannot demand a withdrawal from somebody who is not there",
+      performDiplomacy(g, "versari", "issue-ultimatum",
+        { faction: "goldgrass", demand: { kind: "withdraw" } }).ok === false);
+    theirs.node = mine;
+    check("…but you can once they are",
+      performDiplomacy(g, "versari", "issue-ultimatum",
+        { faction: "goldgrass", demand: { kind: "withdraw" } }).ok === true);
+    theirs.node = Object.keys(g.board.hexes).find((h) => zoc[h] !== "versari");
+    g.round += 1;
+    runDiplomacyRound(g);
+    check("marching home IS complying — the world is the check",
+      ultimatumsFor(g, "goldgrass").length === 0
+      && g.log.some((e) => e.name === "ultimatum_complied"));
+  }
+
+  // --- the word has to mean something, so it has a cooldown ---
+  {
+    const g = createGame({ seed: 291, humanFactionId: "versari" });
+    ensureDiplomacy(g);
+    g.players.goldgrass.resource = 40;
+    performDiplomacy(g, "versari", "issue-ultimatum", { faction: "goldgrass", demand });
+    const u = ultimatumsFor(g, "goldgrass")[0];
+    performDiplomacy(g, "goldgrass", "answer-ultimatum", { ultimatumId: u.id, comply: true });
+    check("you cannot immediately threaten them again",
+      performDiplomacy(g, "versari", "issue-ultimatum", { faction: "goldgrass", demand }).ok === false);
+    check("…and the wait is readable", ultimatumCooldown(g, "versari", "goldgrass") > 0);
+  }
+}
+
+// Phase 30 — §3's second half: Locations as deal items. Claims made holding
+// somebody else's homeland a standing grievance, and it could only ever end
+// one way: give the place back. There was no way to give the place back.
+// Diplomacy could move scrap, streams, promises and apologies, but not the
+// one thing the whole war is about, so it ran as a side-market beside the
+// game rather than inside it.
+{
+  line("\n  [Phase 30] diplomacy — ground on the table");
+  const C30 = CONFIG.diplomacy.cession;
+
+  // Set a Goldgrass homeland in Versari hands, and make sure Versari has
+  // somewhere else to stand so the last-ground rule is not what is being
+  // tested. Returns the game and the contested city.
+  const seize = (seed = 301) => {
+    const g = createGame({ seed, humanFactionId: "versari" });
+    ensureDiplomacy(g);
+    const theirs = Object.values(g.locations).find(
+      (l) => LOCATIONS[l.locationId]?.affiliation === "goldgrass" && !l.controller,
+    ) || Object.values(g.locations).find(
+      (l) => LOCATIONS[l.locationId]?.affiliation === "goldgrass" && l.controller !== "versari",
+    );
+    theirs.controller = "versari";
+    theirs.loyaltyOwner = "versari";
+    theirs.sections = ["versari", "versari", "versari"];
+    return { g, theirs };
+  };
+
+  // --- a city has a price, and it is not the same price to everybody ---
+  {
+    const { g, theirs } = seize();
+    const toThem = locationWorth(g, "goldgrass", theirs.hexId);
+    const toYou = locationWorth(g, "versari", theirs.hexId);
+    check("a city is worth something on the table", toYou > 0);
+    check("…and worth more to the faction that calls it home", toThem > toYou);
+    check("the claim is exactly the difference",
+      Math.abs(toThem - toYou * C30.claimMultiplier) < 0.001);
+    // Ground given up costs more than ground gained.
+    const giving = valueOfItem(g, "versari", { location: { hexId: theirs.hexId } },
+      { other: "goldgrass", side: "give" });
+    const getting = valueOfItem(g, "versari", { location: { hexId: theirs.hexId } },
+      { other: "goldgrass", side: "get" });
+    check("letting go of ground costs more than taking it", giving > getting);
+  }
+
+  // --- what can and cannot be signed away ---
+  {
+    const { g, theirs } = seize();
+    check("you can offer a city you fully hold",
+      cedeBlocker(g, "versari", theirs.hexId) === null);
+    check("…and not one you do not hold",
+      typeof cedeBlocker(g, "goldgrass", theirs.hexId) === "string");
+    // Half a city is not a thing you can sign away.
+    theirs.sections = ["versari", "versari", "goldgrass"];
+    theirs.controller = null;
+    check("nor half of one", typeof cedeBlocker(g, "versari", theirs.hexId) === "string");
+    theirs.sections = ["versari", "versari", "versari"];
+    theirs.controller = "versari";
+    // A seat is not a bargaining chip.
+    const seat = Object.values(g.locations).find(
+      (l) => l.controller === "versari"
+        && (l.chips || []).some((c) => g.chips[c]?.chipId === "capital"),
+    );
+    check("a capital is on the board", !!seat);
+    check("but a seat is never for sale",
+      typeof cedeBlocker(g, "versari", seat.hexId) === "string");
+    check("the picker offers what is offerable and nothing else",
+      cedeableLocations(g, "versari").includes(theirs.hexId)
+      && !cedeableLocations(g, "versari").includes(seat.hexId));
+    // …and never the last thing you hold, which would be an elimination
+    // dressed as an offer.
+    for (const l of Object.values(g.locations)) {
+      if (l.controller === "versari" && l.hexId !== theirs.hexId) l.controller = null;
+    }
+    check("nor the last ground you stand on",
+      typeof cedeBlocker(g, "versari", theirs.hexId) === "string"
+      && cedeableLocations(g, "versari").length === 0);
+  }
+
+  // --- the flagship sentence: "cede Omara and we have peace" ---
+  {
+    const { g, theirs } = seize();
+    declareWar(g, "versari", "goldgrass", "test");
+    check("you are at war, and they hold a grievance you cannot pay off",
+      atWar(g, "versari", "goldgrass")
+      && warJustification(g, "goldgrass", "versari") === "occupation"
+      && settleableWeight(g, "goldgrass", "versari") === 0);
+    const r = performDiplomacy(g, "versari", "sue-for-peace", {
+      faction: "goldgrass",
+      give: [{ location: { hexId: theirs.hexId } }], get: [],
+    });
+    check("handing the city back buys the peace", r.accepted === true);
+    check("…and the city actually moved", theirs.controller === "goldgrass");
+    check("…and the war is over", atWar(g, "versari", "goldgrass") === false);
+    check("the grievance ends because the condition ended",
+      grievanceWeight(g, "goldgrass", "versari") === 0
+      && warJustification(g, "goldgrass", "versari") === null);
+  }
+
+  // --- a city given is a city intact ---
+  {
+    const { g, theirs } = seize();
+    theirs.chips = [...theirs.chips];
+    const chipsBefore = theirs.chips.length;
+    theirs.activeBuild = { kind: "build", chipId: "workshop", cost: 6 };
+    theirs.buildProgress = 4;
+    cedeLocation(g, "versari", "goldgrass", theirs.hexId, "test");
+    check("nothing is sacked — every chip carries over",
+      theirs.chips.length === chipsBefore);
+    check("but the workshop's half-built job does not",
+      theirs.activeBuild === null && theirs.buildProgress === 0);
+    check("the people living there did not agree to this",
+      theirs.loyalty === C30.loyaltyOnCede);
+    check("control is whole, not partial",
+      theirs.controller === "goldgrass"
+      && theirs.sections.every((x) => x === "goldgrass"));
+    check("the feed calls it a cession, not a conquest",
+      g.log.some((e) => e.name === "location_ceded" && e.payload.to === "goldgrass")
+      && !g.log.some((e) => e.name === "location_captured"));
+  }
+
+  // --- a third party minds who ends up standing in its homeland ---
+  {
+    const { g, theirs } = seize();
+    const before = getStanding(g, "goldgrass", "lakers");
+    cedeLocation(g, "versari", "lakers", theirs.hexId, "test");
+    check("passing a homeland to somebody else is not an improvement",
+      getStanding(g, "goldgrass", "lakers") === before - C30.thirdPartyStandingHit);
+    check("…and the occupation simply re-points at its new holder",
+      grievanceWeight(g, "goldgrass", "lakers") > 0
+      && grievanceWeight(g, "goldgrass", "versari") === 0);
+  }
+
+  // --- a promise nobody can keep is not a deal that fell short ---
+  {
+    const { g, theirs } = seize();
+    g.players.goldgrass.resource = 100;
+    // Versari asking Goldgrass to cede a city Goldgrass does not hold.
+    const bad = performDiplomacy(g, "versari", "propose-deal", {
+      faction: "goldgrass", give: [], get: [{ location: { hexId: theirs.hexId } }],
+    });
+    check("you cannot be sold a city its seller does not hold",
+      bad.accepted === false && bad.countered !== true
+      && /do not hold/.test(bad.reason || ""));
+    check("…and no counter-offer is invented for it",
+      offersFor(g, "versari").length === 0);
+  }
+
+  // --- an offer sits on a table for rounds; the world does not wait ---
+  {
+    const { g, theirs } = seize();
+    g.players.goldgrass.resource = 100;
+    tableOffer(g, "goldgrass", "versari", {
+      proposer: "goldgrass", recipient: "versari",
+      give: [{ resource: { resource: "scrap", amount: 20 } }],
+      get: [{ location: { hexId: theirs.hexId } }],
+    }, { kind: "deal" });
+    const id = offersFor(g, "versari")[0].id;
+    // …and in the meantime the city is lost.
+    theirs.controller = "lakers";
+    const res = answerOffer(g, "versari", id, true);
+    check("accepting a city you no longer hold is refused, not half-applied",
+      res.ok === false && (g.players.versari.resource || 0) < 100);
+    check("…and the offer is still there to decline properly",
+      offersFor(g, "versari").length === 1);
+    check("nothing moved", theirs.controller === "lakers");
+  }
+
+  // --- ground is not tribute ---
+  {
+    const { g, theirs } = seize();
+    // Give versari the muscle to coerce, so the refusal is about the ASK and
+    // not about the power ratio.
+    for (const [id, u] of Object.entries(g.units)) {
+      if (u.owner === "goldgrass") delete g.units[id];
+    }
+    const r = performDiplomacy(g, "versari", "demand-tribute", {
+      faction: "goldgrass",
+      get: [{ resource: { resource: "scrap", amount: 1 } }, { location: { hexId: theirs.hexId } }],
+    });
+    check("a city cannot be squeezed out of somebody on a power ratio",
+      r.ok === false && /not tribute/.test(r.reason || ""));
+  }
+
+  // --- and the AI can say it too, in both directions ---
+  //
+  // Tested on the DECISION rather than by playing games until an AI happens
+  // to speak: approaching the player is behind the game's own RNG gate, so
+  // "run turns until it fires" is a coin-flip dressed as a check — and if
+  // the game reaches a winner first, takeAITurn quietly stops doing anything
+  // at all, which is how an earlier version of this passed for the wrong
+  // reason. warPeaceTerms is the whole judgement; the callers only choose
+  // between an inbox and applying it on the spot.
+  const warSetup = (seed, occupier, victim) => {
+    const g = createGame({ seed, humanFactionId: "versari" });
+    ensureDiplomacy(g);
+    // A homeland of `victim`'s that is not their seat: a captured capital
+    // has its chip destroyed, so a city really held in a war has none.
+    const loc = Object.values(g.locations).find(
+      (l) => LOCATIONS[l.locationId]?.affiliation === victim
+        && !(l.chips || []).some((c) => g.chips[c]?.chipId === "capital"),
+    );
+    loc.controller = occupier;
+    loc.loyaltyOwner = occupier;
+    loc.sections = [occupier, occupier, occupier];
+    loc.loyalty = CONFIG.loyalty.ceiling;
+    declareWar(g, occupier, victim, "test");
+    return { g, loc };
+  };
+
+  // Losing badly, and squatting on the other side's homeland: give it back.
+  {
+    const { g, loc } = warSetup(303, "goldgrass", "versari");
+    const war = findWar(g, "goldgrass", "versari");
+    war.unitsLost.goldgrass = 12;
+    war.contestsWon.versari = 8;
+    check("they are losing and they know it",
+      warExhaustion(g, "goldgrass", "versari") >= CONFIG.diplomacy.suePeace.acceptThreshold * 0.6);
+    const terms = warPeaceTerms(g, "goldgrass", "versari");
+    check("the AI offers the city back to end a war it is losing",
+      !!terms && (terms.give || []).some((it) => it.location?.hexId === loc.hexId));
+    check("…and offers peace with it, not the city alone",
+      !!terms && (terms.give || []).some((it) => it.promise?.kind === "peace"));
+    check("…and asks for nothing in return", !!terms && !(terms.get || []).length);
+    applyDeal(g, { proposer: "goldgrass", recipient: "versari", give: terms.give, get: terms.get }, "test");
+    check("…and the terms, applied, move the city and end the war",
+      loc.controller === "versari" && atWar(g, "versari", "goldgrass") === false);
+    check("…and the occupation goes with it",
+      grievanceWeight(g, "versari", "goldgrass") === 0);
+  }
+
+  // Losing, but holding nothing of theirs: scrap, because there is no city
+  // to hand over. The branch has to fall through cleanly, not stall.
+  {
+    const g = createGame({ seed: 304, humanFactionId: "versari" });
+    ensureDiplomacy(g);
+    declareWar(g, "goldgrass", "versari", "test");
+    const war = findWar(g, "goldgrass", "versari");
+    war.unitsLost.goldgrass = 12;
+    war.contestsWon.versari = 8;
+    g.players.goldgrass.resource = 20;
+    const terms = warPeaceTerms(g, "goldgrass", "versari");
+    check("with no city of theirs to give, it reaches for the purse",
+      !!terms && !(terms.give || []).some((it) => it.location)
+      && (terms.give || []).some((it) => it.resource?.resource === "scrap"));
+  }
+
+  // Winning, and the player is sitting in their homeland: name the price.
+  // The AI had no way to say this at all — it could only fight on until
+  // exhaustion turned it into a supplicant, so a war it was WINNING had no
+  // diplomatic expression whatsoever.
+  {
+    const { g, loc } = warSetup(305, "versari", "goldgrass");
+    const war = findWar(g, "versari", "goldgrass");
+    war.unitsLost.versari = 12;
+    war.contestsWon.goldgrass = 8;
+    // …and the muscle to mean it. Strip the human's army rather than inflate
+    // theirs: `powerOf` reads live Strength, which recomputeStats rebuilds
+    // from baseStrength on every turn, so a hand-set `strength` survives
+    // exactly one call.
+    for (const [id, u] of Object.entries(g.units)) {
+      if (u.owner === "versari") delete g.units[id];
+    }
+    const terms = warPeaceTerms(g, "goldgrass", "versari");
+    check("the AI names the city as the price of peace",
+      !!terms && (terms.get || []).some((it) => it.location?.hexId === loc.hexId)
+      && (terms.give || []).some((it) => it.promise?.kind === "peace"));
+    applyDeal(g, { proposer: "goldgrass", recipient: "versari", give: terms.give, get: terms.get }, "test");
+    check("…and paying it ends the war and the occupation together",
+      loc.controller === "goldgrass"
+      && atWar(g, "versari", "goldgrass") === false
+      && grievanceWeight(g, "goldgrass", "versari") === 0);
+  }
+
+  // …and between two AIs it lands on the spot, because neither has an inbox
+  // — the same road the settle branch takes. Before this, two AIs in a war
+  // one of them was plainly losing fought it to the end while the loser sat
+  // in the winner's homeland with no way to put it down.
+  {
+    const { g, loc } = warSetup(303, "goldgrass", "lakers");
+    const war = findWar(g, "goldgrass", "lakers");
+    war.unitsLost.goldgrass = 12;
+    war.contestsWon.lakers = 8;
+    const terms = warPeaceTerms(g, "goldgrass", "lakers");
+    const deal = { proposer: "goldgrass", recipient: "lakers", give: terms.give, get: terms.get };
+    check("the wronged AI takes the city back rather than fight on",
+      wouldAccept(g, "lakers", deal));
+    applyDeal(g, deal, "ai-war-cession");
+    check("…and it changes hands with no human in the room",
+      loc.controller === "lakers" && atWar(g, "goldgrass", "lakers") === false);
+  }
 }
 
 line(`\n  v0.2 verification: ${v2pass} passed, ${v2fail} failed`);

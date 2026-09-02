@@ -9,30 +9,47 @@
 // expansion appetite). These are the §18.4.2 starter-roster dials, inline
 // here in the engine registry (NEVER content/) and tunable. `aggression`
 // 0..1 is the numeric spine of Menace scoring and Tolerance.
+// `capital` is the Location a faction starts holding — set explicitly per
+// faction rather than derived, so it is a design decision rather than a
+// side effect of strategicValue ordering. All four capitals are deliberately
+// the same tier (see LOCATIONS below), so nobody opens ahead on garrison,
+// chip slots, production or VP.
+//
+// `unitNames` is the formation roster a faction musters from — setup.js walks
+// it in order, so a faction's units come up named rather than as
+// "<Faction> unit", which is what every unit in the game was called. The four
+// major rosters are the authored ones from content/unit-names.csv (that sheet
+// is legacy and was wired to nothing); the minors' are written to the same
+// brief. Cycling past the end suffixes a numeral rather than repeating a name
+// outright.
 export const FACTIONS = {
   versari: {
-    id: "versari", name: "Versari Korad", color: "#3a7d44", affiliatedLocations: ["korad", "dambar"],
+    id: "versari", name: "Versari Korad", color: "#3a7d44", affiliatedLocations: ["korad", "dambar", "runaway"], capital: "korad",
     tier: "major", scope: "global", playable: true,
     temperament: "schemer", aggression: 0.4, trust: 0.55, grudge: 0.4, sociability: 0.8,
     victoryLean: "diplomacy", expansion: 0.5,
+    unitNames: ["Adjunct Corps", "Retrieval Units", "Dambaran Blades", "Korad Envoys"],
   },
   goldgrass: {
-    id: "goldgrass", name: "Goldgrass Coalition", color: "#d8a72b", affiliatedLocations: ["kansit", "omara"],
+    id: "goldgrass", name: "Goldgrass Coalition", color: "#d8a72b", affiliatedLocations: ["kansit", "omara", "witcha"], capital: "kansit",
     tier: "major", scope: "global", playable: true,
     temperament: "pacifist", aggression: 0.1, trust: 0.9, grudge: 0.25, sociability: 0.95,
     victoryLean: "diplomacy", expansion: 0.3,
+    unitNames: ["Grain Guard", "Silo Watch", "Coalition Levies", "Flatland Riders"],
   },
   lakers: {
-    id: "lakers", name: "Grand Lakers", color: "#21406e", affiliatedLocations: ["chigan", "droit"],
+    id: "lakers", name: "Grand Lakers", color: "#21406e", affiliatedLocations: ["droit", "chigan", "dulut"], capital: "droit",
     tier: "major", scope: "global", playable: true,
     temperament: "warlord", aggression: 0.9, trust: 0.6, grudge: 0.7, sociability: 0.2,
     victoryLean: "conquest", expansion: 0.9,
+    unitNames: ["Shore Crew", "Lake Wardens", "Rekoner Guard", "Iron Fleet Marines"],
   },
   plainers: {
-    id: "plainers", name: "Free Plainers", color: "#c43b35", affiliatedLocations: ["the-shelf", "tin-town"],
+    id: "plainers", name: "Free Plainers", color: "#c43b35", affiliatedLocations: ["tin-town", "the-shelf", "linkin"], capital: "tin-town",
     tier: "major", scope: "global", playable: true,
     temperament: "opportunist", aggression: 0.5, trust: 0.3, grudge: 0.3, sociability: 0.65,
     victoryLean: "opportunist", expansion: 0.6,
+    unitNames: ["Dustriders", "Scrap Runners", "Flatwind Raiders", "Shortgrass Rovers"],
   },
 };
 
@@ -43,6 +60,14 @@ export const FACTIONS = {
 // kin (warm) | rival (cold) | foil (wary) seeds default standing toward
 // the associated major. Not added to FACTIONS so the default 4-major
 // headless game (Object.keys(FACTIONS)) is unchanged.
+//
+// `homeLocation` is optional and names the Location a minor actually holds
+// in the fiction. A minor that declares one seats THERE whenever that
+// Location made the board and nobody already holds it; the others (and this
+// one, when its home is off a small board) fall back to the proximity rule
+// in setup.js. Only the Dambarans have one so far: they hold Dambar, and
+// seating them at whatever neutral happened to sit nearest the Versari put
+// them in a random city while their own stood empty.
 export const MINOR_FACTIONS = {
   tempest: {
     id: "tempest", name: "Clan Tempest", color: "#4a6fa5",
@@ -50,6 +75,7 @@ export const MINOR_FACTIONS = {
     associatedMajor: "lakers", relationship: "rival",
     temperament: "warlord", aggression: 0.8, trust: 0.6, grudge: 0.7, sociability: 0.2,
     victoryLean: "conquest", expansion: 0.55,
+    unitNames: ["Storm Crew", "Tempest Outriders", "Squall Wardens", "Breakwater Hands"],
   },
   croppers: {
     id: "croppers", name: "The Croppers", color: "#c9b24e",
@@ -57,6 +83,7 @@ export const MINOR_FACTIONS = {
     associatedMajor: "goldgrass", relationship: "kin",
     temperament: "pacifist", aggression: 0.12, trust: 0.85, grudge: 0.25, sociability: 0.8,
     victoryLean: "economy", expansion: 0.3,
+    unitNames: ["Threshers", "Field Hands", "Harvest Guard", "Furrow Watch"],
   },
   steeltraders: {
     id: "steeltraders", name: "The Steel Traders", color: "#a8584f",
@@ -64,13 +91,15 @@ export const MINOR_FACTIONS = {
     associatedMajor: "plainers", relationship: "rival",
     temperament: "opportunist", aggression: 0.55, trust: 0.3, grudge: 0.35, sociability: 0.5,
     victoryLean: "conquest", expansion: 0.5,
+    unitNames: ["Caravan Guard", "Ledger Men", "Tariff Enforcers", "Road Factors"],
   },
   dambarans: {
     id: "dambarans", name: "The Dambarans", color: "#5fa06e",
     tier: "minor", scope: "local", playable: false,
-    associatedMajor: "versari", relationship: "foil",
+    associatedMajor: "versari", relationship: "foil", homeLocation: "dambar",
     temperament: "honorable", aggression: 0.45, trust: 0.92, grudge: 0.5, sociability: 0.5,
     victoryLean: "conquest", expansion: 0.4,
+    unitNames: ["Old Dambar Line", "Archive Guard", "Terrace Watch", "Signal Corps"],
   },
 };
 
@@ -84,21 +113,55 @@ export function factionDef(fid) {
 // strategicValue drives garrison Strength and chip slots (see config).
 // affiliation: a faction id, or null for unaffiliated.
 // production: [min, max] scrap/turn — PROVISIONAL ranges by value.
-// vpReward: VP banked by the player on FIRST capture of this Location.
-// One-shot — recaptures don't grant it again (loc.vpAwarded gates it).
-// Total board VP = 4·1 (med) + 4·2 (high) + 2·3 (veryHigh) = 18, so
-// the win threshold of 12 needs roughly two-thirds of the map.
+// vpReward: what this Location is worth to whoever HOLDS it. Not a bounty:
+// VP is held, not banked (victory.js), so the total rises when you take the
+// place and falls when you lose it, at half value below half Loyalty. There
+// is no `loc.vpAwarded` and no first-capture one-shot — both went with the VP
+// redesign, and nothing reads a VP threshold any more; the win condition is
+// Dominion. Total board VP = 3·1 (med) + 5·2 (high) + 2·3 (veryHigh) = 19.
+// `flavour` and `basis` are the authored lines from content/locations.csv —
+// a sheet that, like unit-names.csv before it, was wired to nothing: nineteen
+// cities on the board and not a word of the prose written for them reaching a
+// player. Folded in here so the registry stays the single source the adapter
+// reads. Only the ten Locations that sheet covers carry them; the nine third
+// homes and outposts added later have none written yet and render without.
 export const LOCATIONS = {
-  korad: { id: "korad", name: "Korad", strategicValue: "high", affiliation: "versari", production: [3, 4], vpReward: 2 },
-  dambar: { id: "dambar", name: "Dambar", strategicValue: "veryHigh", affiliation: "versari", production: [4, 5], vpReward: 3 },
-  kansit: { id: "kansit", name: "Kansit", strategicValue: "high", affiliation: "goldgrass", production: [3, 4], vpReward: 2 },
-  omara: { id: "omara", name: "Omara", strategicValue: "medium", affiliation: "goldgrass", production: [2, 3], vpReward: 1 },
-  chigan: { id: "chigan", name: "Chigan", strategicValue: "veryHigh", affiliation: "lakers", production: [4, 5], vpReward: 3 },
-  droit: { id: "droit", name: "Droit", strategicValue: "high", affiliation: "lakers", production: [3, 4], vpReward: 2 },
-  "the-shelf": { id: "the-shelf", name: "The Shelf", strategicValue: "high", affiliation: "plainers", production: [3, 4], vpReward: 2 },
-  "tin-town": { id: "tin-town", name: "Tin Town", strategicValue: "medium", affiliation: "plainers", production: [2, 3], vpReward: 1 },
-  concordan: { id: "concordan", name: "Concordan", strategicValue: "medium", affiliation: null, production: [2, 3], vpReward: 1 },
-  erport: { id: "erport", name: "Erport", strategicValue: "medium", affiliation: null, production: [2, 3], vpReward: 1 },
+  korad: { id: "korad", name: "Korad", strategicValue: "high", affiliation: "versari", production: [3, 3], vpReward: 2, basis: "Boulder, CO", flavour: "Where the Versari keep their best work and their worst secrets." },
+  dambar: { id: "dambar", name: "Dambar", strategicValue: "veryHigh", affiliation: "versari", production: [4, 5], vpReward: 3, basis: "Denver, CO", flavour: "The continent's brain. It knows this about itself." },
+  kansit: { id: "kansit", name: "Kansit", strategicValue: "high", affiliation: "goldgrass", production: [3, 3], vpReward: 2, basis: "Kansas City", flavour: "Every trade route on the plains runs through here eventually. The city charges accordingly." },
+  omara: { id: "omara", name: "Omara", strategicValue: "medium", affiliation: "goldgrass", production: [2, 3], vpReward: 1, basis: "Omaha", flavour: "Far enough north to feel the Laker wind. Close enough to Dambar to feel the other kind." },
+  chigan: { id: "chigan", name: "Chigan", strategicValue: "veryHigh", affiliation: "lakers", production: [4, 5], vpReward: 3, basis: "Chicago", flavour: "The factories never fully stopped. Neither did the people who depend on them." },
+  droit: { id: "droit", name: "Droit", strategicValue: "high", affiliation: "lakers", production: [3, 3], vpReward: 2, basis: "Detroit", flavour: "Whoever holds the straits holds the conversation between east and west." },
+  "the-shelf": { id: "the-shelf", name: "The Shelf", strategicValue: "high", affiliation: "plainers", production: [3, 4], vpReward: 2, basis: "New settlement", flavour: "Someone built here because it was defensible. Someone else is always trying to prove them wrong." },
+  // The four capitals -- korad, kansit, droit, tin-town -- are deliberately
+  // identical: all `high` (same garrison, chip slots and VP) and all with a
+  // FIXED production of 3 rather than a [3,4] roll, so every faction's opening
+  // is the same rather than merely the same in expectation. Tin Town was
+  // raised medium -> high to join them. Non-capital Locations keep their
+  // ranges.
+  "tin-town": { id: "tin-town", name: "Tin Town", strategicValue: "high", affiliation: "plainers", production: [3, 3], vpReward: 2, basis: "New settlement", flavour: "It looks like nothing. That's the first mistake people make about it." },
+  concordan: { id: "concordan", name: "Concordan", strategicValue: "medium", affiliation: null, production: [2, 3], vpReward: 1, flavour: "Unaffiliated by choice" },
+  erport: { id: "erport", name: "Erport", strategicValue: "medium", affiliation: null, production: [2, 3], vpReward: 1, flavour: "The last stop before open water. Or the first" },
+
+  // Third homes — one per faction, so the group stays a whole fairness group
+  // (board.js generateLayout admits them all or none).
+  runaway: { id: "runaway", name: "Runaway", strategicValue: "high", affiliation: "versari", production: [3, 4], vpReward: 2 },
+  witcha: { id: "witcha", name: "Witcha", strategicValue: "high", affiliation: "goldgrass", production: [3, 4], vpReward: 2 },
+  dulut: { id: "dulut", name: "Dulut", strategicValue: "high", affiliation: "lakers", production: [3, 4], vpReward: 2 },
+  linkin: { id: "linkin", name: "Linkin", strategicValue: "high", affiliation: "plainers", production: [3, 4], vpReward: 2 },
+
+  // Sign-named settlements. These grew up around ROAD signage that the
+  // survivors read as a place name — REST AREA, LAST GAS, SCENIC OVERLOOK, NO
+  // SERVICES, DETOUR — which is why `noRailTerminus` is set on every one of
+  // them: a railway never had reason to stop at a lay-by. A line may still run
+  // THROUGH their hex on its way somewhere that matters.
+  restaria: { id: "restaria", name: "Restaria", strategicValue: "medium", affiliation: null, production: [2, 3], vpReward: 1, noRailTerminus: true },
+  lastgas: { id: "lastgas", name: "Lastgas", strategicValue: "medium", affiliation: null, production: [2, 3], vpReward: 1, noRailTerminus: true },
+  overlook: { id: "overlook", name: "Overlook", strategicValue: "medium", affiliation: null, production: [2, 3], vpReward: 1, noRailTerminus: true },
+  // The first `low` Locations in the set: one chip slot, a garrison of 4, and
+  // little to lose. Cheap to take and cheap to give up again.
+  nosservis: { id: "nosservis", name: "Nosservis", strategicValue: "low", affiliation: null, production: [1, 2], vpReward: 1, noRailTerminus: true },
+  detor: { id: "detor", name: "Detor", strategicValue: "low", affiliation: null, production: [1, 2], vpReward: 1, noRailTerminus: true },
 };
 
 // Upgrade chips — §20 makes these the whole economy: built at a Location
@@ -132,7 +195,7 @@ export const CHIPS = {
   // --- unit chips: Movement line ---
   navigator: { id: "navigator", name: "Navigator", kind: "unit", statType: "movement", slots: 1, techLevel: 1, cost: 3, movement: 1, buildCost: 3, loyaltyReq: 0, upgradesTo: "troop-carrier", desc: "+1 Movement" },
   "troop-carrier": { id: "troop-carrier", name: "Troop Carrier", kind: "unit", statType: "movement", slots: 1, techLevel: 2, cost: 6, movement: 2, buildCost: 6, loyaltyReq: 3, desc: "+2 Movement — the whole squad rides" },
-  landship: { id: "landship", name: "Landship", kind: "unit", statType: "movement", slots: 2, techLevel: 3, cost: 12, movement: 3, buildCost: 12, loyaltyReq: 6, upkeep: 2, ignoresTerrain: true, railIncompatible: true, desc: "+3 Movement; ignores terrain (forest costs 1, mountains do not halt)" },
+  landship: { id: "landship", name: "Landship", kind: "unit", statType: "movement", slots: 2, techLevel: 3, cost: 12, movement: 3, buildCost: 12, loyaltyReq: 6, upkeep: 2, ignoresTerrain: true, railIncompatible: true, desc: "+3 Movement; rough ground plays road-grade (forest 1, mountains 2, no halt)" },
   // --- unit chips: Vision line (no T3 — sight is an area; docs/chip-set-v0.1.md) ---
   "field-glass": { id: "field-glass", name: "Field Glass", kind: "unit", statType: "vision", slots: 1, techLevel: 1, cost: 3, vision: 1, buildCost: 3, loyaltyReq: 0, upgradesTo: "spotter-net", desc: "+1 Vision range" },
   "spotter-net": { id: "spotter-net", name: "Spotter Net", kind: "unit", statType: "vision", slots: 1, techLevel: 2, cost: 6, vision: 1, detection: 1, buildCost: 6, loyaltyReq: 3, desc: "+1 Vision and +1 Detection — finds what hides" },
@@ -142,7 +205,10 @@ export const CHIPS = {
   works: { id: "works", name: "Works", kind: "location", slots: 1, techLevel: 1, cost: 4, buildRate: 1, buildCost: 4, loyaltyReq: 0, desc: "+1 build progress each turn toward this location's active build" },
   // --- location chips: research ---
   labs: { id: "labs", name: "Labs", kind: "location", slots: 1, techLevel: 1, cost: 3, research: 1, buildCost: 3, loyaltyReq: 0, upgradesTo: "advanced-lab", desc: "+1 Research while controlled" },
-  "advanced-lab": { id: "advanced-lab", name: "Advanced Lab", kind: "location", slots: 1, techLevel: 2, cost: 6, research: 2, buildCost: 6, loyaltyReq: 3, upkeep: 1, desc: "+2 Research while controlled (upkeep 1)" },
+  // techLevelReq overrides the tier gate (which would ask for L3): the
+  // Advanced Lab is what produces research, so locking it behind the level it
+  // helps you reach is a bootstrap nobody can pay.
+  "advanced-lab": { id: "advanced-lab", name: "Advanced Lab", kind: "location", slots: 1, techLevel: 2, techLevelReq: 2, cost: 6, research: 2, buildCost: 6, loyaltyReq: 3, upkeep: 1, desc: "+2 Research while controlled (upkeep 1)" },
   // --- location chips: defense ---
   "defense-turrets": { id: "defense-turrets", name: "Defense Turrets", kind: "location", slots: 1, techLevel: 1, cost: 4, garrison: 2, buildCost: 4, loyaltyReq: 0, upgradesTo: "stronghold", desc: "+2 garrison Strength" },
   stronghold: { id: "stronghold", name: "Stronghold", kind: "location", slots: 1, techLevel: 2, cost: 7, garrison: 4, buildCost: 7, loyaltyReq: 3, upkeep: 1, desc: "+4 garrison Strength (upkeep 1)" },
@@ -155,12 +221,18 @@ export const CHIPS = {
   broadcast: { id: "broadcast", name: "Broadcast", kind: "location", slots: 1, techLevel: 2, cost: 7, localInfluence: 2, influenceRange: 1, buildCost: 7, loyaltyReq: 3, desc: "+2 Influence and +1 Influence range" },
   "civic-hall": { id: "civic-hall", name: "Civic Hall", kind: "location", slots: 1, techLevel: 2, cost: 5, loyaltyRise: 1, noLoyaltyDecay: true, buildCost: 5, loyaltyReq: 3, desc: "Loyalty rises +1 extra while garrisoned and never decays while neglected" },
   // --- location chips: utility ---
-  "recon-team": { id: "recon-team", name: "Recon Team", kind: "location", slots: 1, techLevel: 1, cost: 3, buildCost: 3, loyaltyReq: 0, encounterRedraws: 1, desc: "Discard a drawn encounter and draw again" },
   "logistics-hub": { id: "logistics-hub", name: "Logistics Hub", kind: "location", slots: 2, techLevel: 3, cost: 12, buildCost: 12, loyaltyReq: 6, upkeep: 1, actionBonus: 1, desc: "+1 Action each turn (rare, 2-slot; upkeep 1)" },
+  // --- blockade chips (docs/rail-road-blockade-design.md §3.2) ---
+  // kind "blockade" installs into a COMPLETED blockade, never a Location or a
+  // unit, and is funded by the same settlement draw that raised the structure
+  // (§3.4). Excluded from the Location build menu by that kind.
+  palisade: { id: "palisade", name: "Palisade", kind: "blockade", slots: 1, techLevel: 1, cost: 4, blockadeDefense: 3, buildCost: 4, loyaltyReq: 0, desc: "+3 blockade defense" },
+  "signal-mast": { id: "signal-mast", name: "Signal Mast", kind: "blockade", slots: 1, techLevel: 1, cost: 3, blockadeVision: 1, blockadeDetection: 1, buildCost: 3, loyaltyReq: 0, desc: "+1 Vision and +1 Detection from this blockade — an unmasted blockade cannot stop what it cannot see" },
+  "toll-booth": { id: "toll-booth", name: "Toll Booth", kind: "blockade", slots: 1, techLevel: 2, cost: 4, output: 2, buildCost: 4, loyaltyReq: 0, desc: "+2 scrap each Upkeep — a fortified chokepoint taxing what passes" },
   // --- special unit chips: buildable (docs/chip-set-v0.1.md) ---
   // No statType — specials compete for bay slots but not stat families.
   "field-medics": { id: "field-medics", name: "Field Medics", kind: "unit", slots: 1, techLevel: 2, cost: 4, buildCost: 4, loyaltyReq: 3, healAnywhere: 1, desc: "Heals +1 at Upkeep anywhere, not only on a held Location" },
-  pathfinders: { id: "pathfinders", name: "Pathfinders", kind: "unit", slots: 1, techLevel: 2, cost: 5, buildCost: 5, loyaltyReq: 3, ignoresTerrain: true, desc: "Forest costs 1 to enter; mountains don't halt the move" },
+  pathfinders: { id: "pathfinders", name: "Pathfinders", kind: "unit", slots: 1, techLevel: 2, cost: 5, buildCost: 5, loyaltyReq: 3, ignoresTerrain: true, desc: "Rough ground plays road-grade: forest 1, mountains 2 and no halt" },
   rearguard: { id: "rearguard", name: "Rearguard", kind: "unit", slots: 1, techLevel: 2, cost: 4, buildCost: 4, loyaltyReq: 3, retreatBonus: 1, routSpillImmune: true, desc: "On losing a contest, may retreat 2 hexes; never takes rout spill damage" },
   trailwise: { id: "trailwise", name: "Trailwise", kind: "unit", slots: 1, techLevel: 1, cost: 3, buildCost: 3, loyaltyReq: 0, encounterRedraws: 1, desc: "Discard an encounter this unit triggers and draw again" },
   "entrenching-tools": { id: "entrenching-tools", name: "Entrenching Tools", kind: "unit", slots: 1, techLevel: 1, cost: 3, buildCost: 3, loyaltyReq: 0, fortifyBonus: 1, desc: "+1 to this unit's fortify bonus" },
@@ -205,7 +277,6 @@ export const CHIP_SKINS = {
   beacon: { versari: "Wire Service", goldgrass: "Market Fair", lakers: "Radio Tower", plainers: "Circuit Riders" },
   broadcast: { versari: "Signal Authority", goldgrass: "County Fair", lakers: "Clear Channel", plainers: "Camp Meeting" },
   "civic-hall": { versari: "The Ministry", goldgrass: "Grange Hall", lakers: "Company Store", plainers: "Watering Hole" },
-  "recon-team": { versari: "Field Agents", goldgrass: "Town Criers", lakers: "Block Captains", plainers: "Trail Scouts" },
 };
 
 // Resolve a chip's display name for a faction — the skin if one exists,
@@ -217,11 +288,38 @@ export function chipDisplayName(chipId, factionId) {
   return CHIP_SKINS[chipId]?.[factionId] || CHIPS[chipId]?.name || chipId;
 }
 
+// docs/rail-road-blockade-design.md §2.1 — a unit carrying a rail-incompatible
+// chip cannot use rail. The rule is "anything bulky enough to need two chip
+// slots is too bulky to put on a train", DERIVED from `slots` rather than read
+// off a hand-set flag, so a future 2-slot unit chip inherits it without anyone
+// remembering to tag it. The explicit `railIncompatible: true` on Bombard and
+// Landship stays as documentation and is asserted against this in the harness.
+// Location chips are exempt whatever their size — they never ride a unit.
+export function chipBlocksRail(chipId) {
+  const def = CHIPS[chipId];
+  return !!def && def.kind === "unit" && (def.slots || 1) >= 2;
+}
+
 // The Capital — a special predefined chip, one per player. Not sold in
 // the Market; placed on each faction's starting location at setup.
 export const CAPITAL = {
   id: "capital", name: "Capital", kind: "location", slots: 1, special: true,
   desc: "Decay-immune; +2 garrison Strength, +2 scrap production",
+  // Placed at setup, destroyed when the Location falls (contest.js
+  // captureLocation) — and REBUILDABLE, once, by a faction that still holds
+  // ground but has no seat left anywhere. Losing your capital is meant to be a
+  // catastrophe, not an amputation.
+  //
+  // Priced at 12: the most expensive thing in the game (level with `bombard`
+  // and `landship`), so re-seating costs a full late-game build and can never
+  // be a casual move. Deliberately NOT gated on tech or Loyalty — a faction
+  // that has just lost its capital is precisely the one least able to clear a
+  // tech bar or hold a freshly-taken city at high Loyalty, and a recovery
+  // option that only the strong can take is not a recovery option.
+  //
+  // The "no capital anywhere" condition is what stops this being a relocation
+  // tool: you cannot move your seat to a safer city while you still have one.
+  buildCost: 12, techLevel: 1, loyaltyReq: 0,
 };
 
 // Look up the definition behind a chip instance — covers both the

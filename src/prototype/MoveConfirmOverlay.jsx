@@ -27,7 +27,46 @@ function getHexCenter(hexId) {
   return getCenter(document.querySelector(`[data-hex="${CSS.escape(hexId)}"]`));
 }
 
+// Copy the real token's appearance off the DOM rather than rebuilding it here.
+// The board applies its own zoom transform, so a hardcoded size would drift out
+// of step with the unit it is previewing; reading the live element keeps the
+// preview the same size and the same art at every zoom level. Returns null for
+// factions still on the disc token, which falls through to the disc preview.
+function spritePreviewStyle(uid) {
+  if (typeof document === "undefined") return null;
+  const real = document.querySelector(`[data-unit-uid="${CSS.escape(uid)}"]`);
+  const sprite = real?.parentElement?.querySelector("[data-unit-sprite]");
+  if (!sprite) return null;
+  const r = sprite.getBoundingClientRect();
+  const cs = getComputedStyle(sprite);
+  return {
+    width: r.width,
+    height: r.height,
+    backgroundImage: cs.backgroundImage,
+    backgroundSize: cs.backgroundSize,
+    backgroundPositionX: cs.backgroundPositionX,
+    backgroundPositionY: cs.backgroundPositionY,
+    backgroundRepeat: "no-repeat",
+    // The preview stands on the destination hex, so put the sprite's anchor on
+    // the point we were handed — same rule the board token follows.
+    transform: cs.transform === "none" ? undefined : cs.transform,
+  };
+}
+
 function PreviewToken({ unit, color, x, y, size = 32 }) {
+  const sprite = unit?.uid ? spritePreviewStyle(unit.uid) : null;
+  if (sprite) {
+    return (
+      <div style={{
+        position: "fixed",
+        left: x, top: y,
+        pointerEvents: "none",
+        zIndex: 51,
+        filter: `drop-shadow(0 0 6px ${C.holo}) drop-shadow(0 2px 3px rgba(0,0,0,0.6))`,
+        ...sprite,
+      }} />
+    );
+  }
   const half = size / 2;
   return (
     <div style={{
@@ -49,7 +88,7 @@ function PreviewToken({ unit, color, x, y, size = 32 }) {
   );
 }
 
-export default function MoveConfirmOverlay({ unit, originHexId, destHexId, pathHexIds, ownerColor, onConfirm, onCancel, onSkipFuture }) {
+export default function MoveConfirmOverlay({ unit, originHexId, destHexId, pathHexIds, ownerColor, trespass, onConfirm, onCancel, onSkipFuture }) {
   useEscClose(onCancel);
   const [skip, setSkip] = useState(false);
   const [pts, setPts] = useState(null); // screen-space centres along the route
@@ -110,8 +149,8 @@ export default function MoveConfirmOverlay({ unit, originHexId, destHexId, pathH
 
   // Prompt: small, anchored to the right of the ghost (origin), flips
   // left only if it would clip the viewport right edge.
-  const promptW = 138;
-  const promptH = 56;
+  const promptW = trespass ? 186 : 138;
+  const promptH = trespass ? 96 : 56;
   const gap = 30;
   const vw = (typeof window !== "undefined" ? window.innerWidth : 1440);
   const vh = (typeof window !== "undefined" ? window.innerHeight : 900);
@@ -276,6 +315,37 @@ export default function MoveConfirmOverlay({ unit, originHexId, destHexId, pathH
           }}
           className="hud-int"
         >×</button>
+
+        {/* §11 — the trespass cost, before the move. `vp-and-actions-design.md`
+            §7 listed this as "possible polish later"; it is not polish. The
+            ladder is [0,1,2] by consecutive round and a player can only plan
+            around it if they see it before committing. Losing standing to a
+            rule you could not read is the complaint that sticks to a territory
+            system however well tuned it is. */}
+        {trespass && (
+          <div style={{
+            marginBottom: 6, padding: "5px 6px", borderRadius: 3,
+            background: "rgba(210,145,60,0.10)",
+            border: "1px solid rgba(210,145,60,0.5)",
+            fontFamily: C.font, fontSize: 9, letterSpacing: 0.3, lineHeight: 1.4,
+            color: "#e8b467",
+          }}>
+            <div style={{ fontWeight: 700, letterSpacing: 1.2, textTransform: "uppercase", marginBottom: 2 }}>
+              Their ground
+            </div>
+            {trespass.alreadyCited
+              ? <span>Already cited this round — no further cost.</span>
+              : trespass.standingHit === 0 && trespass.menaceHit === 0
+              ? <span>A warning only, this time. Staying costs more each round.</span>
+              : <span>
+                  Costs {trespass.standingHit} standing with them
+                  {trespass.menaceHit ? `, +${trespass.menaceHit} Menace` : ""}
+                  {trespass.distrustful
+                    ? " — they are past courtesies."
+                    : ` — round ${trespass.streak} of staying.`}
+                </span>}
+          </div>
+        )}
 
         {/* Confirm button — shorter (auto-width, centred) */}
         <button onClick={confirm} className="hud-int" style={{

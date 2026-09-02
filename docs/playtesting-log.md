@@ -1,5 +1,13 @@
 # Playtesting Log
 
+> **NOT ABOUT THIS GAME below the template.** The recorded sessions are from
+> an earlier card-and-building prototype: `militia_bunkhouse`,
+> `vehicle_garage` and `passDef` appear in them and **zero of those strings
+> exist anywhere in `src/`**. The template at the top is still the right
+> shape for a new session. For current findings read
+> `docs/playtest-2026-08-15-findings.md`, `docs/scoreboard-2026-08-23.md` and
+> the two 2026-08-23 briefs.
+
 Running notes from playtest sessions. Add a new section for each session.
 
 ## Template

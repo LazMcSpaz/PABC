@@ -1,0 +1,26 @@
+{
+  "name": "plainer_infantry_std_str",
+  "frameWidth": 192,
+  "frameHeight": 192,
+  "frames": 10,
+  "fps": 3,
+  "loop": true,
+  "anchor": [
+    96,
+    150
+  ],
+  "rows": [
+    "s",
+    "se",
+    "e",
+    "ne",
+    "n",
+    "nw",
+    "w",
+    "sw"
+  ],
+  "sheetWidth": 1920,
+  "sheetHeight": 1536,
+  "footprintMetres": 7.4,
+  "pixelsPerMetre": 18.3
+}

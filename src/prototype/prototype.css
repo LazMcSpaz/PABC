@@ -114,16 +114,6 @@
   transform: translateY(1px);
 }
 
-/* Corner brackets framing the board. */
-.pc-bracket {
-  position: absolute;
-  width: 28px;
-  height: 28px;
-  border: 2px solid #e8a93f;
-  opacity: 0.5;
-  pointer-events: none;
-}
-
 /* Floating windows pop in when they open. The end state matches the
  * window's own inline transform (a centring translate). */
 @keyframes pc-pop-in {
@@ -335,6 +325,31 @@
   .tech-pulse { animation: none; }
 }
 
+/* Control wheel — the third that turns over at the next Upkeep.
+ *
+ * Influence taking a section, or Loyalty losing one, used to be findable only
+ * by ending your turn and reading the feed afterwards: a warning that arrived
+ * after the thing it was warning about. The wheel now says it a turn early.
+ *
+ * Two beats, because the two directions are not the same news. Ground coming
+ * TO you swells — it fills in. Ground about to be lost blinks harder and
+ * brighter, because you have exactly one turn to walk a column back in.
+ */
+@keyframes pc-wheel-gaining {
+  0%, 100% { opacity: 0.45; }
+  50% { opacity: 1; }
+}
+@keyframes pc-wheel-losing {
+  0%, 100% { opacity: 0.25; }
+  45% { opacity: 1; }
+  60% { opacity: 0.6; }
+}
+.pc-wheel-gaining { animation: pc-wheel-gaining 1.6s ease-in-out infinite; }
+.pc-wheel-losing  { animation: pc-wheel-losing 1.15s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .pc-wheel-gaining, .pc-wheel-losing { animation: none; opacity: 0.85; }
+}
+
 /* Faction-select portrait — a slow, subtle "living portrait" breathe on
  * the currently-picked faction card so the setup screen isn't static.
  * The portrait is positioned with `inset: 0` (not a translate-based
@@ -348,4 +363,21 @@
 }
 @media (prefers-reduced-motion: reduce) {
   .portrait-slow-zoom { animation: none; }
+}
+
+/* --- holographic board ---------------------------------------------------
+ * A contested Location has no single owner to colour, so its projection
+ * breathes instead of picking a side.
+ */
+@keyframes pc-holo-contested {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 0.85; }
+}
+/* An unresolved encounter reads as a projection that hasn't locked on. */
+@keyframes pc-holo-flicker {
+  0%, 92%, 96% { opacity: 0.9; }
+  94%, 98% { opacity: 0.35; }
+}
+.pc-hex-tile {
+  transition: transform 0.12s ease;
 }

@@ -5,21 +5,53 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { theme } from "./data.js";
 import { animatePan } from "./aiReplay/CameraController.js";
+import { COL_STEP, ROW_STEP } from "./hexProjection.js";
+import { BoardLodContext, LOD_FULL, nextLod } from "./boardLod.js";
 
-const MIN_SCALE = 0.45;
+// The floor exists to stop the board shrinking into illegibility, and it used
+// to be set against the detailed tile art turning to mush. Below ~0.62 the
+// board now swaps to flat tinted polygons (boardLod.js), which stay readable
+// much further out, so the floor can drop.
+//
+// It needs to. A `huge` map's content box is 2365 x 1747, so fit-to-view wants
+// 0.50 at 1600x950 — fine — but 0.42 at 1280x800 and 0.32 at 900x600. At the
+// old 0.45 floor anything at or below a 1280-wide viewport could not fit the
+// whole board on screen at all, and "recenter" quietly did nothing. 0.26 fits a
+// huge board down to roughly 790x550.
+const MIN_SCALE = 0.26;
+// The tile masters are 1024 px square and ship downscaled, so past ~2.4 the art
+// is being magnified past its own resolution. Unchanged.
 const MAX_SCALE = 2.4;
 const clamp = (n, lo, hi) => Math.min(hi, Math.max(lo, n));
+
+// How much ground the opening view frames around your Capital, in hexes.
+// Wide enough to show your neighbours and the ground between you, tight
+// enough that a hex is readable without zooming in first.
+//
+// It has to be a function of viewport width, not a constant: a hex column is
+// 170 px, so asking a 390 px phone to frame nine of them wants a scale of
+// 0.25 — under the 0.26 floor, i.e. the most zoomed-OUT the board can go.
+// A phone shows fewer hexes bigger, which is the only way it reads at all.
+function openingSpan(vw) {
+  if (vw < 520) return { cols: 4, rows: 6 };
+  if (vw < 900) return { cols: 6, rows: 6 };
+  return { cols: 9, rows: 7 };
+}
 
 // `cameraTarget` is a content-space point {x,y} (a hex centre) the AI replay
 // wants centred; `cameraPanMs` is the eased pan duration (0 = snap). User
 // drag / wheel still work and simply override the last programmatic pan.
-export default function BoardViewport({ children, cameraTarget = null, cameraPanMs = 350, controlsTop = 14 }) {
+export default function BoardViewport({ children, cameraTarget = null, cameraPanMs = 350, controlsTop = 14, initialFocus = null }) {
   const vpRef = useRef(null);
   const contentRef = useRef(null);
   const drag = useRef(null);
   const moved = useRef(false);
   const [view, setView] = useState({ scale: 1, x: 0, y: 0 });
   const [grabbing, setGrabbing] = useState(false);
+  // Level of detail is derived from the scale but held as its own quantized
+  // state, so the board below only re-renders when the threshold is crossed —
+  // not on every wheel notch or pinch frame. `nextLod` carries the hysteresis.
+  const [lod, setLod] = useState(LOD_FULL);
   const viewRef = useRef(view);
   viewRef.current = view;
   const panStopRef = useRef(null);
@@ -45,10 +77,50 @@ export default function BoardViewport({ children, cameraTarget = null, cameraPan
     setView({ scale: fit, x: (vw - cw * fit) / 2, y: (vh - ch * fit) / 2 });
   }, []);
 
-  // Fit the board into the viewport once, on mount.
+  // The opening shot. Fitting the whole board is the right thing for the
+  // recenter button and was the only thing this did on mount — which framed
+  // the MAP, not the player: with fog on, everything you own sits in one
+  // corner of a screen that is otherwise unexplored dark, and on a phone it
+  // is a thumbnail at the edge. Open on your Capital instead, at a scale
+  // that frames its neighbourhood, and only when there is actually something
+  // off-screen to be missing: if the whole board already fits at a readable
+  // size, fit it, because nothing is hidden and a focused view would just
+  // add dead space beyond the map edge.
+  const focusOnStart = useCallback((pt) => {
+    const vp = vpRef.current;
+    const content = contentRef.current;
+    if (!vp || !content || !pt) return false;
+    const vw = vp.clientWidth;
+    const vh = vp.clientHeight;
+    const cw = content.offsetWidth;
+    const ch = content.offsetHeight;
+    if (!cw || !ch) return false;
+    const fit = clamp(Math.min(vw / cw, vh / ch) * 0.92, MIN_SCALE, MAX_SCALE);
+    const span = openingSpan(vw);
+    const want = clamp(
+      Math.min(vw / (span.cols * COL_STEP), vh / (span.rows * ROW_STEP)),
+      MIN_SCALE,
+      MAX_SCALE,
+    );
+    if (want <= fit) return false; // the whole board is already this readable
+    setView({ scale: want, x: vw / 2 - pt.x * want, y: vh / 2 - pt.y * want });
+    return true;
+  }, []);
+
+  // Frame the board once, on mount.
   useLayoutEffect(() => {
-    fitToView();
-  }, [fitToView]);
+    if (!focusOnStart(initialFocus)) fitToView();
+    // Deliberately mount-only: this is the opening shot, not a live binding.
+    // Re-running it when the Capital changes hands would yank the camera out
+    // from under whatever the player was looking at.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fitToView, focusOnStart]);
+
+  // Setting the same level is a no-op React bails out of, so this only costs a
+  // render when the board actually changes representation.
+  useEffect(() => {
+    setLod((prev) => nextLod(prev, view.scale));
+  }, [view.scale]);
 
   // Programmatic camera pan: ease the content translate so `cameraTarget`
   // centres in the viewport, keeping the current scale. Driven by the AI
@@ -234,7 +306,10 @@ export default function BoardViewport({ children, cameraTarget = null, cameraPan
           transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})`,
         }}
       >
-        {children}
+        {/* `children` is a stable element reference, so React skips re-rendering
+            the board on pan/zoom entirely; only a change of `lod` propagates
+            through the context to the tile layer. */}
+        <BoardLodContext.Provider value={lod}>{children}</BoardLodContext.Provider>
       </div>
 
       <div

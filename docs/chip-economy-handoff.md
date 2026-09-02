@@ -1,5 +1,18 @@
 # Chip Variety & Cost Balance — Handoff
 
+> **Substantially out of date 2026-08-23 — read it for the REASONING, never
+> for the inventory or the line numbers.** Not because it was wrong, but
+> because every fix it recommended shipped:
+>
+> - it says there are **14** chips; there are **40**
+> - it says `content/upgrade-chips.csv` is an unwired rival dataset; it is now
+>   *generated from* `content.js` by `scripts/export-chips.mjs`
+> - it says `rushScrapPerPoint` is 1 and `defaultSlider` 0; they are **2** and
+>   **0.5**, and `config.js` cites this document by name beside both
+>
+> The audit method and the cost-curve argument are still the best writing on
+> the subject in the repo. The numbers are in `config.js` and `content.js`.
+
 Starting point for a session focused on chip content (units + settlements)
 and getting costs tuned. Everything below is a verified data audit of the
 current engine, not a general impression — file:line references throughout

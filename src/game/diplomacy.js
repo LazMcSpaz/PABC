@@ -11,11 +11,30 @@
 import { CONFIG } from "./config.js";
 import { FACTIONS, MINOR_FACTIONS, factionDef, LOCATIONS, CHIPS } from "./content.js";
 import { emit, registerEventHook } from "./events.js";
-import { getStanding, adjustStanding, setStanding, standingTier } from "./standing.js";
+import { getStanding, adjustStanding, setStanding, standingTier, standingReceipts } from "./standing.js";
 import { bfsDistances, reinforcementRoute } from "./board.js";
-import { holdsLocation } from "./control.js";
-import { revealRegion, applySharedVision, recomputeVisibilityFor } from "./visibility.js";
+import { holdsLocation, syncControlHistory } from "./control.js";
+import { registerInterestReaders, interestsOf, interestToward, interestMultiplier } from "./interests.js";
+import {
+  registerSwayReaders, tickSway, seedSway, swayIncome, swayOf, spendSway, canAffordSway,
+  canSustainCourtship, swayLedger, recordSway,
+} from "./sway.js";
+import {
+  registerPostureReaders, recomputePostures, postureOf, setPosture, postureStated,
+  isCourting, eitherCourting, courtRounds, speakPosture, postureCitation, conditionText,
+  beginCourtship, mayBeginCourtship, courtshipScore,
+} from "./posture.js";
+import {
+  revealRegion, applySharedVision, recomputeVisibilityFor, isUnitVisibleTo, isHexVisible,
+} from "./visibility.js";
 import { recomputeResearch } from "./stats.js";
+import { recomputeVp } from "./victory.js";
+import { recomputeInfluence } from "./influence.js";
+// §12.3 — the intrigue branch reads the Intelligence wheel and the Listening
+// Post network to decide what a faction could plausibly have found out.
+import { hasTechNode } from "./tech.js";
+import { ownedPosts } from "./posts.js";
+import { registerIntelReaders } from "./intel.js";
 
 // --- state ----------------------------------------------------------
 export function ensureDiplomacy(state) {
@@ -28,19 +47,37 @@ export function ensureDiplomacy(state) {
       vassals: {}, // vassalFid -> lordId
       resentment: {}, // vassalFid -> number
       threatScores: {}, // pid -> number
-      recognition: {}, // pid -> number (cached)
       giftCounter: {}, // §1.2 — { fromPid: { toPid: gifts-in-window } }
       pendingCalls: [], // AI→human pact-call inbox: { id, from, target, since, expiresOnRound }
+      offers: [], // the round trip — offers awaiting an answer (see §6.10)
+      ultimatums: [], // demands with a deadline and a consequence (§6.11)
+      asks: {}, // pester bookkeeping: { round, byPair: { "a|b": n } }
       standingBaselines: {}, // earned drift targets: { a: { b: -cap..+cap } }
-      recognizedEver: {}, // summit VP bookkeeping: { pid: [fids that ever backed pid] }
+      // §12.1 — why a pair stands where it does, per ORDERED pair. Standing
+      // is the number the win condition reads and was the only reputation
+      // measure with no receipt at all. Written by `recordStandingCause` in
+      // standing.js; read by `standingReceipts`.
+      standingLog: {},
+      // §15 — the last round each unordered pair was within reach of each
+      // other. Absent means never. Feeds `engagementReach`.
+      contact: {},
+      // §5 — where every faction stands toward every other:
+      // posture[observer][subject] = { kind, condition, since, statedRound }.
+      // Derived per round, never authored.
+      posture: {},
     };
   }
+  if (!state.diplomacy.posture) state.diplomacy.posture = {};
+  if (!state.diplomacy.contact) state.diplomacy.contact = {};
+  if (!state.diplomacy.standingLog) state.diplomacy.standingLog = {};
   if (!state.diplomacy.giftCounter) state.diplomacy.giftCounter = {};
   if (!state.diplomacy.pendingCalls) state.diplomacy.pendingCalls = [];
   if (!state.diplomacy.standingBaselines) state.diplomacy.standingBaselines = {};
-  if (!state.diplomacy.recognizedEver) state.diplomacy.recognizedEver = {};
   if (!state.diplomacy.truces) state.diplomacy.truces = {};
   if (!state.diplomacy.pendingWarnings) state.diplomacy.pendingWarnings = [];
+  if (!state.diplomacy.offers) state.diplomacy.offers = [];
+  if (!state.diplomacy.ultimatums) state.diplomacy.ultimatums = [];
+  if (!state.diplomacy.asks) state.diplomacy.asks = { round: state.round, byPair: {} };
   for (const p of Object.values(state.players)) {
     if (p.menace == null) p.menace = 0;
     if (p.honor == null) p.honor = CONFIG.diplomacy.honor.start;
@@ -101,6 +138,17 @@ function unitTrespasses(state, unit, owner, hex) {
   if (hasOpenBorders(state, mover, owner)) return false; // permission granted
   // Safe Conduct (chip `safeConduct`): forged papers — no citation.
   if (unit.chips.some((c) => !state.chips[c]?.disabled && CHIPS[state.chips[c]?.chipId]?.safeConduct)) return false;
+  // Nobody cites an intrusion nobody noticed. This was the one place ZoC and
+  // Vision were fused (rail doc Part 0): a citation fired purely off the
+  // destination sitting in a foreign ZoC, so slipping through forest — which
+  // conceals precisely so that it hides you — still got you a formal warning
+  // from a faction that could not see you.
+  //
+  // `isUnitVisibleTo` is the same concealment-aware check the rest of the game
+  // uses, so cover, stealth chips and Detection all keep the meaning they have
+  // everywhere else: cover hides you from an owner without Detection, and
+  // Detection sees through it.
+  if (!isUnitVisibleTo(state, owner, unit)) return false;
   return true;
 }
 
@@ -132,6 +180,49 @@ function citeTrespass(state, mover, owner, hex) {
   emit(state, "territory_trespassed", {
     mover, owner, hex, standingHit, repHit, streak, warning: standingHit === 0 && repHit === 0,
   });
+}
+
+// What entering `hex` would cost this unit, before it commits — the thing
+// `vp-and-actions-design.md` §7 listed as "possible polish later" and the
+// diplomacy brief §11 asks for outright. The ladder is `[0,1,2]` by
+// consecutive round, which a player can only plan around if they can read it
+// BEFORE the move. Penalising the player for a rule they could not see is
+// §2.16's "I had no chance to stop it", and it is the one complaint that
+// sticks to a territory system however well tuned it is.
+//
+// Pure: computes what `citeTrespass` WOULD do without writing the record or
+// emitting anything. It deliberately shares `unitTrespasses` rather than
+// re-deriving the conditions, so concealment, open borders, safe conduct, war
+// and holding-the-place all keep exactly the meaning they have on the real
+// path. Returns null when the move is free.
+export function trespassPreview(state, unit, hex) {
+  if (!state.diplomacy || !unit) return null;
+  const owner = state.world?.zoc?.[hex] || null;
+  if (!unitTrespasses(state, unit, owner, hex)) return null;
+  const key = `${unit.owner}|${owner}`;
+  const r = state.diplomacy.trespassRecord?.[key];
+  // Already cited this round: the move is free because the citation has
+  // already been paid, not because the ground is open. Say so — "no further
+  // cost this round" is a different sentence from "they do not mind".
+  if (r && r.lastRound === state.round) {
+    return { owner, standingHit: 0, menaceHit: 0, streak: r.streak, alreadyCited: true, distrustful: false };
+  }
+  const streak = r && r.lastRound === state.round - 1 ? r.streak + 1 : 1;
+  const tr = D().trespass;
+  const distrustful = getStanding(state, owner, unit.owner) < D().tiers.neutral;
+  if (distrustful) {
+    return { owner, standingHit: tr.standingPenalty, menaceHit: tr.reputationPenalty,
+             streak, alreadyCited: false, distrustful: true };
+  }
+  const ladder = tr.escalation;
+  return {
+    owner,
+    standingHit: ladder[Math.min(streak - 1, ladder.length - 1)],
+    menaceHit: 0,
+    streak,
+    alreadyCited: false,
+    distrustful: false,
+  };
 }
 
 function onTrespass(state, payload) {
@@ -227,7 +318,23 @@ export function trustFloor(state, observerFid) {
   return tf.base + (def.trust || 0.5) * tf.distrustScale;
 }
 
-export function menaceOf(state, pid) { return state.players[pid]?.menace || 0; }
+// §B-blood — Menace with the BLOOD FLOOR under it. Every faction whose
+// elimination this one was at war for leaves a permanent mark
+// (`bloodMarks`, stamped in `sweepEliminations`), and Menace can decay to
+// the floor those marks set but never below it. One rule, priced everywhere
+// the board already reads Menace: `passesRepGates` checks it against
+// tolerance on BOTH sides of every pact and courtship, `denounceWarrant`
+// makes a serial killer permanently denounceable, and `coalitionGrounds`
+// reads it as grounds to rise. An exterminator does not get to spend the
+// late game being trusted; `menacePerKill: 0` switches the floor off.
+export function menaceOf(state, pid) {
+  const raw = state.players[pid]?.menace || 0;
+  const perKill = D().bloodPrice?.menacePerKill ?? 0;
+  if (!perKill) return raw;
+  const marks = state.players[pid]?.bloodMarks || 0;
+  if (!marks) return raw;
+  return Math.max(raw, Math.min(D().menace.max, marks * perKill));
+}
 export function honorOf(state, pid) {
   const h = state.players[pid]?.honor;
   return h == null ? CONFIG.diplomacy.honor.start : h;
@@ -246,20 +353,196 @@ export function passesRepGates(state, observerFid, subjectPid) {
 // intent the whole board heard) or b wronged a (broken pact/promise,
 // surprise attack) inside the grievance window. Fighting a justified war
 // generates no Menace for the justified side.
-function recordGrievance(state, victim, offender, kind) {
-  if (!victim || !offender || victim === offender) return;
+// The ledger of what `offender` has actually done to `victim`. A LIST, not a
+// slot: it used to be `gr[victim][offender] = {kind, round}`, overwritten
+// every time, so a faction that betrayed you three times had one record of
+// the most recent betrayal and no notion of how badly. Nothing downstream
+// could name what happened, weigh it, or settle it.
+//
+// `at` is where it happened, kept so a denouncement can cite the place and
+// so the dossier can point at the map.
+export function recordGrievance(state, victim, offender, kind, opts = {}) {
+  if (!victim || !offender || victim === offender) return null;
+  const g = D().grievance;
   const gr = state.diplomacy.grievances = state.diplomacy.grievances || {};
   gr[victim] = gr[victim] || {};
-  gr[victim][offender] = { kind, round: state.round };
+  const list = gr[victim][offender] = gr[victim][offender] || [];
+  const entry = {
+    kind,
+    round: state.round,
+    severity: opts.severity ?? g.severity[kind] ?? g.defaultSeverity,
+    at: opts.at || null,
+  };
+  list.push(entry);
+  // Keep the ledger bounded. The oldest entries are also the ones closest to
+  // ageing out of the window anyway.
+  if (list.length > g.maxPerPair) list.splice(0, list.length - g.maxPerPair);
+  emit(state, "grievance_recorded", { victim, offender, kind, severity: entry.severity, at: entry.at });
+  return entry;
+}
+
+// Places `offender` holds that `victim` calls its own. Every Location in
+// content.js already carries an `affiliation` and it was used for exactly one
+// thing — deciding where factions start. Politically it did not exist, which
+// left the game's central object (the map) outside its diplomacy entirely.
+//
+// These are CONDITIONS, not events: computed live from who holds what, so
+// they appear the moment a city is taken, vanish the moment it is given back,
+// and cannot be bought off with scrap. Goldgrass will not call it square
+// while you are sitting in Omara, whatever you pay them.
+export function occupationsBy(state, victim, offender) {
+  const out = [];
+  for (const loc of Object.values(state.locations || {})) {
+    if (loc.controller !== offender) continue;
+    if (LOCATIONS[loc.locationId]?.affiliation !== victim) continue;
+    out.push({
+      kind: "occupation",
+      round: state.round, // a standing condition is always current
+      severity: D().grievance.severity.occupation ?? D().grievance.defaultSeverity,
+      at: loc.hexId,
+      locationId: loc.locationId,
+      standing: true, // not a ledger entry — cannot be settled, only ended
+    });
+  }
+  return out;
+}
+
+// The entries still inside the grievance window, newest first — the recorded
+// ones plus whatever standing conditions currently hold.
+export function grievancesAgainst(state, victim, offender) {
+  const list = state.diplomacy?.grievances?.[victim]?.[offender] || [];
+  const window = D().justWar.grievanceWindowRounds;
+  return [
+    ...occupationsBy(state, victim, offender),
+    ...list.filter((e) => state.round - e.round <= window),
+  ].sort((a, b) => b.round - a.round);
+}
+
+// How much `victim` holds against `offender`, all live entries summed. This
+// is the number a settlement has to buy out, and the number that says whether
+// a grudge is a scratch or a blood feud.
+export function grievanceWeight(state, victim, offender) {
+  return grievancesAgainst(state, victim, offender).reduce((n, e) => n + e.severity, 0);
+}
+
+// The part of that weight a settlement can actually buy. Standing conditions
+// are excluded: an occupation ends by giving the place back, not by paying
+// somebody to stop minding it. Pricing the settlement off the full weight
+// let a player hand over a fortune for an item that then cleared nothing.
+export function settleableWeight(state, victim, offender) {
+  return grievancesAgainst(state, victim, offender)
+    .filter((e) => !e.standing)
+    .reduce((n, e) => n + e.severity, 0);
+}
+
+// The single entry that best answers "what did they do to you" — the worst
+// one still standing, most recent breaking ties. What a denouncement cites
+// and what a war is declared over.
+export function worstGrievance(state, victim, offender) {
+  let worst = null;
+  for (const e of grievancesAgainst(state, victim, offender)) {
+    if (!worst || e.severity > worst.severity) worst = e;
+  }
+  return worst;
+}
+
+// Wipe the slate between two factions. The victim's decision, not the
+// offender's — reached by accepting a settlement they were offered.
+export function settleGrievances(state, victim, offender) {
+  // Only the recorded ones. A settlement is compensation for things that
+  // HAPPENED; a city you are still holding is not in the past, and paying
+  // somebody to stop minding that you occupy their homeland is not a deal
+  // anyone would take. Ending that grievance means giving the place back.
+  const held = (state.diplomacy?.grievances?.[victim]?.[offender] || [])
+    .filter((e) => state.round - e.round <= D().justWar.grievanceWindowRounds);
+  if (!held.length) return 0;
+  const weight = held.reduce((n, e) => n + e.severity, 0);
+  state.diplomacy.grievances[victim][offender] = [];
+  // A denouncement resting on those grievances loses its grounds with them —
+  // otherwise settling would leave the accusation standing and the just war
+  // it bought still live.
+  const den = state.diplomacy.denouncements?.[victim]?.[offender];
+  if (den?.warrant && !denounceWarrant(state, victim, offender)) den.warrant = null;
+  emit(state, "grievances_settled", { victim, offender, weight, count: held.length });
+  return weight;
+}
+
+// §6.3 — WHAT A GIFT COSTS, in one place, because three callers need the same
+// number: the verb that charges it, the AI that budgets for it, and the pane
+// that prints it. A flat `want * perStanding` was fine while gifts only ever
+// went to factions that already tolerated you; reparations are priced by how
+// far below Neutral their regard for you has fallen.
+//
+// Note the DIRECTION. A gift moves THEIR opinion of YOU, so the surcharge is
+// read off `getStanding(state, them, you)` — how badly they think of you —
+// and not off your view of them, which is nobody's business but yours.
+export function giftMultiplier(state, pid, f) {
+  const rep = CONFIG.sway?.giftReparations;
+  if (!rep?.perStepBelowNeutral) return 1;
+  const neutral = D().tiers.neutral;
+  const theirs = getStanding(state, f, pid);
+  if (theirs >= neutral) return 1;
+  const steps = neutral - theirs;
+  return Math.min(rep.maxMultiplier ?? 3, 1 + steps * rep.perStepBelowNeutral);
+}
+
+// Rounded UP: a price the player is shown has to be a price they can pay
+// exactly, and a fractional Sway is not a thing this game has.
+export function giftCost(state, pid, f, want = 1) {
+  const n = Math.max(1, Math.round(want));
+  return Math.ceil(n * CONFIG.sway.perStanding * giftMultiplier(state, pid, f));
+}
+
+// Is there something to denounce? Judged by the DENOUNCER's own standards —
+// tolerance and trustFloor are per-observer, so a pacifist and a warlord
+// genuinely disagree about what counts as beyond the pale, which is as it
+// should be.
+//
+// This is the same question `warJustification` asks about a war, and the
+// answer wants the same shape: an accusation is either grounded in something
+// the target actually did, or it is an accusation you invented.
+export function denounceWarrant(state, denouncer, target) {
+  const worst = worstGrievance(state, denouncer, target);
+  if (worst) return worst.kind;
+  if (!state.players[target]) return null; // no Menace/Honor to judge
+  if (menaceOf(state, target) > tolerance(state, denouncer, target)) return "menace";
+  if (honorOf(state, target) < trustFloor(state, denouncer)) return "honor";
+  return null;
+}
+
+// The same answer with the receipt attached — which act, when, and where —
+// so the UI can say "for the strike on Tin Town at round 7" instead of
+// "you have grounds".
+export function denounceGrounds(state, denouncer, target) {
+  // §13 — a position broken outranks the ledger for the purpose of SAYING so.
+  // It is fresher, it is public, and it names itself; a denouncement that
+  // reached past it for a two-round-old trespass would be the AI failing to
+  // notice the loudest thing on the board.
+  const pos = citablePositions(state, target, denouncer)[0];
+  if (pos) {
+    return {
+      kind: "position-broken", entry: pos, position: pos,
+      text: positionText(state, pos),
+      weight: grievanceWeight(state, denouncer, target),
+    };
+  }
+  const worst = worstGrievance(state, denouncer, target);
+  if (worst) return { kind: worst.kind, entry: worst, weight: grievanceWeight(state, denouncer, target) };
+  const kind = denounceWarrant(state, denouncer, target);
+  return kind ? { kind, entry: null, weight: 0 } : null;
 }
 
 export function warJustification(state, a, b) {
   const jw = D().justWar;
   const den = state.diplomacy?.denouncements?.[a]?.[b];
-  if (den != null && state.round - den <= jw.denounceWindowRounds) return "denounced";
-  const gr = state.diplomacy?.grievances?.[a]?.[b];
-  if (gr && state.round - gr.round <= jw.grievanceWindowRounds) return gr.kind;
-  return null;
+  // Only a WARRANTED denouncement makes a war righteous. Otherwise the verb
+  // is a laundry: pay a little Honor, denounce anyone, and every war of
+  // conquest you ever fight is free of Menace. A grievance has to come from
+  // something the other side actually did — you cannot manufacture one by
+  // saying so loudly.
+  if (den?.warrant && state.round - den.round <= jw.denounceWindowRounds) return "denounced";
+  const worst = worstGrievance(state, a, b);
+  return worst ? worst.kind : null;
 }
 
 // Is `pid`'s side of its war with `other` justified? (Reads the war record,
@@ -270,11 +553,31 @@ export function warIsJustified(state, pid, other) {
 }
 
 // --- Menace / Honor (§18.5) -----------------------------------------
+// Every reputation change, kept with its reason. Menace 9 and Honor −2 are
+// facts about you that the player could not previously trace to a single
+// act — the causes were flowing through `emit` and nothing kept them.
+// Bounded, because this is a receipt roll and not an archive.
+const REP_LOG_MAX = 14;
+function recordRep(state, pid, stat, delta, value, cause) {
+  const p = state.players[pid];
+  if (!p || !delta) return;
+  p.repLog = p.repLog || [];
+  p.repLog.push({ stat, delta, value, cause: cause || null, round: state.round });
+  if (p.repLog.length > REP_LOG_MAX) p.repLog.splice(0, p.repLog.length - REP_LOG_MAX);
+}
+
+// The receipts behind a faction's Menace or Honor, newest first.
+export function reputationLog(state, pid, stat = null) {
+  const log = state.players[pid]?.repLog || [];
+  return log.filter((e) => !stat || e.stat === stat).slice().reverse();
+}
+
 export function adjustMenace(state, pid, amount, cause) {
   const p = state.players[pid];
   if (!p || !amount) return;
   const m = D().menace;
   p.menace = Math.max(m.min, Math.min(m.max, (p.menace || 0) + amount));
+  recordRep(state, pid, "menace", amount, p.menace, cause);
   emit(state, "menace_changed", { player: pid, value: p.menace, delta: amount, cause });
 }
 
@@ -283,13 +586,39 @@ export function adjustHonor(state, pid, amount, cause) {
   if (!p || !amount) return;
   const h = D().honor;
   p.honor = Math.max(h.min, Math.min(h.max, honorOf(state, pid) + amount));
+  recordRep(state, pid, "honor", amount, p.honor, cause);
   emit(state, "honor_changed", { player: pid, value: p.honor, delta: amount, cause });
 }
 
 // §18.5 — Menace swing for an attack, scored relative to the TARGET's
 // temperament: bullying a peaceful faction raises it; checking a warlord
 // lowers it. Called on contest resolution (contest.js).
-export function menaceFromAttack(state, attackerPid, targetFid) {
+// Who could SEE what happened at `hex` — third parties only. The attacker
+// obviously knows and the victim was there; neither is news. This is the
+// board, and the board is what Menace measures.
+export function witnessesOf(state, hex, { attacker, victim } = {}) {
+  return factionIds(state).filter((f) => {
+    if (f === attacker || f === victim) return false;
+    if (!state.players[f]) return false;
+    return isHexVisible(state, f, hex);
+  });
+}
+
+// The share of the board that saw it, 0..1. With fog off everyone sees
+// everything, which is exactly right — a game without fog is a game where
+// reputation is omniscient, and it used to be omniscient either way.
+export function witnessShare(state, hex, opts) {
+  const m = D().menace;
+  if (!m.witnessedOnly || !hex) return 1;
+  const audience = factionIds(state).filter(
+    (f) => f !== opts?.attacker && f !== opts?.victim && state.players[f],
+  );
+  if (!audience.length) return 1; // nobody else is playing; no reputation to lose either way
+  const seen = witnessesOf(state, hex, opts).length;
+  return m.unwitnessedShare + (1 - m.unwitnessedShare) * (seen / audience.length);
+}
+
+export function menaceFromAttack(state, attackerPid, targetFid, hex) {
   if (!state.players[attackerPid]) return;
   // A justified war is fought clean: no Menace for the righteous side.
   if (warIsJustified(state, attackerPid, targetFid)) return;
@@ -297,8 +626,18 @@ export function menaceFromAttack(state, attackerPid, targetFid) {
   // Checking a warlord soothes your reputation a LITTLE — clamped at −1 so
   // attacking aggressive factions can't launder a bully's Menace away (the
   // playtest human dropped 5 → 0 Menace purely by attacking Grand Lakers).
-  const delta = Math.max(-1, Math.round(D().menace.base * (0.5 - (tDef.aggression ?? 0.5)) * 2));
-  if (delta) adjustMenace(state, attackerPid, delta, `attack:${targetFid}`);
+  const raw = Math.max(-1, Math.round(D().menace.base * (0.5 - (tDef.aggression ?? 0.5)) * 2));
+  if (!raw) return;
+  // Scaled by who saw it. Only a COST is discounted for being unseen —
+  // striking a bully where nobody is watching should not earn you the credit
+  // for having checked them in public.
+  const share = raw > 0 ? witnessShare(state, hex, { attacker: attackerPid, victim: targetFid }) : 1;
+  const delta = raw > 0 ? Math.round(raw * share) : raw;
+  if (delta) {
+    adjustMenace(state, attackerPid, delta, `attack:${targetFid}`);
+  } else if (raw > 0) {
+    emit(state, "attack_unwitnessed", { attacker: attackerPid, victim: targetFid, hex });
+  }
 }
 
 // --- power / threat (§18.8) -----------------------------------------
@@ -311,13 +650,30 @@ export function powerOf(state, fid) {
   return c.vpWeight * vp + c.territoryWeight * territory + 0.5 * strength;
 }
 
-// Lead over the rest of the board (mean of the others).
+// How far ahead of the board `fid` is.
+//
+// Measured against the STRONGEST RIVAL by default, not the mean, and the
+// difference is not cosmetic. Against the mean, a lead grows every time
+// somebody dies — the board empties (4.9 of 7 rivals per game, mean round 24)
+// and the survivor's number balloons for reasons that have nothing to do with
+// what it did. Traced on seed 424242, that put a MENACE 0 faction over the
+// coalition fear line at round 11 and kept somebody over it every round to the
+// end. Runaway means "pulling away from your nearest competitor"; four equal
+// factions are not runaways however many minors are buried between them.
+//
+// A faction is compared only against SURVIVORS. Counting the dead as zeroes is
+// the same bug wearing a different hat.
 export function powerLead(state, fid) {
-  const others = factionIds(state).filter((f) => f !== fid);
+  const others = factionIds(state).filter(
+    (f) => f !== fid && state.players[f] && !state.players[f].eliminated,
+  );
   if (!others.length) return 0;
   const mine = powerOf(state, fid);
-  const mean = others.reduce((s, f) => s + powerOf(state, f), 0) / others.length;
-  return mine - mean;
+  if (D().coalition.leadMeasure === "mean") {
+    const mean = others.reduce((s, f) => s + powerOf(state, f), 0) / others.length;
+    return mine - mean;
+  }
+  return mine - Math.max(...others.map((f) => powerOf(state, f)));
 }
 
 // §18.8 threat(player) = wM·Menace + wP·max(0, powerLead).
@@ -347,8 +703,32 @@ export function areNeighbours(state, a, b) {
   return false;
 }
 
+// When were these two last within reach of each other? Stamped each round by
+// `sweepContact`; absent means never. Unordered — contact is a property of the
+// pair, not a direction.
+const contactKey = (a, b) => [a, b].sort().join("|");
+export function lastContactRound(state, a, b) {
+  return state.diplomacy?.contact?.[contactKey(a, b)] ?? null;
+}
+
+// Record who is currently in reach of whom. Runs once per round, before the
+// politics: `areNeighbours` is a BFS per Location pair, so calling it from
+// every acceptance gate would be the expensive way to ask a question that only
+// changes when somebody moves a city.
+export function sweepContact(state) {
+  const book = state.diplomacy.contact = state.diplomacy.contact || {};
+  const ids = factionIds(state);
+  for (let i = 0; i < ids.length; i += 1) {
+    for (let j = i + 1; j < ids.length; j += 1) {
+      if (state.players[ids[i]]?.eliminated || state.players[ids[j]]?.eliminated) continue;
+      if (areNeighbours(state, ids[i], ids[j])) book[contactKey(ids[i], ids[j])] = state.round;
+    }
+  }
+}
+
 // May `a` engage `b` diplomatically/militarily given scope? A local faction
-// only engages neighbours; globals engage anyone.
+// only engages neighbours; globals engage anyone. UNCHANGED — see `mayCourt`
+// below for why the §15 reachability escape does not live here.
 export function mayEngage(state, a, b) {
   const aLocal = factionDef(a)?.scope === "local";
   const bLocal = factionDef(b)?.scope === "local";
@@ -357,25 +737,439 @@ export function mayEngage(state, a, b) {
   return true;
 }
 
+// How `a` and `b` can reach each other FOR THE ALLY AND VASSAL DOORS, and
+// what it costs.
+//
+//   { ok: false }                     out of scope and not yet distant enough
+//   { ok: true, distant: false }      neighbours, or both global — ordinary terms
+//   { ok: true, distant: true }       reachable only because the silence has
+//                                     run long enough, at a Standing penalty
+//
+// THE HOLE (diplomacy brief §15). Every minor is `scope: "local"`, so a minor
+// outside `ai.localityRadius` could be neither allied nor vassalised — and
+// `dominionStanding` counts it anyway. Measured on the baseline suite: 3.47 of
+// 4 minors killed per game, 0.33 allied or vassalised, 6 of 15 games never
+// resolving. The win condition demanded something the rules made impossible,
+// and the only remaining answer was genocide.
+//
+// The fix is not a separate ruleset for minors — the research is unambiguous
+// that a simplified parallel ruleset is exactly what earns city-states their
+// "vending machine" reputation. It is that DISTANCE STOPS BEING PERMANENT for
+// the two doors the win condition needs: a pair out of contact for
+// `reachabilityRounds` can ally or submit, at a higher Standing bar, because
+// they are strangers.
+//
+// WHY THIS IS NOT `mayEngage`. The first cut of this fix widened `mayEngage`
+// itself, and the suite caught it: unresolved games went from 6 of 15 to 11.
+// `mayEngage` gates `runAIPolitics`'s grudge-war path, coalition membership
+// and ultimatums as well as the two acceptance functions, so widening it gave
+// every distant pair a WAR path too — wars per game 52 -> 78, undeclared
+// attacks 25 -> 40, and a board where somebody is always at war with somebody
+// can never complete Dominion. Each half of this stage measured well alone and
+// badly together, which is exactly the interaction the plan's "retune before
+// the next stage lands" rule exists to catch.
+//
+// The win condition asks that every surviving faction be reachable by ally,
+// vassal or elimination. Elimination was never gated. So only the other two
+// doors need opening, and opening only those is the whole fix.
+export function engagementReach(state, a, b) {
+  if (mayEngage(state, a, b)) return { ok: true, distant: false };
+  const rounds = D().reach?.reachabilityRounds || 0;
+  if (!rounds) return { ok: false, distant: false }; // escape switched off
+  // Never in contact counts from the start of the game, not from never: two
+  // factions that have spent six rounds on the same continent without meeting
+  // have still had six rounds in which word could travel.
+  const since = lastContactRound(state, a, b) ?? 0;
+  if (state.round - since < rounds) return { ok: false, distant: false };
+  return { ok: true, distant: true };
+}
+
+// May `a` be courted or take `b` as a protector? The ally/vassal doors only.
+export function mayCourt(state, a, b) {
+  return engagementReach(state, a, b).ok;
+}
+
+// The Standing `f` effectively reads from `other`, once the distance between
+// them is priced in. A pair reachable only through the §15 escape is dealing
+// with strangers, and strangers need to be keener.
+function reachAdjustedStanding(state, f, other) {
+  const s = getStanding(state, f, other);
+  const reach = engagementReach(state, f, other);
+  return reach.distant ? s - (D().reach?.distantStandingPenalty || 0) : s;
+}
+
 // --- deal valuation (§18.6 / §18.8) ---------------------------------
 // Subjective value of one Item to `fid` (positive = good to receive).
+// How many rounds a flow runs for. A deal flow always carries a term (the
+// builder supplies one and applyDeal stamps a default if it somehow doesn't);
+// a flow with no term is engine-made and perpetual — today only vassal
+// tribute, which ends when the vassalage does.
+export function flowRounds(flow) {
+  return flow?.rounds || D().flow.perpetualHorizon;
+}
+
+// How long a standing promise binds for, and what that multiplies its worth
+// by. Square-rooted so a promise twice as long is worth ~1.4x, not 2x — the
+// far end of a long promise is the least believable part of it.
+export function promiseRounds(promise) {
+  return promise?.rounds || D().flow.defaultRounds;
+}
+function promiseTermScale(promise) {
+  return Math.sqrt(promiseRounds(promise) / D().flow.defaultRounds);
+}
+
+// What an alliance itself is worth to `fid` right now — the value of the
+// `pact` deal item. A faction that would accept a bare pact offer values it
+// highly; one that would refuse still prices it above zero if it likes you,
+// so a pact can be the sweetener in a larger deal without being free.
+function pactAppetite(state, fid, other) {
+  if (!other || arePacted(state, fid, other)) return 0;
+  const def = factionDef(fid) || {};
+  const social = def.sociability ?? 0.5;
+  if (aiAcceptsPact(state, fid, other)) return 5 + social * 4;
+  // Below the bar, but not worthless: it is still an alliance being offered.
+  if (!mayCourt(state, fid, other) || atWar(state, fid, other)) return 0;
+  const shortfall = D().pactStandingReq - getStanding(state, fid, other);
+  return Math.max(0, (5 + social * 4) - shortfall);
+}
+
+// --- §3.2 Locations as deal items -----------------------------------
+//
+// Every faction in content.js carries affiliated Locations, and the claims
+// half of this work made holding somebody else's a standing grievance. What
+// was still missing was the other side of that sentence: a way to GIVE ONE
+// BACK. Diplomacy could move scrap, streams, promises and apologies — it
+// could not move the one thing the whole war is about, so it ran as a
+// side-market beside the game rather than inside it.
+//
+// A cession is a deal item like any other: `{ location: { hexId } }` on
+// either side of a give/get. It prices itself, it transfers atomically with
+// the rest of the deal, and — because occupation grievances are computed
+// live from who holds what — handing a homeland back ends the grievance it
+// created the moment the deed is done, with nothing to clear and nobody to
+// forgive.
+
+const CESSION = () => D().cession;
+
+// A Location's flat worth, before anybody's feelings about it: victory
+// points, what it actually produces, and how hard its walls are.
+function baseLocationWorth(state, loc) {
+  const def = LOCATIONS[loc.locationId] || {};
+  const c = CESSION();
+  return (def.vpReward || 0) * c.vpWeight
+    + (loc.output ?? loc.production ?? 0) * c.outputWeight
+    + (c.valueRank[def.strategicValue] ?? 0);
+}
+
+// What this Location is worth TO `fid` — the number a deal is priced on.
+// The claim multiplier is what separates a holding from a homeland: to
+// Goldgrass, Omara is not a medium-value city with two production, it is
+// Omara. That is the whole reason "give it back" is a thing a faction can
+// want badly enough to pay for.
+export function locationWorth(state, fid, hexId) {
+  const loc = state.locations?.[hexId];
+  if (!loc) return 0;
+  let worth = baseLocationWorth(state, loc);
+  if (LOCATIONS[loc.locationId]?.affiliation === fid) worth *= CESSION().claimMultiplier;
+  return worth;
+}
+
+// §18.5 — the extra Menace for declaring an unjustified war on somebody whose
+// name is better than yours. Zero when the gap is small, when the charge is
+// switched off, or when either side is not a scored faction.
+//
+// Read as a forecast as well as a charge — `diplomaticPrice` calls it so the
+// AI weighs the surcharge BEFORE declaring rather than discovering it after,
+// which is the difference between a deterrent and a tax.
+export function cleanHandsSurcharge(state, a, b) {
+  const cfg = D().menace?.declareOnCleanHands;
+  if (!cfg?.perPoint) return 0;
+  if (!state.players[a] || !state.players[b]) return 0;
+  const gap = honorOf(state, b) - honorOf(state, a);
+  const over = gap - (cfg.freeGap ?? 0);
+  if (over <= 0) return 0;
+  return Math.min(cfg.max ?? Infinity, over * cfg.perPoint);
+}
+
+// §8 — WHAT ATTACKING `target` WOULD COST `pid`, in locationWorth units.
+//
+// The comparison the brief states precisely, because the first draft of it
+// overstated the gap: declaring first does NOT save you the Standing collapse.
+// `declareWar` sets both sides to hostile on either path, and `onAttack` calls
+// `declareWar` anyway. What declaring saves is the 8 Honor and the grievance,
+// against `menace.declareUnjustified: 2` — still a large enough gap to change
+// behaviour, but not "a quarter of the cost".
+export function diplomaticPrice(state, pid, target, { declared = false } = {}) {
+  const cfg = D().attackPrice;
+  if (!cfg?.enabled) return 0;
+  const h = D().honor, m = D().menace;
+  let points = 0;
+  if (declared) {
+    // A justified war costs nothing to declare — which is the whole point of
+    // having earned one.
+    points += warIsJustified(state, pid, target)
+      ? 0
+      : m.declareUnjustified + cleanHandsSurcharge(state, pid, target);
+  } else {
+    points += h.surpriseAttackLoss;
+    points += D().grievance.severity["surprise-attack"] ?? D().grievance.defaultSeverity;
+    // A surprise attack calls `declareWar` on the way through, so it pays the
+    // clean-hands surcharge too. Forecasting it on one branch and not the
+    // other would have made striking a blameless neighbour without warning
+    // the CHEAPER of the two — the exact opposite of the rule's point.
+    points += cleanHandsSurcharge(state, pid, target);
+  }
+  // Expected Menace, forecast the way `menaceFromAttack` scores it: by the
+  // share of the board that can see, and by the target's own temperament —
+  // bullying a pacifist costs more than checking a warlord.
+  const tDef = factionDef(target) || {};
+  const raw = Math.max(-1, Math.round(m.base * (0.5 - (tDef.aggression ?? 0.5)) * 2));
+  if (raw > 0) points += raw * witnessShare(state, null, { attacker: pid, victim: target });
+
+  const aggression = factionDef(pid)?.aggression ?? 0.5;
+  return points * cfg.perReputationPoint * (1 - aggression) * desperation(state, pid, target);
+}
+
+// How much a faction's SITUATION changes its ethics rather than its
+// arithmetic — the one place in the design where that is allowed, and the term
+// most likely to need tuning to stop a losing faction turning saintly.
+//
+// Below 1 when it is being ground down (a cornered faction discounts its
+// reputation), above 1 when it is comfortable (a leader has more to lose).
+function desperation(state, pid, target) {
+  const cfg = D().attackPrice;
+  const ex = Math.min(1.5, warExhaustion(state, pid, target) || 0);
+  const lead = powerLead(state, pid);
+  const scale = Math.max(1, powerOf(state, pid) || 1);
+  // Losing ground and bleeding both push it down; a commanding lead pushes up.
+  const comfort = 1 + Math.max(-0.6, Math.min(0.6, lead / (scale * 2))) - ex * 0.4;
+  return Math.max(cfg.desperationFloor, Math.min(cfg.comfortCeiling, comfort));
+}
+
+// What this attack STANDS TO WIN, on the same scale the price is quoted in.
+//
+// Two prizes, because there are two attack paths and they want different
+// things. Contesting a Location wants the Location. Raiding wants the enemy
+// unit off the ground — and `state.locations` holds only Locations, so pricing
+// a raid on `locationWorth` alone values every fight in open country at zero
+// and would block the entire raid path outright.
+function attackPrize(state, pid, hexId, victim) {
+  const cfg = D().attackPrice;
+  let worth = locationWorth(state, pid, hexId);
+  if (victim) {
+    // The strongest thing of theirs standing here. Strength is the one unit
+    // scale every other system already prices fights on, so the conversion is
+    // a single stated constant rather than a second valuation model.
+    let best = 0;
+    for (const u of Object.values(state.units || {})) {
+      if (u.node === hexId && u.owner === victim) best = Math.max(best, u.strength || 0);
+    }
+    worth += best * cfg.unitWorth;
+  }
+  return worth;
+}
+
+// Is this hex your own ground, or the ring around it?
+function defendsOwnGround(state, pid, hexId) {
+  if (state.locations?.[hexId]?.controller === pid) return true;
+  for (const n of state.board?.adjacency?.[hexId] || []) {
+    if (state.locations?.[n]?.controller === pid) return true;
+  }
+  return false;
+}
+
+// Is this fight worth what it costs the attacker's name? The comparison is
+// `prize x winProbability` against the diplomatic price — the one existing
+// value scale on the same objects, rather than an invented one.
+//
+// WHO gets priced is the part the first draft got wrong. It read the
+// Location's controller, but `onAttack` fires against whoever actually
+// DEFENDED — so the raid branch, which strikes a unit on ground its owner may
+// not hold, paid nothing at all. Measured over three full games: 58 of 62 war
+// openings came through that branch and only 9 attacks ever reached the gate.
+export function attackIsWorthIt(state, pid, hexId, winProbability, { declared = false, victim = null } = {}) {
+  const cfg = D().attackPrice;
+  if (!cfg?.enabled) return true;
+  const victims = new Set();
+  if (victim) victims.add(victim);
+  else {
+    const c = state.locations?.[hexId]?.controller;
+    if (c) victims.add(c);
+    for (const u of Object.values(state.units || {})) {
+      if (u.node === hexId && u.owner !== pid) victims.add(u.owner);
+    }
+  }
+  // DEFENCE IS NEVER PRICED. An enemy standing on ground you hold, or one hex
+  // off it, is a threat you answer — nobody reads clearing your own doorstep
+  // as a treacherous strike, and pricing it is what turned this gate from a
+  // brake into a paralysis: measured, 84% of all refusals were fights on or
+  // beside the attacker's own Locations, and unresolved games went 2 -> 6.
+  if (defendsOwnGround(state, pid, hexId)) return true;
+  let price = 0;
+  for (const v of victims) {
+    // Already at war with them: the reputation for it is spent, and refusing
+    // to press a war you are already in is not restraint, it is paralysis.
+    if (!v || v === pid || atWar(state, pid, v)) continue;
+    price += diplomaticPrice(state, pid, v, { declared });
+  }
+  if (price <= 0) return true;
+  return attackPrize(state, pid, hexId, victim) * (winProbability ?? 1) > price;
+}
+
+// Ground given up is worth more than ground gained. You lose the place, the
+// zone of control around it and the base you were working from — and a
+// warlord feels that harder than a merchant does, which is `aggression`
+// paying for itself in the price rather than in a special case.
+function cedeReluctance(fid) {
+  const c = CESSION();
+  const agg = factionDef(fid)?.aggression ?? 0.5;
+  return c.cedeReluctanceBase + agg * c.cedeReluctancePerAggression;
+}
+
+// Why `from` cannot hand `hexId` over — or null if they can. Full control,
+// because half a city is not a thing you can sign away; and never a Capital,
+// because a faction's seat is not a bargaining chip and trading one away
+// would be an elimination dressed as an offer.
+export function cedeBlocker(state, from, hexId) {
+  const loc = state.locations?.[hexId];
+  if (!loc) return "there is no such place";
+  const name = LOCATIONS[loc.locationId]?.name || hexId;
+  if (loc.controller !== from) return `they do not hold ${name} to give`;
+  if ((loc.chips || []).some((c) => state.chips?.[c]?.chipId === "capital"))
+    return `${name} is their seat, and a seat is not for sale`;
+  const held = Object.values(state.locations).filter((l) => l.controller === from);
+  if (held.length <= 1) return `${name} is the last ground they hold`;
+  return null;
+}
+
+// Everything `fid` could put on a table right now. The UI's picker reads
+// this rather than filtering locations itself, so the rule about seats and
+// last ground lives in exactly one place.
+export function cedeableLocations(state, fid) {
+  return Object.values(state.locations || {})
+    .filter((loc) => loc.controller === fid && !cedeBlocker(state, fid, loc.hexId))
+    .map((loc) => loc.hexId);
+}
+
+// Which party a `{ location }` item is being given BY, inside a deal. The
+// item itself does not say — the side of the give/get it sits on does.
+function cessionsIn(deal) {
+  const out = [];
+  for (const it of deal.give || []) if (it.location) out.push({ from: deal.proposer, to: deal.recipient, hexId: it.location.hexId });
+  for (const it of deal.get || []) if (it.location) out.push({ from: deal.recipient, to: deal.proposer, hexId: it.location.hexId });
+  return out;
+}
+
+// The handover. Deliberately NOT captureLocation: a city given is a city
+// intact. Nothing is sacked, no chip is destroyed, and the affiliated
+// faction is not told a conquest happened — because one didn't.
+//
+// What does carry over from capture is everything that follows from control
+// changing hands: the people living there did not agree to this, so Loyalty
+// starts low; the half-built workshop belongs to somebody else now, so the
+// build resets; and Research, Influence, Vision and VP all have to be told.
+export function cedeLocation(state, from, to, hexId, cause = "cession") {
+  const loc = state.locations?.[hexId];
+  if (!loc) return false;
+  // Never to a faction that is out. `sweepEliminations` now drops the dead
+  // from the diplomacy graph, which removes the path that reached here; this
+  // is the guard rather than the fix, because ground parked under an owner
+  // that can never act is unrecoverable and silent.
+  if (!state.players[to] || state.players[to].eliminated) return false;
+  loc.controller = to;
+  loc.loyaltyOwner = to;
+  loc.sections = loc.sections.map(() => to);
+  loc.loyalty = CESSION().loyaltyOnCede;
+  // §20.8 — the same reasoning capture uses: whatever was on the bench
+  // belongs to whoever holds the bench now, and they have not chosen yet.
+  loc.activeBuild = null;
+  loc.buildProgress = 0;
+  loc.buildSlider = CONFIG.economy.defaultSlider;
+  loc.buildPriority = "blockade";
+  loc.poolTarget = null;
+  emit(state, "location_ceded", {
+    hex: hexId, locationId: loc.locationId, from, to, cause,
+    name: LOCATIONS[loc.locationId]?.name || hexId,
+  });
+  // A third party whose homeland this is minds who is standing in it. Handing
+  // Omara from Versari to the Lakers is not, to Goldgrass, an improvement —
+  // and the standing occupation grievance simply re-points at its new holder
+  // on its own, because it is computed from the board rather than recorded.
+  const aff = LOCATIONS[loc.locationId]?.affiliation;
+  if (aff && aff !== to && state.players[aff]) {
+    adjustStanding(state, aff, to, -CESSION().thirdPartyStandingHit, "location-ceded");
+  }
+  syncControlHistory(state); // a city signed away changes hands as surely as one stormed
+  recomputeResearch(state);
+  recomputeInfluence(state);
+  recomputeVisibilityFor(state, [to, from], { emitEvents: false });
+  recomputeVp(state);
+  return true;
+}
+
 export function valueOfItem(state, fid, item, ctx = {}) {
   if (!item) return 0;
+  // §5 — WHAT THIS FACTION ACTUALLY WANTS, applied to the price.
+  //
+  // `interestMultiplier` has existed since the interests module landed and was
+  // called by nothing: every faction priced every item identically, so the six
+  // derived wants shaped what an AI would SAY in a courtship and had no bearing
+  // whatever on what it would PAY. A faction whose homeland is under occupation
+  // valued that city at exactly the same number as a bystander.
+  //
+  // It multiplies the base price rather than replacing it, and the multiplier
+  // is capped at `1 + priceMultiplier` (1.6 today), so personality tilts a
+  // negotiation without letting a warlord be talked into anything with the word
+  // "war" in it. Scrap is deliberately exempt: money is money, and a want that
+  // changed the value of a coin would be an exchange-rate bug wearing a hat.
+  const want = item.resource ? 1 : interestMultiplier(state, fid, item, ctx.other);
   if (item.resource) return item.resource.amount || 0;
-  if (item.flow) return (item.flow.amountPerTurn || 0) * 3; // a few turns of stream
-  if (item.research) return (item.research.amount || 0) * 2;
+  // A stream is worth its rate times its TERM. This used to be a flat "×3"
+  // against a flow that never expired, so 4 scrap a turn forever priced at
+  // 12 — buy it once, collect it for the rest of the game.
+  if (item.flow) return (item.flow.amountPerTurn || 0) * flowRounds(item.flow) * want;
+  if (item.research) return (item.research.amount || 0) * 2 * want;
+  // "Let us call it settled." Priced from `fid`'s own side of the ledger:
+  // to the party that HOLDS the grievances this is something being asked of
+  // them — they give up a righteous war and the moral standing that comes
+  // with it — and to the party that owes them it is a clean record. Same
+  // number either way; dealValue's give/get sides supply the sign, so an
+  // apology can never be free and can never be refused for nothing.
+  if (item.settlement) {
+    const owedToMe = settleableWeight(state, fid, ctx.other);
+    const owedByMe = settleableWeight(state, ctx.other, fid);
+    return (owedToMe + owedByMe) * D().grievance.settlementPerWeight * want;
+  }
+  // A city on the table. Priced from `fid`'s own side — their claim on it,
+  // their output from it — and, when they are the one giving it up, scaled
+  // by what it costs to be the party that lets go of ground.
+  if (item.location) {
+    const worth = locationWorth(state, fid, item.location.hexId);
+    // Reclaiming a homeland is worth more to GET; the reluctance to hand ground
+    // over is already `cedeReluctance` and does not want a second multiplier
+    // on top, or a faction would refuse to trade away the very city it wants.
+    return ctx.side === "give" ? worth * cedeReluctance(fid) : worth * want;
+  }
   if (item.chip) return 4; // generic gear value
-  if (item.intel) return item.intel.kind === "mapData" ? 3 : 2;
+  if (item.intel) return (item.intel.kind === "mapData" ? 3 : 2) * want;
   if (item.promise) {
     const def = factionDef(fid) || {};
+    // A promise with a term is worth more the longer it binds, but not
+    // linearly — the far end of a long promise is worth less than the near
+    // end, because anything can happen by then. `termScale` is 1.0 at the
+    // default term and grows/shrinks with the square root of the ratio.
+    const termScale = promiseTermScale(item.promise) * want;
     switch (item.promise.kind) {
-      case "peace": return atWar(state, fid, ctx.other) ? 6 : 1;
-      case "nonAggression": return 2 + (1 - (def.aggression || 0.5)) * 3;
-      case "openBorders": return 1 + (def.sociability || 0.5) * 2;
-      case "joinWar": return wantsDead(state, fid, item.promise.target) ? 5 : 0;
-      case "dontAlly": return 1;
-      case "tribute": return 4; // receiving tribute is good
-      default: return 1;
+      // Enacted on the spot rather than promised, so no term applies.
+      case "pact": return pactAppetite(state, fid, ctx.other) * want;
+      case "peace": return (atWar(state, fid, ctx.other) ? 6 : 1) * want;
+      case "openBorders": return (1 + (def.sociability || 0.5) * 2) * want;
+      case "joinWar": return (wantsDead(state, fid, item.promise.target) ? 5 : 0) * want;
+      // Standing promises — these bind for a term and are enforced.
+      case "nonAggression": return (2 + (1 - (def.aggression || 0.5)) * 3) * termScale;
+      case "dontAlly": return 1 * termScale;
+      case "tribute": return 4 * termScale; // receiving tribute is good
+      default: return want;
     }
   }
   return 0;
@@ -395,8 +1189,12 @@ export function dealValue(state, fid, deal) {
   const get = iAmProposer ? deal.get : deal.give;
   const give = iAmProposer ? deal.give : deal.get;
   let v = 0;
-  for (const it of get || []) v += valueOfItem(state, fid, it, ctx);
-  for (const it of give || []) v -= valueOfItem(state, fid, it, ctx);
+  // Which side an item sits on is not decoration for every kind: a Location
+  // is worth more to lose than to gain, so the valuer has to be told which
+  // it is doing. Every other item kind ignores `side` and prices the same
+  // either way, which is what keeps a settlement symmetrical.
+  for (const it of get || []) v += valueOfItem(state, fid, it, { ...ctx, side: "get" });
+  for (const it of give || []) v -= valueOfItem(state, fid, it, { ...ctx, side: "give" });
   v += getStanding(state, fid, other) * D().ai.relationshipBiasPerStanding;
   return v;
 }
@@ -406,15 +1204,565 @@ export function wouldAccept(state, fid, deal) {
   const other = deal.proposer === fid ? deal.recipient : deal.proposer;
   // Hard gate: a pact / deep promise needs the proposer past rep gates.
   const hasDeepPromise = [...(deal.give || []), ...(deal.get || [])].some(
-    (it) => it.promise && ["nonAggression", "openBorders", "tribute"].includes(it.promise.kind),
+    (it) => it.promise && ["pact", "nonAggression", "openBorders", "tribute"].includes(it.promise.kind),
   );
   if (hasDeepPromise && !passesRepGates(state, fid, other)) return false;
+  // Hard gate: a city nobody can actually hand over. This is not a matter of
+  // price — a deal that promises Omara by a party who does not hold Omara is
+  // not a deal that fell short, it is a deal that cannot be performed. The
+  // check runs on BOTH parties, because a proposer who cannot deliver their
+  // own side is the more common mistake.
+  for (const c of cessionsIn(deal)) {
+    if (cedeBlocker(state, c.from, c.hexId)) return false;
+  }
   // Hard gate: conflicting agreements — won't ally a sworn enemy's friend.
   for (const it of [...(deal.give || []), ...(deal.get || [])]) {
     if (it.promise?.kind === "joinWar" && arePacted(state, fid, it.promise.target)) return false;
     if (it.promise?.kind === "peace" && vassalLord(state, fid) && atWar(state, vassalLord(state, fid), other)) return false;
+    // An alliance is not for sale. `pactAppetite` prices one so a pact can
+    // SWEETEN a deal for a faction that already wants it — it must never let
+    // a pile of scrap buy past the Standing bar aiAcceptsPact guards, or
+    // Standing stops being the currency of the diplomacy game.
+    if (it.promise?.kind === "pact" && !aiAcceptsPact(state, fid, other)) return false;
   }
   return dealValue(state, fid, deal) >= 0;
+}
+
+// Promise kinds that are ACTS, not undertakings: striking the deal performs
+// them there and then, so they leave a pact / an open border / a peace behind
+// rather than a piece of paper somebody might later dishonour.
+const ENACTED_PROMISES = new Set(["pact", "peace", "openBorders", "joinWar"]);
+
+// A settlement clears the slate BOTH ways. Half a reconciliation is not one,
+// and a deal that wiped only the proposer's debts would be a trap rather
+// than an offer.
+function enactSettlement(state, a, b) {
+  const cleared = settleGrievances(state, a, b) + settleGrievances(state, b, a);
+  if (!cleared) return;
+  const gain = D().grievance.settlementHonorGain;
+  for (const side of [a, b]) {
+    if (state.players[side]) adjustHonor(state, side, gain, "made-amends");
+  }
+}
+
+// Perform the enacted half of a struck deal. `from` is the party making the
+// promise; `to` is the party it is made to.
+function enactPromise(state, from, to, promise, cause) {
+  switch (promise.kind) {
+    case "pact":
+      formPact(state, from, to, cause);
+      return;
+    case "peace":
+      makePeace(state, from, to, cause);
+      return;
+    case "openBorders":
+      // The promiser opens THEIR territory to the other party. One-directional,
+      // exactly like the standalone verb — granting is not receiving.
+      if (!standaloneOpenBorders(state, from, to)) {
+        state.diplomacy.agreements.push({
+          id: `ob-${from}-${to}-${state.round}`, type: "open-borders",
+          a: from, b: to, since: state.round,
+        });
+        emit(state, "open_borders_toggled", { agreement: `ob-${from}-${to}`, on: true });
+      }
+      return;
+    case "joinWar":
+      // "I will fight X with you" is settled by fighting X, now.
+      if (promise.target && !atWar(state, from, promise.target)) {
+        declareWar(state, from, promise.target, "deal-joinwar");
+      }
+      return;
+    default:
+  }
+}
+
+// --- §6.10 the round trip: patience, counter-offers, the offer inbox ---
+//
+// Before this, every proposal was a turnstile: one click, one binary answer,
+// no state in between. `dealValue` already knew exactly how far short an
+// offer fell and that number was thrown away. These three pieces spend it:
+// asking has a cost, a refusal comes back with terms that WOULD land, and an
+// offer is an object that can sit on a table awaiting an answer.
+
+const askKey = (a, b) => `${a}|${b}`;
+
+// How many times `a` has asked `b` for something this round. The counter
+// resets on the round boundary rather than decaying, so a patient player who
+// spreads their diplomacy across turns is never penalised.
+export function asksThisRound(state, a, b) {
+  const book = state.diplomacy.asks;
+  if (!book || book.round !== state.round) return 0;
+  return book.byPair[askKey(a, b)] || 0;
+}
+
+// Record an ask and report whether it was one too many. Answering somebody
+// else's offer is not an ask — only opening a new one is.
+function recordAsk(state, a, b) {
+  const book = state.diplomacy.asks = state.diplomacy.asks || { round: state.round, byPair: {} };
+  if (book.round !== state.round) { book.round = state.round; book.byPair = {}; }
+  const k = askKey(a, b);
+  book.byPair[k] = (book.byPair[k] || 0) + 1;
+  return book.byPair[k] > D().offers.freeAsksPerRound;
+}
+
+// The Standing cost of pestering, charged only when an over-quota ask is
+// actually REFUSED. A deal they wanted is never pestering, however many
+// times you have already knocked.
+function chargePester(state, asker, target) {
+  const hit = D().offers.pesterStandingHit;
+  if (!hit) return false;
+  adjustStanding(state, target, asker, -hit, "pestered");
+  emit(state, "offer_pestered", { asker, target, asks: asksThisRound(state, asker, target) });
+  return true;
+}
+
+// The scrap terms of a deal, from the PROPOSER's side: what they are putting
+// up, and what they are asking for. Counter-offers move these two numbers and
+// nothing else — the shape of the deal (which promises, which streams) is the
+// proposer's design, and a counter that rewrote it would be a different deal
+// rather than an answer to this one.
+function scrapTerms(deal) {
+  const sum = (items) => (items || []).reduce(
+    (n, it) => n + (it.resource?.resource === "scrap" ? (it.resource.amount || 0) : 0), 0);
+  return { offered: sum(deal.give), asked: sum(deal.get) };
+}
+function withScrapTerms(deal, offered, asked) {
+  const strip = (items) => (items || []).filter((it) => !(it.resource?.resource === "scrap"));
+  // Never write both sides paying each other scrap — "I give you 2, you give
+  // me 2" is not a term, it is an accounting error with a handshake.
+  const net = offered - asked;
+  const give = net > 0 ? net : 0;
+  const get = net < 0 ? -net : 0;
+  return {
+    ...deal,
+    give: [...strip(deal.give), ...(give > 0 ? [{ resource: { resource: "scrap", amount: give } }] : [])],
+    get: [...strip(deal.get), ...(get > 0 ? [{ resource: { resource: "scrap", amount: get } }] : [])],
+  };
+}
+// A deal with nothing on either side of it. Reached when the only way to make
+// an offer acceptable was to delete it, which is a refusal wearing a suit.
+function isEmptyDeal(deal) {
+  return !(deal.give || []).length && !(deal.get || []).length;
+}
+
+// The nearest deal `fid` WOULD take, given one it won't. Returns null when no
+// price closes the gap — which is the honest answer for a hard refusal (a
+// reputation gate, a conflicting alliance) and for a gap the proposer could
+// never cover.
+//
+// The gap is exactly `-dealValue`, and scrap is worth 1 apiece to everyone,
+// so closing it is arithmetic rather than search: give more, ask for less, or
+// both. Preference order is deliberate — dropping YOUR ask costs the proposer
+// nothing they hold, so a counter takes that first and only then reaches into
+// their treasury.
+export function counterOffer(state, fid, deal) {
+  const other = deal.proposer === fid ? deal.recipient : deal.proposer;
+  // Hard gates are not a matter of price.
+  const gated = { ...deal, give: deal.give || [], get: deal.get || [] };
+  if (dealValue(state, fid, gated) >= 0) return null; // they'd take it as-is
+  const bare = withScrapTerms(deal, 0, 0);
+  const gapAtZero = -dealValue(state, fid, bare);
+  if (!Number.isFinite(gapAtZero)) return null;
+
+  const { offered, asked } = scrapTerms(deal);
+  const cfg = D().offers;
+  // How much the proposer can actually reach for.
+  const purse = D().offers.counterWithinMeans
+    ? (state.players[deal.proposer]?.resource || 0)
+    : Infinity;
+
+  // Step 1 — give up the ask. Cheapest concession available to the proposer.
+  let newAsked = asked;
+  let need = gapAtZero + asked - offered; // value still missing at these terms
+  if (need > 0 && newAsked > 0) {
+    const shed = Math.min(newAsked, need);
+    newAsked -= shed;
+    need -= shed;
+  }
+  // Step 2 — the rest comes out of the proposer's pocket, if they have it.
+  let newOffered = offered;
+  if (need > 0) {
+    if (need > cfg.counterGapCeiling) return null; // no price; say no properly
+    newOffered = offered + Math.ceil(need);
+    if (newOffered > purse) return null; // an unanswerable counter is just a refusal
+  }
+  if (newOffered === offered && newAsked === asked) return null;
+
+  const counter = withScrapTerms(deal, newOffered, newAsked);
+  // Sanity: the counter must actually be one they take. If the arithmetic
+  // missed (a promise whose value moved with the terms), walk it up a little
+  // rather than returning an offer that would itself be refused.
+  for (let i = 0; i < 8 && dealValue(state, fid, counter) < 0; i++) {
+    const bump = scrapTerms(counter).offered + 1;
+    if (bump > purse) return null;
+    Object.assign(counter, withScrapTerms(counter, bump, scrapTerms(counter).asked));
+  }
+  if (dealValue(state, fid, counter) < 0) return null;
+  if (!wouldAccept(state, fid, counter)) return null;
+  // "Yes, if you ask me for nothing and give me nothing" is not an answer.
+  if (isEmptyDeal(counter)) return null;
+  // Nor is a counter that concedes nothing — if the terms came back
+  // unchanged in substance, the honest reply is no.
+  const before = scrapTerms(deal);
+  const after = scrapTerms(counter);
+  if (after.offered === before.offered && after.asked === before.asked) return null;
+  return counter;
+}
+
+// Put an offer on the table. `from` proposes to `to`; it waits until answered
+// or until it lapses.
+// One road for every proposal the player makes: they take it, they name a
+// price, or they say no — and only the last of those is a dead end. This is
+// the piece that turns a turnstile into a conversation, and it needed no new
+// valuation model: `dealValue` has always known the size of the gap.
+export function resolveProposal(state, pid, f, deal, cause, kind) {
+  // A settlement that would clear nothing is an empty box, and an AI will
+  // cheerfully take real scrap for one. Refuse it here rather than let a
+  // player pay for a term with no content — the same guard tribute has
+  // against demanding zero.
+  const hasSettlement = [...(deal.give || []), ...(deal.get || [])].some((it) => it.settlement);
+  if (hasSettlement && !settleableWeight(state, f, pid) && !settleableWeight(state, pid, f)) {
+    return {
+      accepted: false,
+      reason: grievanceWeight(state, f, pid) || grievanceWeight(state, pid, f)
+        ? "what stands between you is ground held, and no payment ends that"
+        : "there is nothing between you to settle",
+    };
+  }
+  // …and the same courtesy for a city that cannot change hands: say why,
+  // rather than counter with scrap against terms that were never performable.
+  for (const c of cessionsIn(deal)) {
+    const blocker = cedeBlocker(state, c.from, c.hexId);
+    if (blocker) return { accepted: false, reason: c.from === pid ? blocker.replace(/^they /, "you ") : blocker };
+  }
+  const pestering = recordAsk(state, pid, f);
+  if (wouldAccept(state, f, deal)) {
+    applyDeal(state, deal, cause);
+    emit(state, "deal_struck", { proposer: pid, recipient: f, cause });
+    // Brief §7.1 — negotiation costs the ask budget EITHER WAY. This used to
+    // bite only on refusal, so tabling a run of cheap deals a faction would
+    // obviously take was free, and that was half of the round-one alliance.
+    // Johnson's warning is the reason it is not: unlimited free negotiation
+    // trades a vending machine for a slot machine.
+    if (pestering && D().deals.chargeAskOnAccept) chargePester(state, pid, f);
+    return { accepted: true };
+  }
+  const counter = counterOffer(state, f, deal);
+  if (counter) {
+    const offer = tableOffer(state, f, pid, counter, { kind, isCounter: true });
+    return { accepted: false, countered: true, offerId: offer.id, reason: "they answer with terms of their own" };
+  }
+  // A flat no. THIS is where asking too often lands: a refusal you brought on
+  // yourself by knocking again after two.
+  if (pestering) chargePester(state, pid, f);
+  return {
+    accepted: false,
+    reason: pestering ? "they are tired of being asked" : refusalReason(state, f, deal),
+  };
+}
+
+// Why they will not deal at ANY price. "No" is a poor answer when the player
+// cannot tell whether they were 3 scrap short or asking for something that is
+// not for sale — the first is a haggle, the second is a different game.
+function refusalReason(state, fid, deal) {
+  const other = deal.proposer === fid ? deal.recipient : deal.proposer;
+  for (const it of [...(deal.give || []), ...(deal.get || [])]) {
+    const kind = it.promise?.kind;
+    if (kind === "pact" && !aiAcceptsPact(state, fid, other)) {
+      const short = D().pactStandingReq - getStanding(state, fid, other);
+      return short > 0
+        ? `an alliance is not for sale — they need ${short} more Standing first`
+        : "they will not enter an alliance with you";
+    }
+    if (kind === "joinWar" && arePacted(state, fid, it.promise.target)) {
+      return `they will not turn on ${factionDef(it.promise.target)?.name || it.promise.target}, who is their ally`;
+    }
+  }
+  for (const c of cessionsIn(deal)) {
+    const blocker = cedeBlocker(state, c.from, c.hexId);
+    if (blocker) return blocker;
+    if (c.from === fid) {
+      const name = LOCATIONS[state.locations[c.hexId]?.locationId]?.name || c.hexId;
+      return `they will not give up ${name} at that price`;
+    }
+  }
+  if (!passesRepGates(state, fid, other)) {
+    return menaceOf(state, other) > tolerance(state, fid, other)
+      ? "your Menace is past what they will overlook"
+      : "your Honor is below what they will deal on";
+  }
+  return "nothing they would take, at any price you could pay";
+}
+
+export function tableOffer(state, from, to, deal, meta = {}) {
+  ensureDiplomacy(state);
+  const offer = {
+    id: `offer-${from}-${to}-${state.round}-${state.diplomacy.offers.length}`,
+    from, to,
+    // `from`/`to` say who is putting this to whom — who reads it in their
+    // inbox. They are NOT the deal's own direction, and must not overwrite
+    // it: a counter-offer is the RECIPIENT's answer to terms the PROPOSER
+    // wrote, so its give/get are still written from the proposer's side.
+    // Re-stamping them here flipped every counter inside out — the AI would
+    // have paid the scrap the player offered, and the player would have made
+    // the promises they had asked for.
+    deal: {
+      ...deal,
+      proposer: deal.proposer || from,
+      recipient: deal.recipient || to,
+    },
+    kind: meta.kind || "deal",
+    isCounter: !!meta.isCounter,
+    note: meta.note || null,
+    since: state.round,
+    expiresOnRound: state.round + D().offers.expiryRounds,
+  };
+  state.diplomacy.offers.push(offer);
+  emit(state, "offer_tabled", { offer: offer.id, from, to, kind: offer.kind, isCounter: offer.isCounter });
+  return offer;
+}
+
+export function offersFor(state, fid) {
+  return (state.diplomacy?.offers || []).filter((o) => o.to === fid);
+}
+
+// Answer an offer sitting in your inbox. Accepting applies it exactly as
+// tabled — the terms are the terms, which is the whole point of an offer
+// existing as an object.
+export function answerOffer(state, fid, offerId, accept) {
+  ensureDiplomacy(state);
+  const i = state.diplomacy.offers.findIndex((o) => o.id === offerId && o.to === fid);
+  if (i < 0) return { ok: false, reason: "that offer is no longer on the table" };
+  const offer = state.diplomacy.offers[i];
+  // An offer is an object that SITS there, for rounds — long enough for a
+  // city named in it to be lost, given away, or peeled to neutral. Applying
+  // it anyway would quietly drop the term and hand the other side everything
+  // else for free, so a cession that can no longer be performed voids the
+  // offer instead, and it stays on the table to be declined properly.
+  if (accept) {
+    for (const c of cessionsIn(offer.deal)) {
+      const blocker = cedeBlocker(state, c.from, c.hexId);
+      if (blocker) return { ok: false, reason: blocker.replace(/^they /, c.from === fid ? "you " : "they ") };
+    }
+  }
+  state.diplomacy.offers.splice(i, 1);
+  if (!accept) {
+    emit(state, "offer_declined", { offer: offer.id, from: offer.from, to: fid });
+    return { ok: true, accepted: false };
+  }
+  applyDeal(state, offer.deal, offer.isCounter ? "counter-accepted" : "offer-accepted");
+  emit(state, "offer_accepted", { offer: offer.id, from: offer.from, to: fid });
+  checkDominion(state);
+  return { ok: true, accepted: true };
+}
+
+// §13 — THE PLAYER'S OWN COUNTER.
+//
+// The AI has been able to counter the player's terms since §6.10; the player
+// could only take an offer or leave it. That asymmetry is the whole reason the
+// inbox read as a vending machine — an offer arrives, you press one of two
+// buttons, nothing you think enters the conversation.
+//
+// A counter is a HAGGLE, not a redraft: the player moves the scrap and nothing
+// else. Rewriting the non-scrap terms would make it a different deal, which is
+// what `propose-deal` is for, and the AI's own `counterOffer` holds to exactly
+// the same discipline for exactly the same reason.
+//
+// `scrap` is signed and read from the PLAYER's seat: positive is what they pay,
+// negative is what they want paid. The deal underneath stays in the proposer's
+// frame, because that is the frame `applyDeal` and `wouldAccept` read.
+export function counterTheOffer(state, fid, offerId, scrap = 0) {
+  ensureDiplomacy(state);
+  const i = (state.diplomacy.offers || []).findIndex((o) => o.id === offerId && o.to === fid);
+  if (i < 0) return { ok: false, reason: "that offer is no longer on the table" };
+  const offer = state.diplomacy.offers[i];
+  const other = offer.from;
+  const pay = Math.max(0, Math.round(scrap));
+  if (pay > (state.players[fid]?.resource || 0)) {
+    return { ok: false, reason: "you do not have that much scrap" };
+  }
+  const want = Math.max(0, -Math.round(scrap));
+  // Proposer-space. When the other side wrote the offer, what the player pays
+  // is what the PROPOSER asks; when these are counter-terms against something
+  // the player wrote, the player is still the proposer and it is what they give.
+  const viewerProposes = offer.deal.proposer === fid;
+  const deal = viewerProposes
+    ? withScrapTerms(offer.deal, pay, want)
+    : withScrapTerms(offer.deal, want, pay);
+  if (isEmptyDeal(deal)) return { ok: false, reason: "there would be nothing left to agree to" };
+  // Off the table before it is answered: a counter replaces the offer, and
+  // leaving the original sitting there would let the player take the old terms
+  // after being refused the new ones.
+  state.diplomacy.offers.splice(i, 1);
+  emit(state, "offer_countered", { offer: offer.id, by: fid, to: other, scrap: Math.round(scrap) });
+  const res = resolveProposal(state, fid, other, deal, "counter-offer", offer.kind);
+  return { ok: true, ...res };
+}
+
+// Offers nobody answered lapse quietly. Letting one lapse is not a refusal
+// and costs nothing — silence has never been an answer in this game
+// (expirePactCalls has always worked the same way).
+function expireOffers(state) {
+  const live = [];
+  for (const o of state.diplomacy.offers || []) {
+    if (state.round <= o.expiresOnRound) { live.push(o); continue; }
+    emit(state, "offer_lapsed", { offer: o.id, from: o.from, to: o.to });
+  }
+  state.diplomacy.offers = live;
+}
+
+// --- §6.11 ultimatums ------------------------------------------------
+//
+// The verb the layer had no version of. You could ask, you could trade, you
+// could declare war — there was nothing in between, no way to say "stop, or
+// else", which is the most common act in pre-war diplomacy and the one that
+// generates all the tension.
+//
+// An ultimatum is public, deadlined, and binding on the ISSUER as much as on
+// the target: defying one hands the issuer a righteous war, and issuing one
+// you then do nothing about is a bluff the whole board watched you make.
+
+// Is the demand met right now? Deliberately checked against the world rather
+// than tracked as a flag, so a target that complies by simply marching home
+// is complying, without having to announce it.
+export function demandSatisfied(state, u) {
+  const d = u.demand || {};
+  if (d.kind === "tribute") return !!u.paid;
+  if (d.kind === "withdraw") return unitsInTerritory(state, u.to, u.from).length === 0;
+  return false;
+}
+
+// `moverFid`'s units standing inside `ownerFid`'s zone of control. The same
+// question the trespass rules ask, which is what makes "get out of my
+// territory" a demand with an unambiguous answer.
+export function unitsInTerritory(state, moverFid, ownerFid) {
+  const zoc = state.world?.zoc || {};
+  return Object.values(state.units || {}).filter(
+    (unit) => unit.owner === moverFid && zoc[unit.node] === ownerFid,
+  );
+}
+
+// How long until `from` may threaten `to` again. A threat repeated every
+// other round is not a threat, it is a tic.
+export function ultimatumCooldown(state, from, to) {
+  const at = state.diplomacy?.ultimatumHistory?.[`${from}|${to}`];
+  if (at == null) return 0;
+  const left = D().ultimatum.cooldownRounds - (state.round - at);
+  return left > 0 ? left : 0;
+}
+
+export function ultimatumsFor(state, fid, { issuedBy = false } = {}) {
+  return (state.diplomacy?.ultimatums || []).filter((u) => (issuedBy ? u.from : u.to) === fid);
+}
+
+export function issueUltimatum(state, from, to, demand) {
+  ensureDiplomacy(state);
+  const cfg = D().ultimatum;
+  if (from === to || !state.players[to]) return { ok: false, reason: "there is nobody to say that to" };
+  if (!mayEngage(state, from, to)) return { ok: false, reason: "they are beyond your reach" };
+  if (atWar(state, from, to)) return { ok: false, reason: "you are already at war — there is nothing left to threaten" };
+  if (ultimatumsFor(state, to).some((u) => u.from === from)) {
+    return { ok: false, reason: "they are already under one of your ultimatums" };
+  }
+  const cd = ultimatumCooldown(state, from, to);
+  if (cd > 0) return { ok: false, reason: `you threatened them too recently — ${cd} rounds` };
+  if (demand?.kind === "tribute") {
+    const amount = Math.min(cfg.maxScrap, Math.max(1, Math.round(demand.amount || 0)));
+    if (!amount) return { ok: false, reason: "name what you want" };
+    demand = { kind: "tribute", amount };
+  } else if (demand?.kind === "withdraw") {
+    if (!unitsInTerritory(state, to, from).length) {
+      return { ok: false, reason: "they have nothing of yours to leave" };
+    }
+    demand = { kind: "withdraw" };
+  } else {
+    return { ok: false, reason: "no such demand" };
+  }
+  const u = {
+    id: `ult-${from}-${to}-${state.round}`,
+    from, to, demand,
+    since: state.round,
+    expiresOnRound: state.round + cfg.deadlineRounds,
+    paid: false,
+    mustActBy: null,
+  };
+  state.diplomacy.ultimatums.push(u);
+  state.diplomacy.ultimatumHistory = state.diplomacy.ultimatumHistory || {};
+  state.diplomacy.ultimatumHistory[`${from}|${to}`] = state.round;
+  // A threat is a hostile act however politely it is worded, and the board
+  // is watching — this one is never discounted for witnesses.
+  adjustMenace(state, from, cfg.menaceOnIssue, `ultimatum:${to}`);
+  emit(state, "ultimatum_issued", { id: u.id, from, to, demand, expiresOnRound: u.expiresOnRound });
+  return { ok: true, id: u.id };
+}
+
+// Give in. For a tribute demand that means paying; for a withdrawal it means
+// marching home, which the round check notices on its own.
+export function answerUltimatum(state, fid, id, comply) {
+  ensureDiplomacy(state);
+  const u = (state.diplomacy.ultimatums || []).find((x) => x.id === id && x.to === fid);
+  if (!u) return { ok: false, reason: "that ultimatum has passed" };
+  if (!comply) return { ok: true, complied: false, reason: "you let it stand" };
+  if (u.demand.kind === "tribute") {
+    const p = state.players[fid];
+    if ((p?.resource || 0) < u.demand.amount) return { ok: false, reason: "you cannot cover it" };
+    transferItems(state, fid, u.from, [{ resource: { resource: "scrap", amount: u.demand.amount } }]);
+    u.paid = true;
+  }
+  if (!demandSatisfied(state, u)) {
+    return { ok: false, reason: "your units are still in their territory" };
+  }
+  completeUltimatum(state, u, true);
+  return { ok: true, complied: true };
+}
+
+function completeUltimatum(state, u, complied) {
+  state.diplomacy.ultimatums = state.diplomacy.ultimatums.filter((x) => x !== u);
+  const cfg = D().ultimatum;
+  if (complied) {
+    // Giving in costs face, not standing: they got what they wanted, and the
+    // relationship is fractionally warmer for the crisis having ended.
+    adjustStanding(state, u.from, u.to, cfg.complyStandingGain, "ultimatum-met");
+    emit(state, "ultimatum_complied", { id: u.id, from: u.from, to: u.to, demand: u.demand });
+    return;
+  }
+  // Defied. The issuer now has a grievance on the record and a righteous war
+  // available — and a clock of their own to make good on it.
+  recordGrievance(state, u.from, u.to, "defiance", { severity: cfg.defianceSeverity });
+  state.diplomacy.ultimatums.push({ ...u, defied: true, mustActBy: state.round + cfg.graceRounds });
+  emit(state, "ultimatum_defied", { id: u.id, from: u.from, to: u.to, demand: u.demand });
+}
+
+// Would `fid` give in? Weighed against what defying actually risks: a
+// righteous war from someone stronger is a bad trade, and a righteous war
+// from someone weaker is an invitation. Temperament decides the margin —
+// a warlord would rather be invaded than be seen to fold.
+export function aiComplies(state, fid, u) {
+  const def = factionDef(fid) || {};
+  if (u.demand.kind === "tribute" && (state.players[fid]?.resource || 0) < u.demand.amount) return false;
+  const ratio = powerOf(state, u.from) / Math.max(1, powerOf(state, fid));
+  // Backing down is worth roughly what the war would cost you, discounted by
+  // how much this faction minds being pushed around.
+  const spine = 0.6 + (def.aggression ?? 0.5) * 1.2;
+  return ratio > spine;
+}
+
+// Round cadence: deadlines fall due, and bluffs get called.
+function resolveUltimatums(state) {
+  const cfg = D().ultimatum;
+  for (const u of [...(state.diplomacy.ultimatums || [])]) {
+    if (u.defied) {
+      // The issuer said "or else" and the board is waiting to see the else.
+      if (state.round <= u.mustActBy) continue;
+      state.diplomacy.ultimatums = state.diplomacy.ultimatums.filter((x) => x !== u);
+      if (atWar(state, u.from, u.to)) continue; // they made good on it
+      if (state.players[u.from]) adjustHonor(state, u.from, -cfg.bluffHonorLoss, `bluff:${u.to}`);
+      emit(state, "ultimatum_bluffed", { id: u.id, from: u.from, to: u.to });
+      continue;
+    }
+    if (demandSatisfied(state, u)) { completeUltimatum(state, u, true); continue; }
+    if (state.round > u.expiresOnRound) completeUltimatum(state, u, false);
+  }
 }
 
 // --- applying a struck deal (§18.6 atomic) --------------------------
@@ -422,25 +1770,124 @@ export function applyDeal(state, deal, cause = "deal") {
   // transfer each side's items
   transferItems(state, deal.proposer, deal.recipient, deal.give);
   transferItems(state, deal.recipient, deal.proposer, deal.get);
+  // …then perform the promises that are acts. Before this, a deal could be
+  // struck on "I offer you an alliance and open borders" and leave neither
+  // behind: the terms were recorded on an agreement nothing ever read.
+  for (const it of deal.give || []) {
+    if (it.promise && ENACTED_PROMISES.has(it.promise.kind)) {
+      enactPromise(state, deal.proposer, deal.recipient, it.promise, cause);
+    }
+  }
+  for (const it of deal.get || []) {
+    if (it.promise && ENACTED_PROMISES.has(it.promise.kind)) {
+      enactPromise(state, deal.recipient, deal.proposer, it.promise, cause);
+    }
+  }
+  if ([...(deal.give || []), ...(deal.get || [])].some((it) => it.settlement)) {
+    enactSettlement(state, deal.proposer, deal.recipient);
+  }
   // register live agreement if it carries flows/promises (§6.2 type tag).
-  const promises = [...(deal.give || []), ...(deal.get || [])].filter((it) => it.flow || it.promise);
+  // Only flows and STANDING promises go on the record. An enacted promise
+  // has already happened; keeping it as a live term would let it be
+  // "broken" twice, and would make an alliance look like an IOU.
+  const promises = [...(deal.give || []), ...(deal.get || [])].filter(
+    (it) => it.flow || (it.promise && !ENACTED_PROMISES.has(it.promise.kind)),
+  );
   if (promises.length) {
+    // Every flow a deal creates is term-limited. A flow that arrived without
+    // one takes the default rather than becoming perpetual — the perpetual
+    // case is reserved for agreements the engine makes itself (vassal
+    // tribute), and a deal must never be able to mint one.
+    for (const it of promises) {
+      if (it.flow && !it.flow.rounds) it.flow.rounds = D().flow.defaultRounds;
+      if (it.promise && !it.promise.rounds) it.promise.rounds = D().flow.defaultRounds;
+    }
+    const term = Math.max(
+      ...promises.map((it) => (it.flow ? it.flow.rounds : promiseRounds(it.promise))),
+      0,
+    );
     state.diplomacy.agreements.push({
       id: `agr${state.diplomacy.agreements.length + 1}`,
       type: "deal-promise",
       proposer: deal.proposer, recipient: deal.recipient,
       give: deal.give || [], get: deal.get || [], round: state.round,
+      // The LAST round this is live, not the first round it isn't:
+      // runFlows fires at round-end, after state.round has already advanced,
+      // so a deal struck in round R first pays in R+1. Expiring at
+      // `R + term` exclusive would pay term−1 times and quietly shortchange
+      // whatever the players agreed.
+      expiresOnRound: state.round + term,
     });
   }
-  // §1.2 — a gift warms Standing with diminishing returns; any other deal
-  // warms both ways at the flat rate.
+  // §1.2 / brief §7.1 — a gift warms Standing with diminishing returns; any
+  // other deal warms by how LOPSIDED it was, capped per pair per round.
   if (cause === "gift") {
     applyGiftStanding(state, deal);
   } else {
-    adjustStanding(state, deal.proposer, deal.recipient, 2, cause);
-    adjustStanding(state, deal.recipient, deal.proposer, 2, cause);
+    applyDealStanding(state, deal, cause);
   }
   emit(state, "deal_struck", { proposer: deal.proposer, recipient: deal.recipient, cause });
+}
+
+// Brief §7.1 — Standing from an ordinary deal.
+//
+// It used to be a flat +2 both ways for ANY non-gift deal, which is what let
+// four one-scrap deals buy an alliance on round one. Three things replace it,
+// and each one alone would close the hole:
+//
+//   · it scales with the NET value transferred, so a swap of equals warms
+//     nobody. Generosity is what warms — the same thing gifts already say —
+//     and a token deal is worth a token amount, which rounds to nothing.
+//   · it is capped per pair per round, so "warm them faster" is never
+//     answered by "table more deals this turn".
+//   · the ask budget is charged on acceptance as well as refusal (see
+//     `resolveProposal`), so the spam itself has a price.
+//
+// The net is measured from each RECEIVER's own side of the table: what the
+// recipient got, valued by them, against what the proposer got, valued by
+// them. That is the only symmetric reading available — there is no neutral
+// valuer in this engine — and it prices a lopsided city-for-nothing exactly
+// the way both parties would describe it.
+//
+// Both sides warm by the same amount, which is deliberate: a generous deal is
+// a warm event for the pair, not a debt one of them owes.
+// The historical flat rate, kept reachable so a stage can be measured against
+// its own "before" without a branch revert (config comment on
+// `dealStandingPerValue`).
+const LEGACY_FLAT_DEAL_STANDING = 2;
+
+function applyDealStanding(state, deal, cause) {
+  const cfg = D().deals;
+  if (!(cfg.dealStandingPerValue > 0)) {
+    adjustStanding(state, deal.proposer, deal.recipient, LEGACY_FLAT_DEAL_STANDING, cause);
+    adjustStanding(state, deal.recipient, deal.proposer, LEGACY_FLAT_DEAL_STANDING, cause);
+    return;
+  }
+  const value = (fid, items, side) =>
+    (items || []).reduce((n, it) => n + valueOfItem(state, fid, it, { other: fid === deal.proposer ? deal.recipient : deal.proposer, side }), 0);
+  // What each party received, priced by the party that received it.
+  const toRecipient = value(deal.recipient, deal.give, "get");
+  const toProposer = value(deal.proposer, deal.get, "get");
+  const net = Math.abs(toRecipient - toProposer);
+  const gain = Math.min(
+    cfg.dealStandingCapPerRound,
+    Math.round(net / Math.max(1, cfg.dealStandingPerValue)),
+  );
+  if (gain <= 0) return;
+  // The per-pair, per-round ceiling. Unordered — "warm them" is one budget,
+  // not two, or the same pair could be pumped from both directions.
+  const book = state.diplomacy.dealStanding =
+    state.diplomacy.dealStanding && state.diplomacy.dealStanding.round === state.round
+      ? state.diplomacy.dealStanding
+      : { round: state.round, byPair: {} };
+  const k = [deal.proposer, deal.recipient].sort().join("|");
+  const spent = book.byPair[k] || 0;
+  const allowed = Math.max(0, cfg.dealStandingCapPerRound - spent);
+  const actual = Math.min(gain, allowed);
+  if (actual <= 0) return;
+  book.byPair[k] = spent + actual;
+  adjustStanding(state, deal.proposer, deal.recipient, actual, cause);
+  adjustStanding(state, deal.recipient, deal.proposer, actual, cause);
 }
 
 // §1.2/§6.9 — gift Standing with sliding-window diminishing returns. The n-th
@@ -480,13 +1927,20 @@ function transferItems(state, from, to, items) {
       // §18.6/§19.9 — intel delivers Fog vision/mapData of the giver's area.
       const giverHexes = [...(state.visibility?.[from]?.explored || [])];
       if (giverHexes.length) revealRegion(state, to, giverHexes);
+    } else if (it.location) {
+      // §3.2 — the deed changes hands with everything else in the deal.
+      // Re-checked here rather than trusted: a deal can sit in an inbox for
+      // rounds, and the city can be lost in the meantime.
+      if (!cedeBlocker(state, from, it.location.hexId)) {
+        cedeLocation(state, from, to, it.location.hexId, "deal");
+      }
     }
     // flows + promises are tracked in the live agreement (applied per round)
   }
 }
 
 // --- the verbs (§18.7) ----------------------------------------------
-export function declareWar(state, a, b, cause = "declared") {
+export function declareWar(state, a, b, cause = "declared", opts = {}) {
   if (atWar(state, a, b)) return;
   // declaring war on a pacted faction breaks the pact (Honor ding).
   if (arePacted(state, a, b)) breakPact(state, a, b, "war-on-ally");
@@ -496,15 +1950,41 @@ export function declareWar(state, a, b, cause = "declared") {
   const justified = [];
   if (cause === "rebellion" || warJustification(state, a, b)) justified.push(a);
   if (warJustification(state, b, a)) justified.push(b);
+  // §9 — a coalition formed ON GROUNDS hands every member a justified war.
+  // That is not a courtesy: an unjustified declaration charges Menace, and
+  // with `coalition.wM` at 1 that raises the members' OWN threat scores, so
+  // the old blanket draft seeded the next coalition out of the last one.
+  for (const f of opts.justifiedFor || []) if (!justified.includes(f)) justified.push(f);
   // §6.2 — war record tracks losses for the §1.5 exhaustion model.
   state.diplomacy.wars.push({ a, b, since: state.round, justified, unitsLost: {}, locationsLost: {}, contestsWon: {} });
-  setStanding(state, a, b, D().tiers.hostile, cause);
-  setStanding(state, b, a, D().tiers.hostile, cause);
+  // A war normally slams both sides to Hostile. A DRAFT does not: signing a
+  // rising against somebody you were on decent terms with cools the room, it
+  // does not make you their enemy, and the old behaviour turned a +5 partner
+  // into a permanent one over a third party's lead.
+  const floor = opts.standingFloor;
+  const land = (x, y) => setStanding(state, x, y,
+    floor == null ? D().tiers.hostile : Math.min(getStanding(state, x, y), floor), cause);
+  land(a, b); land(b, a);
   // Voluntary coalition membership: taking up arms against a faction the
   // board has risen against makes you part of the rising (the human's only
   // road in — coalitions never conscript them).
   const coal = coalitionAgainst(state, b);
   if (coal && a !== coal.target && !coal.members.includes(a)) coal.members.push(a);
+  // The declaration itself is an act the board judges. A war you earned the
+  // right to costs nothing to open; one you simply wanted marks you before
+  // a single shot. (Previously the confirm dialog promised this and nothing
+  // charged it, so declaring was free and only fighting was scored.)
+  if (!justified.includes(a) && D().menace.declareUnjustified) {
+    adjustMenace(state, a, D().menace.declareUnjustified, `declare:${b}`);
+    // …and the board judges WHO you hit, not only that you hit somebody. A
+    // spotless neighbour is armour: see `menace.declareOnCleanHands`.
+    const extra = cleanHandsSurcharge(state, a, b);
+    if (extra > 0) adjustMenace(state, a, extra, `declare-clean-hands:${b}`);
+  }
+  // §13 — a position said to the whole board is broken by the deed, not by
+  // the declaration's wording, so this sits after the war record exists.
+  breakPositionsOnWar(state, a, b);
+  breakPositionsOnWar(state, b, a);
   emit(state, "war_declared", { a, b, cause, justified });
 }
 
@@ -521,6 +2001,24 @@ export function makePeace(state, a, b, cause = "peace") {
   state.diplomacy.wars = state.diplomacy.wars.filter(
     (w) => !((w.a === a && w.b === b) || (w.a === b && w.b === a)),
   );
+  // §9 — MAKING YOUR OWN PEACE IS HOW YOU LEAVE A RISING.
+  //
+  // `declareWar` enrols anyone who declares on a coalition's target — that is
+  // the human's only road INTO one, since coalitions never conscript them. It
+  // had no road out: membership outlived the war that created it, so a faction
+  // that fought, settled and moved on stayed on the roster of a coalition it
+  // was no longer part of. Measured across ten games, the human sat in two
+  // coalitions against factions they were at peace with.
+  //
+  // Leaving by settling is also the right rule to have: a rising held together
+  // by nothing but a list is not a coalition, it is a label.
+  for (const c of state.diplomacy.coalitions || []) {
+    if (c.target !== a && c.target !== b) continue;
+    const member = c.target === a ? b : a;
+    if (!c.members.includes(member)) continue;
+    c.members = c.members.filter((m) => m !== member);
+    emit(state, "coalition_left", { target: c.target, member, cause });
+  }
   if (state.diplomacy.wars.length !== before) {
     adjustStanding(state, a, b, 3, cause);
     adjustStanding(state, b, a, 3, cause);
@@ -543,8 +2041,24 @@ export function findPactAgreement(state, a, b) {
   ) || null;
 }
 
+// A live `dontAlly` promise by `a` naming `b` — the promise that was
+// previously sellable, priceable, and completely unenforced. Returns the
+// agreement so a caller can name it when it blocks something.
+export function dontAllyPledge(state, a, b) {
+  return (state.diplomacy?.agreements || []).find((agr) => {
+    if (agr.type !== "deal-promise") return false;
+    if (agr.expiresOnRound != null && state.round > agr.expiresOnRound) return false;
+    const mine = agr.proposer === a ? agr.give : agr.recipient === a ? agr.get : null;
+    return !!mine?.some((it) => it.promise?.kind === "dontAlly" && it.promise.target === b);
+  }) || null;
+}
+
 export function formPact(state, a, b, cause = "pact") {
   if (arePacted(state, a, b)) return false;
+  // Either side may have promised a third party it would not ally this one.
+  // Honouring it is the default; breaking it is a deliberate act that runs
+  // through breakPromiseIfAny, not something formPact does by accident.
+  if (dontAllyPledge(state, a, b) || dontAllyPledge(state, b, a)) return false;
   makePeace(state, a, b, "pact-peace");
   state.diplomacy.pacts.push({ a, b, since: state.round });
   // §1.9/§1.10 — a pact carries a typed agreement with the auto-share defaults
@@ -668,6 +2182,11 @@ function queueHumanPactCalls(state) {
 // Why this faction is unhappy — the concrete, checkable grievance behind
 // the warning, so the envoy can name it instead of grumbling vaguely.
 function warningReason(state, f, human) {
+  // §13 — a position broken is the most concrete thing an envoy can put in
+  // front of you: it is a sentence you said, in public, and then contradicted.
+  // It goes FIRST, because the whole cost of breaking one is being named for
+  // it, and an envoy that grumbles about Menace instead has swallowed the bill.
+  if (citablePositions(state, human, f).length) return "position";
   if (menaceOf(state, human) > tolerance(state, f, human)) return "menace";
   if (honorOf(state, human) < trustFloor(state, f)) return "honor";
   const rec = state.diplomacy.trespassRecord?.[`${human}|${f}`];
@@ -702,9 +2221,37 @@ function queueHumanWarnings(state) {
   if (t >= D().coalition.threshold * w.coalitionFraction
     && !coalitionAgainst(state, human) && due("coalition")) {
     warned.coalition = state.round;
-    const payload = { from: null, to: human, kind: "coalition", threat: Math.round(t * 10) / 10 };
+    const payload = {
+      from: null, to: human, kind: "coalition", threat: Math.round(t * 10) / 10,
+      // §9 — say what they would be rising ABOUT. Without grounds the murmur
+      // is "they don't like you"; with them it is "your Menace is 5", which is
+      // a thing the player can actually go and fix.
+      grounds: coalitionGrounds(state, human),
+    };
     queue.push({ id: `warn-coalition-${state.round}`, round: state.round, ...payload });
     emit(state, "diplomatic_warning", payload);
+  }
+
+  // §9 — THE MURMUR IS FOR ALL OF THEM. A rising against a rival is the
+  // single most important thing on the board for a player who is neither in
+  // it nor its target: it is their window. Before this, the human heard the
+  // board turning only when it was turning on them, so the whole coalition
+  // layer was invisible from the outside and read as the AI acting at random.
+  if (!D().coalition.murmurAll) return;
+  for (const f of factionIds(state)) {
+    if (f === human) continue;
+    const tf = threatScore(state, f);
+    if (tf < D().coalition.threshold * w.coalitionFraction) continue;
+    if (coalitionAgainst(state, f)) continue;
+    const g = coalitionGrounds(state, f);
+    if (!g) continue; // no grounds, no rising, nothing to murmur about
+    if (!due(`coalition|${f}`)) continue;
+    warned[`coalition|${f}`] = state.round;
+    // A murmur, not an audience: it is news about somebody else, so it goes
+    // to the log and not into the queue of envoys waiting at the door.
+    emit(state, "coalition_murmur", {
+      about: f, to: human, threat: Math.round(tf * 10) / 10, grounds: g,
+    });
   }
 }
 
@@ -767,14 +2314,227 @@ function dropStandingTiers(state, a, b, n) {
   setStanding(state, a, b, Math.min(getStanding(state, a, b), D().tiers[order[idx]]), "tribute-refused");
 }
 
+// --- passage and interruption ----------------------------------------
+// Both of these used to live in movement.js, but neither is about movement:
+// they are the two diplomacy questions the map keeps asking. Keeping them here
+// lets diplomacy answer them for itself (trade routes below) without importing
+// movement.js, which imports this file. movement.js re-exports both, so every
+// mover still finds them where it always did.
+
+// May `a`'s units move freely THROUGH `b`'s units / Locations? True for the
+// same faction, an alliance (pact or vassalage either way), or MUTUAL Friendly+
+// Standing. Neutral/wary/hostile all block, so a single unit can hold a pass.
+export function passesFreely(state, a, b) {
+  if (!a || !b || a === b) return true;
+  if (arePacted(state, a, b)) return true;
+  if (vassalLord(state, a) === b || vassalLord(state, b) === a) return true;
+  const need = D().tiers.friendly;
+  return getStanding(state, a, b) >= need && getStanding(state, b, a) >= need;
+}
+
+// Does something hostile to `ownerId` sit on this hex, cutting a road or rail
+// line that runs through it? The rail doc uses one definition of "cut" in four
+// places now — rail's line-cut check (§2.1), blockade construction supply
+// (§3.1), blockade funding (§3.4) and trading-pact routes — so it is defined
+// once, here.
+//
+// Ground truth today, matching movementBlockers. Part 1 of the rail doc would
+// additionally require the blocker to have DETECTED the faction whose line it
+// is cutting; that is not built, and this is the single place it would change.
+// `parties` is who the line belongs to — one faction for a supply line, two for
+// a trading pact's route. A THIRD party cuts it if any party cannot pass them
+// freely; the parties themselves never cut their own line, which matters for a
+// pact: b's garrison sitting in b's own capital is the far end of the route,
+// not an interruption of it.
+export function routeCutter(state, parties) {
+  const party = new Set([].concat(parties));
+  const severs = (fid) =>
+    !party.has(fid) && [...party].some((p) => !passesFreely(state, p, fid));
+  return (hexId) => {
+    for (const u of Object.values(state.units)) {
+      if (u.node === hexId && severs(u.owner)) return true;
+    }
+    // Blockades are keyed `hex|edge` — a hex holds one per road out of it — so
+    // this has to scan for any barricade standing on the hex rather than look
+    // one up by hex id. Indexing by hex silently found nothing, which stopped
+    // enemy blockades cutting supply lines at all.
+    for (const b of Object.values(state.world?.blockades || {})) {
+      if (b.hex === hexId && b.done && severs(b.owner)) return true;
+    }
+    return false;
+  };
+}
+
+export function supplyCutter(state, ownerId) {
+  return routeCutter(state, [ownerId]);
+}
+
+// §1.6 — the Standing half of the open-borders gate, exported so the UI can
+// grey the verb out with the SAME answer the engine will give instead of
+// offering it and then refusing.
+//
+// Open borders is a two-way agreement, not a grant you hand over, so it needs
+// Friendly+ in BOTH directions. Reporting that as "need Friendly+ standing"
+// was actively misleading: the drawer only shows their regard for you, so a
+// player looking at a Friendly card was told they needed the thing they could
+// see they already had. The reason now names the side that is short and the
+// numbers, because the failing direction is the one you cannot see.
+export function openBordersStanding(state, a, b) {
+  const need = D().tiers.friendly;
+  const mine = getStanding(state, a, b);
+  const theirs = getStanding(state, b, a);
+  if (mine >= need && theirs >= need) return { ok: true, mine, theirs, need };
+  const short = mine < need
+    ? `your regard for them is ${mine >= 0 ? "+" : ""}${mine}`
+    : `their regard for you is ${theirs >= 0 ? "+" : ""}${theirs}`;
+  return {
+    ok: false, mine, theirs, need,
+    reason: `open borders runs both ways and needs ${need >= 0 ? "+" : ""}${need} each way — ${short}`,
+  };
+}
+
+// --- rail doc §2.3 rail access --------------------------------------
+// Rail has no owner of its own: the track is pre-collapse, and whoever holds a
+// station controls what runs through it. This is the agreement the rail doc
+// flagged as "not yet named, specified, or scoped" — running rights over
+// somebody else's line.
+//
+// It is deliberately a LOWER bar than open borders. Open borders is the right
+// to march an army across a neighbour's fields; running rights are commerce —
+// your freight moves through their yard on their track. Neutral-or-better, one
+// direction at a time, and it grants nothing but the rail.
+//
+// Pacts include it implicitly: allies ride each other's lines without a
+// separate negotiation. MOVEMENT IMPORTS THIS (via the re-export in
+// movement.js) to widen unitRailEdges, and tradeRouteOpen uses it below.
+export function hasRailAccess(state, riderFid, ownerFid) {
+  if (riderFid === ownerFid) return true;
+  if (arePacted(state, riderFid, ownerFid)) return true;
+  for (const agr of state.diplomacy?.agreements || []) {
+    if (agr.type !== "rail-access") continue;
+    // Directional: `a` granted `b` running rights over a's stations.
+    if (agr.a === ownerFid && agr.b === riderFid) return true;
+  }
+  return false;
+}
+
+// The standing gate for granting running rights. One-directional, so unlike
+// open borders it only asks about the grantor's regard for the rider.
+export function railAccessStanding(state, owner, rider) {
+  const need = D().tiers.neutral;
+  const mine = getStanding(state, owner, rider);
+  if (mine >= need) return { ok: true, mine, need };
+  return {
+    ok: false, mine, need,
+    reason: `running rights need ${need >= 0 ? "+" : ""}${need} regard — yours for them is ${mine >= 0 ? "+" : ""}${mine}`,
+  };
+}
+
+// The standalone rail-access grant from `owner` to `rider`, or null.
+function standaloneRailAccess(state, owner, rider) {
+  return state.diplomacy.agreements.find(
+    (agr) => agr.type === "rail-access" && agr.a === owner && agr.b === rider,
+  ) || null;
+}
+
+// May `parties` run freight over this link? Every station on it has to be open
+// to at least one of them: unheld track is nobody's to close, your own is
+// yours, and anyone else's needs running rights.
+export function railLinkOpenTo(state, link, parties) {
+  for (const station of [link.a, link.b]) {
+    const holder = state.locations[station]?.controller;
+    if (!holder) continue;
+    if (parties.some((p) => p === holder || hasRailAccess(state, p, holder))) continue;
+    return false;
+  }
+  return true;
+}
+
 // --- §1.3 trading pact ----------------------------------------------
-// The Capital hex a faction controls (carries the `capital` chip), or null.
-function capitalHexOf(state, fid) {
-  for (const loc of Object.values(state.locations)) {
-    if (loc.controller === fid && (loc.chips || []).some((c) => state.chips[c]?.chipId === "capital")) return loc.hexId;
+// Is there a trade route between two factions? Two ways to have one, and they
+// are genuinely different roads:
+//
+//   overland   `reinforcementRoute` — a corridor of friendly/neutral ground,
+//              which an enemy ZoC can wall off.
+//   rail       the pre-collapse trunk line. It would be strange for a pact to
+//              collapse for want of a footpath while a railway runs between
+//              the two.
+//
+// Rail is not free: a line is a real sequence of hexes (rail doc §2.1), so a
+// hostile third party parked anywhere along it cuts that link, and a cut can
+// isolate a city even though the track still exists. That is what makes
+// railed trade worth attacking rather than a free pass.
+//
+// Takes SETS at both ends — any station on one side reaching any station on
+// the other. It used to take one capital and one capital, which is not what
+// being connected to a faction means: you trade with the places you can
+// actually reach, and their capital may not be one of them.
+//
+// `isCut` is injected by the caller so this module stays clear of movement.js.
+// `parties` are the two factions the route is for: a link is only usable if
+// its stations are open to one of them (rail doc §2.3 running rights).
+function railRouteBetween(state, fromHexes, toHexes, isCut, parties) {
+  const links = state.board?.rails;
+  if (!links || !links.length) return null;
+  const starts = Array.isArray(fromHexes) ? fromHexes : [fromHexes];
+  const goals = new Set(Array.isArray(toHexes) ? toHexes : [toHexes]);
+  if (!starts.length || !goals.size) return null;
+  // Track where each station was reached FROM, so the walk can name the pair
+  // of cities the route actually joins rather than only that one exists.
+  const origin = new Map(starts.map((h) => [h, h]));
+  const seen = new Set(starts);
+  const queue = [...starts];
+  while (queue.length) {
+    const cur = queue.shift();
+    if (goals.has(cur)) return { from: origin.get(cur), to: cur };
+    for (const link of links) {
+      const far = link.a === cur ? link.b : link.b === cur ? link.a : null;
+      if (far === null || seen.has(far)) continue;
+      if (link.path.some((h) => isCut(h))) continue; // this line is severed
+      // A third party's stations close the line unless they have granted one
+      // of the two running rights. Without this a pact could route its trade
+      // through the yards of a faction that wants nothing to do with either.
+      if (parties && !railLinkOpenTo(state, link, parties)) continue;
+      seen.add(far);
+      origin.set(far, origin.get(cur));
+      queue.push(far);
+    }
   }
   return null;
 }
+
+// The trade route between `a` and `b`, overland or by rail — from ANY city one
+// holds to ANY city the other holds.
+//
+// This used to demand a clear CAPITAL-to-capital route, which made a trading
+// pact a statement about two specific hexes rather than about whether the two
+// powers can reach each other. Two neighbours whose border towns share a
+// railway could not trade because their capitals sat at opposite ends of the
+// map; a pact also died the moment either capital was cut off, even with the
+// rest of both countries in easy contact.
+// Returns the PAIR it found — `{ from, to, by }` — or null. A boolean was
+// enough while the answer was always "their capital and yours"; now that the
+// route can run between any two cities, the map has to be able to draw the
+// one that is actually carrying the trade.
+export function tradeRouteOpen(state, a, b) {
+  const mine = controlledHexes(state, a);
+  const theirs = controlledHexes(state, b);
+  if (!mine.length || !theirs.length) return null;
+  // Overland: reinforcementRoute already searches out of EVERY city `a` holds,
+  // so this only has to ask about each possible destination. It returns the
+  // route, whose first hex is the city that supplies it.
+  for (const hex of theirs) {
+    // `{ dist, originHex }` — originHex is the city of `a`'s that supplies the
+    // corridor, which is exactly the near end of the route to draw.
+    const route = reinforcementRoute(state, a, hex);
+    if (route) return { from: route.originHex ?? mine[0], to: hex, by: "road" };
+  }
+  // Rail: one walk, seeded with every station `a` holds, looking for any of
+  // theirs.
+  const rail = railRouteBetween(state, mine, theirs, routeCutter(state, [a, b]), [a, b]);
+  return rail ? { ...rail, by: "rail" } : null;
+}
+
 function tradingPactBetween(state, a, b) {
   return state.diplomacy.agreements.find(
     (agr) => agr.type === "trading-pact" && ((agr.a === a && agr.b === b) || (agr.a === b && agr.b === a)),
@@ -785,9 +2545,10 @@ function grantResearchFloor(state, fid, amount) {
   if (p) p.permanentResearch = Math.max(0, (p.permanentResearch || 0) + amount);
 }
 
-// Form a Trading Pact between a and b: both need a Capital with a clear
-// capital-to-capital route (reusing `reinforcementRoute`), Neutral+ both ways,
-// not at war, rep gates clear. Grants +1 permanent Research FLOOR to each.
+// Form a Trading Pact between a and b: both need at least one city, with a
+// clear route from any of one's to any of the other's (road or rail), Neutral+
+// both ways, not at war, rep gates clear. Grants +1 permanent Research FLOOR
+// to each.
 export function formTradingPact(state, a, b) {
   if (a === b) return { ok: false, reason: "can't trade with yourself" };
   if (atWar(state, a, b)) return { ok: false, reason: "at war with them" };
@@ -796,9 +2557,13 @@ export function formTradingPact(state, a, b) {
     return { ok: false, reason: "standing too low (need Neutral+)" };
   if (!passesRepGates(state, a, b) || !passesRepGates(state, b, a))
     return { ok: false, reason: "reputation gates fail" };
-  const capA = capitalHexOf(state, a), capB = capitalHexOf(state, b);
-  if (!capA || !capB) return { ok: false, reason: "both parties need a Capital" };
-  if (!reinforcementRoute(state, a, capB)) return { ok: false, reason: "no clear route between capitals" };
+  // A landless faction has nothing to trade from. The gate used to be "both
+  // need a Capital", which is a stricter thing: it refused a faction that held
+  // three cities but had lost its seat.
+  if (!controlledHexes(state, a).length || !controlledHexes(state, b).length)
+    return { ok: false, reason: "both parties need somewhere to trade from" };
+  if (!tradeRouteOpen(state, a, b))
+    return { ok: false, reason: "nothing of yours can reach anything of theirs — by road or by rail" };
   state.diplomacy.agreements.push({
     id: `trade-${a}-${b}-${state.round}`,
     type: "trading-pact", a, b, partyA: a, partyB: b,
@@ -822,8 +2587,7 @@ function tradingPactRoundCheck(state) {
   const survivors = [];
   for (const agr of state.diplomacy.agreements) {
     if (agr.type !== "trading-pact") { survivors.push(agr); continue; }
-    const capB = capitalHexOf(state, agr.b);
-    const clear = !!(capB && reinforcementRoute(state, agr.a, capB));
+    const clear = tradeRouteOpen(state, agr.a, agr.b);
     if (!clear) {
       if (!agr.suspended) { agr.suspended = true; emit(state, "trading_pact_suspended", { agreement: agr.id, reason: "route-severed" }); }
       agr.suspendedRounds = (agr.suspendedRounds || 0) + 1;
@@ -899,18 +2663,88 @@ export function resolvePactCall(state, caller, ally, target, honored) {
 // §18.7 Denounce — shift faction↔faction Standing around the denounced.
 // Also the formal FIRST STEP of a just war: a denouncement on record
 // justifies a later declaration inside the window (no Menace from it).
+// Has `denouncer` already spent a denouncement on `target` too recently to
+// spend another? Exported so the UI can grey the verb and say when it clears
+// rather than letting the player fire a no-op.
+export function denounceCooldown(state, denouncer, target) {
+  const rec = state.diplomacy?.denouncements?.[denouncer]?.[target];
+  if (rec == null) return 0;
+  const left = D().justWar.denounceCooldownRounds - (state.round - rec.round);
+  return left > 0 ? left : 0;
+}
+
 export function denounce(state, denouncer, target) {
+  // A denouncement on the record already does its work for
+  // justWar.denounceWindowRounds; re-stamping it every round was how a
+  // permanent pretext against the whole board cost nothing.
+  if (denounceCooldown(state, denouncer, target) > 0) return false;
+  const dc = D().denounce;
+  const warrant = denounceWarrant(state, denouncer, target);
+  // Who would have believed them, judged BEFORE this denouncement's own
+  // Honor cost lands. Otherwise a slander silences itself: the accuser drops
+  // under the listeners' trust floor in the same breath, and the backlash
+  // that should follow a baseless accusation never arrives.
+  const heardBy = factionIds(state).filter((f) => believableTo(state, f, denouncer));
   const dn = state.diplomacy.denouncements = state.diplomacy.denouncements || {};
   dn[denouncer] = dn[denouncer] || {};
-  dn[denouncer][target] = state.round;
-  adjustStanding(state, denouncer, target, -3, "denounce");
+  dn[denouncer][target] = { round: state.round, warrant };
+
+  // Honor cuts both ways here, as it does for a war. Naming a faction the
+  // board can already see is dangerous is what having Honor MEANS; naming a
+  // clean-handed neighbour because you want their cities is a slander.
+  if (state.players[denouncer]) {
+    adjustHonor(
+      state, denouncer,
+      warrant ? D().honor.denounceWarrantedGain : -D().honor.denounceLoss,
+      warrant ? "denounce-warranted" : "denounce-baseless",
+    );
+  }
+  adjustStanding(state, denouncer, target, -dc.targetHit, "denounce");
+
+  // …and the board judges the ACCUSATION, not whether it happens to like the
+  // accused. It used to warm anyone who merely disliked the target, which
+  // meant slandering a saint still rallied their rivals to you. Now the
+  // question each faction asks is "do I agree?" — and by their own gates,
+  // which differ: a high-trust faction is quicker to believe an accusation
+  // about a liar, an aggressive one slower to be shocked by a bully.
   for (const f of factionIds(state)) {
     if (f === denouncer || f === target) continue;
-    if (arePacted(state, f, target)) adjustStanding(state, f, denouncer, -2, "denounce-friend");
-    else if (atWar(state, f, target) || getStanding(state, f, target) <= D().tiers.wary)
-      adjustStanding(state, f, denouncer, +2, "denounce-enemy");
+    // An ally closes ranks whatever the merits — that is what an ally is.
+    if (arePacted(state, f, target)) {
+      adjustStanding(state, f, denouncer, -dc.allyDefends, "denounce-friend");
+      continue;
+    }
+    // A denouncer nobody believes moves nobody. Liars can shout all they like.
+    if (!heardBy.includes(f)) continue;
+    const agrees = atWar(state, f, target) || !passesRepGates(state, f, target);
+    if (agrees) {
+      adjustStanding(state, f, denouncer, warrant ? dc.rallyWarranted : dc.rally, "denounce-enemy");
+    } else {
+      // They see a faction with clean hands being accused, and draw the
+      // obvious conclusion about the accuser.
+      adjustStanding(state, f, denouncer, -dc.backlash, "denounce-baseless");
+    }
   }
-  emit(state, "denounced", { denouncer, target });
+  // A warranted accusation the board can hear is how a crime nobody witnessed
+  // catches up with its author. The victim was there — they hold the
+  // grievance — and this is them putting it in front of everyone else.
+  // Which is the whole point of gating Menace on witnesses: striking in the
+  // dark buys you time, not impunity, and only for as long as the party you
+  // wronged stays quiet or unbelieved.
+  const m = D().menace;
+  if (warrant && heardBy.length && state.players[target] && m.denouncedShare) {
+    adjustMenace(state, target, Math.max(1, Math.round(m.base * m.denouncedShare)), `denounced-by:${denouncer}`);
+  }
+  emit(state, "denounced", { denouncer, target, warrant, heard: heardBy.length });
+  return true;
+}
+
+// Would `observer` take `speaker`'s word for anything? An accusation from a
+// faction whose own Honor is beneath the observer's floor carries no weight —
+// which gives Honor a use beyond passing gates: it is what makes you audible.
+function believableTo(state, observer, speaker) {
+  if (!state.players[speaker]) return true;
+  return honorOf(state, speaker) >= trustFloor(state, observer);
 }
 
 // §18.7 Mediate — broker peace between two OTHER warring factions. A
@@ -937,7 +2771,15 @@ export function mediate(state, mediator, a, b) {
 
 // §18.9 Vassalize — subordinate `vassal` to `lord` (a formal sub-state).
 export function vassalize(state, lord, vassal, cause = "vassalized") {
-  if (vassalLord(state, vassal) === lord) return false;
+  const previous = vassalLord(state, vassal);
+  if (previous === lord) return false;
+  // A faction serves ONE lord. `state.diplomacy.vassals` is keyed by vassal so
+  // the record could only ever name one — but everything HUNG off that record
+  // was additive, so a lord who took another's vassal left the old lord's
+  // tribute flow and vassal-pact standing, and the vassal paid both. Release
+  // the old bond properly before forming the new one.
+  if (previous) releaseVassal(state, vassal, "vassal-taken");
+  breakPositionsOnVassalage(state, lord); // §13
   // a vassal cannot keep a pact with the lord's enemies
   state.diplomacy.vassals[vassal] = lord;
   state.diplomacy.resentment[vassal] = 0;
@@ -995,7 +2837,7 @@ function breakPromiseIfAny(state, a, b, kinds) {
 // attacker takes a Menace swing scored vs the target's temperament; an
 // attack on an ally or non-aggression partner breaks that word (Honor ding);
 // and an attack that isn't already a war establishes the war-state.
-export function onAttack(state, attackerPid, targetFid) {
+export function onAttack(state, attackerPid, targetFid, hex = null) {
   if (!targetFid || attackerPid === targetFid) return;
   ensureDiplomacy(state);
   // Striking through a live truce is treachery on top of everything else:
@@ -1007,7 +2849,7 @@ export function onAttack(state, attackerPid, targetFid) {
     const tc = D().truce;
     if (state.players[attackerPid]) adjustHonor(state, attackerPid, -tc.breakHonorLoss, "truce-broken");
     adjustMenace(state, attackerPid, tc.breakMenace, "truce-broken");
-    recordGrievance(state, targetFid, attackerPid, "truce-broken");
+    recordGrievance(state, targetFid, attackerPid, "truce-broken", { at: hex });
     emit(state, "truce_broken", { breaker: attackerPid, victim: targetFid });
   }
   // §1.1/§6.8 — a "treacherous strike": attacking before any war exists costs
@@ -1023,69 +2865,626 @@ export function onAttack(state, attackerPid, targetFid) {
       attacker: attackerPid, target: targetFid, amount: D().honor.surpriseAttackLoss,
     });
     adjustBaseline(state, targetFid, attackerPid, -D().baseline.surpriseAttackLoss, "surprise-attack");
-    recordGrievance(state, targetFid, attackerPid, "surprise-attack");
+    recordGrievance(state, targetFid, attackerPid, "surprise-attack", { at: hex });
   }
+  breakPositionsOnWar(state, attackerPid, targetFid); // §13 — the strike IS the deed
   if (arePacted(state, attackerPid, targetFid)) breakPact(state, attackerPid, targetFid, "attacked-ally");
   breakPromiseIfAny(state, attackerPid, targetFid, ["nonAggression", "peace"]);
   if (!atWar(state, attackerPid, targetFid)) declareWar(state, attackerPid, targetFid, "attack");
-  menaceFromAttack(state, attackerPid, targetFid);
+  menaceFromAttack(state, attackerPid, targetFid, hex);
 }
 
-// --- Recognition victory (§18.10) -----------------------------------
-// Recognition weight a faction lends `pid`: Vassal=2, Allied=1, but 0 if it
-// is in a coalition against pid. Gated by Menace<Tolerance & Honor>floor.
-export function recognitionScore(state, pid) {
-  const rc = D().recognition;
-  const coal = coalitionAgainst(state, pid);
-  let total = 0;
-  const contributors = [];
-  for (const f of factionIds(state)) {
-    if (f === pid) continue;
-    if (coal && coal.members.includes(f)) continue; // contributes nothing
-    if (!passesRepGates(state, f, pid)) continue; // Menace/Honor gate
-    if (vassalLord(state, f) === pid) { total += rc.vassalWeight; contributors.push(f); }
-    else if (arePacted(state, f, pid) && standingTier(getStanding(state, f, pid)) === "allied") {
-      total += rc.alliedWeight; contributors.push(f);
-    }
+// --- the win condition ------------------------------------------------
+//
+// ONE condition with three faces: every surviving faction is eliminated, your
+// ally, or your vassal. Win it by conquest, by diplomacy, or by any mix —
+// which is the interesting case, and the one no previous version of this game
+// could express.
+//
+// `survivors` excludes the eliminated, so wiping the board satisfies it
+// vacuously. A faction serves one lord (state.diplomacy.vassals is keyed by
+// vassal), so two rivals cannot both count the same vassal.
+export function dominionStanding(state, pid) {
+  const others = factionIds(state).filter(
+    (f) => f !== pid && !state.players[f]?.eliminated,
+  );
+  const allied = [], vassals = [], outstanding = [];
+  for (const f of others) {
+    if (vassalLord(state, f) === pid) vassals.push(f);
+    else if (arePacted(state, pid, f)) allied.push(f);
+    else outstanding.push(f);
   }
-  return { total, contributors };
+  return { others, allied, vassals, outstanding, met: outstanding.length === 0 };
 }
 
-export function recognitionMet(state, pid) {
-  if (!state.players[pid]) return false;
-  return recognitionScore(state, pid).total >= D().recognition.threshold;
+export function dominionMet(state, pid) {
+  return dominionStanding(state, pid).met;
 }
 
-// Win-condition gate — sets winnerId on a met Recognition (parallel to the
-// VP-12 path). Called from the round-end pipeline + after deals/vassalage.
-// Also pays the SUMMIT dividend: the first time each faction EVER backs a
-// major, that major banks summitVp — so diplomacy feeds the same VP race
-// conquest does instead of being all-or-nothing at the threshold. Once per
-// backer per game (kept in recognizedEver; losing and re-winning a backer
-// doesn't pay twice). The VP winner check is inline — turn.js imports this
-// module, so awardVp can't be imported here without a cycle.
-export function checkRecognitionVictory(state) {
+// --- distance to Dominion, as a number the AI can steer by ------------
+//
+// `checkDominion` is DETECTION: it runs after a handshake to see whether that
+// handshake happened to win the game. Until now that was the only reading of
+// the win condition anywhere in the AI, and the consequence is the headline
+// defect — sixteen games in forty-five reach the round limit with nobody
+// having won, because nobody on the board is trying to. They behave in
+// character until the clock runs out.
+//
+// This is the other reading: not "have I won" but "how far am I, and who is
+// in the way". Dominion asks that every surviving faction be an ally, a
+// vassal, or gone. So the only factions that matter are `outstanding`, and
+// what separates them is not how much you like them — it is what closing each
+// one COSTS.
+//
+// Returns, for `pid` considering `target`:
+//   0            they are already allied, sworn, or dead — courting them
+//                buys nothing the win condition counts
+//   (0, 1]       they are outstanding, scored by cheapness: a faction at or
+//                below your power comes over by patronage or submission and
+//                scores 1; one twice your power has to be talked round and
+//                scores 0.5.
+//
+// The power ratio is the cheapness proxy on purpose — it is the same reading
+// `aiAcceptsVassalage` and `evaluatePactCall` already take, so a minor two
+// hexes away and a major across the map are separated by the thing that
+// actually separates them rather than by a second distance model.
+export function dominionValue(state, pid, target) {
+  if (pid === target) return 0;
+  const st = dominionStanding(state, pid);
+  if (!st.outstanding.includes(target)) return 0;
+  const mine = Math.max(1, powerOf(state, pid));
+  const theirs = Math.max(1, powerOf(state, target));
+  return 1 / (1 + Math.max(0, theirs / mine - 1));
+}
+
+// How many factions `pid` still has to deal with. The probe reads this as
+// "rivals still to deal with" and measures 1.9 for a scripted pacifist at the
+// end of a game it did not win.
+export function dominionOutstanding(state, pid) {
+  return dominionStanding(state, pid).outstanding.length;
+}
+
+// Latch a winner once the arrangement has HELD for `holdRounds` consecutive
+// rounds. The hold is what makes a bloodless win a position you defend rather
+// than a switch you flip: rivals get a window to denounce you, break a partner
+// away, or attack. It does not apply when nobody is left to break it — kill
+// everyone and you have won, there is nothing to hold against.
+export function checkDominion(state) {
+  // Alliances and vassals are worth SCORE now, and nothing else recomputes on
+  // a change to the alliance graph — territory changes call recomputeVp,
+  // handshakes never did. Without this a lord who had sworn the whole board
+  // still showed its opening total, and the closing table could rank a winner
+  // below its own vassal. This runs wherever the political situation moves,
+  // which is exactly where the score needs re-reading.
+  recomputeVp(state);
   if (state.winnerId) return;
-  const rc = D().recognition;
+  if (state.rules?.victory?.dominion === false) return;
+  const held = state.diplomacy.dominionSince = state.diplomacy.dominionSince || {};
   for (const pid of factionIds(state)) {
-    const sc = recognitionScore(state, pid);
-    if (state.diplomacy.recognition[pid] !== sc.total) {
-      state.diplomacy.recognition[pid] = sc.total;
-      emit(state, "recognition_changed", { player: pid, value: sc.total, contributors: sc.contributors });
-    }
-    const p = state.players[pid];
-    if (rc.summitVp && p && factionDef(pid)?.tier === "major") {
-      const ever = state.diplomacy.recognizedEver[pid] = state.diplomacy.recognizedEver[pid] || [];
-      for (const backer of sc.contributors) {
-        if (ever.includes(backer)) continue;
-        ever.push(backer);
-        p.vp += rc.summitVp;
-        emit(state, "recognition_summit", { player: pid, backer, vp: rc.summitVp });
-        if (p.vp >= CONFIG.vpThreshold && !state.winnerId) { state.winnerId = pid; return; }
+    if (state.players[pid]?.eliminated) continue;
+    const st = dominionStanding(state, pid);
+    if (!st.met) {
+      if (held[pid] != null) {
+        delete held[pid];
+        emit(state, "dominion_lost", { player: pid, outstanding: st.outstanding });
       }
+      continue;
     }
-    if (sc.total >= rc.threshold) { state.winnerId = pid; return; }
+    // Nobody left to hold it against.
+    if (!st.others.length) { state.winnerId = pid; emit(state, "dominion_won", { player: pid, by: "conquest" }); return; }
+    if (held[pid] == null) {
+      held[pid] = state.round;
+      emit(state, "dominion_reached", { player: pid, allied: st.allied, vassals: st.vassals });
+      continue;
+    }
+    if (state.round - held[pid] >= CONFIG.victory.holdRounds) {
+      state.winnerId = pid;
+      emit(state, "dominion_won", { player: pid, by: st.vassals.length && st.allied.length ? "mixed" : st.allied.length ? "diplomacy" : "submission" });
+      return;
+    }
   }
+}
+
+// How many rounds are left on `pid`'s clock, or null if it is not running.
+export function dominionCountdown(state, pid) {
+  const at = state.diplomacy?.dominionSince?.[pid];
+  if (at == null) return null;
+  return Math.max(0, CONFIG.victory.holdRounds - (state.round - at));
+}
+
+// §9 — WHAT GIVES A BOARD THE RIGHT TO RISE.
+//
+// Returns the stated reason, or null when there is none. This is the whole
+// answer to the "Attila" failure: leading is not a crime, and a faction that
+// has done nothing to anybody should be able to lead without the map turning
+// on it. Three things ARE grounds, and each one is something the target did
+// or became rather than something it merely is:
+//
+//   menace     it has frightened the board by its own conduct
+//   grievance  somebody is owed, concretely, and can name it
+//   fear       its lead is so far past everything else that saying so is honest
+//
+// The last is deliberately set well above the coalition threshold. It is the
+// escape hatch that stops a flawless runaway being unstoppable, not the
+// ordinary path in.
+export function coalitionGrounds(state, target) {
+  const c = D().coalition;
+  if (!c.groundsGate) return "position";
+  if (menaceOf(state, target) >= c.menaceGrounds) return "menace";
+  for (const f of factionIds(state)) {
+    if (f === target) continue;
+    if (grievanceWeight(state, f, target) > 0) return "grievance";
+  }
+  if (threatScore(state, target) >= c.fearThreshold) return "fear";
+  return null;
+}
+
+// §9 — HOW BADLY ONE FACTION WANTS IN.
+//
+// A deliberation, not a draft. The terms are the ones a faction would actually
+// weigh, and the Standing term is SIGNED: liking the target holds you back,
+// which is what makes a coalition a thing the target can talk its way out of
+// rather than a dice roll on the leaderboard.
+export function coalitionJoinScore(state, f, target) {
+  const c = D().coalition;
+  let score = c.joinFearWeight * Math.max(0, threatScore(state, target) - c.threshold);
+  score += c.joinGrievanceWeight * grievanceWeight(state, f, target);
+  score -= c.joinStandingWeight * getStanding(state, f, target);
+  // Menace is felt by everyone, but it is felt hardest by neighbours: a
+  // frightening faction six hexes away is a headline, one next door is a plan.
+  if (menaceOf(state, target) >= c.menaceGrounds && areNeighbours(state, f, target)) score += 1;
+  return score;
+}
+
+// --- §13 player positions --------------------------------------------
+//
+// A PROMISE is bilateral, priced, and asked for. A POSITION is unilateral and
+// public: "I will not make war on the Croppers", said to the whole board, at
+// nobody's request. Every other political act in this game is a transaction —
+// the player can pay for goodwill, trade for it, or take ground and lose it,
+// but until now they could not simply STAND for something and be held to it.
+//
+// Three kinds, and the list is short on purpose: each one has to be something
+// the engine can CHECK, or a position is a mood.
+//
+//   noWarOn <faction>   broken by declaring war on them, or striking them
+//   handsOff <faction>  broken by taking ground their name is on
+//   noVassals           broken by making any faction your vassal
+//
+// Keeping one costs nothing and pays nothing directly. A position you are paid
+// to hold is a contract; what this buys is the right to be believed, and what
+// it risks is being named for it.
+const POSITION_KINDS = {
+  noWarOn: { needsTarget: true, text: (n) => `will make no war on ${n}` },
+  handsOff: { needsTarget: true, text: (n) => `will take no ground of ${n}` },
+  noVassals: { needsTarget: false, text: () => "will take no vassals" },
+};
+export const positionKinds = () => Object.keys(POSITION_KINDS);
+
+const P = () => D().positions;
+
+function ensurePositions(state) {
+  ensureDiplomacy(state);
+  if (!state.diplomacy.positions) state.diplomacy.positions = [];
+  return state.diplomacy.positions;
+}
+
+export function positionsOf(state, pid) {
+  return ensurePositions(state).filter((p) => p.by === pid && !p.broken && !p.withdrawn);
+}
+
+// Is `pid` standing on this right now? Returns the position or null, so the
+// caller can cite it rather than merely know it exists.
+export function positionHeld(state, pid, kind, target = null) {
+  return positionsOf(state, pid).find(
+    (p) => p.kind === kind && (!POSITION_KINDS[kind]?.needsTarget || p.target === target),
+  ) || null;
+}
+
+export function positionText(state, p) {
+  const def = POSITION_KINDS[p.kind];
+  if (!def) return p.kind;
+  return def.text(p.target ? (factionDef(p.target)?.name || p.target) : null);
+}
+
+// Why `pid` may NOT stand on this, or null. Split out from `declarePosition`
+// because the drawer has to offer the list, and a UI that re-derives the rules
+// to grey out a button is a second copy of them that will drift. One reader,
+// asked twice.
+export function positionBlocker(state, pid, kind, target = null) {
+  if (!P()?.enabled) return "positions are not in play";
+  const def = POSITION_KINDS[kind];
+  if (!def) return "no such position";
+  if (def.needsTarget && (!target || target === pid)) return "that position has to be about somebody";
+  if (!def.needsTarget && target) target = null;
+  ensurePositions(state);
+  if (positionHeld(state, pid, kind, target)) return "you already stand on that";
+  // You cannot take a position you are already in breach of — declaring "no
+  // war on the Lakers" mid-war is not a position, it is a press release.
+  if (kind === "noWarOn" && atWar(state, pid, target)) return "you are at war with them now";
+  if (kind === "handsOff" && heldAffiliatedGround(state, pid, target)) {
+    return "you hold ground of theirs already";
+  }
+  if (kind === "noVassals" && Object.values(state.diplomacy.vassals || {}).includes(pid)) {
+    return "you hold a vassal already";
+  }
+  if (positionsOf(state, pid).length >= P().max) return `you can stand on ${P().max} things at once`;
+  return null;
+}
+
+function heldAffiliatedGround(state, pid, aff) {
+  for (const loc of Object.values(state.locations || {})) {
+    if (loc.controller !== pid) continue;
+    if (LOCATIONS[loc.locationId]?.affiliation === aff) return true;
+  }
+  return false;
+}
+
+export function declarePosition(state, pid, kind, target = null) {
+  const blocker = positionBlocker(state, pid, kind, target);
+  if (blocker) return { ok: false, reason: blocker };
+  if (!POSITION_KINDS[kind].needsTarget) target = null;
+  const p = {
+    id: `pos-${pid}-${kind}-${target || "any"}-${state.round}`,
+    by: pid, kind, target: target || null, since: state.round,
+    broken: null, withdrawn: null,
+  };
+  state.diplomacy.positions.push(p);
+  emit(state, "position_declared", { by: pid, kind, target: target || null, id: p.id });
+  return { ok: true, position: p };
+}
+
+// Standing down honestly. Cheaper than being caught, and deliberately not
+// free: a position you can drop the round before you break it is not one.
+export function withdrawPosition(state, pid, positionId) {
+  const p = ensurePositions(state).find((x) => x.id === positionId && x.by === pid && !x.broken && !x.withdrawn);
+  if (!p) return { ok: false, reason: "you are not standing on that" };
+  if (state.round - p.since < P().minRounds) {
+    return { ok: false, reason: `you have stood on that for ${state.round - p.since} of ${P().minRounds} rounds` };
+  }
+  p.withdrawn = state.round;
+  if (state.players[pid]) adjustHonor(state, pid, -P().withdrawHonorLoss, "position-withdrawn");
+  emit(state, "position_withdrawn", { by: pid, id: p.id, kind: p.kind, target: p.target });
+  return { ok: true };
+}
+
+// Break one. The cost is bigger than a bilateral promise's because a position
+// was said to EVERYBODY — and the point of the whole feature is the citation,
+// so this records who is entitled to name it and when.
+function breakPosition(state, p, cause) {
+  if (p.broken) return;
+  p.broken = state.round;
+  p.brokenCause = cause;
+  const pid = p.by;
+  if (state.players[pid]) adjustHonor(state, pid, -P().breakHonorLoss, "position-broken");
+  adjustMenace(state, pid, P().breakMenace, "position-broken");
+  // The wronged party is the one the position was ABOUT; a position with no
+  // target was made to the room, so the room holds it.
+  const wronged = p.target ? [p.target] : factionIds(state).filter((f) => f !== pid);
+  for (const w of wronged) {
+    if (!state.players[w]) continue;
+    recordGrievance(state, w, pid, "position-broken");
+    adjustBaseline(state, w, pid, -D().baseline.pactBrokenLoss, "position-broken");
+  }
+  emit(state, "position_broken", {
+    by: pid, id: p.id, kind: p.kind, target: p.target, cause,
+    text: positionText(state, p),
+  });
+}
+
+// Every hook into the rest of the engine, in one place, so a new position kind
+// has exactly one file to be wired into.
+export function breakPositionsOnWar(state, a, b) {
+  for (const p of positionsOf(state, a)) {
+    if (p.kind === "noWarOn" && p.target === b) breakPosition(state, p, "war");
+  }
+}
+export function breakPositionsOnVassalage(state, lord) {
+  for (const p of positionsOf(state, lord)) {
+    if (p.kind === "noVassals") breakPosition(state, p, "vassalage");
+  }
+}
+export function breakPositionsOnTaking(state, pid, hexId) {
+  const aff = LOCATIONS[state.locations?.[hexId]?.locationId]?.affiliation;
+  if (!aff || aff === pid) return;
+  for (const p of positionsOf(state, pid)) {
+    if (p.kind === "handsOff" && p.target === aff) breakPosition(state, p, "ground");
+  }
+}
+
+// Positions broken recently enough that naming one is still news. THIS is the
+// audit's claim: a position broken has to be cited BY NAME within
+// `citeWithinRounds`, or the whole cost of breaking it is invisible and the
+// feature is a line in a save file.
+export function citablePositions(state, pid, against = null) {
+  return ensurePositions(state).filter((p) =>
+    p.by === pid && p.broken != null
+    && state.round - p.broken <= P().citeWithinRounds
+    && (against == null || p.target == null || p.target === against));
+}
+
+// --- §12.3 the intrigue branch: Expose, Forge, Fabricate ---------------
+//
+// `sway.opCost` has sat in config since Sway shipped with nothing reading it,
+// and the recorded finding from phase 3 is that the political pool sits at its
+// ceiling 30% of all rounds — a currency nothing can exhaust prices nothing.
+// This is the sink it was waiting for, and it is deliberately a POLITICAL one:
+// Sway buys what a faction THINKS, so what it buys here is what the board
+// believes about who wronged whom.
+//
+// THE SHAPE OF THE TRIO. Each op is a claim, and they differ in whether the
+// claim is true and in who it is about:
+//
+//   Expose     a TRUE wrong, done by them, that nobody saw
+//   Forge      a FALSE wrong, done by them, to somebody else
+//   Fabricate  a FALSE wrong, done by them, to YOU
+//
+// Expose needs grounds and cannot rebound, because it is true — you are not
+// lying, you are publishing. The other two are lies, both can be seen through,
+// and that is the whole thing standing between this branch and a
+// Sway-to-casus-belli vending machine.
+// Lives under CONFIG.sway, not CONFIG.diplomacy: an op is priced in Sway and
+// every number here is about what Sway buys.
+const OPS = () => CONFIG.sway.ops || {};
+
+export function opsEnabled() { return !!OPS().enabled; }
+
+// What Expose has to find: a strike this faction got away with, recent enough
+// that publishing it is news. `attack_unwitnessed` is already emitted by
+// `menaceFromAttack` on exactly the case — an attack whose Menace rounded to
+// nothing because nobody saw it — so the op reads the log rather than keeping
+// a second ledger of the same fact.
+// HOW `viewer` COULD HAVE FOUND OUT about something that happened at `hex`.
+//
+// Returns the apparatus that learned it, or null. The string is not decoration:
+// the drawer shows it, because "you cannot expose this" is a dead end and
+// "your Spy Ring heard about it" is a reason to have built a Spy Ring.
+//
+// This is the seam between the tech wheel's espionage branch and the diplomacy
+// layer's. Before it they were two systems with the same theme and no contact.
+export function exposureApparatus(state, viewer, hex) {
+  if (!OPS().exposeNeedsApparatus) return "omniscient";
+  if (!viewer) return null;
+  // A standing network hears about it wherever it happened. This is the payoff
+  // for the deepest node on the B-path, which until now revealed two static
+  // numbers and did nothing else.
+  if (hasTechNode(state, viewer, "int-b1")) return "spy-ring";
+  if (!hex) return null;
+  // Local ears. A Listening Post carries an upkeep, a concealment model, a
+  // Strength and a destruction path, and the only reason to build one was map
+  // vision; catching what happens in earshot is what a listening post is FOR.
+  const range = CONFIG.posts?.range ?? 1;
+  for (const post of ownedPosts(state, viewer)) {
+    if (post.dormant) continue; // unpaid: it hears nothing
+    if (post.hex === hex) return "listening-post";
+    if (range > 0 && (state.board?.adjacency?.[post.hex] || []).includes(hex)) return "listening-post";
+  }
+  // …or your own scouts can see the place and piece it together.
+  if (hasTechNode(state, viewer, "int-a1") && isHexVisible(state, viewer, hex)) return "scouts";
+  return null;
+}
+
+// The strikes `viewer` may publish against `target`. `viewer` is required: an
+// unwitnessed strike is by definition one nobody saw, so WHO is asking is the
+// whole question, and the first draft of this function did not ask it.
+// Every quiet strike by `target` still inside the window and not yet sold —
+// before anybody asks whether they could have HEARD of it. Split out because
+// "there is nothing to publish" and "there is something and you are blind to
+// it" are different refusals, and the caller can only tell them apart if it
+// can see both lists.
+function rawStrikes(state, target) {
+  if (!opsEnabled()) return [];
+  const window = OPS().exposeWindowRounds;
+  const out = [];
+  for (const e of state.log || []) {
+    if (e.name !== "attack_unwitnessed") continue;
+    if (e.payload.attacker !== target) continue;
+    if (state.round - (e.round ?? 0) > window) continue;
+    if (state.diplomacy?.exposed?.[`${e.round}|${e.payload.attacker}|${e.payload.victim}`]) continue;
+    out.push(e);
+  }
+  return out;
+}
+
+export function exposableStrikes(state, target, viewer = null) {
+  const out = [];
+  for (const e of rawStrikes(state, target)) {
+    // Never your own strike, and never one against you — you were there.
+    if (viewer && (e.payload.attacker === viewer || e.payload.victim === viewer)) continue;
+    const how = exposureApparatus(state, viewer, e.payload.hex);
+    if (!how) continue;
+    out.push({ ...e, apparatus: how });
+  }
+  return out;
+}
+
+// What `victim`'s intelligence apparatus adds to their chance of seeing
+// through something done to them. The DEFENSIVE half of the branch, and the
+// half that was missing: `int-b1` is called Spy Ring and did nothing whatever
+// to help its holder catch somebody lying about them.
+export function counterIntelligence(state, victim) {
+  const o = OPS();
+  if (!victim) return 0;
+  let n = 0;
+  if (hasTechNode(state, victim, "int-b1")) n += o.counterSpyRing;
+  if (hasTechNode(state, victim, "int-a1")) n += o.counterDetection;
+  const posts = ownedPosts(state, victim).filter((p) => !p.dormant).length;
+  n += Math.min(o.counterPostCap, posts * o.counterPerPost);
+  return n;
+}
+
+// Is a covert act seen through? Rolled once, at the moment it is done, and it
+// has TWO sides: the caster's Honor is cover, the victim's apparatus is the
+// counter. One reader for every covert act in the game — the lies AND the
+// sabotage — because two implementations of "were you caught" is how the two
+// halves drifted apart in the first place.
+export function covertDetection(state, caster, victim = null) {
+  const o = OPS();
+  const p = o.lieBaseDetection
+    + o.lieDetectionPerHonor * honorOf(state, caster)
+    + counterIntelligence(state, victim);
+  return Math.max(o.lieDetectionMin, Math.min(o.lieDetectionMax, p));
+}
+
+// Kept as the name the lie-specific callers read, so a forgery still says it
+// is a forgery at the call site.
+export function lieDetectionChance(state, pid, victim = null) {
+  return covertDetection(state, pid, victim);
+}
+
+// Caught. Steeper than an ordinary promise-break, because a promise is broken
+// under pressure and a forgery is premeditated — and everyone the lie was told
+// to or about is entitled to hold it against you.
+function opBackfires(state, pid, kind, wronged, magnitude = null) {
+  const o = OPS();
+  const honorLoss = magnitude?.honorLoss ?? o.caughtHonorLoss;
+  const menace = magnitude?.menace ?? o.caughtMenace;
+  if (state.players[pid]) adjustHonor(state, pid, -honorLoss, `${kind}-exposed`);
+  adjustMenace(state, pid, menace, `${kind}-exposed`);
+  for (const w of new Set(wronged.filter(Boolean))) {
+    if (w === pid || !state.players[w]) continue;
+    recordGrievance(state, w, pid, "position-broken", { severity: menace });
+  }
+  emit(state, "op_backfired", { by: pid, kind, wronged: [...new Set(wronged.filter(Boolean))] });
+}
+
+function chargeOp(state, pid) {
+  const cost = CONFIG.sway.opCost;
+  if (!canAffordSway(state, pid, cost)) {
+    return `not enough Sway — ${cost} needed, you hold ${swayOf(state, pid)}`;
+  }
+  spendSway(state, pid, cost, "intrigue");
+  return null;
+}
+
+// EXPOSE — publish a strike they got away with. True, so it charges the Menace
+// the strike escaped at the full public rate and hands the victim the grievance
+// they were denied. The caster's own name is untouched: you are not lying.
+export function expose(state, pid, target) {
+  if (!opsEnabled()) return { ok: false, reason: "there is no one to carry it" };
+  if (!target || target === pid) return { ok: false, reason: "there is nobody to expose" };
+  const strikes = exposableStrikes(state, target, pid);
+  if (!strikes.length) {
+    // Say WHICH wall you hit. "Nothing to expose" and "something happened but
+    // you have no way of knowing about it" are different sentences, and only
+    // the second one tells the player to go and build something.
+    // Something happened and you are blind to it, versus nothing happened.
+    const blind = rawStrikes(state, target).some(
+      (e) => e.payload.attacker !== pid && e.payload.victim !== pid);
+    return {
+      ok: false,
+      reason: blind
+        ? "if they have done anything quietly, you have no way of knowing it"
+        : "there is nothing of theirs the board has not already seen",
+    };
+  }
+  const bad = chargeOp(state, pid);
+  if (bad) return { ok: false, reason: bad };
+  const o = OPS();
+  const m = D().menace;
+  state.diplomacy.exposed = state.diplomacy.exposed || {};
+  const e = strikes[0];
+  const { attacker, victim, hex } = e.payload;
+  state.diplomacy.exposed[`${e.round}|${attacker}|${victim}`] = state.round;
+  // The Menace it escaped, scored the way `menaceFromAttack` would have scored
+  // it in the open — the same arithmetic, at witness share 1.
+  const tDef = factionDef(victim) || {};
+  const raw = Math.max(-1, Math.round(m.base * (0.5 - (tDef.aggression ?? 0.5)) * 2));
+  const delta = Math.max(1, Math.round(raw * o.exposeWitnessShare));
+  adjustMenace(state, attacker, delta, `exposed:${pid}`);
+  recordGrievance(state, victim, attacker, "surprise-attack", { at: hex });
+  emit(state, "op_expose", {
+    by: pid, target: attacker, victim, hex, menace: delta, apparatus: e.apparatus,
+  });
+  return { ok: true, target: attacker, victim, menace: delta, apparatus: e.apparatus };
+}
+
+// FORGE — plant evidence that they wronged SOMEBODY ELSE. A lie, so it can be
+// seen through, and being seen through hands the grievance to the two factions
+// you tried to set against each other.
+export function forge(state, pid, target, against) {
+  if (!opsEnabled()) return { ok: false, reason: "there is no one to carry it" };
+  if (!target || target === pid) return { ok: false, reason: "there is nobody to forge against" };
+  if (!against || against === pid || against === target) {
+    return { ok: false, reason: "a forgery has to be about somebody else" };
+  }
+  if (!state.players[against]) return { ok: false, reason: "they are not on the board" };
+  const bad = chargeOp(state, pid);
+  if (bad) return { ok: false, reason: bad };
+  // The party being FRAMED is the one with both the motive and the apparatus
+  // to produce the counter-evidence, so theirs is the counter-intelligence
+  // that matters — not the party being told the story.
+  if (state.rng.next() < covertDetection(state, pid, target)) {
+    opBackfires(state, pid, "forge", [target, against]);
+    return { ok: true, caught: true };
+  }
+  const entry = recordGrievance(state, against, target, "promise-broken");
+  if (entry) entry.forged = { by: pid, until: state.round + OPS().lieDecaysAfterRounds };
+  emit(state, "op_forge", { by: pid, target, against });
+  return { ok: true, caught: false };
+}
+
+// FABRICATE — a wrong done to YOU. The one that buys a war, so it is the one
+// most worth lying about and the one where being caught costs most: the
+// grievance it plants is the thing `warJustification` reads.
+export function fabricate(state, pid, target) {
+  if (!opsEnabled()) return { ok: false, reason: "there is no one to carry it" };
+  if (!target || target === pid) return { ok: false, reason: "there is nobody to accuse" };
+  if (!state.players[target]) return { ok: false, reason: "they are not on the board" };
+  if (grievanceWeight(state, pid, target) > 0) {
+    // You do not need to invent one. Refusing here is not politeness — a
+    // fabricated grievance stacked on a real one launders the real one's
+    // expiry, and the AI would fabricate every round to keep a war righteous.
+    return { ok: false, reason: "you already have something real to hold against them" };
+  }
+  const bad = chargeOp(state, pid);
+  if (bad) return { ok: false, reason: bad };
+  if (state.rng.next() < covertDetection(state, pid, target)) {
+    opBackfires(state, pid, "fabricate", [target]);
+    return { ok: true, caught: true };
+  }
+  const entry = recordGrievance(state, pid, target, "promise-broken");
+  if (entry) entry.forged = { by: pid, until: state.round + OPS().lieDecaysAfterRounds };
+  emit(state, "op_fabricate", { by: pid, target });
+  return { ok: true, caught: false };
+}
+
+// §12.3 — SABOTAGE IS A COVERT ACT TOO. `actions.js` owns the deed; this owns
+// what it costs when the deed is seen. Exported rather than inlined there so
+// every covert act in the game is caught by the same reader — the split is
+// what let sabotage stay free and anonymous while the lies risked everything.
+//
+// Returns true if the saboteur was caught.
+export function sabotageCaught(state, pid, victim) {
+  const o = OPS();
+  if (!opsEnabled() || !o.sabotageCanBeCaught || !victim || victim === pid) return false;
+  if (state.rng.next() >= covertDetection(state, pid, victim)) return false;
+  opBackfires(state, pid, "sabotage", [victim], {
+    honorLoss: o.sabotageCaughtHonorLoss,
+    menace: o.sabotageCaughtMenace,
+  });
+  return true;
+}
+
+// A lie is real while it lasts and then evaporates. Swept on the round tick so
+// a fabricated casus belli buys a WINDOW rather than a permanent licence —
+// without this, one Fabricate would make every war that faction ever fought
+// against that target righteous forever.
+export function sweepForgeries(state) {
+  const gr = state.diplomacy?.grievances;
+  if (!gr) return 0;
+  let dropped = 0;
+  for (const victim of Object.keys(gr)) {
+    for (const offender of Object.keys(gr[victim])) {
+      const before = gr[victim][offender].length;
+      gr[victim][offender] = gr[victim][offender].filter(
+        (e) => !e.forged || state.round <= e.forged.until,
+      );
+      dropped += before - gr[victim][offender].length;
+    }
+  }
+  if (dropped) emit(state, "forgeries_lapsed", { count: dropped });
+  return dropped;
 }
 
 // --- coalitions (§18.8) ---------------------------------------------
@@ -1105,19 +3504,33 @@ function recomputeCoalitions(state) {
     const existing = coalitionAgainst(state, pid);
     const cooling = state.diplomacy.coalitionCooldown?.[pid];
     const onCooldown = cooling != null && state.round - cooling < c.reformCooldownRounds;
-    if (score >= c.threshold && !existing && !onCooldown) {
+    // §9 — grounds first. A spotless leader is not a casus belli, and the
+    // rising has to be able to say WHY in one word before it can say WHO.
+    const grounds = score >= c.threshold ? coalitionGrounds(state, pid) : null;
+    if (grounds && !existing && !onCooldown) {
       const members = factionIds(state).filter((f) =>
         f !== pid
         && f !== state.humanFactionId // never conscript the player
         && vassalLord(state, f) !== pid && !arePacted(state, f, pid)
         && !truceBetween(state, f, pid) // a faction under truce keeps its word
         && !coalitionAgainst(state, f) // a hunted faction can't be drafted
-        && mayEngage(state, f, pid));
+        && mayEngage(state, f, pid)
+        // …and now each one decides for itself.
+        && coalitionJoinScore(state, f, pid) >= c.joinScoreMin);
       if (members.length >= 2) {
-        state.diplomacy.coalitions.push({ target: pid, members, since: state.round });
+        state.diplomacy.coalitions.push({ target: pid, members, since: state.round, grounds });
         for (const m of members) {
-          adjustStanding(state, m, pid, -c.standingHit, "coalition");
-          declareWar(state, m, pid, "coalition");
+          // ONE rule for what a draft costs, not two. The old pair — a flat
+          // -standingHit and then a war that slammed to Hostile — stacked, so
+          // a member who already disliked the target ended up well past the
+          // floor the floor exists to stop them passing. A draft cools you TO
+          // the floor and no further, and never lifts somebody who was already
+          // colder than it: `min(before, floor)`.
+          const before = getStanding(state, m, pid);
+          declareWar(state, m, pid, "coalition", {
+            standingFloor: Math.min(before, c.draftStandingFloor),
+            justifiedFor: [m],
+          });
           // members bury their quarrels for the duration — no pacts minted
           for (const n of members) {
             if (n === m) continue;
@@ -1125,7 +3538,7 @@ function recomputeCoalitions(state) {
             adjustStanding(state, m, n, 1, "common-cause");
           }
         }
-        emit(state, "coalition_formed", { target: pid, members });
+        emit(state, "coalition_formed", { target: pid, members, grounds });
       }
     } else if (existing && score <= c.dissolve
       && state.round - (existing.since ?? state.round) >= c.minRounds) {
@@ -1174,9 +3587,31 @@ function driftStanding(state) {
       if (a === b) continue;
       if (vassalLord(state, a) === b) continue; // vassal standing locked
       if (arePacted(state, a, b) || atWar(state, a, b)) continue; // active relations don't fade
+      // §7.3 — a pair somebody is actively COURTING is not unreinforced, which
+      // is the whole meaning of the drift rule. This is not a nicety: the
+      // first draft of the brief missed it and the arithmetic does not work
+      // without it. Drift moves at max(1, ...), i.e. always at least 1 per
+      // round, and the human's baseline is 0 because `seedStanding` skips them
+      // — probed, Standing set to 6 decays 6 -> 5 -> 4 -> 3 -> 2 over four
+      // rounds. So `courtStandingGain: 2` would net +1/round and 0 -> 6 would
+      // take six rounds rather than three, and the ladder would cost the
+      // diplomacy face reachability it cannot afford.
+      if (D().posture?.courtDriftExempt && eitherCourting(state, a, b)) continue;
       const cur = getStanding(state, a, b);
       const target = getBaseline(state, a, b);
       if (cur === target) continue;
+      // §B1 — WARMTH DECAYS SLOWER THAN CONTEMPT HEALS. Drift above the
+      // baseline (a warm relationship cooling) only ticks every
+      // `warmDriftEvery` rounds; drift below it (a cold one recovering) keeps
+      // the full rate. The asymmetry is the point: forgiveness stays fast,
+      // forgetting gets slow. This is the treadmill fix — at the old symmetric
+      // rate a pair needed +2/round of continuous attention just to hold
+      // position against a pact bar of +6, so earned Standing evaporated
+      // faster than any verb could rebuild it, and the measured consequence
+      // was 6.4 eliminations per game against 1.5 pacts. 1 is the no-op and
+      // restores the symmetric decay exactly.
+      if (cur > target && (d.warmDriftEvery ?? 1) > 1
+        && state.round % d.warmDriftEvery !== 0) continue;
       const grudge = factionDef(a)?.grudge ?? 0.4;
       const step = Math.max(1, Math.round(d.driftPerRound * (1 - grudge * d.grudgeDriftScale * 0.5)));
       if (cur > target) setStanding(state, a, b, Math.max(target, cur - step), "drift");
@@ -1237,11 +3672,18 @@ function runAIPolitics(state) {
     for (const b of ids) {
       if (a === b || b === human) continue; // AI-to-AI only (human acts via the screen)
       if (a === human) continue;
-      if (!mayEngage(state, a, b)) continue;
+      // §15 — the two branches below take DIFFERENT reach predicates, and
+      // that distinction is the whole fix. The pact branch uses `mayCourt`,
+      // so a distant minor can be allied; the war branch stays on
+      // `mayEngage`, so distance never manufactures a grudge war. Gating both
+      // on the widened predicate was measured and reverted: it took wars per
+      // game from 52 to 78 and unresolved games from 6 of 15 to 11.
+      if (!mayEngage(state, a, b) && !mayCourt(state, a, b)) continue;
       if (vassalLord(state, a) === b || vassalLord(state, b) === a) continue;
       const s = getStanding(state, a, b);
       // form a pact: high mutual Standing + sociability + rep gates + compat
-      if (!arePacted(state, a, b) && !atWar(state, a, b)
+      if (mayCourt(state, a, b)
+        && !arePacted(state, a, b) && !atWar(state, a, b)
         && s >= d.pactStandingReq && getStanding(state, b, a) >= d.pactStandingReq
         && (aDef.sociability ?? 0.5) >= 0.4
         && passesRepGates(state, a, b) && passesRepGates(state, b, a)) {
@@ -1250,7 +3692,8 @@ function runAIPolitics(state) {
       }
       // declare war: low Standing + aggression, and not already at war/pact
       // — and never through a live truce (peace holds for its window).
-      if (!atWar(state, a, b) && !arePacted(state, a, b) && !truceBetween(state, a, b)
+      if (mayEngage(state, a, b)
+        && !atWar(state, a, b) && !arePacted(state, a, b) && !truceBetween(state, a, b)
         && s <= d.ai.warGrudgeThreshold && (aDef.aggression ?? 0.5) >= 0.6) {
         declareWar(state, a, b, "ai-grudge");
         continue;
@@ -1269,10 +3712,22 @@ function runAIPolitics(state) {
 
 // --- agreement upkeep: flows (trade routes / tribute) ----------------
 function runFlows(state) {
+  const expired = [];
   for (const agr of state.diplomacy.agreements) {
     if (agr.vassalTribute) continue; // tribute handled in vassalTick
+    if (agr.expiresOnRound != null && state.round > agr.expiresOnRound) { expired.push(agr); continue; }
     for (const it of agr.give || []) applyFlow(state, agr.proposer, agr.recipient, it);
     for (const it of agr.get || []) applyFlow(state, agr.recipient, agr.proposer, it);
+  }
+  // An agreement that ran its full term was HONORED — the parties kept their
+  // word to the end, which is exactly what Honor is for. That also gives the
+  // stat a source other than punishment for the first time.
+  for (const agr of expired) {
+    state.diplomacy.agreements = state.diplomacy.agreements.filter((x) => x !== agr);
+    for (const side of [agr.proposer, agr.recipient]) {
+      if (state.players[side]) adjustHonor(state, side, D().honor.keepGain, "agreement-kept");
+    }
+    emit(state, "agreement_expired", { agreement: agr.id, proposer: agr.proposer, recipient: agr.recipient });
   }
 }
 function applyFlow(state, from, to, item) {
@@ -1286,7 +3741,7 @@ function applyFlow(state, from, to, item) {
 
 // --- the round cadence (§18.12) -------------------------------------
 // Runs once per round in the §15.12 rollover: decay Menace, drift Standing,
-// pay flows, AI-to-AI politics, vassal tick, coalitions, then Recognition.
+// pay flows, AI-to-AI politics, vassal tick, coalitions, then Dominion.
 export function runDiplomacyRound(state) {
   ensureDiplomacy(state);
   // Menace decays with clean play / time.
@@ -1297,6 +3752,21 @@ export function runDiplomacyRound(state) {
       if (h !== tgt) adjustHonor(state, pid, Math.sign(tgt - h) * D().honor.decayPerRound, "decay");
     }
   }
+  // §15 — who is within reach of whom, before anything reads it. Stamped once
+  // per round rather than derived per acceptance gate: `areNeighbours` is a
+  // BFS per Location pair and only moves when somebody's holdings do.
+  sweepContact(state);
+  // §5 — where everybody stands, recomputed BEFORE the acts. Transitions and
+  // condition outcomes land here; SPEAKING them is `speakPosture`, hoisted to
+  // the top of the AI's turn, so a faction says where it stands before it acts
+  // rather than after its violence.
+  recomputePostures(state);
+  // §6 — political income, then the standing political bills. After postures
+  // so a courtship opened this round is billed for it, and before the acts so
+  // a faction that just went bankrupt is not still courting when it chooses.
+  tickSway(state);
+  expireOffers(state); // §6.10 — an unanswered offer lapses; silence is not a no
+  resolveUltimatums(state); // §6.11 — deadlines fall due, and bluffs get called
   pactTenureBaselines(state); // warm long-alliance baselines before the fade
   driftStanding(state);
   guestHouseDrift(state);
@@ -1310,8 +3780,9 @@ export function runDiplomacyRound(state) {
   runAIPolitics(state);
   vassalTick(state);
   recomputeCoalitions(state);
+  sweepForgeries(state); // §12.3 — a lie is real while it lasts, then evaporates
   queueHumanWarnings(state); // after politics/coalitions — warn on settled state
-  checkRecognitionVictory(state);
+  checkDominion(state);
 }
 
 // --- seeding (§18.4.1 alliance variety) -----------------------------
@@ -1349,35 +3820,124 @@ export function seedStanding(state, rng) {
 export function performDiplomacy(state, pid, action, params = {}) {
   ensureDiplomacy(state);
   const f = params.faction;
-  const r = (extra) => { checkRecognitionVictory(state); return { ok: true, ...extra }; };
+  const r = (extra) => { checkDominion(state); return { ok: true, ...extra }; };
   switch (action) {
     case "declare-war":
       declareWar(state, pid, f, "player");
       return r();
-    case "make-peace":
+    // A bare ceasefire offer: no terms, so nothing sweetens it and the only
+    // thing that can carry it is how much they want the war over.
+    // `sue-for-peace` is the same ask WITH terms attached.
+    //
+    // This used to call makePeace() outright, with no check of any kind — a
+    // warlord one round into a war it was winning ended it because you
+    // pressed a button, and peace pays +3 Standing to both sides, so
+    // "declare, take, make peace" came out ahead of never declaring.
+    case "make-peace": {
+      if (!atWar(state, pid, f)) return { ok: false, reason: "not at war with them" };
+      if (!aiAcceptsPeace(state, f, pid, null)) {
+        return { ok: true, accepted: false, reason: "they fight on" };
+      }
       makePeace(state, pid, f, "player-peace");
-      return r();
+      return r({ accepted: true });
+    }
+    // §5/§7.3 — open a courtship. An OVERTURE, not an offer: it states the
+    // condition and puts no pact on the table. This is the middle the layer
+    // was missing. Both the AI's selection pass and the player's drawer reach
+    // the ladder through this one verb, because §7.2's "one bar for everyone"
+    // has to mean one ROAD as well as one number.
+    case "court": {
+      const f = params.faction;
+      if (!f || f === pid) return { ok: false, reason: "there is nobody to court" };
+      if (arePacted(state, pid, f)) return { ok: false, reason: "you are already allied" };
+      if (atWar(state, pid, f)) return { ok: false, reason: "you are at war with them" };
+      if (isCourting(state, pid, f)) return { ok: false, reason: "you are already courting them" };
+      if (!mayCourt(state, pid, f)) return { ok: false, reason: "they are beyond your reach" };
+      if (getStanding(state, pid, f) < D().tiers.neutral) {
+        return { ok: false, reason: "you think too little of them to be seen courting them" };
+      }
+      if (!passesRepGates(state, pid, f)) {
+        return { ok: false, reason: "your own reputation is in the way" };
+      }
+      // §6.3 — a courtship is a RUNNING cost, so the bar is "can you keep
+      // paying", not "can you pay once". Enforced here rather than only in the
+      // UI so the human and the AI answer to the same test: the first cut had
+      // the AI budget against income while the button gated on the pool, which
+      // on round one let the AI court and told the human it was broke.
+      if (!canSustainCourtship(state, pid)) {
+        return {
+          ok: false,
+          reason: `you cannot keep paying for another courtship — ${CONFIG.sway.courtUpkeep} a round, ` +
+            `and you are already spending ${courtingList(state, pid).length * CONFIG.sway.courtUpkeep} ` +
+            `against an income of ${swayIncome(state, pid).total}`,
+        };
+      }
+      if (!beginCourtship(state, pid, f)) return { ok: false, reason: "there is nothing to open" };
+      const p = postureOf(state, pid, f);
+      return r({
+        courting: f,
+        condition: conditionText(state, pid, f, p.condition),
+      });
+    }
+
+    // Stop. A courtship is a running cost (economy §6.3), so calling one off
+    // has to be a thing a faction can decide to do.
+    case "end-courtship": {
+      const f = params.faction;
+      if (!isCourting(state, pid, f)) return { ok: false, reason: "you are not courting them" };
+      setPosture(state, pid, f, "Watching", null);
+      return r({ ended: f });
+    }
+
+    // §6.3 — a gift that MOVES STANDING is priced in Sway, not scrap. This is
+    // the sink that replaces the scrap gift outright, and it is the second
+    // half of the same wall the diplomacy brief built when it closed the deal
+    // pump: letting one fungible currency buy both production and political
+    // outcomes is the genre's most reliable way to make diplomacy feel bought.
+    //
+    // `params.standing` is how many points of warmth to buy. The scrap form is
+    // still reachable and still moves goods — it is now a `propose-deal` with
+    // nothing asked in return, which is what handing somebody resources
+    // actually is, and it is priced as generosity by the deal rules rather
+    // than as a Standing purchase.
     case "gift": {
-      const amount = Math.min(params.amount || 0, state.players[pid]?.resource || 0);
-      if (amount <= 0) return { ok: false, reason: "no scrap to gift" };
-      applyDeal(state, { proposer: pid, recipient: f, give: [{ resource: { resource: "scrap", amount } }], get: [] }, "gift");
-      return r({ amount });
+      const want = Math.max(1, Math.round(params.standing || 1));
+      if (!f || f === pid) return { ok: false, reason: "there is nobody to send to" };
+      if (!mayCourt(state, pid, f)) return { ok: false, reason: "they are beyond your reach" };
+      const cost = giftCost(state, pid, f, want);
+      if (!canAffordSway(state, pid, cost)) {
+        return { ok: false, reason: `not enough Sway — ${cost} needed, you hold ${swayOf(state, pid)}` };
+      }
+      // Diminishing returns still apply. A gift is a campaign, not a bribe,
+      // and the window that made scrap gifts fade has nothing to do with which
+      // currency pays for them.
+      const n = state.diplomacy.giftCounter[pid]?.[f] || 0;
+      const actual = Math.floor(want / (n + 1));
+      if (actual <= 0) {
+        return { ok: false, reason: "you have leaned on them too often lately for this to land" };
+      }
+      spendSway(state, pid, cost, `courting ${factionDef(f)?.name || f}`);
+      adjustStanding(state, f, pid, actual, "gift");
+      if (actual >= 2) adjustBaseline(state, f, pid, D().gift.baselineWarmth, "gift");
+      state.diplomacy.giftCounter[pid] = state.diplomacy.giftCounter[pid] || {};
+      state.diplomacy.giftCounter[pid][f] = n + 1;
+      return r({ standing: actual, sway: cost });
     }
     case "denounce":
       denounce(state, pid, f);
       return r();
     case "mediate":
       return mediate(state, pid, params.a, params.b) ? r() : { ok: false, reason: "they refuse mediation" };
+    // A bare alliance offer is a deal whose only term is the alliance, so it
+    // goes down the same road: they take it, or they name a price.
     case "propose-pact": {
-      if (!aiAcceptsPact(state, f, pid)) return { ok: true, accepted: false, reason: "they decline the pact" };
-      formPact(state, pid, f, "player-pact");
-      return r({ accepted: true });
+      if (arePacted(state, pid, f)) return { ok: false, reason: "already allied" };
+      const deal = { proposer: pid, recipient: f, give: [{ promise: { kind: "pact" } }], get: [] };
+      return r(resolveProposal(state, pid, f, deal, "player-pact", "pact"));
     }
     case "propose-deal": {
       const deal = { proposer: pid, recipient: f, give: params.give || [], get: params.get || [] };
-      if (!wouldAccept(state, f, deal)) return { ok: true, accepted: false, reason: "they decline the deal" };
-      applyDeal(state, deal, "player-deal");
-      return r({ accepted: true });
+      return r(resolveProposal(state, pid, f, deal, "player-deal", "deal"));
     }
     case "vassalize": {
       if (!aiAcceptsVassalage(state, f, pid)) return { ok: true, accepted: false, reason: "they refuse to submit" };
@@ -1389,16 +3949,54 @@ export function performDiplomacy(state, pid, action, params = {}) {
     case "sue-for-peace": {
       if (!atWar(state, pid, f)) return { ok: false, reason: "not at war with them" };
       const side = { proposer: pid, recipient: f, give: params.give || [], get: params.get || [] };
-      if (!aiAcceptsPeace(state, f, pid, side)) return { ok: true, accepted: false, reason: "they fight on" };
-      if ((side.give.length || side.get.length)) applyDeal(state, side, "sue-for-peace");
-      makePeace(state, pid, f, "sue-for-peace");
-      return r({ accepted: true });
+      const pestering = recordAsk(state, pid, f);
+      if (aiAcceptsPeace(state, f, pid, side)) {
+        if (side.give.length || side.get.length) applyDeal(state, side, "sue-for-peace");
+        makePeace(state, pid, f, "sue-for-peace");
+        return r({ accepted: true });
+      }
+      // What would buy it? aiAcceptsPeace weighs exhaustion + the side terms,
+      // so the shortfall converts straight into scrap the same way a deal's
+      // does — which turns "they fight on" into a number.
+      const short = D().suePeace.acceptThreshold
+        - warExhaustion(state, f, pid)
+        - (getStanding(state, f, pid) >= D().tiers.neutral ? D().suePeace.standingBoost : 0)
+        - dealValue(state, f, side);
+      const purse = state.players[pid]?.resource || 0;
+      const terms = scrapTerms(side);
+      const need = terms.offered + Math.ceil(Math.max(0, short));
+      if (short > 0 && need <= purse && short <= D().offers.counterGapCeiling) {
+        const counter = withScrapTerms(side, need, 0);
+        const offer = tableOffer(state, f, pid, counter, {
+          kind: "peace", isCounter: true, note: "They will stop for a price.",
+        });
+        return r({ accepted: false, countered: true, offerId: offer.id, reason: "they name a price for peace" });
+      }
+      if (pestering) chargePester(state, pid, f);
+      return r({ accepted: false, reason: "they fight on" });
     }
 
     // §1.4 — demand tribute. Power-gated; caves or escalates to war.
     case "demand-tribute": {
       if (!canDemandTribute(state, pid, f)) return { ok: false, reason: "not strong enough to coerce them" };
-      const terms = params.terms || [{ resource: { resource: "scrap", amount: params.amount || 0 } }];
+      // The drawer builds a give/get like every other deal pane and sends
+      // the demand as `get`; only the engine's own callers use `terms`.
+      // Reading `terms` alone meant every demand made from the UI asked for
+      // the fallback amount — zero — and "succeeded" moving nothing.
+      const terms = params.terms
+        || (params.get?.length ? params.get : null)
+        || [{ resource: { resource: "scrap", amount: params.amount || 0 } }];
+      if (!terms.some((t) => (t.resource?.amount || 0) > 0 || t.chip || t.research || t.intel)) {
+        return { ok: false, reason: "name something worth demanding" };
+      }
+      // A city is not tribute. `caveOnDemand` weighs a demand on the power
+      // ratio alone — right for scrap, absurd for ground: it would hand over
+      // Omara because somebody counted the armies. Ceding is a thing you
+      // negotiate or a thing you threaten, so it belongs in a deal or an
+      // ultimatum, and this is the one verb it is not allowed in.
+      if (terms.some((t) => t.location)) {
+        return { ok: false, reason: "ground is not tribute — ask for it in a deal, or demand it with a deadline" };
+      }
       adjustMenace(state, pid, D().menace.base, "demand-tribute"); // the threat is hostile
       emit(state, "tribute_demanded", { demander: pid, target: f, terms });
       if (caveOnDemand(state, f, pid, terms)) {
@@ -1413,7 +4011,7 @@ export function performDiplomacy(state, pid, action, params = {}) {
       return r({ accepted: false, refused: true });
     }
 
-    // §1.3 — form a Trading Pact (capital-to-capital route + Neutral+).
+    // §1.3 — form a Trading Pact (a clear route between the two + Neutral+).
     case "trading-pact": {
       const res = formTradingPact(state, pid, f);
       return res.ok ? r(res) : res;
@@ -1428,8 +4026,8 @@ export function performDiplomacy(state, pid, action, params = {}) {
       const on = params.on !== false;
       if (on) {
         if (atWar(state, pid, f)) return { ok: false, reason: "at war with them" };
-        if (getStanding(state, pid, f) < D().tiers.friendly || getStanding(state, f, pid) < D().tiers.friendly)
-          return { ok: false, reason: "need Friendly+ standing" };
+        const gate = openBordersStanding(state, pid, f);
+        if (!gate.ok) return { ok: false, reason: gate.reason };
         if (!passesRepGates(state, pid, f) || !passesRepGates(state, f, pid))
           return { ok: false, reason: "reputation gates fail" };
         if (!standaloneOpenBorders(state, pid, f)) {
@@ -1442,6 +4040,34 @@ export function performDiplomacy(state, pid, action, params = {}) {
         (agr) => !(agr.type === "open-borders" && ((agr.a === pid && agr.b === f) || (agr.a === f && agr.b === pid))),
       );
       emit(state, "open_borders_toggled", { agreement: `ob-${pid}-${f}`, on: false });
+      return r({ on: false });
+    }
+
+    // Rail doc §2.3 — grant or revoke running rights over YOUR stations.
+    // One-directional by design: you decide who rides your line, and that is a
+    // different question from whether you may ride theirs. Revoking is free of
+    // Standing cost while there is no formal treaty behind it — the offence is
+    // in what they do next, not in closing your own yard.
+    case "set-rail-access": {
+      const on = params.on !== false;
+      if (on) {
+        if (atWar(state, pid, f)) return { ok: false, reason: "at war with them" };
+        const gate = railAccessStanding(state, pid, f);
+        if (!gate.ok) return { ok: false, reason: gate.reason };
+        if (!passesRepGates(state, pid, f)) return { ok: false, reason: "reputation gates fail" };
+        if (!standaloneRailAccess(state, pid, f)) {
+          state.diplomacy.agreements.push({
+            id: `ra-${pid}-${f}-${state.round}`, type: "rail-access",
+            a: pid, b: f, since: state.round,
+          });
+        }
+        emit(state, "rail_access_toggled", { grantor: pid, rider: f, on: true });
+        return r({ on: true });
+      }
+      state.diplomacy.agreements = state.diplomacy.agreements.filter(
+        (agr) => !(agr.type === "rail-access" && agr.a === pid && agr.b === f),
+      );
+      emit(state, "rail_access_toggled", { grantor: pid, rider: f, on: false });
       return r({ on: false });
     }
 
@@ -1534,6 +4160,53 @@ export function performDiplomacy(state, pid, action, params = {}) {
     }
 
     // §1.7/§6.10 — voluntarily release a vassal (clemency).
+    // §6.10 — answer something sitting in your inbox. Answering is never an
+    // ask, so it never counts toward pestering.
+    case "answer-offer":
+      return r(answerOffer(state, pid, params.offerId, params.accept !== false));
+
+    // §13 — haggle rather than take-it-or-leave-it. Answering is not an ask;
+    // countering IS one, and `resolveProposal` charges it like any other.
+    case "counter-offer": {
+      const res = counterTheOffer(state, pid, params.offerId, params.scrap ?? 0);
+      return res.ok ? r(res) : res;
+    }
+
+    // §12.3 — the intrigue branch. All three are Sway, and none of them is an
+    // ask: nobody is being petitioned, so none costs the pestering budget.
+    case "expose": {
+      const res = expose(state, pid, f);
+      return res.ok ? r(res) : res;
+    }
+    case "forge": {
+      const res = forge(state, pid, f, params.against);
+      return res.ok ? r(res) : res;
+    }
+    case "fabricate": {
+      const res = fabricate(state, pid, f);
+      return res.ok ? r(res) : res;
+    }
+
+    // §13 — stand for something in public, or stand down from it.
+    // Neither is an ask: nobody is being petitioned, so neither costs the
+    // pestering budget and neither can be refused by a faction.
+    case "declare-position": {
+      const res = declarePosition(state, pid, params.kind, params.target || null);
+      return res.ok ? r(res) : res;
+    }
+    case "withdraw-position": {
+      const res = withdrawPosition(state, pid, params.positionId);
+      return res.ok ? r(res) : res;
+    }
+
+    // §6.11 — "stop, or else", with a deadline and your name on it.
+    case "issue-ultimatum": {
+      const res = issueUltimatum(state, pid, f, params.demand);
+      return res.ok ? r(res) : res;
+    }
+    case "answer-ultimatum":
+      return r(answerUltimatum(state, pid, params.ultimatumId, params.comply !== false));
+
     case "free-vassal": {
       const vassal = f;
       if (vassalLord(state, vassal) !== pid) return { ok: false, reason: "not your vassal" };
@@ -1561,14 +4234,55 @@ export function performDiplomacy(state, pid, action, params = {}) {
 // Standing, rep gates, no conflicting war, and basic sociability.
 export function aiAcceptsPact(state, f, proposer) {
   if (f === proposer || arePacted(state, f, proposer)) return false;
-  if (!mayEngage(state, f, proposer)) return false;
-  if (getStanding(state, f, proposer) < D().pactStandingReq) return false;
+  if (!mayCourt(state, f, proposer)) return false; // §15 — the ally door, not the war one
+  // §7.2 — ONE BAR MEANS BOTH ROADS. There are two roads to a pact and the
+  // brief-input doc only named one: the AI offering the human
+  // (`proposeToHuman`, which gated at tiers.neutral = -1) and the player
+  // asking (this function, which gated at pactStandingReq = 6). Gating only
+  // the first left two roads, not one.
+  //
+  // A faction does not enter an alliance with anyone it is not Courting.
+  // EITHER side's Courting unlocks it (economy §6.4 rule 2): if the human
+  // courts an AI the human pays and the AI may accept; if the AI courts the
+  // human the AI pays. Nobody is gated on a budget they do not control — the
+  // failure that would take the diplomacy face from 1-in-15 to zero.
+  if (!eitherCourting(state, f, proposer)) return false;
+  // …and a courtship is a process, not a switch. `courtRounds` is what turns
+  // "6 Standing out of a clear sky" into "6 Standing after three rounds of a
+  // faction publicly courting you, naming a condition, and watching you keep
+  // it." The bar was never the problem; the absence of a middle was.
+  const need = D().posture?.courtRounds ?? 0;
+  if (need > 0) {
+    const worked = Math.max(courtRounds(state, f, proposer), courtRounds(state, proposer, f));
+    if (worked < need) return false;
+  }
+  // Reach-adjusted: a faction you can only speak to because the silence ran
+  // long enough is a stranger, and wants more before it signs anything.
+  if (reachAdjustedStanding(state, f, proposer) < D().pactStandingReq) return false;
   if (!passesRepGates(state, f, proposer)) return false;
   // won't ally you if you're allied to its sworn enemy
   for (const enemy of factionIds(state)) {
     if (atWar(state, f, enemy) && arePacted(state, proposer, enemy)) return false;
   }
   return (factionDef(f)?.sociability ?? 0.5) >= 0.3;
+}
+
+// Has `lord` been openly Warning `f` for long enough that it reads as a
+// standing threat rather than a mood? §15's second door.
+//
+// Three gates, and each is load-bearing. It has to be a WARNING (a stance with
+// a named grievance behind it, not a courtship); it has to have been SPOKEN
+// (`postureStated`), because a threat nobody has heard cannot corner anybody
+// and that is audit block 11's rule; and it has to have been held for
+// `submissionRounds`, because the whole point is that it is a campaign of
+// pressure rather than a switch.
+function warningHeldLongEnough(state, lord, f) {
+  const need = D().reach?.submissionRounds || 0;
+  if (!need) return false;
+  const p = postureOf(state, lord, f);
+  if (p.kind !== "Warning") return false;
+  if (!postureStated(state, lord, f)) return false;
+  return state.round - p.since >= need;
 }
 
 // §18.9 — a faction accepts vassalage when subordination beats its
@@ -1578,23 +4292,253 @@ export function aiAcceptsPact(state, f, proposer) {
 //  · Patronage — a MINOR faction takes a protector it genuinely likes:
 //    Friendly+ Standing, the lord is its best friend on the board, and the
 //    lord's reputation passes its gates. This is the peaceful road to the
-//    vassal weight Recognition needs — courtship, not coercion.
+//    vassal face Dominion needs — courtship, not coercion.
 export function aiAcceptsVassalage(state, f, lord) {
   if (f === lord || vassalLord(state, f)) return false;
-  if (!mayEngage(state, f, lord)) return false;
+  if (!mayCourt(state, f, lord)) return false; // §15 — the vassal door, not the war one
   // A recent rebel refuses its old lord until the cooldown clears.
   const reb = state.diplomacy?.rebellions?.[f];
   if (reb && reb.lord === lord && state.round - reb.round < D().vassal.rebellionCooldownRounds) return false;
   const ratio = powerOf(state, f) / Math.max(1, powerOf(state, lord));
   if (ratio > D().ai.vassalPowerRatio) return false;
-  const cornered = atWar(state, lord, f) || getStanding(state, f, lord) <= D().tiers.wary;
+  // §15 — the second vassalage door. A MAJOR has exactly one road in
+  // (`cornered`), and it runs through a war; §8 and §9 both make wars rarer,
+  // so without a second door they narrow the vassal face by arithmetic rather
+  // than by design. A Warning held long enough against somebody who cannot
+  // resist IS being cornered — the shadow of the thing is doing the work the
+  // thing used to do.
+  const cornered = atWar(state, lord, f)
+    || getStanding(state, f, lord) <= D().tiers.wary
+    || warningHeldLongEnough(state, lord, f);
   if (cornered) return true;
   if ((factionDef(f)?.tier || "major") === "major") return false;
-  const s = getStanding(state, f, lord);
+  // The patronage door reads the reach-adjusted number for the same reason
+  // the pact door does: a distant protector is a stranger offering protection.
+  const s = reachAdjustedStanding(state, f, lord);
   if (s < D().tiers.friendly) return false;
   if (!passesRepGates(state, f, lord)) return false;
   // the lord must be this minor's top Standing on the board (ties count)
   return factionIds(state).every((o) => o === f || o === lord || getStanding(state, f, o) <= s);
 }
 
-export { standingTier, getStanding, adjustStanding };
+// --- Sway: what political capacity is spent on (economy §6.3) ---------
+//
+// FOUR SINKS, and no more. Courtship upkeep, gifts that move Standing,
+// espionage operations, and occupation. Two from the first draft are
+// deliberately cut: LOBBYING A COALITION contradicts §9.2's closed,
+// normalised, published join score twice over — a hidden purchased term in it
+// would be both illegible and a literal instance of "diplomacy feels bought" —
+// and BACKING AN ULTIMATUM narrows the vassal face, because ultimatum ->
+// defiance -> righteous war -> cornered is a live road to a submission the
+// design already paid to protect once.
+//
+// MATERIAL COMPENSATION STAYS SCRAP. Reparations, settlements, tribute and
+// cessions are THINGS. Scrap buys what a faction has; Sway buys what a faction
+// thinks.
+
+// How many live agreements `pid` holds — the income's third term.
+function agreementCount(state, pid) {
+  let n = 0;
+  for (const p of state.diplomacy?.pacts || []) if (p.a === pid || p.b === pid) n += 1;
+  for (const [vassal, lord] of Object.entries(state.diplomacy?.vassals || {})) {
+    if (lord === pid && !state.players[vassal]?.eliminated) n += 1;
+  }
+  for (const agr of state.diplomacy?.agreements || []) {
+    if (agr.type === "trading-pact" && (agr.a === pid || agr.b === pid)) n += 1;
+  }
+  return n;
+}
+
+// Who `pid` is currently Courting.
+export function courtingList(state, pid) {
+  const row = state.diplomacy?.posture?.[pid] || {};
+  return Object.keys(row).filter((f) => row[f]?.kind === "Courting"
+    && !state.players[f]?.eliminated);
+}
+
+// Economy §6.5 — OCCUPATION. The keystone: holding a Location whose
+// `affiliation` belongs to another SURVIVING faction costs Sway every round
+// you hold it.
+//
+// WHY SWAY AND NOT SCRAP. Because it is what makes conquest and courtship
+// compete for the same pool, under a win condition that needs every faction
+// dealt with — every foreign homeland you garrison is political capacity you
+// are not spending on the factions you still need. Charging scrap would be
+// conventional and easier to explain, and it would also be a separate tax
+// rather than the thesis.
+//
+// NOT GATED ON LOYALTY. The first draft charged only below half Loyalty, and
+// the measurement killed it: a captured Location starts at `loyalty.start: 2`
+// and `tickLoyalty` adds +1 per Upkeep while garrisoned, so a garrisoned
+// conquest clears half the ceiling in three rounds and the total lifetime
+// charge was smaller than one round of courting one faction. Charging the
+// whole tenure is also the rule the diplomacy layer already applies to the
+// same fact: an occupation is a standing grievance that "cannot be settled"
+// while you are still standing in it.
+//
+// AN EMPTY AFFILIATED LOCATION SETTLED PEACEFULLY STILL CHARGES, and should:
+// walking into an unclaimed `chigan` as Versari is taking the Lakers' homeland
+// whether or not anyone was home.
+export function occupationCharges(state, pid) {
+  const cfg = CONFIG.sway;
+  const out = [];
+  if (!cfg?.occupation) return out;
+  for (const loc of Object.values(state.locations || {})) {
+    if (loc.controller !== pid) continue;
+    const aff = LOCATIONS[loc.locationId]?.affiliation;
+    if (!aff || aff === pid) continue;
+    // Only a SURVIVING faction has a homeland to be aggrieved about.
+    if (!state.players[aff] || state.players[aff].eliminated) continue;
+    // …and only ground you TOOK. The setup deals affiliated Locations to
+    // other factions (the Croppers open holding Goldgrass's Omara), and
+    // billing somebody from round one for a city they never took is the
+    // failure `startingController` exists to prevent.
+    if (loc.startingController === pid) continue;
+    out.push({ hex: loc.hexId, locationId: loc.locationId, aggrieved: aff });
+  }
+  // …AND AN OCCUPIER HAS TO BE AN EMPIRE. A faction holding `occupierFloor`
+  // Locations or fewer is not occupying anybody, it is cornered on the last
+  // ground it has — and billing it 6 Sway a round against a floor income of 6
+  // is a hundred per cent of its political capacity for the crime of losing.
+  //
+  // This is an ELIMINATION RATCHET, which the design has already refused once:
+  // the first draft of the supply rule refused off-supply purchases and was
+  // reverted for being exactly this shape. Measured with a faction cut down to
+  // one city at round 20 — it recovered ground in 0 of 15 games with
+  // occupation live and 3 of 15 with it off, and died seven rounds sooner.
+  const held = Object.values(state.locations || {}).filter((l) => l.controller === pid).length;
+  if (held <= (cfg.occupierFloor ?? 0)) return [];
+  return out;
+}
+
+// The per-round occupation bill, and what happens when it cannot be paid.
+//
+// ARREARS ARE THE PART THE FIRST DRAFT LEFT UNRESOLVED. A conqueror who never
+// intends to do politics would otherwise get occupation for free — they simply
+// never hold Sway, so a Sway charge costs them nothing. Unpayable occupation
+// converts to Standing loss with the AGGRIEVED faction, so they pay in the
+// reputation the rest of the board reads instead.
+function chargeOccupation(state, pid) {
+  const cfg = CONFIG.sway;
+  let spent = 0;
+  for (const occ of occupationCharges(state, pid)) {
+    if (spendSway(state, pid, cfg.occupation, `holding ${LOCATIONS[occ.locationId]?.name || occ.locationId}`)) {
+      spent += cfg.occupation;
+      emit(state, "occupation_charged", {
+        holder: pid, hex: occ.hex, locationId: occ.locationId,
+        aggrieved: occ.aggrieved, sway: cfg.occupation, arrears: 0,
+      });
+      continue;
+    }
+    // Cannot pay: the bill lands on the relationship instead.
+    const hit = Math.max(1, Math.round(cfg.occupation / Math.max(1, cfg.arrearsStandingPer)));
+    adjustStanding(state, occ.aggrieved, pid, -hit, "occupation");
+    emit(state, "occupation_charged", {
+      holder: pid, hex: occ.hex, locationId: occ.locationId,
+      aggrieved: occ.aggrieved, sway: 0, arrears: hit,
+    });
+  }
+  return spent;
+}
+
+// The per-round bill, charged inside `tickSway` after income lands.
+//
+// WHEN A FACTION CANNOT PAY, the courtship is simply CALLED OFF — the cheapest
+// ones first, so a faction under pressure keeps the relationship it has
+// invested most in. That is the honest failure: a courtship is attention, and
+// attention you cannot spare is attention you are not spending. It is
+// deliberately NOT a Standing penalty; that is occupation's arrears rule
+// (§6.5), where the whole point is that a conqueror who never does politics
+// still pays in reputation.
+function chargeSwayUpkeep(state, pid) {
+  const cfg = CONFIG.sway;
+  const p = state.players[pid];
+  if (!cfg || !p) return 0;
+  // OCCUPATION FIRST, courtships second. Ground you are sitting on is not a
+  // discretionary commitment you can quietly stop paying for — the garrison is
+  // there whether or not you can afford the politics. Billing it first is what
+  // makes the competition real: a conqueror who cannot cover both loses the
+  // courtship, not the conquest, and that is the trade the design is about.
+  let spent = chargeOccupation(state, pid);
+  // §B4 — WAR BILLS THE POLITICAL POOL, and it bills FIRST. Until this, the
+  // two loops never competed for anything: conquest spent scrap and actions,
+  // diplomacy spent Sway, and a conqueror ran a full political program on the
+  // side for free. Now every active war claims `sway.warUpkeep` a round of
+  // political capacity — ahead of occupation and courtship, because a war is
+  // the one commitment a faction cannot quietly stop paying for. It cannot
+  // lapse like a courtship; it just drains, down to zero if the pool is
+  // shallow. Choosing a third war now means not affording the courtship that
+  // was going to end the first one. 0 is the no-op.
+  const warRate = CONFIG.sway.warUpkeep ?? 0;
+  if (warRate > 0) {
+    const activeWars = (state.diplomacy.wars || [])
+      .filter((w) => w.a === pid || w.b === pid).length;
+    if (activeWars > 0) {
+      const owed = activeWars * warRate;
+      const paid = Math.min(owed, p.sway || 0);
+      if (paid > 0) {
+        p.sway -= paid;
+        recordSway(state, pid, -paid, `${activeWars} war${activeWars > 1 ? "s" : ""}`);
+        emit(state, "sway_spent", { player: pid, amount: paid, cause: "war-upkeep", left: p.sway });
+        spent += paid;
+      }
+    }
+  }
+  const courting = courtingList(state, pid);
+  // Longest-running first: an established courtship is the one worth keeping.
+  courting.sort((a, b) => (postureOf(state, pid, a).since) - (postureOf(state, pid, b).since));
+  for (const f of courting) {
+    if (spendSway(state, pid, cfg.courtUpkeep, `courting ${factionDef(f)?.name || f}`)) {
+      spent += cfg.courtUpkeep;
+      continue;
+    }
+    setPosture(state, pid, f, "Watching", null);
+    emit(state, "courtship_lapsed", { observer: pid, subject: f, reason: "no capacity" });
+  }
+  return spent;
+}
+
+// --- injected readers ------------------------------------------------
+//
+// `interests.js` and `posture.js` are LEAVES so this module can use them
+// without a cycle — both need several of diplomacy's own queries, and
+// diplomacy already sits above victory, standing, control, board and
+// influence. Registered once at load; every reader here is a pure query.
+registerInterestReaders({
+  factionIds, occupationsBy, worstGrievance, grievanceWeight, atWar, warExhaustion,
+  mayCourt, tradingPactBetween, tradeRouteOpen, unitsInTerritory, threatScore,
+});
+// §17.5 B1 — what a Spy Ring can see of the political layer. Registered rather
+// than imported, so `intel.js` stays a leaf.
+registerIntelReaders({
+  interestsOf, positionsOf, positionText, swayOf, swayIncome, courtingList,
+});
+
+registerSwayReaders({
+  factionIds, agreementCount, chargeSwayUpkeep,
+  courtingCount: (state, pid) => courtingList(state, pid).length,
+});
+registerPostureReaders({
+  factionIds, atWar, arePacted, vassalLord, coalitionAgainst, mayCourt,
+  // §9 — why a board may rise, and how badly one faction wants in.
+  coalitionGrounds, coalitionJoinScore,
+  // §12.3 — how an op learned what it publishes, and who might see through it.
+  exposureApparatus, counterIntelligence, covertDetection, sabotageCaught,
+  getStanding, adjustStanding, passesRepGates, grievanceWeight,
+  tradingPactBetween, unitsInTerritory,
+  // §2 — how much a partner closes the win condition. `courtshipScore` picks
+  // who the AI spends its one initiative a round on, and until this landed it
+  // picked on warmth alone.
+  dominionValue,
+});
+
+export {
+  standingTier, getStanding, adjustStanding, standingReceipts,
+  // §5/§6 — re-exported so callers reach the political layer through one door.
+  interestsOf, interestToward, interestMultiplier,
+  postureOf, setPosture, postureStated, isCourting, eitherCourting, courtRounds,
+  speakPosture, postureCitation, conditionText,
+  beginCourtship, mayBeginCourtship, courtshipScore,
+  // Sway, re-exported through the one political door.
+  swayIncome, swayOf, spendSway, canAffordSway, canSustainCourtship, seedSway, swayLedger,
+};

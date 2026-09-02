@@ -4,6 +4,9 @@ import { LOCATIONS, FACTIONS, fullController, ownerColor, theme } from "./data.j
 import ControlMeter from "./ControlMeter.jsx";
 import GarrisonValue from "./GarrisonValue.jsx";
 import { HEX_W, HEX_H } from "./hexDims.js";
+import { influenceFill, INFLUENCE_EDGE } from "./InfluenceOverlay.jsx";
+import PostMark from "./PostMark.jsx";
+import SiteMark from "./SiteMark.jsx";
 
 export { HEX_W, HEX_H };
 
@@ -25,7 +28,7 @@ const TOKEN_SLOTS = [
   { left: "16%", top: "50%" }, // 9:00  (left)
 ];
 
-function UnitToken({ unit, selected, slot = 0, onClick, dim = false }) {
+function UnitToken({ unit, selected, slot = 0, onClick, dim = false, ready = false }) {
   // Fall back for any faction id the UI table doesn't know (so an
   // unexpected owner never blanks the board).
   const faction = FACTIONS[unit.owner] || { name: unit.owner || "Unknown", color: "#888" };
@@ -65,6 +68,19 @@ function UnitToken({ unit, selected, slot = 0, onClick, dim = false }) {
       <span style={{ fontFamily: theme.fontDisplay, fontSize: 13, fontWeight: 700, color: "#fff" }}>
         {unit.name[0]}
       </span>
+      {/* Still has its action — the same dot the HUD's READY strip and the
+          holo board's tokens use. */}
+      {ready && (
+        <span
+          style={{
+            position: "absolute", right: -2, top: -2,
+            width: 8, height: 8, borderRadius: "50%",
+            background: theme.ready,
+            border: "1.5px solid #100d09",
+            boxShadow: `0 0 5px ${theme.ready}`,
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -90,7 +106,7 @@ function Plaque({ children }) {
   );
 }
 
-export default function Hex({ hex, units, selected, reachable, selectedUnitId, dimmedUnitUid, factionHighlight, onClick, onUnitClick }) {
+export default function Hex({ hex, units, selected, reachable, selectedUnitId, dimmedUnitUid, factionHighlight, showInfluence, influenceThreshold = 3, onClick, onUnitClick }) {
   // §19 fog state — "visible" (live) | "explored" (remembered, dimmed) |
   // "unexplored" (black). Drives whether live details render at all.
   const fog = hex.fog || "visible";
@@ -107,7 +123,6 @@ export default function Hex({ hex, units, selected, reachable, selectedUnitId, d
 
   let rim = "#4a4231";
   if (isUnexplored) rim = "#1b1813";
-  else if (hex.type === "encounter") rim = "#3c5b65";
   else if (isLocation) rim = ctrl ? ownerColor(ctrl) : "#5a5040";
   if (reachable) rim = theme.good;
   if (selected) rim = theme.accent;
@@ -161,11 +176,27 @@ export default function Hex({ hex, units, selected, reachable, selectedUnitId, d
       >
         {isLocation && (
           <>
-            <Plaque>{loc.name}</Plaque>
+            <Plaque>
+              {/* Still has an action — the same dot the units and the HUD's
+                  READY strip use. */}
+              {Array.from({ length: hex.actionsReady || 0 }, (_, i) => (
+                <span
+                  key={i}
+                  style={{
+                    display: "inline-block", width: 6, height: 6, borderRadius: "50%",
+                    marginRight: 5, verticalAlign: "middle",
+                    background: theme.ready, boxShadow: `0 0 5px ${theme.ready}`,
+                  }}
+                />
+              ))}
+              {loc.name}
+            </Plaque>
             <ControlMeter
               sections={hex.control.sections}
               loyalty={hex.control.loyalty}
               danger={hex.control.loyaltyDanger}
+              pressureBy={hex.control.pressureBy}
+              pending={hex.control.pending}
               size={54}
             />
             <GarrisonValue
@@ -177,32 +208,25 @@ export default function Hex({ hex, units, selected, reachable, selectedUnitId, d
             />
           </>
         )}
-        {hex.type === "encounter" && !isUnexplored && (
-          <>
-            <div
-              style={{
-                fontFamily: theme.fontDisplay,
-                fontSize: 36,
-                fontWeight: 700,
-                color: "#7ab0c0",
-                textShadow: "0 0 14px rgba(110,168,184,0.7)",
-                lineHeight: 1,
-              }}
-            >
-              ?
-            </div>
-            <div
-              style={{
-                fontSize: 9,
-                letterSpacing: 1.4,
-                textTransform: "uppercase",
-                color: "#6b97a4",
-                fontWeight: 600,
-              }}
-            >
-              Encounter
-            </div>
-          </>
+        {/* §17.7 — the listening post. Shown to its owner always, and to
+            anyone it has been revealed to; concealment, not fog, is the rule
+            that decides. It sits in the tile's content column so it reads as
+            something ON the ground rather than as terrain. */}
+        {hex.post && !isUnexplored && (
+          <div style={{ marginBottom: 2 }}>
+            <PostMark post={hex.post} size={20} />
+          </div>
+        )}
+        {/* A place somebody told you about. Beside the post rather than in
+            place of it: both are things standing on the ground, and a hex can
+            hold either, both, or neither.
+            Not gated on exploration — see engineAdapter.js. Being told where
+            something is is how you know about ground you have never walked,
+            and a mark on an unexplored tile is what a map has always been. */}
+        {hex.site && (
+          <div style={{ marginBottom: 2 }}>
+            <SiteMark site={hex.site} size={20} />
+          </div>
         )}
         {hex.type === "terrain" && !isUnexplored && (
           <div
@@ -218,22 +242,47 @@ export default function Hex({ hex, units, selected, reachable, selectedUnitId, d
           </div>
         )}
       </div>
+      {/* §11 — your own Influence here, when the overlay is on. Under the
+          road and the ZoC ring: the ring says WHOSE ground this is, the
+          heatmap says how hard you are pushing on it, and the ring has to
+          stay readable over the wash. The amber edge is the dominance
+          threshold, which is the step function the whole field turns on. */}
+      {!isUnexplored && showInfluence && influenceFill(hex.influence, influenceThreshold) && (
+        <div
+          title={`Your Influence here: ${hex.influence}${hex.influenceDominant ? " — dominant" : ""}`}
+          style={{
+            position: "absolute", inset: 3, pointerEvents: "none", zIndex: 1,
+            background: influenceFill(hex.influence, influenceThreshold).color,
+            opacity: influenceFill(hex.influence, influenceThreshold).opacity,
+            boxShadow: hex.influenceDominant ? `inset 0 0 0 1.5px ${INFLUENCE_EDGE}` : undefined,
+          }}
+        />
+      )}
       {/* §16.2 road — a worn corridor across the hex (movement modifier).
           Drawn over the fill, under the ZoC tint and tokens. */}
       {!isUnexplored && hex.road && <RoadBand />}
       {/* §18.3 ZoC overlay — a DASHED border ring in the dominating
           faction's color (dashed = influence, solid rims = ownership), over
           a much fainter area tint. When one of YOUR units stands on foreign
-          ground the ring burns hotter — the "you are trespassing" cue. */}
+          ground the ring burns hotter — the "you are trespassing" cue.
+          On explored-but-unseen ground the ring is REMEMBERED (`zocStale`):
+          the same border at reduced opacity with no glow and no tint, matching
+          how fog memory renders everything else it holds. The political map
+          should not stop existing the moment you look away. */}
       {zocColor && (
         <>
           <div
             className="pc-hex"
-            title={`Zone of Control — ${FACTIONS[hex.zocOwner]?.name || hex.zocOwner}`}
+            title={hex.zocStale
+              ? `Zone of Control — ${FACTIONS[hex.zocOwner]?.name || hex.zocOwner} (last seen)`
+              : `Zone of Control — ${FACTIONS[hex.zocOwner]?.name || hex.zocOwner}`}
             style={{
               position: "absolute",
               inset: selected ? 4 : 3,
-              background: `radial-gradient(circle at 50% 45%, ${zocColor}1e 0%, ${zocColor}0c 55%, transparent 78%)`,
+              // No area tint on remembered ground — the ring alone. A tint is
+              // a claim about the present.
+              background: hex.zocStale ? "none"
+                : `radial-gradient(circle at 50% 45%, ${zocColor}1e 0%, ${zocColor}0c 55%, transparent 78%)`,
               pointerEvents: "none",
               zIndex: 2,
             }}
@@ -248,7 +297,8 @@ export default function Hex({ hex, units, selected, reachable, selectedUnitId, d
               height: "100%",
               pointerEvents: "none",
               zIndex: 2,
-              filter: hex.zocTrespassing
+              filter: hex.zocStale ? "none"
+                : hex.zocTrespassing
                 ? `drop-shadow(0 0 5px ${zocColor})`
                 : `drop-shadow(0 0 3px ${zocColor}aa)`,
             }}
@@ -259,10 +309,10 @@ export default function Hex({ hex, units, selected, reachable, selectedUnitId, d
               points="50,4.2 95.8,27 95.8,73 50,95.8 4.2,73 4.2,27"
               fill="none"
               stroke={zocColor}
-              strokeWidth={hex.zocTrespassing ? 3.5 : 2.25}
-              strokeDasharray={hex.zocTrespassing ? "5 3" : "7 5"}
+              strokeWidth={hex.zocTrespassing ? 3.5 : hex.zocStale ? 1.6 : 2.25}
+              strokeDasharray={hex.zocTrespassing ? "5 3" : hex.zocStale ? "3 6" : "7 5"}
               vectorEffect="non-scaling-stroke"
-              opacity={hex.zocTrespassing ? 1 : 0.85}
+              opacity={hex.zocTrespassing ? 1 : hex.zocStale ? 0.4 : 0.85}
             />
           </svg>
         </>
@@ -274,6 +324,7 @@ export default function Hex({ hex, units, selected, reachable, selectedUnitId, d
           slot={i}
           selected={u.uid === selectedUnitId}
           dim={u.uid === dimmedUnitUid}
+          ready={!!u.canAct}
           onClick={onUnitClick}
         />
       ))}
@@ -326,7 +377,7 @@ function GhostToken({ ghost, slot = 0 }) {
 function RoadBand() {
   return (
     <div
-      title="Road — ignores terrain movement cost (a fast, contestable lane)"
+      title="Road — half a hex to enter, and no terrain cost or mountain halt (a fast, contestable lane)"
       style={{
         position: "absolute",
         top: "50%",

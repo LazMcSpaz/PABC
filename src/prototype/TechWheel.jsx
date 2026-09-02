@@ -222,6 +222,22 @@ function Segment({ seg, active, onPreview, onConfirm, geo }) {
   );
 }
 
+// The usable width for a label sitting at the middle of a ring segment: the
+// straight-line chord across the wedge at that radius, held off the two
+// radial edges a little. Everything on the wheel scales with `geo`, so this
+// has to be derived rather than fixed.
+function chordWidth(geo, seg) {
+  const { ri, ro } = geo.RINGS[seg.ring];
+  const midR = (ri + ro) / 2;
+  const half = (((seg.a1 - seg.a0) / 2) * Math.PI) / 180;
+  // 0.52 of the chord rather than most of it: it makes every two-word name
+  // break onto two lines, which both keeps the label clear of the wedge's
+  // radial edges (widest at the arc, much narrower nearer the hub) and reads
+  // more evenly around the ring than a mix of long and short single lines.
+  // The rings are ~58 px deep, so two lines of 12 px sit comfortably.
+  return Math.max(40, 2 * midR * Math.sin(half) * 0.52);
+}
+
 function SegmentContent({ seg, active, geo }) {
   const midR = (geo.RINGS[seg.ring].ri + geo.RINGS[seg.ring].ro) / 2;
   const midA = (seg.a0 + seg.a1) / 2;
@@ -244,13 +260,20 @@ function SegmentContent({ seg, active, geo }) {
       ) : (
         <span style={{
           fontFamily: "'Oswald',sans-serif", fontWeight: 700,
-          fontSize: (seg.ring === "layer2" ? 12.5 : 13) * fk,
-          letterSpacing: 1.4, textTransform: "uppercase",
+          fontSize: (seg.ring === "layer2" ? 11.5 : 12) * fk,
+          letterSpacing: 0.6, textTransform: "uppercase",
+          // Wrap inside the wedge rather than run out of it. The widest name
+          // ("Production Lines") is about 140 px on one line against a 100 px
+          // chord at the inner ring, so the label has to be allowed two.
+          maxWidth: chordWidth(geo, seg),
+          whiteSpace: "normal",
+          textAlign: "center",
+          lineHeight: 1.06,
           color: isAssigned ? "#fff" : (canAssign || isHover) ? col : "rgba(143,246,234,0.45)",
           textShadow: isAssigned ? `0 0 6px ${col}cc` : isHover ? `0 0 6px ${col}aa` : undefined,
           transition: "color .14s ease",
         }}>
-          {seg.id.slice(-2)}
+          {nodeName(seg.node)}
         </span>
       )}
     </div>

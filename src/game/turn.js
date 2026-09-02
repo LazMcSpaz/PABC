@@ -10,19 +10,37 @@ import { CONFIG } from "./config.js";
 import { activePlayerId } from "./targeting.js";
 import { sweepDeferred } from "./deferred.js";
 import { evaluateTriggers } from "./triggers.js";
-import { evaluateConditionalBeats } from "./quests.js";
-import { applyOutputAndBuilds, chargeChipUpkeep, enforceLoyaltySlotCap } from "./economy.js";
-import { runDiplomacyRound, vassalsOf, arePacted, adjustMenace, sweepTrespass } from "./diplomacy.js";
-import { holdsLocation } from "./control.js";
+import { evaluateConditionalBeats, offerQuests } from "./quests.js";
+import { resetBeatBudget } from "./beatBudget.js";
+import {
+  applyOutputAndBuilds, chargeChipUpkeep, chargeUnitUpkeep, enforceLoyaltySlotCap,
+  sweepDeliveries,
+} from "./economy.js";
+import {
+  runDiplomacyRound, vassalsOf, arePacted, adjustMenace, sweepTrespass,
+  checkDominion, dominionStanding,
+} from "./diplomacy.js";
+import { holdsLocation, syncControlHistory } from "./control.js";
+import { absorbLocation, destroyUnit } from "./contest.js";
 import { adjustStanding } from "./standing.js";
-import { pressureSource } from "./influence.js";
+import { pressureSource, claimStrength, strongestRivalAt } from "./influence.js";
 import { hasTechNode } from "./tech.js";
 import { chargePostUpkeep } from "./posts.js";
+import { chargeBlockadeUpkeep } from "./blockades.js";
+import { bankVp, recomputeVp, registerAllyReader } from "./victory.js";
 import { CHIPS, LOCATIONS, ABILITIES, factionDef } from "./content.js";
 
 // Sum a numeric chip field across a Location's installed, non-dormant
 // chips — the shared reader for the per-Location behavior chips
 // (loyaltyRise, healBonus, actionBonus, …).
+// How many actions a Location refreshes to at Upkeep — one, plus whatever a
+// Logistics Hub adds. Exported because the HUD has to draw the same number:
+// the action readout used to assume one per city, so a hub city could put the
+// dial at "8/7" and its pip row a pip short of what it actually holds.
+export function locationActionCapacity(state, loc) {
+  return 1 + locChipSum(state, loc, "actionBonus");
+}
+
 function locChipSum(state, loc, field) {
   let n = 0;
   for (const c of loc.chips) {
@@ -150,79 +168,253 @@ export function tickLoyalty(state, pid) {
   // §18.3 — Loyalty rises/decays and any peel shift this faction's
   // Influence; recompute the field + ZoC once after the tick.
   recomputeInfluence(state);
+  // The drift the other way, run AFTER the recompute above so it reads the
+  // field this Upkeep's peels and Loyalty moves actually produced.
+  tickClaims(state, pid);
   // §19 — Location sight scales with Loyalty and a peel can drop a source,
   // so refresh this faction's fog after the tick (and the ZoC it draws on).
   recomputeVisibility(state, pid, { emitEvents: false });
 }
 
-// docs/vp-and-actions-design.md §1 — the repeatable VP faucets, awarded at
-// the player's Upkeep (after the Loyalty tick so a city that just reached
-// the rung counts this turn).
-function dominionQualifies(state, loc, beneficiary) {
-  const def = LOCATIONS[loc.locationId];
-  if (!def) return false;
-  if (def.strategicValue !== "high" && def.strategicValue !== "veryHigh") return false;
-  if (def.affiliation === beneficiary) return false; // your homeland never ticks
-  const loy = loc.loyalty == null ? CONFIG.loyalty.ceiling : loc.loyalty;
-  return loy >= CONFIG.victory.dominionLoyaltyMin;
+// Unclaimed ground drifts toward whoever surrounds it.
+//
+// `tickLoyalty` above cannot do this: it iterates `loc.loyaltyOwner === pid`,
+// and a fully-neutral Location has no loyaltyOwner at all — which is exactly
+// why a place that peeled to neutral then sat there for the rest of the game.
+// Peeling to neutral is right for ground taken FROM somebody: soft power can
+// hollow a rival's city out, but you do not inherit it by squeezing. What was
+// missing is the second half — once nobody holds it, the same influence that
+// hollowed it out starts filling it in.
+//
+// FOUR THINGS STOP THE DRIFT, and each is a different kind of "not yours":
+//
+//   · A rival holds a section here. Then this is contested ground and the
+//     contest is how it changes hands — influence never takes a section off
+//     a faction that is still standing in the town.
+//   · A rival column is on the hex. A garrison in the square is a fact on the
+//     ground that outranks the border on the map.
+//   · You do not dominate the hex, or you do but below `claim.threshold`.
+//     Two factions pulling at the same town cancel out and it stays neutral —
+//     which is the honest outcome, not a stalled one.
+//   · The Location is nobody's to take because you already hold it all.
+//
+// One section per Upkeep, so absorbing a place outright takes three turns and
+// a rival has three chances to walk in, out-project you, or contest it.
+// Would `pid` claim a section of `loc` at their next Upkeep, and if not, why?
+//
+// THE POINT OF THIS BEING ITS OWN FUNCTION is that the board draws a pulse on
+// the section about to change, and a preview that reasons about the rule
+// separately from the rule is a preview that will eventually lie. The tick
+// below and the meter both call this, so the wheel cannot promise a flip that
+// does not happen or stay quiet through one that does.
+//
+// `index` is the section that would turn over, or -1. `reason` names the
+// blocker when it is one worth reporting: a rival column and a contested
+// field are things the player did or can undo, and both emit a stall event.
+// "below-bar" and "not-neutral" are just the ordinary state of most of the
+// map and say nothing.
+export function claimOutlook(state, loc, pid) {
+  const cfg = CONFIG.influence?.claim;
+  const no = (reason) => ({ index: -1, reason });
+  if (!cfg?.enabled) return no("off");
+  if (!pid || !state.players[pid] || state.players[pid].eliminated) return no("no-claimant");
+  if (!loc?.sections?.includes("neutral")) return no("not-neutral");
+  // Contested ground is the contest's business.
+  if (loc.sections.some((sec) => sec && sec !== "neutral" && sec !== pid)) return no("rival-section");
+  if (cfg.blockedByRivalUnit && Object.values(state.units).some(
+    (u) => u.node === loc.hexId && u.owner !== pid)) return no("rival-unit");
+  const mine = claimStrength(state, pid, loc.hexId);
+  if (mine < (cfg.threshold ?? 5)) return no("below-bar");
+  if (strongestRivalAt(state, pid, loc.hexId) >= mine) return no("contested-field");
+  return { index: loc.sections.indexOf("neutral"), reason: null };
 }
 
+// Would a section of `loc` peel AWAY from its holder at their next Upkeep?
+//
+// The mirror of the claim, and the one the holder most needs to see. It is
+// deliberately the LAST step of `tickLoyalty`'s ladder and not an
+// approximation of it: Loyalty already at 0, still neglected, nothing holding
+// it up. A city at Loyalty 1 is bleeding but does not peel next Upkeep — it
+// reaches 0 next Upkeep and peels the one after — and a wheel that pulsed for
+// both would cry wolf every time a garrison stepped out for a turn.
+export function peelOutlook(state, loc) {
+  const cfg = CONFIG.loyalty;
+  const pid = loc?.loyaltyOwner;
+  if (!pid || (loc.loyalty ?? null) !== 0) return { index: -1 };
+  if (loc.chips?.some((u) => state.chips[u]?.chipId === "capital")) return { index: -1 };
+  if (Object.values(state.units).some((u) => u.owner === pid && u.node === loc.hexId)) return { index: -1 };
+  if (loc.chips?.some((c) => !state.chips[c]?.disabled
+    && CHIPS[state.chips[c]?.chipId]?.noLoyaltyDecay)) return { index: -1 };
+  if (!cfg?.peelPerUpkeep) return { index: -1 };
+  return { index: loc.sections.indexOf(pid), from: pid };
+}
+
+// What the control wheel should pulse: the one section of this Location that
+// turns over at somebody's next Upkeep, whoever's it is.
+//
+// Losing ground is checked FIRST and wins a tie, because the two can only
+// collide on a Location that is both shedding sections and being absorbed,
+// and of the two facts "you are about to lose a piece of this" is the one a
+// player needs a turn's warning about.
+export function pendingSectionChange(state, loc) {
+  const peel = peelOutlook(state, loc);
+  if (peel.index >= 0) {
+    return { index: peel.index, from: peel.from, to: null, cause: "loyalty" };
+  }
+  for (const pid of factionIdsOf(state)) {
+    const out = claimOutlook(state, loc, pid);
+    if (out.index >= 0) return { index: out.index, from: null, to: pid, cause: "influence" };
+  }
+  return null;
+}
+
+const factionIdsOf = (state) => state.turnOrder
+  || Object.keys(state.players || {});
+
+// Unclaimed ground drifts toward whoever surrounds it.
+//
+// `tickLoyalty` above cannot do this: it iterates `loc.loyaltyOwner === pid`,
+// and a fully-neutral Location has no loyaltyOwner at all — which is exactly
+// why a place that peeled to neutral then sat there for the rest of the game.
+// Peeling to neutral is right for ground taken FROM somebody: soft power can
+// hollow a rival's city out, but you do not inherit it by squeezing. What was
+// missing is the second half — once nobody holds it, the same influence that
+// hollowed it out starts filling it in.
+//
+// The decision itself lives in `claimOutlook` above, shared with the board's
+// pulse. What is left here is the bookkeeping: the per-Upkeep budget, the
+// stall events worth reporting, and finishing the absorption.
+//
+// One section per Upkeep, so absorbing a place outright takes three turns and
+// a rival has three chances to walk in, out-project you, or contest it.
+export function tickClaims(state, pid) {
+  const cfg = CONFIG.influence?.claim;
+  if (!cfg?.enabled || !pid || !state.players[pid] || state.players[pid].eliminated) return;
+  let claimed = 0;
+  for (const loc of Object.values(state.locations)) {
+    if (claimed >= (cfg.sectionsPerUpkeep ?? 1)) break;
+    const { index, reason } = claimOutlook(state, loc, pid);
+    if (index < 0) {
+      // Only the blockers the player can act on are worth a line. "Most of the
+      // map is not neutral" is not news.
+      if (reason === "rival-unit" || reason === "contested-field") {
+        emit(state, "claim_stalled", { hex: loc.hexId, by: pid, reason });
+      }
+      continue;
+    }
+    loc.sections[index] = pid;
+    claimed += 1;
+    emit(state, "control_claimed", { hex: loc.hexId, to: pid });
+    emit(state, "section_flipped", { hex: loc.hexId, to: pid, cause: "influence" });
+    if (loc.sections.every((sec) => sec === pid)) absorbLocation(state, loc, pid);
+  }
+  if (claimed) recomputeInfluence(state);
+}
+
+// The repeatable VP faucet, awarded at the player's Upkeep.
+//
+// DOMINION IS GONE. VP is held, not ticked (victory.js): a city you hold is
+// already worth its value every moment you hold it, so paying again each
+// Upkeep counted the same ground twice and made an early land-grab impossible
+// to catch up with. What remains is the one faucet that was never about
+// territory.
 function awardVp(state, pid, amount, source) {
   if (amount <= 0) return;
-  const p = state.players[pid];
-  p.vp += amount;
-  emit(state, "resource_gained", { player: pid, resource: "VP", amount, source });
-  // Only MAJOR factions race the victory threshold — a seeded minor can
-  // bank VP (captures etc.) but never wins the game.
-  if (p.vp >= CONFIG.vpThreshold && !state.winnerId && factionDef(pid)?.tier === "major") {
-    state.winnerId = pid;
-  }
+  bankVp(state, pid, amount, source);
 }
 
-function tickVictoryFaucets(state, pid) {
-  // The victory faucets are the MAJORS' race — seeded minors hold their
-  // ground but don't tick dominion or collect the alliance trickle
-  // (playtest log: Croppers/Dambarans were quietly accruing dominion VP).
-  if (factionDef(pid)?.tier !== "major") return;
-  // Foreign dominion — cities you hold yourself. "Hold" means outright OR
-  // by majority: a besieged city whose people are still loyal to you is
-  // still yours to draw prestige from (and without this, a city stuck in
-  // majority-limbo silently switched the faucet off).
-  let dominion = 0;
-  for (const loc of Object.values(state.locations)) {
-    if (holdsLocation(loc, pid) && dominionQualifies(state, loc, pid)) dominion += 1;
-  }
-  awardVp(state, pid, dominion * CONFIG.victory.dominionPerCity, "dominion");
-  // Vassal dominion — qualifying cities your vassals hold tick for YOU
-  // (still never your own affiliated cities, even in a vassal's hands).
-  let vassalCities = 0;
-  for (const vid of vassalsOf(state, pid)) {
-    for (const loc of Object.values(state.locations)) {
-      if (holdsLocation(loc, vid) && dominionQualifies(state, loc, pid)) vassalCities += 1;
-    }
-  }
-  awardVp(state, pid, vassalCities * CONFIG.victory.dominionPerCity, "vassal-dominion");
-  // Alliance trickle — you must be pacted with a MAJORITY of the other
-  // surviving MAJORS to draw anything (seeded minors don't move the
-  // denominator), and past that bar every allied major pays. The flat
-  // version was diplomacy's structural weakness: Dominion scales with each
-  // city you take, but a second, third, fourth ally added nothing, so the
-  // peaceful route had a hard ceiling the conquest route did not.
-  const others = state.turnOrder.filter(
-    (f) => f !== pid && !state.players[f]?.eliminated && factionDef(f)?.tier === "major",
-  );
-  if (others.length > 0) {
-    const pacts = others.filter((f) => arePacted(state, pid, f)).length;
-    if (pacts > others.length / 2) {
-      awardVp(state, pid, pacts * CONFIG.victory.allianceTrickle, "alliance");
-    }
-  }
-}
+// The alliance trickle used to live here: +1 VP per allied major every round,
+// forever, once you were pacted with a majority of them. It was 77% of all
+// banked VP across 20 games and enough on its own to win while holding no
+// ground at all. Alliances and vassals are worth a HELD score now (victory.js
+// `diplomacyVp`), which every recompute picks up.
+function tickVictoryFaucets() {}
 
 // Elimination (docs/vp-and-actions-design.md §1): a faction with no
-// Locations and no units is out — flagged, skipped by the turn loop, and
-// excluded from the trickle majority. Last faction standing wins outright.
+// Locations and no units is out — flagged and skipped by the turn loop.
+//
+// Being last standing is no longer its own win condition: it is the pure-
+// conquest face of the one condition (checkDominion), which every surviving
+// faction being dead satisfies vacuously.
+// Everything a faction is party to, dropped when it dies. Deliberately in one
+// place: the alternative is a `!eliminated` guard at a dozen call sites, and
+// the one that gets missed is the bug.
+function releaseFromDiplomacy(state, pid) {
+  const d = state.diplomacy;
+  if (!d) return;
+  d.wars = (d.wars || []).filter((w) => w.a !== pid && w.b !== pid);
+  d.pacts = (d.pacts || []).filter((p) => p.a !== pid && p.b !== pid);
+  d.offers = (d.offers || []).filter((o) => o.from !== pid && o.to !== pid);
+  d.ultimatums = (d.ultimatums || []).filter((u) => u.from !== pid && u.to !== pid);
+  d.pendingCalls = (d.pendingCalls || []).filter((c) => c.from !== pid && c.target !== pid);
+  d.coalitions = (d.coalitions || []).filter((c) => c.target !== pid);
+  for (const c of d.coalitions) c.members = c.members.filter((m) => m !== pid);
+  // …including as somebody's lord: a vassal of a dead faction is free, not
+  // orphaned under a name that no longer plays.
+  for (const [vassal, lord] of Object.entries(d.vassals || {})) {
+    if (lord === pid || vassal === pid) delete d.vassals[vassal];
+  }
+  for (const key of Object.keys(d.truces || {})) {
+    if (key.split("|").includes(pid)) delete d.truces[key];
+  }
+  emit(state, "faction_released", { player: pid });
+}
+
+// §5 — THE LANDLESS CLOCK. A faction that holds no Locations has `graceRounds`
+// to take one back; when the clock runs out its surviving units are destroyed
+// and it leaves the game.
+//
+// This exists because a landless faction was previously IMMORTAL and INERT at
+// the same time, which is the worst pair of properties a blocker can have.
+// Elimination below wants no Locations AND no units, so a faction reduced to a
+// few wandering units survives indefinitely; `baseActions: 0` means actions
+// come from ground, so it has no actions, no production, no Research and no
+// Sway income, and therefore no way to fight back, court anybody, or bring
+// anything to a deal. And `dominionStanding` counts every survivor, so it goes
+// on blocking a win it can no longer participate in.
+//
+// Measured before this rule: EIGHT of the twenty-eight blocked outstanding
+// factions at the round limit held zero Locations. Seed 8123 had one faction
+// holding SEVEN of the map's eight Locations, unable to win, because a rival
+// with no ground and five units would not go away.
+//
+// The clock is a DEADLINE, not a death sentence: it starts when the last
+// Location goes, clears the moment one is retaken, and is announced both ways
+// so the board can see it running. `landlessGraceRounds: 0` switches the whole
+// rule off and restores the old behaviour exactly.
+function sweepLandlessClocks(state) {
+  const grace = CONFIG.victory?.landlessGraceRounds ?? 0;
+  for (const pid of state.turnOrder) {
+    const p = state.players[pid];
+    if (!p || p.eliminated) continue;
+    const holdsGround = Object.values(state.locations).some((l) => l.controller === pid);
+    if (holdsGround) {
+      if (p.landlessSince != null) {
+        p.landlessSince = null;
+        emit(state, "landless_clock_cleared", { player: pid });
+      }
+      continue;
+    }
+    if (!grace) continue;                       // rule off — clock never runs
+    if (p.landlessSince == null) {
+      p.landlessSince = state.round;
+      emit(state, "landless_clock_started", { player: pid, deadline: state.round + grace });
+      continue;
+    }
+    if (state.round - p.landlessSince < grace) continue;
+    // Out of time. The units go first, so the ordinary elimination sweep below
+    // retires the faction on the rule it already had rather than on a second,
+    // parallel one — there is one definition of "out of the game" and this
+    // rule feeds it rather than competing with it.
+    emit(state, "faction_collapsed", { player: pid, landlessSince: p.landlessSince });
+    for (const u of Object.values(state.units)) {
+      if (u.owner === pid) destroyUnit(state, u.uid, null, { cause: "landless-collapse" });
+    }
+  }
+}
+
 function sweepEliminations(state) {
+  sweepLandlessClocks(state);
   for (const pid of state.turnOrder) {
     const p = state.players[pid];
     if (!p || p.eliminated) continue;
@@ -230,12 +422,37 @@ function sweepEliminations(state) {
       Object.values(state.locations).some((l) => l.controller === pid) ||
       Object.values(state.units).some((u) => u.owner === pid);
     if (!holdsAnything) {
+      // §B-blood — THE KILL LEAVES A MARK ON THE KILLERS. Every faction at
+      // war with the dead one at the moment it dies is complicit in the
+      // elimination, and carries a permanent `bloodMarks` for it — read by
+      // `menaceOf` as a floor Menace can never decay below. Stamped HERE,
+      // before `releaseFromDiplomacy` wipes the war list, because afterwards
+      // nobody was ever at war with the corpse. A faction that starved on its
+      // own with no wars running marks nobody.
+      if (state.diplomacy?.wars?.length) {
+        for (const w of state.diplomacy.wars) {
+          const other = w.a === pid ? w.b : w.b === pid ? w.a : null;
+          if (!other || !state.players[other] || state.players[other].eliminated) continue;
+          state.players[other].bloodMarks = (state.players[other].bloodMarks || 0) + 1;
+          emit(state, "blood_marked", { player: other, victim: pid, marks: state.players[other].bloodMarks });
+        }
+      }
       p.eliminated = true;
       emit(state, "faction_eliminated", { player: pid });
+      // A DEAD FACTION LEAVES THE DIPLOMACY GRAPH. Without this it keeps its
+      // wars, and the AI's peace machinery keeps trying to settle with a
+      // corpse — measured, `warPeaceTerms` ceded a city TO an eliminated
+      // faction twice across ten games (seed 8123 r43, seed 90210 r61), which
+      // parks real ground on the board under an owner who can never act, use
+      // it, or give it back.
+      //
+      // It also has to happen HERE rather than at each reader, because the
+      // readers are many (peace, pacts, coalitions, offers, ultimatums, the
+      // vassal tick) and every one that forgot would be this bug again.
+      releaseFromDiplomacy(state, pid);
     }
   }
-  const survivors = state.turnOrder.filter((f) => !state.players[f]?.eliminated);
-  if (survivors.length === 1 && !state.winnerId) state.winnerId = survivors[0];
+  checkDominion(state);
 }
 
 // v0.2 §16.2 — refresh each owned unit's move budget from its effective
@@ -246,14 +463,21 @@ function refreshMoveBudget(state, pid) {
   for (const u of Object.values(state.units)) {
     if (u.owner !== pid) continue;
     u.moveRemaining = u.movement;
-    // §16.2 road march — starting the turn on the highway network is
-    // worth +1 Movement this turn (roads as fast lanes, not only
-    // terrain-negators).
-    if (state.board.hexes[u.node]?.road) {
-      u.moveRemaining += CONFIG.movement.roadStartBonus || 0;
-    }
+    // SET_MOVEMENT is an absolute override, not a modifier: the unit's
+    // movement BECOMES the authored value for the turn it applies to.
+    const ov = (state.movementOverrides || []).find(
+      (o) => o.player === pid && !o.consumed && o.appliesOnRound <= state.round);
+    if (ov) u.moveRemaining = Math.max(0, ov.value);
+    // No road start-bonus any more: the network pays out per hex travelled
+    // (CONFIG.movement.pavedCost), not as a lump for happening to be parked on
+    // it at Upkeep. See config.js.
+
     u.fortified = !u.movedSinceUpkeep;
     u.movedSinceUpkeep = false;
+    // Where this unit's turn began, and whether an unseen blocker has since
+    // checked its advance. Both drive the retreat/lateral rule in unitReach.
+    u.turnStartNode = u.node;
+    u.checked = false;
   }
 }
 
@@ -314,6 +538,17 @@ export function startTurn(state) {
   // citation streak alive (warning → −1 → −2), even without moving.
   sweepTrespass(state, pid);
 
+  // A fresh beat allowance for the seat about to play (CONFIG.quests
+  // .beatsPerTurn). Reset HERE rather than at round end so the pulse that
+  // runs after everyone has played draws on the same allowance the turn did
+  // — one turn cycle, one budget, however the beats arrive.
+  resetBeatBudget(state, pid);
+
+  // Offer any quest whose opening beat is available to THIS player. Runs
+  // here, inside their own turn, so an opener gate reading `active` means
+  // the player being offered it (see quests.js offerQuests).
+  offerQuests(state);
+
   const p = state.players[pid];
   p.actions.remaining = p.actions.max; // wildcard pool (base 0)
   // Per-entity actions: every owned unit and held Location refreshes to 1.
@@ -323,7 +558,7 @@ export function startTurn(state) {
   }
   for (const loc of Object.values(state.locations)) {
     if (loc.controller !== pid) continue;
-    loc.actionsRemaining = 1 + locChipSum(state, loc, "actionBonus");
+    loc.actionsRemaining = locationActionCapacity(state, loc);
   }
   state.pendingActionGrants = state.pendingActionGrants.filter((g) => {
     if (g.player === pid) {
@@ -388,7 +623,21 @@ export function startTurn(state) {
   // post goes dormant (no Vision) until repaid. Refresh fog so a post that
   // just went dormant stops contributing sight this turn.
   chargePostUpkeep(state, pid);
+  // Rail doc §3.1 — a finished blockade is manned, so it costs scrap; unpaid
+  // it goes dormant and the road opens back up through it.
+  chargeBlockadeUpkeep(state, pid);
+  // Standing armies eat. Charged LAST of the four, so structures a player has
+  // already sunk scrap into keep running and it is the army that goes hungry
+  // first. Must follow the action reset and refreshMoveBudget above — an
+  // unsupplied unit is stranded by having those zeroed back out.
+  chargeUnitUpkeep(state, pid);
+  // Refresh fog last: a post that just went dormant stops contributing sight
+  // this turn, and a blockade that completed during the economy step (rail doc
+  // §3.4 funds construction out of Output) starts.
   recomputeVisibility(state, pid, { emitEvents: false });
+  // VP is held, not banked — Loyalty ticked and Control may have peeled, and a
+  // city sliding under half its Loyalty is worth half as much from now on.
+  recomputeVp(state);
 
   // Preparation (the optional stat-buy step) is folded in once Layer 3
   // gives it something to do; for now the turn opens straight into Main.
@@ -404,6 +653,13 @@ export function endTurn(state) {
   const pid = activePlayerId(state);
   state.phase = "Cleanup";
   state.modifiers = state.modifiers.filter((m) => m.duration !== "this_turn");
+  // A movement override covers exactly the turn it landed on.
+  for (const o of state.movementOverrides || []) {
+    if (o.player === pid && !o.consumed && o.appliesOnRound <= state.round) o.consumed = true;
+  }
+  if (state.movementOverrides?.length) {
+    state.movementOverrides = state.movementOverrides.filter((o) => !o.consumed);
+  }
   emit(state, "turn_ended", { player: pid });
 
   state.activeIndex += 1;
@@ -419,16 +675,91 @@ export function endTurn(state) {
 // The §15.12 round-end pipeline. Deferred resolution comes first so a
 // queued consequence can update the state that triggers then read.
 function runRoundEnd(state) {
+  // The control ledger, before anything reads it. `control_duration` is a DSL
+  // condition that could never fire — `controlHistory` was seeded at setup and
+  // never appended to — so a content author asking "have they held this place
+  // for three rounds?" got a silent permanent no. Swept rather than hooked:
+  // control changes hands through five paths today and a ledger that misses
+  // one is worse than none.
+  syncControlHistory(state);
   sweepDeferred(state);
+  sweepPlayerFlags(state);
+  sweepSecondments(state);
   sweepReinforcements(state);
+  // §7.1 — purchases paid for off-supply, arriving. Alongside the convoy
+  // sweep, because they are the same model.
+  sweepDeliveries(state);
   evaluateTriggers(state);
   evaluateConditionalBeats(state);
   expirePlacementMarkers(state);
   decayWorldCounters(state);
   // §18.8/§18.12 — the diplomacy round cadence: Menace decay, Standing
   // drift, flows, AI-to-AI politics, vassal tick, coalitions, then the
-  // Recognition win check (sets winnerId if a peaceful victory has landed).
+  // Dominion win check (sets winnerId if the arrangement has held).
   runDiplomacyRound(state);
+}
+
+// Player flags with a finite lifetime lapse here. SET_PLAYER_FLAG stored a
+// `duration` from the beginning but nothing ever expired it, so every
+// "for a while" arrangement in authored content was silently permanent —
+// one escort job granting safe passage for the rest of the game. Flags
+// without an expiry round are untouched: the moral ledger is meant to be
+// permanent, and count_flags reads it.
+function sweepPlayerFlags(state) {
+  for (const p of Object.values(state.players || {})) {
+    if (!p.flags) continue;
+    for (const [name, rec] of Object.entries(p.flags)) {
+      if (!rec || rec.expiresAtRound == null) continue;
+      if (state.round < rec.expiresAtRound) continue;
+      delete p.flags[name];
+      emit(state, "player_flag_expired", { player: p.id, flag: name });
+      // Safe passage written against this flag lapses with it.
+      for (const [fid, grant] of Object.entries(p.safePassage || {})) {
+        if (grant?.whileFlag === name) {
+          delete p.safePassage[fid];
+          emit(state, "safe_passage_expired", { player: p.id, faction: fid, reason: "flag_expired" });
+        }
+      }
+    }
+  }
+  // Round-bounded passage grants expire on their own clock too.
+  for (const p of Object.values(state.players || {})) {
+    for (const [fid, grant] of Object.entries(p.safePassage || {})) {
+      if (grant?.until != null && state.round >= grant.until) {
+        delete p.safePassage[fid];
+        emit(state, "safe_passage_expired", { player: p.id, faction: fid, reason: "elapsed" });
+      }
+    }
+  }
+}
+
+// Units lent out by TAKE_UNIT come home. They return to the hex they left
+// from if it is still theirs to stand on, at the agreed strength cost, and
+// set whatever flag the arrangement promised.
+function sweepSecondments(state) {
+  if (!state.secondedUnits?.length) return;
+  const keep = [];
+  for (const s of state.secondedUnits) {
+    if (state.round < s.returnRound) { keep.push(s); continue; }
+    const u = s.record;
+    u.baseStrength = Math.max(0, (u.baseStrength ?? 0) + (s.strengthDelta ?? 0));
+    if (u.baseStrength <= 0) {
+      emit(state, "unit_returned", { unit: u.uid, player: s.owner, destroyed: true });
+      continue; // came back in no state to serve
+    }
+    u.node = s.node;
+    state.units[u.uid] = u;
+    if (s.returnFlag && state.players[s.owner]) {
+      const p = state.players[s.owner];
+      p.flags = p.flags || {};
+      p.flags[s.returnFlag] = { value: true, duration: "permanent", setAt: state.round, expiresAtRound: null };
+    }
+    emit(state, "unit_returned", {
+      unit: u.uid, player: s.owner, hex: s.node, strengthDelta: s.strengthDelta ?? 0,
+    });
+  }
+  state.secondedUnits = keep;
+  recomputeStats(state);
 }
 
 // v0.2 §16.5 — advance in-transit field reinforcements. Each round the
@@ -464,8 +795,11 @@ function sweepReinforcements(state) {
 function expirePlacementMarkers(state) {
   const markers = state.world?.encounterMarkers;
   if (!markers) return;
-  for (const [hex, m] of Object.entries(markers)) {
-    if (m.expiresAt != null && m.expiresAt < state.round) delete markers[hex];
+  for (const [hex, entry] of Object.entries(markers)) {
+    const queue = Array.isArray(entry) ? entry : [entry];
+    const live = queue.filter((m) => m.expiresAt == null || m.expiresAt >= state.round);
+    if (!live.length) delete markers[hex];
+    else markers[hex] = live;
   }
 }
 
@@ -483,3 +817,12 @@ function decayWorldCounters(state) {
     w.ignoreCounts[k] = Math.floor(w.ignoreCounts[k] * 0.9);
   }
 }
+
+
+// victory.js scores alliances and vassals but must not import diplomacy.js —
+// diplomacy already imports victory, and the cycle would bite at load. turn.js
+// sits above both, so it is the natural place to hand the reader across.
+registerAllyReader((state, fid) => {
+  const st = dominionStanding(state, fid);
+  return { allied: st.allied, vassals: st.vassals };
+});

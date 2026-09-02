@@ -9,11 +9,7 @@
 //   humanFactionId: string  — "versari"|"lakers"|"goldgrass"|"plainers"
 //   mapSize:       string   — "small"|"medium"|"large"|"huge"
 //   factionCount:  number   — integer 2..4
-//   victory: {
-//     conquest:     boolean  — reach 12 VP (§14.1; always-available path)
-//     recognition:  boolean  — diplomacy/Recognition victory (§18.10)
-//     elimination:  boolean  — last faction standing
-//   }
+//   (no victory key — there is one condition and it is always on)
 //   encounters: {
 //     field: number  — 0..1 frequency
 //     world: number  — 0..1 frequency
@@ -27,6 +23,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { FACTIONS as UI_FACTIONS } from "./data.js";
 import { C, CornerBrackets } from "./HudChrome.jsx";
 import { useIsPhone } from "./useViewport.js";
+import { CONFIG } from "../game/config.js";
 import "./prototype.css";
 
 // ─── constants ──────────────────────────────────────────────────────────────
@@ -48,33 +45,48 @@ const TAGLINE = {
   plainers:  "Wasteland raiders · opportunistic",
 };
 
-// Placeholder hex counts — ascending, placeholder values for UI display only.
-const MAP_SIZES = [
-  { id: "small",  label: "Small",  hexes: 30  },
-  { id: "medium", label: "Medium", hexes: 54  },
-  { id: "large",  label: "Large",  hexes: 85  },
-  { id: "huge",   label: "Huge",   hexes: 128 },
+// Read straight off the engine's own board table, so the counts shown are the
+// board you actually get. They were placeholders, and worse, `mapSize` never
+// reached createGame at all — every game was the 30-hex board whatever you
+// picked here.
+const MAP_SIZES = ["small", "medium", "large", "huge"].map((id) => ({
+  id,
+  label: id[0].toUpperCase() + id.slice(1),
+  hexes: (CONFIG.mapSizes[id]?.rows || []).reduce((a, b) => a + b, 0),
+  locations: CONFIG.mapSizes[id]?.locations ?? 0,
+}));
+
+// Settlement density. The number each tier resolves to depends on the board —
+// CONFIG.mapSizes[size].locationTiers — because a "high" density means
+// something different on 30 hexes than on 127.
+const DENSITY = [
+  { id: "low", label: "Low" },
+  { id: "medium", label: "Medium" },
+  { id: "high", label: "High" },
+  { id: "veryHigh", label: "Very High" },
 ];
 
-const VICTORY_CONDITIONS = [
-  {
-    id: "conquest",
-    label: "Conquest",
-    desc: "Reach 12 Victory Points — the always-available path (§14.1).",
-  },
-  {
-    id: "recognition",
-    label: "Recognition",
-    desc: "Diplomacy victory: earn Recognition from enough factions (§18.10).",
-  },
-  {
-    id: "elimination",
-    label: "Elimination",
-    desc: "Last faction standing — all rivals eliminated.",
-  },
-];
+// How many Locations a (size, density) pair actually seats.
+export function locationsFor(sizeId, densityIndex) {
+  const tiers = CONFIG.mapSizes[sizeId]?.locationTiers;
+  if (!tiers) return CONFIG.mapSizes[sizeId]?.locations ?? 0;
+  return tiers[Math.max(0, Math.min(tiers.length - 1, densityIndex))];
+}
 
 const FREQ_LABELS = ["None", "Low", "Normal", "High"];
+// Which of the four bands a 0..1 slider sits in. One definition, so the label
+// a player reads and the number the engine is handed can never disagree.
+function freqTier(v) {
+  if (v <= 0.05) return 0;
+  if (v <= 0.35) return 1;
+  if (v <= 0.69) return 2;
+  return 3;
+}
+// Engine units per band. Field is the SHARE of spare hexes that become
+// encounter sites (the engine's own default is 0.65, which is "Normal"),
+// world is how many world triggers fire each round.
+const FIELD_SHARE = [0, 0.35, 0.65, 0.9];
+const WORLD_PER_ROUND = [0, 1, 2, 4];
 function freqLabel(v) {
   if (v <= 0.05) return "None";
   if (v <= 0.35) return "Low";
@@ -163,7 +175,13 @@ function FactionCard({ fid, picked, onPick }) {
         />
         <div className="hud-scanlines" style={{ position: "absolute", inset: 0 }} />
       </div>
-      <div style={{ padding: "9px 11px 11px" }}>
+      {/* The "◆ Selected" badge below is absolutely positioned bottom-right,
+          so it overlaps whatever the tagline wraps to — a two-line faction
+          name (Versari Korad) pushes the tagline down far enough to run
+          straight under it. The extra bottom padding reserves the badge's
+          strip on EVERY card, selected or not, so the text always clears it
+          and selecting a card causes no layout shift. */}
+      <div style={{ padding: "9px 11px 24px" }}>
         <div style={{
           fontFamily: C.font, fontSize: 13, fontWeight: 700,
           letterSpacing: 1.4, textTransform: "uppercase",
@@ -292,6 +310,9 @@ function Toggle({ value, onChange, label, desc }) {
       <button
         onClick={() => onChange(!value)}
         className="hud-int"
+        role="switch"
+        aria-checked={value}
+        aria-label={label}
         style={{
           flexShrink: 0,
           width: 42, height: 22,
@@ -332,6 +353,59 @@ function Toggle({ value, onChange, label, desc }) {
             marginTop: 2, lineHeight: 1.4,
           }}>{desc}</div>
         )}
+      </div>
+    </div>
+  );
+}
+
+// A slider over NAMED steps rather than a continuous 0–1 range: map size and
+// settlement density are both "pick one of four", but they read as a
+// magnitude, so a slider says more than four buttons do — you can see at a
+// glance that you are near one end.
+function StepSlider({ options, index, onChange, label, note }) {
+  const last = Math.max(0, options.length - 1);
+  const pct = last === 0 ? 0 : Math.round((index / last) * 100);
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 5 }}>
+        <div style={{ ...sectionLabelStyle, opacity: 0.7, fontSize: 9.5 }}>{label}</div>
+        <div style={{ fontFamily: C.font, fontSize: 11, fontWeight: 700, color: C.holoHi, letterSpacing: 1 }}>
+          {options[index]?.label}
+          {note && <span style={{ color: "rgba(143,246,234,0.40)", fontWeight: 400 }}> ({note})</span>}
+        </div>
+      </div>
+      <div style={{ position: "relative", height: 18, display: "flex", alignItems: "center" }}>
+        <div style={{
+          position: "absolute", left: 0, right: 0, height: 3, borderRadius: 2,
+          background: "rgba(86,211,198,0.14)", border: "1px solid rgba(86,211,198,0.22)",
+        }} />
+        <div style={{
+          position: "absolute", left: 0, width: `${pct}%`, height: 3, borderRadius: 2,
+          background: `linear-gradient(90deg, rgba(86,211,198,0.50), ${C.holoHi})`,
+          boxShadow: `0 0 6px ${C.holo}66`, pointerEvents: "none",
+        }} />
+        {/* Notches, so the discrete steps are visible before you drag. */}
+        {options.map((o, i) => (
+          <div key={o.id ?? i} style={{
+            position: "absolute", left: `${last === 0 ? 0 : (i / last) * 100}%`,
+            width: 2, height: 8, marginLeft: -1, borderRadius: 1,
+            background: i <= index ? C.holoHi : "rgba(86,211,198,0.30)",
+            pointerEvents: "none",
+          }} />
+        ))}
+        <input
+          type="range"
+          min={0} max={last} step={1}
+          value={index}
+          onChange={(e) => onChange(parseInt(e.target.value, 10))}
+          className="hud-int"
+          aria-label={label}
+          style={{
+            position: "relative", width: "100%", appearance: "none",
+            WebkitAppearance: "none", background: "transparent", outline: "none",
+            cursor: "pointer", margin: 0, padding: 0, height: 18,
+          }}
+        />
       </div>
     </div>
   );
@@ -411,11 +485,9 @@ export default function SetupScreen({ onStart, onBack }) {
   const [picked, setPicked] = useState("versari");
 
   // map & player config
-  const [mapSize, setMapSize] = useState("small");
   const [factionCount, setFactionCount] = useState(4);
-
-  // victory conditions — all on by default; guard: ≥1 must stay enabled
-  const [victory, setVictory] = useState({ conquest: true, recognition: true, elimination: true });
+  const [sizeIndex, setSizeIndex] = useState(1);      // medium
+  const [densityIndex, setDensityIndex] = useState(1); // medium
 
   // advanced settings (collapsible)
   const [advOpen, setAdvOpen] = useState(false);
@@ -425,14 +497,6 @@ export default function SetupScreen({ onStart, onBack }) {
   const [fogOfWar, setFogOfWar] = useState(true);
   const [seedText, setSeedText] = useState("");
 
-  // guard: prevent disabling the last active victory condition
-  function toggleVictory(id) {
-    const next = { ...victory, [id]: !victory[id] };
-    const anyOn = Object.values(next).some(Boolean);
-    if (!anyOn) return; // refuse — must keep at least one
-    setVictory(next);
-  }
-
   function start() {
     const seed = Number(seedText) || Math.floor(Math.random() * 1e9);
     onStart({
@@ -440,15 +504,26 @@ export default function SetupScreen({ onStart, onBack }) {
       seed,
       humanFactionId: picked,
       mapSize,
+      // What the board should actually seat, resolved here so the engine is
+      // handed a number rather than a pair of UI concepts.
+      locationBudget: settlementCount,
       factionCount,
-      victory: { ...victory },
-      encounters: { field: fieldFreq, world: worldFreq },
+      // Resolved to engine units here, like the settlement budget above, so
+      // the engine is handed shares and counts rather than UI slider values.
+      encounters: {
+        field: FIELD_SHARE[freqTier(fieldFreq)],
+        world: WORLD_PER_ROUND[freqTier(worldFreq)],
+      },
       minorFactions,
       fogOfWar,
     });
   }
 
-  const selectedMap = MAP_SIZES.find((m) => m.id === mapSize);
+  // Derived from the two sliders rather than stored, so the pair can never
+  // disagree with what the board actually builds.
+  const mapSize = MAP_SIZES[sizeIndex]?.id ?? "medium";
+  const selectedMap = MAP_SIZES[sizeIndex];
+  const settlementCount = locationsFor(mapSize, densityIndex);
 
   return (
     <div
@@ -587,23 +662,28 @@ export default function SetupScreen({ onStart, onBack }) {
           {/* ── RIGHT: settings column ───────────────────────────── */}
           <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
 
-            {/* Map Size */}
+            {/* Board — size and settlement density, deliberately independent.
+                Tying the two made "small" mean "few cities" whether or not
+                that was what anyone wanted; a cramped small board and a sparse
+                huge one are both games worth playing. */}
             <div>
-              <div style={{ ...sectionLabelStyle, marginBottom: 10 }}>▸ Map Size</div>
-              <Segmented
-                options={MAP_SIZES}
-                value={mapSize}
-                onChange={setMapSize}
-              />
-              {selectedMap && (
-                <div style={{
-                  fontFamily: C.font, fontSize: 9.5, letterSpacing: 1.2,
-                  color: "rgba(143,246,234,0.42)", marginTop: 5,
-                  textAlign: "center",
-                }}>
-                  ~{selectedMap.hexes} hexes
-                </div>
-              )}
+              <div style={{ ...sectionLabelStyle, marginBottom: 10 }}>▸ The Board</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                <StepSlider
+                  options={MAP_SIZES}
+                  index={sizeIndex}
+                  onChange={setSizeIndex}
+                  label="map size"
+                  note={selectedMap ? `~${selectedMap.hexes} hexes` : null}
+                />
+                <StepSlider
+                  options={DENSITY}
+                  index={densityIndex}
+                  onChange={setDensityIndex}
+                  label="settlements"
+                  note={`${settlementCount} on this map`}
+                />
+              </div>
             </div>
 
             <Divider />
@@ -618,30 +698,6 @@ export default function SetupScreen({ onStart, onBack }) {
                 onChange={setFactionCount}
                 label="major factions"
               />
-            </div>
-
-            <Divider />
-
-            {/* Victory Conditions */}
-            <div>
-              <div style={{ ...sectionLabelStyle, marginBottom: 12 }}>▸ Victory Conditions</div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                {VICTORY_CONDITIONS.map((vc) => {
-                  const isOn = victory[vc.id];
-                  const enabledCount = Object.values(victory).filter(Boolean).length;
-                  const isLast = isOn && enabledCount === 1;
-                  return (
-                    <div key={vc.id} title={isLast ? "At least one victory condition must be enabled." : undefined}>
-                      <Toggle
-                        value={isOn}
-                        onChange={() => toggleVictory(vc.id)}
-                        label={vc.label}
-                        desc={vc.desc}
-                      />
-                    </div>
-                  );
-                })}
-              </div>
             </div>
 
             <Divider />
@@ -783,7 +839,7 @@ export default function SetupScreen({ onStart, onBack }) {
             textAlign: isPhone ? "center" : "left",
             color: "rgba(143,246,234,0.38)",
           }}>
-            {`${UI_FACTIONS[picked]?.name} · ${MAP_SIZES.find((m) => m.id === mapSize)?.label} Map · ${factionCount} Factions`}
+            {`${UI_FACTIONS[picked]?.name} · ${selectedMap?.label} Map · ${settlementCount} Settlements · ${factionCount} Factions`}
           </div>
           <motion.button
             onClick={start}
@@ -813,7 +869,7 @@ export default function SetupScreen({ onStart, onBack }) {
         textTransform: "uppercase", color: "rgba(143,246,234,0.28)",
         zIndex: 1,
       }}>
-        ▸ Ashland Conquest · v0.2 demo · Holographic build
+        ▸ The Remnant Continent · v0.2 demo · Holographic build
       </div>
     </div>
   );

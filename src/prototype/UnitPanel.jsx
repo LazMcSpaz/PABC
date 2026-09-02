@@ -3,9 +3,10 @@
 // colour top accent, glowing icon nodes for the stats, a holo close × and
 // a holo Reinforce action. Bottom-left anchored, ~2:1 wide-and-short so
 // it stays out of the way of the inspector and the event feed.
+import { useState } from "react";
 import { motion } from "framer-motion";
 import { FACTIONS as UI_FACTIONS, UNIT_UPGRADES, CHIP_COLOR } from "./data.js";
-import { C, CornerBrackets } from "./HudChrome.jsx";
+import { C, CornerBrackets, useEscClose } from "./HudChrome.jsx";
 import { useIsPhone } from "./useViewport.js";
 
 const BAY_SLOTS = 2;
@@ -19,6 +20,17 @@ const READY = "#7bb255";      // green — ready
 const STOPPED = "#d2453f";    // warning red — held
 
 // Compact chevron glyph — two parallel arrowheads pointing right.
+// A unit's one-word status. "Ready" used to mean "supplied and not held" and
+// said nothing about the unit's ACTION — so a unit that had already fought
+// still read as Ready, which is the exact question the panel is open to
+// answer. Ordered by what stops you soonest.
+function unitStatus(unit) {
+  if (unit.unsupplied) return { word: "Unsupplied", blocked: true };
+  if (unit.immobilized) return { word: "Held", blocked: true };
+  if (unit.canAct === false) return { word: "Acted", blocked: true };
+  return { word: "Ready", blocked: false };
+}
+
 function MovementGlyph({ color, size = 20 }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none"
@@ -193,8 +205,86 @@ function ChipBay({ chips, compact }) {
   );
 }
 
-export default function UnitPanel({ unit, hex, owned = true, canAct, reinforce, scrap, raidTargets = [], onReinforce, onContest, onClose }) {
+// Rail doc §3 — the offer to BREAK GROUND on a blockade where this unit stands.
+//
+// Only this half is a unit action. Everything about a blockade that already
+// exists — its chips, its upkeep, its supply — lives in the blockade's own
+// window, because a structure that outlives its builder should be selected
+// like a place rather than reached through whichever soldier is parked on it.
+//
+// `offer` is null on ground a blockade could never go on, so the panel does
+// not grow a permanently-dead section.
+function BlockadeOffer({ offer, canAct, onBuild }) {
+  const live = canAct && offer.can;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 5, borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: 7 }}>
+      <div style={{ fontSize: 9, letterSpacing: 1.4, textTransform: "uppercase", color: C.textDim, fontWeight: 700 }}>
+        Blockade
+      </div>
+      <button
+        className="hud-int"
+        disabled={!live}
+        onClick={live ? () => onBuild?.() : undefined}
+        style={{
+          fontFamily: C.font, fontSize: 10, fontWeight: 700, letterSpacing: 1.2,
+          textTransform: "uppercase", color: "#08100f", padding: "6px 8px", borderRadius: 4,
+          border: `1px solid ${C.holo}`,
+          background: `linear-gradient(180deg, ${C.holoHi}, ${C.holo})`,
+          boxShadow: `0 0 10px ${C.holo}55`,
+          cursor: live ? "pointer" : "not-allowed",
+          opacity: live ? 1 : 0.5,
+          textAlign: "center", lineHeight: 1.2,
+        }}
+      >
+        Raise blockade · {offer.cost} scrap
+      </button>
+      <div style={{ fontSize: 9.5, color: C.textFaint, lineHeight: 1.4 }}>
+        {offer.reason
+          ? offer.reason
+          : `Pins this unit ~${offer.turns} turns, then holds the road alone · −${offer.upkeep} scrap/turn.`}
+      </div>
+      {/* §7.2 — WHAT IT WOULD CUT, before you pay for it. The research is
+          blunt: economic strangulation needs an immediate visible number, and
+          the canonical failure is a blockade that is mechanically real and
+          emotionally dead because the impact is not visually obvious. The
+          engine already knew the answer; nobody was asking it. */}
+      {offer.preview?.strangles?.length > 0 && (
+        <div style={{
+          marginTop: 2, padding: "5px 7px", borderRadius: 4,
+          background: "rgba(210,69,63,0.10)",
+          border: "1px solid rgba(210,69,63,0.45)",
+        }}>
+          <div style={{
+            fontSize: 8.5, letterSpacing: 1.2, textTransform: "uppercase",
+            color: "#ffb4ae", fontWeight: 700, marginBottom: 3,
+          }}>It would strangle</div>
+          {offer.preview.strangles.map((t) => (
+            <div key={t.hexId} style={{ fontSize: 10, lineHeight: 1.5, color: "#f0dcda" }}>
+              <b>{t.name}</b> <span style={{ color: C.textFaint }}>({t.ownerName})</span>
+              {" — output "}
+              <b style={{ color: "#f4efe2" }}>{t.output}</b>
+              <span style={{ color: C.textFaint }}> → </span>
+              <b style={{ color: "#ffb4ae" }}>{t.after}</b>
+              <span style={{ color: C.textFaint }}> every turn it stands</span>
+            </div>
+          ))}
+        </div>
+      )}
+      {offer.preview?.routesThrough?.length > 0 && (
+        <div style={{ fontSize: 9.5, color: "#e8b467", lineHeight: 1.4 }}>
+          Cuts the road for {offer.preview.routesThrough.map((r) => r.name).join(", ")}.
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default function UnitPanel({ unit, hex, owned = true, canAct, reinforce, scrap, raidTargets = [], blockade, post, onReinforce, onContest, onBuildBlockade, onBuildPost, onClose }) {
   const isPhone = useIsPhone();
+  // Escape closes it, like every other panel. Without this the only way to
+  // deselect a unit was to find its token again, which is fiddly once the
+  // panel is covering the part of the board the unit is on.
+  useEscClose(onClose);
   if (!unit) return null;
   const faction = UI_FACTIONS[unit.owner];
   const factionColor = faction?.color || C.holo;
@@ -312,12 +402,17 @@ export default function UnitPanel({ unit, hex, owned = true, canAct, reinforce, 
               label="Moves"
               value={`${unit.moveRemaining ?? eff.movement}/${eff.movement}`}
             />
-            <PhoneStatChip
-              color={unit.immobilized ? STOPPED : READY}
-              icon={<StatusGlyph color={unit.immobilized ? STOPPED : READY} blocked={unit.immobilized} size={9} />}
-              label="Status"
-              value={unit.immobilized ? "Held" : "Ready"}
-            />
+            {(() => {
+              const st = unitStatus(unit);
+              return (
+                <PhoneStatChip
+                  color={st.blocked ? STOPPED : READY}
+                  icon={<StatusGlyph color={st.blocked ? STOPPED : READY} blocked={st.blocked} size={9} />}
+                  label="Status"
+                  value={st.word}
+                />
+              );
+            })()}
           </div>
         ) : (
           <div style={{ flex: 1, display: "flex", gap: 6, alignItems: "center", justifyContent: "center" }}>
@@ -337,12 +432,17 @@ export default function UnitPanel({ unit, hex, owned = true, canAct, reinforce, 
               label="Moves"
               value={`${unit.moveRemaining ?? eff.movement}/${eff.movement}`}
             />
-            <StatCell
-              color={unit.immobilized ? STOPPED : READY}
-              icon={<StatusGlyph color={unit.immobilized ? STOPPED : READY} blocked={unit.immobilized} size={22} />}
-              label="Status"
-              value={unit.immobilized ? "Held" : "Ready"}
-            />
+            {(() => {
+              const st = unitStatus(unit);
+              return (
+                <StatCell
+                  color={st.blocked ? STOPPED : READY}
+                  icon={<StatusGlyph color={st.blocked ? STOPPED : READY} blocked={st.blocked} size={22} />}
+                  label="Status"
+                  value={st.word}
+                />
+              );
+            })()}
           </div>
         )}
 
@@ -353,6 +453,31 @@ export default function UnitPanel({ unit, hex, owned = true, canAct, reinforce, 
         <div style={{
           width: isPhone ? "auto" : 158, display: "flex", flexDirection: "column", gap: isPhone ? 4 : 7, minWidth: 0,
         }}>
+          {/* Standing armies eat. Shown on the unit itself so the bill is
+              legible where the decision is made — recruiting a fifth unit or
+              filling a bay is a commitment every turn, not a one-off price.
+              An unsupplied unit says so plainly: it holds ground and still
+              defends, but it cannot move or act until it is paid. */}
+          {owned && unit.upkeep != null && (
+            <div style={{
+              display: "flex", alignItems: "baseline", gap: 5,
+              fontSize: 9.5, letterSpacing: 0.6,
+              color: unit.unsupplied ? STOPPED : C.textDim,
+            }}>
+              <span style={{ fontFamily: C.font, fontWeight: 700, fontSize: 11, color: unit.unsupplied ? STOPPED : C.gold }}>
+                −{unit.upkeep}
+              </span>
+              <span style={{ textTransform: "uppercase", letterSpacing: 1.1 }}>
+                scrap / turn
+              </span>
+              {unit.unsupplied && (
+                <span style={{ textTransform: "uppercase", letterSpacing: 1.1, fontWeight: 700 }}>
+                  · unpaid
+                </span>
+              )}
+            </div>
+          )}
+
           {(unit.veteran || unit.fortified) && (
             <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
               {unit.veteran && <Tag color={C.gold}>Veteran</Tag>}
@@ -407,6 +532,46 @@ export default function UnitPanel({ unit, hex, owned = true, canAct, reinforce, 
                 ? `Send · ${reinforce.cost} · ETA ${reinforce.eta}`
                 : "No supply route"}
             </button>
+          )}
+
+          {/* Rail doc §3 — raise a blockade, or fit chips to one already here.
+              A blockade sits on a plain road hex and a plain hex opens no
+              window of its own, so the unit standing there is the only handle
+              the player has on it: the whole lifecycle lives here. */}
+          {owned && blockade && (
+            <BlockadeOffer blockade={blockade} offer={blockade} canAct={canAct} onBuild={onBuildBlockade} />
+          )}
+
+          {/* §17.7 — dig in a listening post. Same reasoning as the blockade
+              controls: it goes on a plain hex, which opens no window. Only
+              rendered once the tech that unlocks it is in hand, so the panel
+              does not carry a permanently-refused button. */}
+          {owned && post && (post.can || post.mine || !/Intelligence A2/.test(post.reason || "")) && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 5, borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: 7 }}>
+              <div style={{ fontSize: 9, letterSpacing: 1.4, textTransform: "uppercase", color: C.textDim, fontWeight: 700 }}>
+                Listening post
+              </div>
+              <button
+                className="hud-int"
+                disabled={!canAct || !post.can}
+                onClick={canAct && post.can ? () => onBuildPost?.() : undefined}
+                style={{
+                  fontFamily: C.font, fontSize: 10, fontWeight: 700, letterSpacing: 1.2,
+                  textTransform: "uppercase", color: "#08100f", padding: "6px 8px", borderRadius: 4,
+                  border: `1px solid ${C.holo}`,
+                  background: `linear-gradient(180deg, ${C.holoHi}, ${C.holo})`,
+                  boxShadow: `0 0 10px ${C.holo}55`,
+                  cursor: canAct && post.can ? "pointer" : "not-allowed",
+                  opacity: canAct && post.can ? 1 : 0.5,
+                  textAlign: "center", lineHeight: 1.2,
+                }}
+              >
+                Build post · {post.cost} scrap
+              </button>
+              <div style={{ fontSize: 9.5, color: C.textFaint, lineHeight: 1.4 }}>
+                {post.reason || `Concealed sight, radius ${post.range} · ${post.upkeep} scrap each turn.`}
+              </div>
+            </div>
           )}
 
           {/* §16 field raid — attack an enemy unit sharing this hex. */}

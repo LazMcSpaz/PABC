@@ -1,7 +1,7 @@
 {
-  "name": "Ashland Conquest — Content Editor",
-  "short_name": "Ashland Editor",
-  "description": "Author quests, encounters, and the wiki for Ashland Conquest.",
+  "name": "The Remnant Continent — Content Editor",
+  "short_name": "Remnant Editor",
+  "description": "Author quests, encounters, and the wiki for The Remnant Continent.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
